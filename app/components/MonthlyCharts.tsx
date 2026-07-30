@@ -27,6 +27,61 @@ interface MonthlyBarChartProps {
   year: number;
 }
 
+interface YearTooltipPayloadItem {
+  name?: string;
+  value?: number | string | null;
+  color?: string;
+}
+
+function YearCompareTooltip({
+  active,
+  payload,
+  label,
+  subtitle,
+}: {
+  active?: boolean;
+  payload?: YearTooltipPayloadItem[];
+  label?: string;
+  subtitle: string;
+}) {
+  if (!active || !payload?.length) return null;
+
+  const items = payload
+    .filter((p) => p.value != null && Number(p.value) > 0)
+    .sort((a, b) => Number(b.name) - Number(a.name));
+
+  if (!items.length) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-lg">
+      <p className="mb-2 text-sm font-bold text-slate-800">{label}</p>
+      <div className="space-y-1.5">
+        {items.map((p) => {
+          const y = Number(p.name);
+          const c = colorForYear(y);
+          return (
+            <div key={p.name} className="flex items-center justify-between gap-6 text-sm">
+              <span className="flex items-center gap-2">
+                <span
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: c }}
+                />
+                <span className="font-semibold" style={{ color: c }}>
+                  {p.name}
+                </span>
+              </span>
+              <span className="font-bold tabular-nums text-slate-800">
+                {formatMoney(Number(p.value), 0)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 border-t border-slate-100 pt-1.5 text-xs text-slate-500">{subtitle}</p>
+    </div>
+  );
+}
+
 export function MonthlyBarChart({ rows, year }: MonthlyBarChartProps) {
   const fill = colorForYear(year);
   return (
@@ -45,6 +100,50 @@ export function MonthlyBarChart({ rows, year }: MonthlyBarChartProps) {
             contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
           />
           <Bar dataKey="ventas" fill={fill} radius={[4, 4, 0, 0]} maxBarSize={40} name={String(year)} />
+        </RechartsBarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+interface MonthlyTotalComparisonChartProps {
+  rows: Record<string, string | number>[];
+  years: number[];
+}
+
+/** Barras agrupadas — ventas totales por mes, varios años */
+export function MonthlyTotalComparisonChart({ rows, years }: MonthlyTotalComparisonChartProps) {
+  return (
+    <div className="h-80 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <RechartsBarChart
+          data={rows}
+          margin={{ top: 8, right: 12, left: 4, bottom: 8 }}
+          barCategoryGap="18%"
+          barGap={2}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+          <XAxis dataKey="mesCorto" tick={{ fontSize: 11, fill: '#64748b' }} />
+          <YAxis
+            tick={{ fontSize: 11, fill: '#64748b' }}
+            tickFormatter={(v) => formatMoney(Number(v))}
+            width={80}
+          />
+          <Tooltip
+            content={
+              <YearCompareTooltip subtitle="Ventas totales del mes · Acumulado + Infocaja" />
+            }
+          />
+          {years.map((y) => (
+            <Bar
+              key={y}
+              dataKey={String(y)}
+              name={String(y)}
+              fill={colorForYear(y)}
+              radius={[4, 4, 0, 0]}
+              maxBarSize={32}
+            />
+          ))}
         </RechartsBarChart>
       </ResponsiveContainer>
     </div>

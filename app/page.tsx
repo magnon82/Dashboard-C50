@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/app/lib/supabase';
 import { Card, Metric, Text, Title } from '@tremor/react';
 import { WeeklyComparisonChart, colorForYear } from '@/app/components/WeeklyComparisonChart';
-import { MonthlyBarChart, MonthlyComparisonChart } from '@/app/components/MonthlyCharts';
+import { MonthlyComparisonChart, MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
 import { getTheme } from '@/app/lib/themes';
 import {
   MESES,
@@ -15,10 +15,11 @@ import {
   buildMonthlySalesByYear,
   buildMonthlyWeeklyAverageByYear,
   buildMonthlyAvgChartRows,
+  buildMonthlyTotalChartRows,
   yearWeeklyAverageFromMonthly,
   monthlyAverageForYear,
+  monthlyTotalForYear,
   weeklyAverage,
-  lastCompleteWeekSunday,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
 
@@ -42,7 +43,7 @@ export default function Dashboard() {
   const [year, setYear] = useState(2026);
   const [month, setMonth] = useState<number | null>(null);
   const [compareYears, setCompareYears] = useState<number[]>([2026, 2025]);
-  const [saldoVista, setSaldoVista] = useState<'desglose' | 'total'>('desglose');
+  const [saldosVisibles, setSaldosVisibles] = useState(true);
 
   useEffect(() => {
     async function fetchRecords() {
@@ -221,24 +222,15 @@ export default function Dashboard() {
   const saldoTotalHoy =
     Number(saldoEfectivoHoy?.amount || 0) + totalBancosHoy;
 
-  const ultimaSemanaCaptura = useMemo(() => {
-    const y = new Date().getFullYear();
-    return lastCompleteWeekSunday(records, y);
-  }, [records]);
-
   const weeklyComparison = useMemo(
     () => buildWeeklyComparisonChart(weeklyByYear, compareYears, year),
     [weeklyByYear, compareYears, year]
   );
 
-  const monthlyBarData = useMemo(() => {
-    const monthMap = monthlyByYear.get(year);
-    if (!monthMap) return [];
-    return MESES.map((mes, i) => {
-      const m = monthMap.get(i + 1);
-      return { mes, ventas: m?.total ?? 0 };
-    }).filter((_, i) => month === null || i + 1 === month);
-  }, [monthlyByYear, year, month]);
+  const monthlyTotalChartRows = useMemo(
+    () => buildMonthlyTotalChartRows(monthlyByYear, compareYears, month),
+    [monthlyByYear, compareYears, month]
+  );
 
   const monthlyAvgChartRows = useMemo(
     () => buildMonthlyAvgChartRows(monthlyAvgByYear, compareYears),
@@ -350,51 +342,31 @@ export default function Dashboard() {
               <p className="text-xs font-semibold uppercase tracking-widest text-blue-200">
                 Saldos al día
               </p>
-              <div className="flex rounded-md p-0.5" style={{ backgroundColor: theme.selectBg }}>
+              <label className="flex cursor-pointer items-center gap-2">
+                <span className="text-xs font-medium" style={{ color: theme.headerMuted }}>
+                  {saldosVisibles ? 'Visible' : 'Oculto'}
+                </span>
                 <button
                   type="button"
-                  onClick={() => setSaldoVista('desglose')}
-                  className="rounded px-3 py-1 text-xs font-semibold transition-colors"
+                  role="switch"
+                  aria-checked={saldosVisibles}
+                  aria-label="Mostrar u ocultar saldos al día"
+                  onClick={() => setSaldosVisibles((v) => !v)}
+                  className="relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors"
                   style={{
-                    backgroundColor: saldoVista === 'desglose' ? 'rgba(255,255,255,0.2)' : 'transparent',
-                    color: saldoVista === 'desglose' ? '#fff' : theme.headerMuted,
+                    backgroundColor: saldosVisibles ? 'rgba(33,115,70,0.85)' : 'rgba(255,255,255,0.2)',
                   }}
                 >
-                  Desglose
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                      saldosVisibles ? 'translate-x-5 translate-y-0.5' : 'translate-x-0.5 translate-y-0.5'
+                    }`}
+                  />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSaldoVista('total')}
-                  className="rounded px-3 py-1 text-xs font-semibold transition-colors"
-                  style={{
-                    backgroundColor: saldoVista === 'total' ? 'rgba(255,255,255,0.2)' : 'transparent',
-                    color: saldoVista === 'total' ? '#fff' : theme.headerMuted,
-                  }}
-                >
-                  Total
-                </button>
-              </div>
+              </label>
             </div>
 
-            {saldoVista === 'total' ? (
-              <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-                <div>
-                  <span className="text-xs text-blue-200">Efectivo + Bancos</span>
-                  <p className="text-2xl font-bold text-white md:text-3xl">
-                    {saldoTotalHoy > 0 ? money(saldoTotalHoy) : '—'}
-                  </p>
-                </div>
-                <p className="text-xs text-blue-100/80">
-                  {saldoEfectivoHoy && (
-                    <>Efectivo al {formatShort(saldoEfectivoHoy.date)} · FLUJO EFECTIVO CARRANZA 50</>
-                  )}
-                  {saldoEfectivoHoy && totalBancosHoy > 0 && ' · '}
-                  {totalBancosHoy > 0 && ultimaSemanaCaptura && (
-                    <>Bancos · semana al {formatShort(ultimaSemanaCaptura)}</>
-                  )}
-                </p>
-              </div>
-            ) : (
+            {saldosVisibles && (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-lg px-4 py-3" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
                   <p className="text-xs font-semibold uppercase tracking-wide text-blue-200">
@@ -405,7 +377,7 @@ export default function Dashboard() {
                   </p>
                   <p className="mt-1 text-xs text-blue-100/70">
                     {saldoEfectivoHoy
-                      ? `Actualizado al ${formatShort(saldoEfectivoHoy.date)} · FLUJO EFECTIVO CARRANZA 50`
+                      ? `Actualizado al ${formatShort(saldoEfectivoHoy.date)}`
                       : 'Sin datos'}
                   </p>
                 </div>
@@ -421,9 +393,6 @@ export default function Dashboard() {
                       <>
                         Mifel {money(Number(saldosBancosHoy.mifel?.amount || 0))} + BBVA{' '}
                         {money(Number(saldosBancosHoy.bbva?.amount || 0))}
-                        {ultimaSemanaCaptura && (
-                          <> · semana al {formatShort(ultimaSemanaCaptura)}</>
-                        )}
                       </>
                     ) : (
                       'Sin datos'
@@ -441,7 +410,7 @@ export default function Dashboard() {
                     {saldoTotalHoy > 0 ? money(saldoTotalHoy) : '—'}
                   </p>
                   <p className="mt-1 text-xs text-green-100/70">
-                    {bancosMesLabel ? `${bancosMesLabel} · ` : ''}Saldo al día · no afectado por filtros
+                    {bancosMesLabel ? `${bancosMesLabel} · ` : ''}Saldo al día
                   </p>
                 </div>
               </div>
@@ -637,34 +606,70 @@ export default function Dashboard() {
         </Card>
 
         <Card className={`mb-8 ${cardClass} bg-white`} style={{ borderTop: `4px solid ${colorForYear(year)}` }}>
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <Title style={{ color: theme.title }}>Ventas por mes ({year})</Title>
+              <Title style={{ color: theme.title }}>
+                Ventas por mes{month === null ? '' : ` · ${MESES[month - 1]}`}
+              </Title>
               <Text className="text-sm text-slate-500">
-                Acumulado semanal + Infocaja diario · color {year}
+                Totales mensuales · Acumulado semanal + Infocaja · comparativo 2021–2026
               </Text>
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <span
-                className="inline-block h-3 w-3 rounded-full"
-                style={{ backgroundColor: colorForYear(year) }}
-              />
-              <span className="text-sm font-semibold" style={{ color: colorForYear(year) }}>
-                {year}
-              </span>
-              {monthlyAverageForYear(monthlyByYear, year) > 0 && (
-                <span className="text-sm text-slate-500">
-                  · prom. mensual {money(monthlyAverageForYear(monthlyByYear, year))}
-                </span>
-              )}
+            <div className="flex flex-wrap gap-2">
+              {COMPARE_YEARS.map((y) => {
+                const active = compareYears.includes(y);
+                const c = colorForYear(y);
+                return (
+                  <button
+                    key={y}
+                    type="button"
+                    onClick={() => toggleCompareYear(y)}
+                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all"
+                    style={{
+                      backgroundColor: active ? c : '#f1f5f9',
+                      color: active ? '#fff' : '#475569',
+                      border: active ? `2px solid ${c}` : '2px solid #e2e8f0',
+                    }}
+                  >
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
+                      style={{ backgroundColor: active ? '#fff' : c }}
+                    />
+                    {y}
+                  </button>
+                );
+              })}
             </div>
           </div>
           {loading ? (
             <p className="py-16 text-center text-slate-400">Cargando...</p>
-          ) : monthlyBarData.every((m) => m.ventas === 0) ? (
+          ) : !monthlyTotalChartRows.some((r) =>
+              compareYears.some((y) => Number(r[String(y)] ?? 0) > 0)
+            ) ? (
             <p className="py-16 text-center text-slate-400">Sin datos</p>
           ) : (
-            <MonthlyBarChart rows={monthlyBarData} year={year} />
+            <>
+              <div className="mb-4 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                {compareYears.map((y) => (
+                  <div key={y} className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-3 w-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: colorForYear(y) }}
+                    />
+                    <span className="text-sm font-semibold" style={{ color: theme.title }}>
+                      {y}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      total {money(monthlyTotalForYear(monthlyByYear, y))}
+                      {monthlyAverageForYear(monthlyByYear, y) > 0 && (
+                        <> · prom. mensual {money(monthlyAverageForYear(monthlyByYear, y))}</>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <MonthlyTotalComparisonChart rows={monthlyTotalChartRows} years={compareYears} />
+            </>
           )}
         </Card>
 

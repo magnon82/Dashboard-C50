@@ -472,6 +472,39 @@ export function buildMonthlyComparisonRows(
   });
 }
 
+/** Filas para gráfica comparativa de ventas totales por mes */
+export function buildMonthlyTotalChartRows(
+  monthlyByYear: Map<number, Map<number, MonthSale>>,
+  compareYears: number[],
+  monthFilter: number | null = null
+): Record<string, string | number>[] {
+  const monthIndexes =
+    monthFilter !== null ? [monthFilter] : MESES.map((_, i) => i + 1);
+
+  return monthIndexes.map((monthIdx) => {
+    const mes = MESES[monthIdx - 1];
+    const row: Record<string, string | number> = {
+      mes,
+      mesCorto: mes.slice(0, 3),
+      monthIdx,
+    };
+    for (const y of compareYears) {
+      const val = monthlyByYear.get(y)?.get(monthIdx)?.total ?? 0;
+      row[String(y)] = val > 0 ? Number(val.toFixed(2)) : 0;
+    }
+    return row;
+  });
+}
+
+export function monthlyTotalForYear(
+  monthlyByYear: Map<number, Map<number, MonthSale>>,
+  year: number
+): number {
+  const months = monthlyByYear.get(year);
+  if (!months) return 0;
+  return Array.from(months.values()).reduce((a, m) => a + m.total, 0);
+}
+
 export function monthlyAverageForYear(
   monthlyByYear: Map<number, Map<number, MonthSale>>,
   year: number
