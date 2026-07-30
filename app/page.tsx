@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Card, Metric, Text, Title } from '@tremor/react';
 import { WeeklyComparisonChart, colorForYear } from '@/app/components/WeeklyComparisonChart';
 import { MonthlyComparisonChart, MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
+import { PaymentMixPie } from '@/app/components/PaymentMixPie';
 import { getTheme } from '@/app/lib/themes';
 import {
   MESES,
@@ -19,6 +20,10 @@ import {
   monthlyAverageForYear,
   monthlyTotalForYear,
   weeklyAverage,
+  buildWeekToDateSales,
+  buildPaymentMix,
+  buildCorteCancelacionesDescuentos,
+  weekRangeLabel,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
 
@@ -44,6 +49,15 @@ export default function Dashboard() {
   const [compareYears, setCompareYears] = useState<number[]>([2026, 2025]);
   const [saldosVisibles, setSaldosVisibles] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [mixMonth, setMixMonth] = useState<number | null>(new Date().getMonth() + 1);
+  const MIX_YEAR = 2026;
+  const [corteFilter, setCorteFilter] = useState<'todos' | 'descuentos' | 'cancelaciones'>(
+    'descuentos'
+  );
+  const [corteCollapsed, setCorteCollapsed] = useState(false);
+  const [detalleYear, setDetalleYear] = useState(2026);
+  const [weekFrom, setWeekFrom] = useState<number | null>(null);
+  const [weekTo, setWeekTo] = useState<number | null>(null);
 
   useEffect(() => {
     async function fetchRecords() {
@@ -130,16 +144,22 @@ export default function Dashboard() {
       .sort((a, b) => a.week - b.week);
   }, [weeklyByYear, year]);
 
-  const weekRowsDisplay = useMemo(() => {
-    let weeks = yearWeeks;
+  const detalleWeeks = useMemo(() => {
+    const wm = weeklyByYear.get(detalleYear);
+    if (!wm) return [];
+    let weeks = Array.from(wm.values())
+      .filter((w) => w.total > 0)
+      .sort((a, b) => a.week - b.week);
     if (month !== null) {
       weeks = weeks.filter((w) => w.mes === MESES[month - 1]);
     }
     return weeks;
-  }, [yearWeeks, month]);
+  }, [weeklyByYear, detalleYear, month]);
 
-  /** Totales alineados a las filas del detalle semanal (Acumulado + Infocaja) */
-  const totalesPeriodo = useMemo(() => {
+  const weekRowsDisplay = detalleWeeks;
+
+  /** Totales del detalle semanal (año del filtro de detalle) */
+  const totalesDetalle = useMemo(() => {
     return weekRowsDisplay.reduce(
       (acc, w) => ({
         total: acc.total + w.total,
@@ -150,21 +170,33 @@ export default function Dashboard() {
     );
   }, [weekRowsDisplay]);
 
+  /** Totales KPI (filtro header año/mes) */
+  const weekRowsKpi = useMemo(() => {
+    let weeks = yearWeeks;
+    if (month !== null) {
+      weeks = weeks.filter((w) => w.mes === MESES[month - 1]);
+    }
+    return weeks;
+  }, [yearWeeks, month]);
+
+  const totalesPeriodo = useMemo(() => {
+    return weekRowsKpi.reduce(
+      (acc, w) => ({
+        total: acc.total + w.total,
+        eventos: acc.eventos + w.eventos,
+        ventaWi: acc.ventaWi + w.ventaWi,
+      }),
+      { total: 0, eventos: 0, ventaWi: 0 }
+    );
+  }, [weekRowsKpi]);
+
   const ventasAcumuladas = totalesPeriodo.total;
   const eventosPeriodo = totalesPeriodo.eventos;
   const ventaWiPeriodo = totalesPeriodo.ventaWi;
 
-  const promedioSemanal = useMemo(() => {
-    const weeks =
-      month !== null ? yearWeeks.filter((w) => w.mes === MESES[month - 1]) : yearWeeks;
-    return weeklyAverage(weeks);
-  }, [yearWeeks, month]);
+  const promedioSemanal = useMemo(() => weeklyAverage(weekRowsKpi), [weekRowsKpi]);
 
-  const semanasTranscurridas = useMemo(() => {
-    const weeks =
-      month !== null ? yearWeeks.filter((w) => w.mes === MESES[month - 1]) : yearWeeks;
-    return weeks.length;
-  }, [yearWeeks, month]);
+  const semanasTranscurridas = weekRowsKpi.length;
 
   /** Último saldo = último día del FLUJO EFECTIVO CARRANZA 50.xlsx (hoja año en curso) */
   const saldoEfectivoHoy = useMemo(() => {
@@ -207,13 +239,32 @@ export default function Dashboard() {
     Number(saldoEfectivoHoy?.amount || 0) + totalBancosHoy;
 
   const weeklyComparison = useMemo(
-    () => buildWeeklyComparisonChart(weeklyByYear, compareYears, year),
-    [weeklyByYear, compareYears, year]
+    () => buildWeeklyComparisonChart(weeklyByYear, compareYears, year, weekFrom, weekTo),
+    [weeklyByYear, compareYears, year, weekFrom, weekTo]
   );
 
+  const compareMaxWeek = useMemo(() => {
+    let max = 0;
+    compareYears.forEach((y) => {
+      weeklyByYear.get(y)?.forEach((_, w) => {
+        if (w > max) max = w;
+      });
+    });
+    return max || 53;
+  }, [weeklyByYear, compareYears]);
+
+  const weekOptions = useMemo(() => {
+    const refYear = compareYears[0] ?? year;
+    return Array.from({ length: compareMaxWeek }, (_, i) => {
+      const w = i + 1;
+      return { week: w, label: weekRangeLabel(refYear, w) };
+    });
+  }, [compareMaxWeek, compareYears, year]);
+
+  /** Gráficas comparativas NO usan el filtro mes/año del header */
   const monthlyTotalChartRows = useMemo(
-    () => buildMonthlyTotalChartRows(monthlyByYear, compareYears, month),
-    [monthlyByYear, compareYears, month]
+    () => buildMonthlyTotalChartRows(monthlyByYear, compareYears, null),
+    [monthlyByYear, compareYears]
   );
 
   const monthlyAvgChartRows = useMemo(
@@ -227,6 +278,82 @@ export default function Dashboard() {
     month: 'long',
     year: 'numeric',
   });
+
+  const weekToDate = useMemo(() => buildWeekToDateSales(records), [records]);
+
+  const paymentMix = useMemo(
+    () => buildPaymentMix(records, MIX_YEAR, mixMonth),
+    [records, mixMonth]
+  );
+
+  /** Cancelaciones/descuentos: lo que va del mes calendario en curso */
+  const corteMesActual = useMemo(() => {
+    const now = new Date();
+    return buildCorteCancelacionesDescuentos(
+      records,
+      now.getFullYear(),
+      now.getMonth() + 1
+    );
+  }, [records]);
+
+  const corteMesLabel = useMemo(() => {
+    const now = new Date();
+    return `${MESES[now.getMonth()]} ${now.getFullYear()}`;
+  }, []);
+
+  const mixPeriodoLabel =
+    mixMonth === null ? `${MIX_YEAR}` : `${MESES[mixMonth - 1]} ${MIX_YEAR}`;
+
+  const cxpResumen = useMemo(() => {
+    const totales = records.filter(
+      (r) => r.source_file === 'cxp_por_pagar' && r.category === 'Cuentas Por Pagar'
+    );
+    const prog = records.filter(
+      (r) => r.source_file === 'cxp_por_pagar' && r.category === 'CXP Pagos Programados'
+    );
+    const prov = records.filter(
+      (r) => r.source_file === 'cxp_por_pagar' && r.category === 'CXP Proveedores'
+    );
+    const serv = records.filter(
+      (r) => r.source_file === 'cxp_por_pagar' && r.category === 'CXP Servicios'
+    );
+
+    const latest = (rows: typeof records) =>
+      rows.length ? rows.reduce((best, cur) => (cur.date > best.date ? cur : best)) : null;
+
+    const totalRow = latest(totales);
+    const progRow = latest(prog);
+    const provRow = latest(prov);
+    const servRow = latest(serv);
+
+    const total = totalRow ? Number(totalRow.amount) : 0;
+    const programado = progRow
+      ? Number(progRow.amount)
+      : (provRow ? Number(provRow.amount) : 0) + (servRow ? Number(servRow.amount) : 0);
+    const proveedores = provRow ? Number(provRow.amount) : 0;
+    const servicios = servRow ? Number(servRow.amount) : 0;
+
+    return {
+      total,
+      programado,
+      proveedores,
+      servicios,
+      saldo: Math.max(0, total - programado),
+      hasData: Boolean(totalRow),
+    };
+  }, [records]);
+
+  const corteItemsFiltrados = useMemo(() => {
+    const items = corteMesActual.days.flatMap((d) => d.items);
+    if (corteFilter === 'descuentos') return items.filter((i) => i.kind === 'descuento');
+    if (corteFilter === 'cancelaciones') return items.filter((i) => i.kind === 'cancelacion');
+    return items;
+  }, [corteMesActual, corteFilter]);
+
+  const corteTotalFiltrado = useMemo(
+    () => corteItemsFiltrados.reduce((a, i) => a + i.amount, 0),
+    [corteItemsFiltrados]
+  );
 
   const bancosMesLabel = saldosBancosHoy.fecha
     ? MESES[parseIsoDate(saldosBancosHoy.fecha)!.m - 1]
@@ -351,7 +478,7 @@ export default function Dashboard() {
             </div>
 
             {saldosVisibles && (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-lg px-4 py-3" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
                   <p className="text-xs font-semibold uppercase tracking-wide text-blue-200">
                     Efectivo
@@ -384,7 +511,7 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="rounded-lg px-4 py-3 sm:col-span-2 lg:col-span-1"
+                  className="rounded-lg px-4 py-3"
                   style={{ backgroundColor: 'rgba(33,115,70,0.35)', border: '1px solid rgba(33,115,70,0.5)' }}
                 >
                   <p className="text-xs font-semibold uppercase tracking-wide text-green-200">
@@ -395,6 +522,36 @@ export default function Dashboard() {
                   </p>
                   <p className="mt-1 text-xs text-green-100/70">
                     {bancosMesLabel ? `${bancosMesLabel} · ` : ''}Saldo al día
+                  </p>
+                </div>
+                <div
+                  className="rounded-lg px-4 py-3"
+                  style={{ backgroundColor: 'rgba(185,28,28,0.35)', border: '1px solid rgba(248,113,113,0.45)' }}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wide text-red-200">
+                    Cuentas por pagar
+                  </p>
+                  <p className="mt-1 text-xl font-bold text-white md:text-2xl">
+                    {cxpResumen.hasData ? money(cxpResumen.total) : '—'}
+                  </p>
+                  <p className="mt-1 text-xs text-red-100/70">
+                    {cxpResumen.hasData ? (
+                      <>
+                        Proveedores {money(cxpResumen.proveedores)} + Servicios{' '}
+                        {money(cxpResumen.servicios)}
+                      </>
+                    ) : (
+                      'Proveedores + Servicios'
+                    )}
+                  </p>
+                  <p className="mt-0.5 text-xs text-red-100/80">
+                    Pagos programados{' '}
+                    {cxpResumen.hasData ? money(cxpResumen.programado) : '—'}
+                    <span className="mx-1.5 text-red-200/50">·</span>
+                    Saldo x pagar{' '}
+                    <span className="font-semibold text-amber-100">
+                      {cxpResumen.hasData ? money(cxpResumen.saldo) : '—'}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -452,14 +609,32 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {/* Detalle semanal — antes del comparativo */}
-        <Card className={`mb-8 ${cardClass} bg-white`}>
-          <Title style={{ color: theme.title }}>Detalle semanal ({periodoLabel})</Title>
-          <Text className="mb-4 text-sm text-slate-500">
-            Como Acumulado ventas x semana · Venta WI = Total − Eventos
-          </Text>
-          {weekRowsDisplay.length === 0 ? (
-            <p className="py-8 text-center text-slate-400">Sin semanas en el periodo.</p>
+        {/* Ventas de la semana en curso */}
+        <Card
+          className={`mb-8 ${cardClass}`}
+          style={{ backgroundColor: theme.cardBg, borderTop: `4px solid ${theme.kpi[2]?.border ?? theme.kpi[0].border}` }}
+        >
+          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <Text
+                className="text-xs font-bold uppercase tracking-wide"
+                style={{ color: theme.kpi[2]?.label ?? theme.kpi[0].label }}
+              >
+                Ventas de la semana en curso
+              </Text>
+              <Metric className="mt-1 text-3xl font-bold text-slate-900 md:text-4xl">
+                {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
+              </Metric>
+              <Text className="mt-1 text-sm text-slate-500">
+                {formatShort(weekToDate.mondayKey)} – {formatShort(weekToDate.asOf)}
+                {' · '}
+                {weekToDate.days.filter((d) => d.total > 0).length} día
+                {weekToDate.days.filter((d) => d.total > 0).length !== 1 ? 's' : ''} con venta
+              </Text>
+            </div>
+          </div>
+          {weekToDate.days.length === 0 ? (
+            <p className="py-4 text-center text-slate-400">Sin datos Infocaja esta semana.</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="min-w-full text-sm">
@@ -468,52 +643,42 @@ export default function Dashboard() {
                     className="text-left text-xs uppercase tracking-wide text-white"
                     style={{ backgroundColor: theme.tableHead }}
                   >
-                    <th className="px-4 py-3">Mes</th>
-                    <th className="px-4 py-3">Semana</th>
-                    <th className="px-4 py-3">Rango (lun – dom)</th>
-                    <th className="px-4 py-3 text-right">Eventos</th>
-                    <th className="px-4 py-3 text-right">Venta WI</th>
-                    <th className="px-4 py-3 text-right">TOTAL</th>
+                    <th className="px-4 py-2.5">Día</th>
+                    <th className="px-4 py-2.5">Fecha</th>
+                    <th className="px-4 py-2.5 text-right">Venta</th>
+                    <th className="px-4 py-2.5 text-right">Desc. / Canc.</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {weekRowsDisplay.map((w, i) => (
-                    <tr key={w.week} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                      <td className="px-4 py-2.5 text-slate-700">{w.mes}</td>
-                      <td className="px-4 py-2.5 font-semibold" style={{ color: theme.tableWeek }}>
-                        {w.week}
-                      </td>
-                      <td className="px-4 py-2.5 text-slate-600">{w.label}</td>
-                      <td className="px-4 py-2.5 text-right text-slate-600">
-                        {w.eventos > 0 ? money(w.eventos) : '—'}
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-medium text-slate-700">
-                        {money(w.ventaWi)}
+                  {weekToDate.days.map((d, i) => (
+                    <tr key={d.date} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                      <td className="px-4 py-2 capitalize text-slate-700">{d.weekday}</td>
+                      <td className="px-4 py-2 text-slate-600">{d.label}</td>
+                      <td
+                        className="px-4 py-2 text-right font-semibold"
+                        style={{ color: d.total > 0 ? theme.tableTotal : '#94a3b8' }}
+                      >
+                        {d.total > 0 ? money(d.total) : '—'}
                       </td>
                       <td
-                        className="px-4 py-2.5 text-right font-semibold"
-                        style={{ color: theme.tableTotal }}
+                        className="px-4 py-2 text-right font-medium"
+                        style={{ color: d.cortes > 0 ? '#b45309' : '#94a3b8' }}
                       >
-                        {money(w.total)}
+                        {d.cortes > 0 ? money(d.cortes) : '—'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr className="font-bold text-white" style={{ backgroundColor: theme.tableFoot }}>
-                    <td className="px-4 py-3" colSpan={3}>
-                      Total {periodoLabel}
+                    <td className="px-4 py-2.5" colSpan={2}>
+                      Total semana
                     </td>
-                    <td className="px-4 py-3 text-right">{money(eventosPeriodo)}</td>
-                    <td className="px-4 py-3 text-right">{money(ventaWiPeriodo)}</td>
-                    <td className="px-4 py-3 text-right">{money(ventasAcumuladas)}</td>
-                  </tr>
-                  <tr className="bg-slate-100 text-slate-600">
-                    <td className="px-4 py-2.5 font-semibold" colSpan={5}>
-                      Promedio semanal ({semanasTranscurridas} semanas transcurridas)
+                    <td className="px-4 py-2.5 text-right">
+                      {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-semibold">
-                      {promedioSemanal > 0 ? money(promedioSemanal) : '—'}
+                    <td className="px-4 py-2.5 text-right">
+                      {weekToDate.totalCortes > 0 ? money(weekToDate.totalCortes) : '—'}
                     </td>
                   </tr>
                 </tfoot>
@@ -522,164 +687,177 @@ export default function Dashboard() {
           )}
         </Card>
 
+        {/* Cancelaciones y descuentos — lo que va del mes */}
         <Card className={`mb-8 ${cardClass} bg-white`}>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <Title style={{ color: theme.title }}>Comparativo semanal</Title>
-              <Text className="text-sm text-slate-500">
-                Semanas # del Acumulado ventas x semana · TOTAL por semana
-              </Text>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {COMPARE_YEARS.map((y) => {
-                const active = compareYears.includes(y);
-                const c = colorForYear(y);
-                return (
-                  <button
-                    key={y}
-                    type="button"
-                    onClick={() => toggleCompareYear(y)}
-                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all"
-                    style={{
-                      backgroundColor: active ? c : '#f1f5f9',
-                      color: active ? '#fff' : '#475569',
-                      border: active ? `2px solid ${c}` : '2px solid #e2e8f0',
-                    }}
-                  >
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
-                      style={{ backgroundColor: active ? '#fff' : c }}
-                    />
-                    {y}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          {loading ? (
-            <p className="py-16 text-center text-slate-400">Cargando...</p>
-          ) : weeklyComparison.rows.length === 0 ? (
-            <p className="py-16 text-center text-slate-400">Sin datos semanales</p>
-          ) : (
-            <>
-              {/* Leyenda con círculos por año */}
-              <div className="mb-4 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                {compareYears.map((y) => (
-                  <div key={y} className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-3 w-3 shrink-0 rounded-full"
-                      style={{ backgroundColor: colorForYear(y) }}
-                    />
-                    <span className="text-sm font-semibold" style={{ color: theme.title }}>
-                      {y}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <WeeklyComparisonChart rows={weeklyComparison.rows} years={compareYears} />
-              <div className="mt-3 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-                {compareYears.map((y) => {
-                  const weeks = Array.from(weeklyByYear.get(y)?.values() ?? []).filter(
-                    (w) => w.total > 0
-                  );
-                  const avg = weeklyAverage(weeks);
-                  const total = weeks.reduce((a, w) => a + w.total, 0);
-                  return (
-                    <div key={y} className="flex items-center gap-2">
-                      <span
-                        className="inline-block h-3 w-3 shrink-0 rounded-full"
-                        style={{ backgroundColor: colorForYear(y) }}
-                      />
-                      <span className="font-bold" style={{ color: theme.title }}>
-                        {y}:
-                      </span>
-                      <span className="text-slate-500">
-                        prom. {money(avg)} · {weeks.length} sem. · {money(total)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </Card>
-
-        <Card className={`mb-8 ${cardClass} bg-white`} style={{ borderTop: `4px solid ${colorForYear(year)}` }}>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <Title style={{ color: theme.title }}>
-                Ventas por mes{month === null ? '' : ` · ${MESES[month - 1]}`}
+                Cancelaciones y descuentos · {corteMesLabel}
               </Title>
               <Text className="text-sm text-slate-500">
-                Totales mensuales · Acumulado semanal + Infocaja · comparativo 2021–2026
+                Lo que va del mes · mouse over para ver el motivo
               </Text>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {COMPARE_YEARS.map((y) => {
-                const active = compareYears.includes(y);
-                const c = colorForYear(y);
-                return (
-                  <button
-                    key={y}
-                    type="button"
-                    onClick={() => toggleCompareYear(y)}
-                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all"
-                    style={{
-                      backgroundColor: active ? c : '#f1f5f9',
-                      color: active ? '#fff' : '#475569',
-                      border: active ? `2px solid ${c}` : '2px solid #e2e8f0',
-                    }}
-                  >
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
-                      style={{ backgroundColor: active ? '#fff' : c }}
-                    />
-                    {y}
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                <span className="text-slate-500">Ver</span>
+                <select
+                  className="bg-transparent font-semibold text-slate-800 outline-none"
+                  value={corteFilter}
+                  onChange={(e) =>
+                    setCorteFilter(e.target.value as 'todos' | 'descuentos' | 'cancelaciones')
+                  }
+                >
+                  <option value="descuentos">Solo descuentos</option>
+                  <option value="cancelaciones">Solo cancelaciones</option>
+                  <option value="todos">Todos</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => setCorteCollapsed((v) => !v)}
+                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {corteCollapsed ? 'Mostrar desglose' : 'Ocultar desglose'}
+              </button>
             </div>
           </div>
-          {loading ? (
-            <p className="py-16 text-center text-slate-400">Cargando...</p>
-          ) : !monthlyTotalChartRows.some((r) =>
-              compareYears.some((y) => Number(r[String(y)] ?? 0) > 0)
-            ) ? (
-            <p className="py-16 text-center text-slate-400">Sin datos</p>
-          ) : (
+          <div className="mb-3 text-sm text-slate-600">
+            <span className="font-semibold text-rose-700">
+              Canc. {money(corteMesActual.totalCancelaciones)}
+            </span>
+            <span className="mx-2 text-slate-300">|</span>
+            <span className="font-semibold text-amber-700">
+              Desc. {money(corteMesActual.totalDescuentos)}
+            </span>
+            <span className="mx-2 text-slate-300">|</span>
+            <span className="font-bold text-slate-800">
+              Total {money(corteMesActual.total)}
+            </span>
+          </div>
+          {!corteCollapsed && (
             <>
-              <div className="mb-4 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                {compareYears.map((y) => (
-                  <div key={y} className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-3 w-3 shrink-0 rounded-full"
-                      style={{ backgroundColor: colorForYear(y) }}
-                    />
-                    <span className="text-sm font-semibold" style={{ color: theme.title }}>
-                      {y}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      total {money(monthlyTotalForYear(monthlyByYear, y))}
-                      {monthlyAverageForYear(monthlyByYear, y) > 0 && (
-                        <> · prom. mensual {money(monthlyAverageForYear(monthlyByYear, y))}</>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <MonthlyTotalComparisonChart rows={monthlyTotalChartRows} years={compareYears} />
+              {corteItemsFiltrados.length === 0 ? (
+                <p className="py-8 text-center text-slate-400">
+                  Sin registros para el filtro seleccionado.
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr
+                        className="text-left text-xs uppercase tracking-wide text-white"
+                        style={{ backgroundColor: theme.tableHead }}
+                      >
+                        <th className="px-4 py-3">Fecha</th>
+                        <th className="px-4 py-3">Tipo</th>
+                        <th className="px-4 py-3">Detalle</th>
+                        <th className="px-4 py-3 text-right">Monto</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {corteItemsFiltrados.map((item, i) => {
+                        const tip = [
+                          item.motivo,
+                          item.grupo,
+                          item.persona && `Persona: ${item.persona}`,
+                          item.producto,
+                          item.mesero && `Mesero: ${item.mesero}`,
+                          item.autorizo && `Autorizó: ${item.autorizo}`,
+                          item.mesa && `Mesa: ${item.mesa}`,
+                          item.hora,
+                        ]
+                          .filter(Boolean)
+                          .join('\n');
+                        const detalle =
+                          item.producto ||
+                          item.persona ||
+                          item.motivo ||
+                          item.grupo ||
+                          (item.kind === 'descuento' ? 'Descuento' : 'Cancelación');
+                        return (
+                          <tr
+                            key={item.id}
+                            title={tip}
+                            className={`cursor-help ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-amber-50`}
+                          >
+                            <td className="px-4 py-2.5 text-slate-600">
+                              {formatShort(item.date)}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span
+                                className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                  item.kind === 'cancelacion'
+                                    ? 'bg-rose-100 text-rose-700'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {item.kind === 'cancelacion' ? 'Cancelación' : 'Descuento'}
+                              </span>
+                            </td>
+                            <td
+                              className="max-w-xs truncate px-4 py-2.5 text-slate-700"
+                              title={tip}
+                            >
+                              {detalle}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
+                              {money(item.amount)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr
+                        className="font-bold text-white"
+                        style={{ backgroundColor: theme.tableFoot }}
+                      >
+                        <td className="px-4 py-3" colSpan={3}>
+                          Total filtrado · {corteMesLabel}
+                        </td>
+                        <td className="px-4 py-3 text-right">{money(corteTotalFiltrado)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
             </>
           )}
         </Card>
 
-        <Card className={`${cardClass} bg-white`}>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <Title style={{ color: theme.title }}>Promedio venta semanal por mes</Title>
-              <Text className="text-sm text-slate-500">
-                Promedio semanal dentro de cada mes · Acumulado ventas x semana
-              </Text>
+        {/* Mix de cobro: efectivo / bancos / propinas */}
+        <Card className={`mb-8 ${cardClass} bg-white`}>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Title style={{ color: theme.title }}>
+              Efectivo vs bancos · {mixPeriodoLabel}
+            </Title>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                <span className="text-slate-500">Mes</span>
+                <select
+                  className="bg-transparent font-semibold text-slate-800 outline-none"
+                  value={mixMonth ?? ''}
+                  onChange={(e) =>
+                    setMixMonth(e.target.value === '' ? null : Number(e.target.value))
+                  }
+                >
+                  <option value="">Todo el año</option>
+                  {MESES.map((m, i) => (
+                    <option key={m} value={i + 1}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
+          </div>
+          <PaymentMixPie mix={paymentMix} periodoLabel={mixPeriodoLabel} />
+        </Card>
+
+        <Card className={`mb-8 ${cardClass} bg-white`}>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Title style={{ color: theme.title }}>Promedio venta semanal por mes</Title>
             <div className="flex flex-wrap gap-2">
               {COMPARE_YEARS.map((y) => {
                 const active = compareYears.includes(y);
@@ -790,6 +968,287 @@ export default function Dashboard() {
             </>
           ) : (
             <p className="py-16 text-center text-slate-400">Sin datos mensuales</p>
+          )}
+        </Card>
+
+        {/* Detalle semanal — antes del comparativo */}
+        <Card className={`mb-8 ${cardClass} bg-white`}>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Title style={{ color: theme.title }}>Detalle semanal</Title>
+            <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+              <span className="text-slate-500">Año</span>
+              <select
+                className="bg-transparent font-semibold text-slate-800 outline-none"
+                value={detalleYear}
+                onChange={(e) => setDetalleYear(Number(e.target.value))}
+              >
+                {COMPARE_YEARS.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {weekRowsDisplay.length === 0 ? (
+            <p className="py-8 text-center text-slate-400">Sin semanas en el periodo.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr
+                    className="text-left text-xs uppercase tracking-wide text-white"
+                    style={{ backgroundColor: theme.tableHead }}
+                  >
+                    <th className="px-4 py-3">Mes</th>
+                    <th className="px-4 py-3">Semana</th>
+                    <th className="px-4 py-3">Rango (lun – dom)</th>
+                    <th className="px-4 py-3 text-right">Eventos</th>
+                    <th className="px-4 py-3 text-right">Venta WI</th>
+                    <th className="px-4 py-3 text-right">TOTAL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weekRowsDisplay.map((w, i) => (
+                    <tr key={w.week} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                      <td className="px-4 py-2.5 text-slate-700">{w.mes}</td>
+                      <td className="px-4 py-2.5 font-semibold" style={{ color: theme.tableWeek }}>
+                        {w.week}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600">{w.label}</td>
+                      <td className="px-4 py-2.5 text-right text-slate-600">
+                        {w.eventos > 0 ? money(w.eventos) : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-medium text-slate-700">
+                        {money(w.ventaWi)}
+                      </td>
+                      <td
+                        className="px-4 py-2.5 text-right font-semibold"
+                        style={{ color: theme.tableTotal }}
+                      >
+                        {money(w.total)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="font-bold text-white" style={{ backgroundColor: theme.tableFoot }}>
+                    <td className="px-4 py-3" colSpan={3}>
+                      Total {detalleYear}
+                      {month !== null ? ` · ${MESES[month - 1]}` : ''}
+                    </td>
+                    <td className="px-4 py-3 text-right">{money(totalesDetalle.eventos)}</td>
+                    <td className="px-4 py-3 text-right">{money(totalesDetalle.ventaWi)}</td>
+                    <td className="px-4 py-3 text-right">{money(totalesDetalle.total)}</td>
+                  </tr>
+                  <tr className="bg-slate-100 text-slate-600">
+                    <td className="px-4 py-2.5 font-semibold" colSpan={5}>
+                      Promedio semanal ({weekRowsDisplay.length} semanas)
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-semibold">
+                      {weeklyAverage(weekRowsDisplay) > 0
+                        ? money(weeklyAverage(weekRowsDisplay))
+                        : '—'}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        <Card className={`mb-8 ${cardClass} bg-white`}>
+          <div className="mb-4 flex flex-col gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Title style={{ color: theme.title }}>Comparativo semanal</Title>
+              <div className="flex flex-wrap gap-2">
+                {COMPARE_YEARS.map((y) => {
+                  const active = compareYears.includes(y);
+                  const c = colorForYear(y);
+                  return (
+                    <button
+                      key={y}
+                      type="button"
+                      onClick={() => toggleCompareYear(y)}
+                      className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all"
+                      style={{
+                        backgroundColor: active ? c : '#f1f5f9',
+                        color: active ? '#fff' : '#475569',
+                        border: active ? `2px solid ${c}` : '2px solid #e2e8f0',
+                      }}
+                    >
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
+                        style={{ backgroundColor: active ? '#fff' : c }}
+                      />
+                      {y}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                <span className="shrink-0 text-slate-500">Desde</span>
+                <select
+                  className="w-full bg-transparent font-semibold text-slate-800 outline-none"
+                  value={weekFrom ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value === '' ? null : Number(e.target.value);
+                    setWeekFrom(v);
+                    if (v != null && weekTo != null && v > weekTo) setWeekTo(v);
+                  }}
+                >
+                  <option value="">Inicio</option>
+                  {weekOptions.map((o) => (
+                    <option key={o.week} value={o.week}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                <span className="shrink-0 text-slate-500">Hasta</span>
+                <select
+                  className="w-full bg-transparent font-semibold text-slate-800 outline-none"
+                  value={weekTo ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value === '' ? null : Number(e.target.value);
+                    setWeekTo(v);
+                    if (v != null && weekFrom != null && v < weekFrom) setWeekFrom(v);
+                  }}
+                >
+                  <option value="">Fin</option>
+                  {weekOptions.map((o) => (
+                    <option key={o.week} value={o.week}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {(weekFrom != null || weekTo != null) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWeekFrom(null);
+                    setWeekTo(null);
+                  }}
+                  className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Limpiar rango
+                </button>
+              )}
+            </div>
+          </div>
+          {loading ? (
+            <p className="py-16 text-center text-slate-400">Cargando...</p>
+          ) : weeklyComparison.rows.length === 0 ? (
+            <p className="py-16 text-center text-slate-400">Sin datos semanales</p>
+          ) : (
+            <>
+              {/* Leyenda con círculos por año */}
+              <div className="mb-4 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                {compareYears.map((y) => (
+                  <div key={y} className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-3 w-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: colorForYear(y) }}
+                    />
+                    <span className="text-sm font-semibold" style={{ color: theme.title }}>
+                      {y}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <WeeklyComparisonChart rows={weeklyComparison.rows} years={compareYears} />
+              <div className="mt-3 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
+                {compareYears.map((y) => {
+                  const weeks = Array.from(weeklyByYear.get(y)?.values() ?? []).filter((w) => {
+                    if (w.total <= 0) return false;
+                    if (weekFrom != null && w.week < weekFrom) return false;
+                    if (weekTo != null && w.week > weekTo) return false;
+                    return true;
+                  });
+                  const avg = weeklyAverage(weeks);
+                  const total = weeks.reduce((a, w) => a + w.total, 0);
+                  return (
+                    <div key={y} className="flex items-center gap-2">
+                      <span
+                        className="inline-block h-3 w-3 shrink-0 rounded-full"
+                        style={{ backgroundColor: colorForYear(y) }}
+                      />
+                      <span className="font-bold" style={{ color: theme.title }}>
+                        {y}:
+                      </span>
+                      <span className="text-slate-500">
+                        prom. {money(avg)} · {weeks.length} sem. · {money(total)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </Card>
+
+        <Card className={`mb-8 ${cardClass} bg-white`} style={{ borderTop: `4px solid ${colorForYear(year)}` }}>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Title style={{ color: theme.title }}>Ventas por mes</Title>
+            <div className="flex flex-wrap gap-2">
+              {COMPARE_YEARS.map((y) => {
+                const active = compareYears.includes(y);
+                const c = colorForYear(y);
+                return (
+                  <button
+                    key={y}
+                    type="button"
+                    onClick={() => toggleCompareYear(y)}
+                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all"
+                    style={{
+                      backgroundColor: active ? c : '#f1f5f9',
+                      color: active ? '#fff' : '#475569',
+                      border: active ? `2px solid ${c}` : '2px solid #e2e8f0',
+                    }}
+                  >
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
+                      style={{ backgroundColor: active ? '#fff' : c }}
+                    />
+                    {y}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {loading ? (
+            <p className="py-16 text-center text-slate-400">Cargando...</p>
+          ) : !monthlyTotalChartRows.some((r) =>
+              compareYears.some((y) => Number(r[String(y)] ?? 0) > 0)
+            ) ? (
+            <p className="py-16 text-center text-slate-400">Sin datos</p>
+          ) : (
+            <>
+              <div className="mb-4 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                {compareYears.map((y) => (
+                  <div key={y} className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-3 w-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: colorForYear(y) }}
+                    />
+                    <span className="text-sm font-semibold" style={{ color: theme.title }}>
+                      {y}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      total {money(monthlyTotalForYear(monthlyByYear, y))}
+                      {monthlyAverageForYear(monthlyByYear, y) > 0 && (
+                        <> · prom. mensual {money(monthlyAverageForYear(monthlyByYear, y))}</>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <MonthlyTotalComparisonChart rows={monthlyTotalChartRows} years={compareYears} />
+            </>
           )}
         </Card>
       </div>

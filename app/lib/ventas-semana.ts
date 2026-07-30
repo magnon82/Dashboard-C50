@@ -201,6 +201,9 @@ export function weeklyFromInfocaja(
   return map;
 }
 
+/** A partir de este año, ventas vienen de Infocaja diario (Gmail); antes, del Acumulado */
+export const INFOCAJA_YEAR_FROM = 2026;
+
 export function buildWeeklySalesByYear(
   records: FinancialRecord[],
   years: number[]
@@ -212,16 +215,23 @@ export function buildWeeklySalesByYear(
     const yearMap = new Map<number, WeekSale>();
     const eventosByWeek = weeklyEventosFromRecords(records, y);
 
-    ventasSemana.forEach((row) => {
-      if (row.year !== y) return;
-      const ev = eventosByWeek.get(row.week) ?? row.eventos;
-      yearMap.set(row.week, finalizeWeek({ ...row, eventos: ev, ventaWi: Math.max(0, row.total - ev) }));
-    });
-
-    const infocaja = weeklyFromInfocaja(records, y, eventosByWeek);
-    infocaja.forEach((row) => {
-      if (row.total > 0) yearMap.set(row.week, row);
-    });
+    if (y < INFOCAJA_YEAR_FROM) {
+      // 2021–2025: solo Acumulado ventas x semana
+      ventasSemana.forEach((row) => {
+        if (row.year !== y) return;
+        const ev = eventosByWeek.get(row.week) ?? row.eventos;
+        yearMap.set(
+          row.week,
+          finalizeWeek({ ...row, eventos: ev, ventaWi: Math.max(0, row.total - ev) })
+        );
+      });
+    } else {
+      // 2026+: solo reportes diarios Infocaja
+      const infocaja = weeklyFromInfocaja(records, y, eventosByWeek);
+      infocaja.forEach((row) => {
+        if (row.total > 0) yearMap.set(row.week, row);
+      });
+    }
 
     if (yearMap.size > 0) byYear.set(y, yearMap);
   }
@@ -238,7 +248,9 @@ export function weeklyAverage(weeks: WeekSale[]): number {
 export function buildWeeklyComparisonChart(
   byYear: Map<number, Map<number, WeekSale>>,
   compareYears: number[],
-  primaryYear: number
+  primaryYear: number,
+  weekFrom: number | null = null,
+  weekTo: number | null = null
 ): { rows: Record<string, string | number>[]; categories: string[]; maxWeek: number } {
   const categories = compareYears.map(String);
 
@@ -249,9 +261,13 @@ export function buildWeeklyComparisonChart(
     });
   });
 
+  const from = weekFrom ?? 1;
+  const to = weekTo ?? maxWeek;
+
   const rows: Record<string, string | number>[] = [];
 
   for (let w = 1; w <= maxWeek; w++) {
+    if (w < from || w > to) continue;
     const label = `S${w}`;
 
     const row: Record<string, string | number> = { semana: label, n: w };
@@ -384,7 +400,7 @@ export function yearWeeklyAverageFromMonthly(
   return vals.reduce((a, m) => a + m.promSemanal, 0) / vals.length;
 }
 
-/** Ventas mensuales por año — semanas Acumulado + Infocaja diario */
+/** Ventas mensuales: ≤2025 desde semanas Acumulado; ≥2026 desde Infocaja diario */
 export function buildMonthlySalesByYear(
   records: FinancialRecord[],
   weeklyByYear: Map<number, Map<number, WeekSale>>,
@@ -395,61 +411,57 @@ export function buildMonthlySalesByYear(
   for (const y of years) {
     const monthMap = new Map<number, MonthSale>();
 
-    const weekMap = weeklyByYear.get(y);
-    weekMap?.forEach((week) => {
-      if (week.total <= 0) return;
-      const monthIdx = mesToIndex(week.mes);
-      if (monthIdx <= 0) return;
-      const cur =
-        monthMap.get(monthIdx) ||
-        ({
+    if (y < INFOCAJA_YEAR_FROM) {
+      const weekMap = weeklyByYear.get(y);
+      weekMap?.forEach((week) => {
+        if (week.total <= 0) return;
+        const monthIdx = mesToIndex(week.mes);
+        if (monthIdx <= 0) return;
+        const cur =
+          monthMap.get(monthIdx) ||
+          ({
+            year: y,
+            month: monthIdx,
+            mes: MESES[monthIdx - 1],
+            total: 0,
+            eventos: 0,
+            ventaWi: 0,
+          } satisfies MonthSale);
+        cur.total += week.total;
+        cur.eventos += week.eventos;
+        cur.ventaWi += week.ventaWi;
+        monthMap.set(monthIdx, cur);
+      });
+    } else {
+      const eventosMes = new Map<number, number>();
+      records.forEach((r) => {
+        if (r.source_file !== 'eventos' || r.category !== 'Eventos') return;
+        const p = parseIsoDate(r.date);
+        if (!p || p.y !== y) return;
+        eventosMes.set(p.m, (eventosMes.get(p.m) || 0) + Number(r.amount));
+      });
+
+      const infocajaMes = new Map<number, number>();
+      records.forEach((r) => {
+        if (r.source_file !== 'infocaja' || r.category !== 'Venta Total') return;
+        const p = parseIsoDate(r.date);
+        if (!p || p.y !== y) return;
+        infocajaMes.set(p.m, (infocajaMes.get(p.m) || 0) + Number(r.amount));
+      });
+
+      infocajaMes.forEach((total, monthIdx) => {
+        if (total <= 0) return;
+        const ev = eventosMes.get(monthIdx) || 0;
+        monthMap.set(monthIdx, {
           year: y,
           month: monthIdx,
           mes: MESES[monthIdx - 1],
-          total: 0,
-          eventos: 0,
-          ventaWi: 0,
-        } satisfies MonthSale);
-      cur.total += week.total;
-      cur.eventos += week.eventos;
-      cur.ventaWi += week.ventaWi;
-      monthMap.set(monthIdx, cur);
-    });
-
-    // Infocaja diario sobrescribe meses con días registrados (año en curso)
-    const eventosMes = new Map<number, number>();
-    records.forEach((r) => {
-      if (r.source_file !== 'eventos' || r.category !== 'Eventos') return;
-      const p = parseIsoDate(r.date);
-      if (!p || p.y !== y) return;
-      eventosMes.set(p.m, (eventosMes.get(p.m) || 0) + Number(r.amount));
-    });
-
-    const infocajaMes = new Map<number, number>();
-    records.forEach((r) => {
-      if (r.source_file !== 'infocaja' || r.category !== 'Venta Total') return;
-      const p = parseIsoDate(r.date);
-      if (!p || p.y !== y) return;
-      infocajaMes.set(p.m, (infocajaMes.get(p.m) || 0) + Number(r.amount));
-    });
-
-    infocajaMes.forEach((total, monthIdx) => {
-      if (total <= 0) return;
-      const existing = monthMap.get(monthIdx);
-      const currentYear = new Date().getFullYear();
-      // Histórico: conservar suma semanal del Acumulado si ya existe
-      if (existing && existing.total > 0 && y !== currentYear) return;
-
-      const ev = eventosMes.get(monthIdx) || 0;
-      monthMap.set(monthIdx, {
-        year: y,
-        month: monthIdx,
-        mes: MESES[monthIdx - 1],
-        total,
-        eventos: ev,
-        ventaWi: Math.max(0, total - ev),
+          total,
+          eventos: ev,
+          ventaWi: Math.max(0, total - ev),
+        });
       });
-    });
+    }
 
     if (monthMap.size > 0) result.set(y, monthMap);
   }
@@ -517,3 +529,214 @@ export function monthlyAverageForYear(
 }
 
 export { MESES };
+
+export interface DaySale {
+  date: string;
+  label: string;
+  weekday: string;
+  total: number;
+  /** Suma descuentos + cortesías + cancelaciones del día (CORTE) */
+  cortes: number;
+}
+
+/** Viernes de la semana (lun–vie) a partir del lunes ISO */
+export function fridayOfWeek(mondayKey: string): string {
+  const mon = mondayOf(mondayKey);
+  const fri = new Date(mon);
+  fri.setDate(fri.getDate() + 4);
+  return toIsoLocal(fri);
+}
+
+export function weekRangeLabel(year: number, week: number): string {
+  const mon = weekMondayIso(year, week);
+  const fri = fridayOfWeek(mon);
+  return `S${week} · ${formatShort(mon)} – ${formatShort(fri)}`;
+}
+
+/** Semana en curso (lun–hoy) con ventas diarias Infocaja + cortes CORTE */
+export function buildWeekToDateSales(
+  records: FinancialRecord[],
+  todayIso?: string
+): { days: DaySale[]; total: number; totalCortes: number; mondayKey: string; sundayKey: string; asOf: string } {
+  const today = todayIso || toIsoLocal(new Date());
+  const mon = mondayOf(today);
+  const mondayKey = toIsoLocal(mon);
+  const sundayKey = sundayOfWeek(mondayKey);
+
+  const byDate = new Map<string, number>();
+  for (const r of records) {
+    if (r.source_file !== 'infocaja' || r.category !== 'Venta Total') continue;
+    const p = parseIsoDate(r.date);
+    if (!p) continue;
+    if (p.key < mondayKey || p.key > today) continue;
+    byDate.set(p.key, (byDate.get(p.key) || 0) + Number(r.amount));
+  }
+
+  const cortesByDate = new Map<string, number>();
+  for (const r of records) {
+    if (r.source_file !== 'corte_caja') continue;
+    if (r.category !== 'Corte Cancelacion' && r.category !== 'Corte Descuento') continue;
+    const p = parseIsoDate(r.date);
+    if (!p) continue;
+    if (p.key < mondayKey || p.key > today) continue;
+    cortesByDate.set(p.key, (cortesByDate.get(p.key) || 0) + Number(r.amount));
+  }
+
+  const days: DaySale[] = [];
+  let total = 0;
+  let totalCortes = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(mon);
+    d.setDate(d.getDate() + i);
+    const key = toIsoLocal(d);
+    if (key > today) break;
+    const amt = byDate.get(key) || 0;
+    const cortes = cortesByDate.get(key) || 0;
+    total += amt;
+    totalCortes += cortes;
+    days.push({
+      date: key,
+      label: formatShort(key),
+      weekday: d.toLocaleDateString('es-MX', { weekday: 'short' }),
+      total: amt,
+      cortes,
+    });
+  }
+
+  return { days, total, totalCortes, mondayKey, sundayKey, asOf: today };
+}
+
+export interface PaymentMix {
+  efectivo: number;
+  bancarias: number;
+  propina: number;
+  total: number;
+}
+
+/** Efectivo / Bancarias / Propina desde Infocaja en el periodo filtrado */
+export function buildPaymentMix(
+  records: FinancialRecord[],
+  year: number,
+  month: number | null
+): PaymentMix {
+  let efectivo = 0;
+  let bancarias = 0;
+  let propina = 0;
+
+  for (const r of records) {
+    if (r.source_file !== 'infocaja') continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== year) continue;
+    if (month !== null && p.m !== month) continue;
+    const amt = Number(r.amount);
+    if (r.category === 'Infocaja Efectivo') efectivo += amt;
+    else if (r.category === 'Infocaja Bancarias') bancarias += amt;
+    else if (r.category === 'Infocaja Propina') propina += amt;
+  }
+
+  return {
+    efectivo,
+    bancarias,
+    propina,
+    total: efectivo + bancarias + propina,
+  };
+}
+
+export interface CorteDetailItem {
+  id: string;
+  date: string;
+  kind: 'cancelacion' | 'descuento';
+  amount: number;
+  motivo: string;
+  grupo?: string;
+  persona?: string;
+  producto?: string;
+  mesero?: string;
+  autorizo?: string;
+  mesa?: string;
+  hora?: string;
+  raw: Record<string, unknown>;
+}
+
+export interface CorteDaySummary {
+  date: string;
+  cancelaciones: number;
+  descuentos: number;
+  total: number;
+  items: CorteDetailItem[];
+}
+
+function parseCorteDescription(desc: string | null | undefined): Record<string, unknown> {
+  if (!desc) return {};
+  try {
+    const parsed = JSON.parse(desc);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Cancelaciones + descuentos del corte de caja en el periodo filtrado */
+export function buildCorteCancelacionesDescuentos(
+  records: FinancialRecord[],
+  year: number,
+  month: number | null
+): { days: CorteDaySummary[]; totalCancelaciones: number; totalDescuentos: number; total: number } {
+  const byDate = new Map<string, CorteDaySummary>();
+
+  for (const r of records) {
+    if (r.source_file !== 'corte_caja') continue;
+    if (r.category !== 'Corte Cancelacion' && r.category !== 'Corte Descuento') continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== year) continue;
+    if (month !== null && p.m !== month) continue;
+
+    const raw = parseCorteDescription(r.description);
+    const kind: 'cancelacion' | 'descuento' =
+      r.category === 'Corte Cancelacion' ? 'cancelacion' : 'descuento';
+    const amount = Number(r.amount) || 0;
+
+    const item: CorteDetailItem = {
+      id: r.id,
+      date: p.key,
+      kind,
+      amount,
+      motivo: String(raw.motivo || (kind === 'descuento' ? 'Descuento' : 'Cancelación')),
+      grupo: raw.grupo ? String(raw.grupo) : undefined,
+      persona: raw.persona ? String(raw.persona) : undefined,
+      producto: raw.producto ? String(raw.producto) : undefined,
+      mesero: raw.mesero ? String(raw.mesero) : undefined,
+      autorizo: raw.autorizo ? String(raw.autorizo) : undefined,
+      mesa: raw.mesa ? String(raw.mesa) : undefined,
+      hora: raw.hora ? String(raw.hora) : undefined,
+      raw,
+    };
+
+    const day =
+      byDate.get(p.key) ||
+      ({
+        date: p.key,
+        cancelaciones: 0,
+        descuentos: 0,
+        total: 0,
+        items: [],
+      } satisfies CorteDaySummary);
+
+    if (kind === 'cancelacion') day.cancelaciones += amount;
+    else day.descuentos += amount;
+    day.total += amount;
+    day.items.push(item);
+    byDate.set(p.key, day);
+  }
+
+  const days = Array.from(byDate.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const totalCancelaciones = days.reduce((a, d) => a + d.cancelaciones, 0);
+  const totalDescuentos = days.reduce((a, d) => a + d.descuentos, 0);
+
+  return {
+    days,
+    totalCancelaciones,
+    totalDescuentos,
+    total: totalCancelaciones + totalDescuentos,
+  };
+}

@@ -20,6 +20,7 @@ import argparse
 import base64
 import os
 from datetime import date
+from pathlib import Path
 
 from dotenv import load_dotenv
 from supabase import create_client
@@ -28,6 +29,7 @@ from google_auth import gmail_service
 from parse_infocaja_eml import SOURCE_FILE, parse_infocaja_text, upsert_day
 
 load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env.local")
 
 SUBJECT = "Infocaja Fín de Día de la Unidad CLUSTER CULINARIO"
 # Variante sin tilde por si Gmail normaliza el asunto
