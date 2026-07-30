@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/app/lib/supabase';
 import { Card, Metric, Text, Title } from '@tremor/react';
 import { WeeklyComparisonChart, colorForYear } from '@/app/components/WeeklyComparisonChart';
 import { MonthlyComparisonChart, MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
@@ -44,43 +43,28 @@ export default function Dashboard() {
   const [month, setMonth] = useState<number | null>(null);
   const [compareYears, setCompareYears] = useState<number[]>([2026, 2025]);
   const [saldosVisibles, setSaldosVisibles] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchRecords() {
+      setDataError(null);
       try {
-        const all: FinancialRecord[] = [];
-        let from = 0;
-        const pageSize = 1000;
-        while (true) {
-          const { data, error } = await supabase
-            .from('financial_records')
-            .select('*')
-            .order('date', { ascending: false })
-            .range(from, from + pageSize - 1);
-          if (error) {
-            console.error(error.message);
-            break;
-          }
-          if (!data?.length) break;
-          all.push(...data);
-          if (data.length < pageSize) break;
-          from += pageSize;
+        const res = await fetch('/api/financial-records', { cache: 'no-store' });
+        const json = await res.json();
+        if (!res.ok) {
+          setDataError(json.error || 'No se pudieron cargar los datos');
+          setRecords([]);
+          return;
         }
-        setRecords(all);
+        setRecords(json.records || []);
+      } catch (e) {
+        setDataError(e instanceof Error ? e.message : 'Error de red al cargar datos');
+        setRecords([]);
       } finally {
         setLoading(false);
       }
     }
     fetchRecords();
-    const channel = supabase
-      .channel('financial_records_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_records' }, () =>
-        fetchRecords()
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   const availableYears = useMemo(() => {
@@ -420,6 +404,21 @@ export default function Dashboard() {
       </header>
 
       <div className="mx-auto max-w-7xl px-6 py-8 md:px-10">
+        {dataError && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <p className="font-semibold">No se cargaron los datos</p>
+            <p className="mt-1">{dataError}</p>
+            <p className="mt-2 text-red-700">
+              En Vercel → Settings → Environment Variables, agrega{' '}
+              <code className="rounded bg-red-100 px-1">NEXT_PUBLIC_SUPABASE_URL</code> y{' '}
+              <code className="rounded bg-red-100 px-1">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> (Production)
+              y vuelve a hacer deploy.
+            </p>
+          </div>
+        )}
+        {loading && (
+          <p className="mb-6 text-center text-slate-500">Cargando datos…</p>
+        )}
         <Card
           className={`mb-8 ${cardClass}`}
           style={{ backgroundColor: theme.cardBg, borderTop: `4px solid ${theme.kpi[0].border}` }}
