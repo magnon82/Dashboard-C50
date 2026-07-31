@@ -99,7 +99,7 @@ export function MonthlyBarChart({ rows, year }: MonthlyBarChartProps) {
             formatter={(value: number) => [formatMoney(value), String(year)]}
             contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
           />
-          <Bar dataKey="ventas" fill={fill} radius={[4, 4, 0, 0]} maxBarSize={40} name={String(year)} />
+          <Bar dataKey="ventas" fill={fill} radius={[8, 8, 0, 0]} maxBarSize={40} name={String(year)} />
         </RechartsBarChart>
       </ResponsiveContainer>
     </div>
@@ -140,7 +140,7 @@ export function MonthlyTotalComparisonChart({ rows, years }: MonthlyTotalCompari
               dataKey={String(y)}
               name={String(y)}
               fill={colorForYear(y)}
-              radius={[4, 4, 0, 0]}
+              radius={[8, 8, 0, 0]}
               maxBarSize={32}
             />
           ))}

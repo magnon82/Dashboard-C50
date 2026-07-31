@@ -10,13 +10,14 @@ import {
   YAxis,
 } from 'recharts';
 
+/** Paleta suite: contraste alto entre años, armónica con navy + naranja */
 export const YEAR_HEX: Record<number, string> = {
-  2026: '#2e75b6',
-  2025: '#217346',
-  2024: '#7030a0',
-  2023: '#c55a11',
-  2022: '#0d9488',
-  2021: '#475569',
+  2026: '#1B2A4A', // navy
+  2025: '#E8A317', // naranja
+  2024: '#0F9F9C', // teal
+  2023: '#D64545', // coral
+  2022: '#6B5CE7', // violeta
+  2021: '#5B7C99', // azul grisáceo
 };
 
 export function colorForYear(year: number): string {
@@ -70,8 +71,8 @@ export function WeeklyComparisonChart({ rows, years }: WeeklyComparisonChartProp
               dataKey={String(y)}
               name={String(y)}
               fill={colorForYear(y)}
-              radius={[3, 3, 0, 0]}
-              maxBarSize={28}
+              radius={[8, 8, 0, 0]}
+              maxBarSize={32}
             />
           ))}
         </RechartsBarChart>

@@ -2,9 +2,38 @@ import { NextResponse } from 'next/server';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE,
+  canAccessAdmin,
   createSessionToken,
-  validateCredentials,
+  getDashboardPassword,
+  getDashboardUser,
+  type SessionUser,
 } from '@/app/lib/auth';
+import { hashPassword, verifyPassword } from '@/app/lib/password';
+import {
+  countUsers,
+  createUser,
+  findUserByUsername,
+  toPublicUser,
+} from '@/app/lib/users';
+
+export const runtime = 'nodejs';
+
+async function ensureBootstrapAdmin(): Promise<void> {
+  try {
+    const n = await countUsers();
+    if (n > 0) return;
+    await createUser({
+      username: getDashboardUser(),
+      displayName: 'Sergio',
+      passwordHash: hashPassword(getDashboardPassword()),
+      role: 'admin',
+      modules: ['*'],
+      active: true,
+    });
+  } catch {
+    // si falla, login legacy por env
+  }
+}
 
 export async function POST(request: Request) {
   let body: { username?: string; password?: string };
@@ -14,15 +43,57 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Solicitud inválida' }, { status: 400 });
   }
 
-  const username = (body.username || '').trim();
+  const username = (body.username || '').trim().toLowerCase();
   const password = body.password || '';
+  if (!username || !password) {
+    return NextResponse.json({ error: 'Usuario y contraseña requeridos' }, { status: 400 });
+  }
 
-  if (!validateCredentials(username, password)) {
+  await ensureBootstrapAdmin();
+
+  let session: SessionUser | null = null;
+
+  try {
+    const row = await findUserByUsername(username);
+    if (row && row.active && verifyPassword(password, row.password_hash)) {
+      const pub = toPublicUser(row);
+      session = {
+        username: pub.username,
+        role: pub.role,
+        modules: pub.modules,
+        canEdit: pub.canEdit,
+      };
+    }
+  } catch {
+    // fallback env
+  }
+
+  if (!session) {
+    if (username === getDashboardUser() && password === getDashboardPassword()) {
+      session = {
+        username,
+        role: 'admin',
+        modules: ['*'],
+        canEdit: true,
+      };
+    }
+  }
+
+  if (!session) {
     return NextResponse.json({ error: 'Usuario o contraseña incorrectos' }, { status: 401 });
   }
 
-  const token = await createSessionToken(username);
-  const response = NextResponse.json({ ok: true });
+  const token = await createSessionToken(session);
+  const response = NextResponse.json({
+    ok: true,
+    user: {
+      username: session.username,
+      role: session.role,
+      modules: session.modules,
+      canEdit: session.canEdit,
+      canAccessAdmin: canAccessAdmin(session),
+    },
+  });
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

@@ -643,11 +643,15 @@ export function buildWeekToDateSales(
       const pd = new Date(prevMon);
       pd.setDate(pd.getDate() + i);
       prevDate = toIsoLocal(pd);
-      prevAsOfKey = prevDate;
       prevDayTotal = prevByDate.get(prevDate) || 0;
-      prevTotal += prevDayTotal;
-      if (prevDayTotal > 0) {
-        dayChange = ((amt - prevDayTotal) / prevDayTotal) * 100;
+      // Solo comparar días ya transcurridos (antes de hoy), o hoy si ya hay venta
+      const comparable = key < today || amt > 0;
+      if (comparable) {
+        prevAsOfKey = prevDate;
+        prevTotal += prevDayTotal;
+        if (prevDayTotal > 0) {
+          dayChange = ((amt - prevDayTotal) / prevDayTotal) * 100;
+        }
       }
     }
 

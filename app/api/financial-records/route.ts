@@ -7,7 +7,7 @@ function clean(value: string | undefined): string {
   return (value || '').trim().replace(/^["']|["']$/g, '');
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const url = clean(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL);
   const key = clean(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
@@ -34,12 +34,25 @@ export async function GET() {
   let from = 0;
   const pageSize = 1000;
 
+  const reqUrl = new URL(request.url);
+  const sourcesParam = reqUrl.searchParams.get('sources');
+  const sourceFilter = sourcesParam
+    ? sourcesParam.split(',').map((s) => s.trim()).filter(Boolean)
+    : null;
+
   while (true) {
-    const { data, error } = await supabase
+    let q = supabase
       .from('financial_records')
       .select('*')
+      .neq('source_file', 'dashboard_auth')
       .order('date', { ascending: false })
-      .range(from, from + pageSize - 1);
+      .order('id', { ascending: false });
+
+    if (sourceFilter?.length) {
+      q = q.in('source_file', sourceFilter);
+    }
+
+    const { data, error } = await q.range(from, from + pageSize - 1);
 
     if (error) {
       return NextResponse.json(

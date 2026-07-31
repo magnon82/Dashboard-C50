@@ -4,8 +4,8 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import type { PaymentMix } from '@/app/lib/ventas-semana';
 
 const COLORS = {
-  efectivo: '#217346',
-  bancarias: '#2b579a',
+  efectivo: '#0F9F9C', // teal — se diferencia del navy de barras
+  bancarias: '#E8A317', // naranja suite
 };
 
 function pct(part: number, total: number) {

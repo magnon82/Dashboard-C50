@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --suite-navy: #1b2a4a;
+  --suite-orange: #e8a317;
+  --suite-page: #e8ecf1;
+  --suite-muted: #6b7a90;
+  --background: #e8ecf1;
+  --foreground: #1b2a4a;
 }
 
 @theme inline {
@@ -12,15 +16,15 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: var(--suite-page);
+  color: var(--suite-navy);
+  font-family: var(--font-geist-sans), 'Segoe UI', Arial, Helvetica, sans-serif;
 }
 
-body {
-  background: #eef1f5;
-  color: #1e293b;
-  font-family: var(--font-geist-sans), 'Segoe UI', Arial, Helvetica, sans-serif;
+/* Soft cards look from mockup */
+.suite-card {
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(27, 42, 74, 0.08);
 }

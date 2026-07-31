@@ -2,9 +2,9 @@
 
 import { FormEvent, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getTheme } from '@/app/lib/themes';
+import { getTheme, SUITE } from '@/app/lib/themes';
 
-const theme = getTheme('excel');
+const theme = getTheme('suite');
 
 export default function LoginForm() {
   const router = useRouter();
@@ -47,23 +47,27 @@ export default function LoginForm() {
       className="flex min-h-screen items-center justify-center px-4"
       style={{ backgroundColor: theme.pageBg }}
     >
-      <div className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-lg">
-        <div className="px-8 py-6 text-white" style={{ backgroundColor: theme.headerBg }}>
-          <p
-            className="text-xs font-semibold uppercase tracking-widest"
-            style={{ color: theme.headerSub }}
+      <div
+        className="w-full max-w-md overflow-hidden rounded-[28px] bg-white"
+        style={{ boxShadow: SUITE.shadow }}
+      >
+        <div className="px-8 py-7 text-white" style={{ backgroundColor: SUITE.navy }}>
+          <div
+            className="mb-4 flex h-14 w-14 items-center justify-center rounded-full text-xl font-bold"
+            style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: SUITE.orange }}
           >
+            C50
+          </div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-white/70">
             Cluster Culinario · Carranza 50
           </p>
-          <h1 className="mt-2 text-2xl font-bold">Dashboard Ventas</h1>
-          <p className="mt-1 text-sm" style={{ color: theme.headerMuted }}>
-            Acceso restringido · administrador
-          </p>
+          <h1 className="mt-2 text-2xl font-bold">Centro de dashboards</h1>
+          <p className="mt-1 text-sm text-white/65">Acceso restringido</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 px-8 py-8">
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
           )}
@@ -79,7 +83,7 @@ export default function LoginForm() {
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none ring-blue-200 focus:border-blue-500 focus:ring-2"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
             />
           </div>
 
@@ -94,17 +98,17 @@ export default function LoginForm() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none ring-blue-200 focus:border-blue-500 focus:ring-2"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-            style={{ backgroundColor: theme.headerBg }}
+            className="w-full rounded-xl px-4 py-3 text-sm font-bold text-white transition-opacity disabled:opacity-60"
+            style={{ backgroundColor: SUITE.orange }}
           >
-            {loading ? 'Entrando…' : 'Entrar al dashboard'}
+            {loading ? 'Entrando…' : 'Entrar'}
           </button>
         </form>
       </div>

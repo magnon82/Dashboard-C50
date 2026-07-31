@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Dashboard Ventas · Carranza 50",
-  description: "Panel financiero Cluster Culinario Carranza 50",
+  title: "Centro de dashboards · Carranza 50",
+  description: "Suite de dashboards Cluster Culinario Carranza 50",
 };
 
 export default function RootLayout({
