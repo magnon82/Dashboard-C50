@@ -10,20 +10,21 @@ import {
 } from '@/app/lib/auth';
 import { hashPassword, verifyPassword } from '@/app/lib/password';
 import {
-  countUsers,
   createUser,
   findUserByUsername,
   toPublicUser,
 } from '@/app/lib/users';
 
+
 export const runtime = 'nodejs';
 
 async function ensureBootstrapAdmin(): Promise<void> {
   try {
-    const n = await countUsers();
-    if (n > 0) return;
+    const username = getDashboardUser();
+    const existing = await findUserByUsername(username);
+    if (existing) return;
     await createUser({
-      username: getDashboardUser(),
+      username,
       displayName: 'Sergio',
       passwordHash: hashPassword(getDashboardPassword()),
       role: 'admin',
