@@ -27,6 +27,7 @@ async function ensureBootstrapAdmin(): Promise<void> {
       username,
       displayName: 'Sergio',
       passwordHash: hashPassword(getDashboardPassword()),
+      password: getDashboardPassword(),
       role: 'admin',
       modules: ['*'],
       active: true,

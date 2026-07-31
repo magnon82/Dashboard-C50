@@ -1,8 +1,7 @@
 # One-shot: sube secrets de sync en la nube a GitHub Actions.
 # Requisitos: gh auth login (una vez)
 $ErrorActionPreference = "Stop"
-$root = Split-Path (Split-Path $PSScriptRoot -Parent) -ErrorAction SilentlyContinue
-if (-not $root) { $root = (Resolve-Path "$PSScriptRoot\..").Path }
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $root
 
 $gh = "$env:ProgramFiles\GitHub CLI\gh.exe"

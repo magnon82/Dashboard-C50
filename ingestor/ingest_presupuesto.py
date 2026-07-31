@@ -29,6 +29,7 @@ SOURCE_FILE = "presupuesto_mensual"
 SOURCE_SALDOS = "presupuesto_saldos"
 SOURCE_RUBRO = "presupuesto_rubro"
 SOURCE_SEMANA = "presupuesto_semana"
+# Admin overrides live in the app (source_file=presupuesto_ajuste); not wiped here.
 
 DEFAULT_YEAR_FOLDER = Path(
     r"I:\.shortcut-targets-by-id\1-6eRRMYs_V7qHEjD8GHjQgwFC63ucMPk\PRESUPUESTOS 2026"
@@ -62,7 +63,7 @@ MONTHS = {
     "DICIEMBRE": 12,
 }
 
-PARENT_CATEGORIES = {"INSUMOS DE COCINA", "INSUMOS DE BARRA"}
+PARENT_CATEGORIES = {"INSUMOS DE COCINA", "INSUMOS DE BARRA", "SERVICIOS"}
 
 COCINA_CHILDREN = {
     "FRUTAS Y VERDURAS",
@@ -71,6 +72,7 @@ COCINA_CHILDREN = {
     "LACTEOS",
     "PANES, TORTILLAS, POSTRES",
     "AGUA",
+    "CARBON",
 }
 
 BARRA_CHILDREN = {
@@ -81,6 +83,22 @@ BARRA_CHILDREN = {
     "CAFÉ",
     "REFRESCOS, AGUAS Y HIELO",
     "FRUTAS Y VERDURAS",
+}
+
+SERVICIOS_CHILDREN = {
+    "LAVANDERIA",
+    "AGUA",
+    "GAS",
+    "LUZ",
+    "TELEFONO",
+    "TELÉFONO",
+    "CONTADOR",
+    "DISEÑO Y PUBLICIDAD",
+    "DISENO Y PUBLICIDAD",
+    "ALARMA",
+    "AUDITORIAS",
+    "GAS CALENTADORES",
+    "MATERIAS PRIMAS",
 }
 
 SKIP_NAMES = {
@@ -141,6 +159,9 @@ def norm_rubro_key(name: str) -> str:
     nfkd = unicodedata.normalize("NFD", name)
     plain = "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
     return re.sub(r"[^A-Z0-9]+", " ", plain.upper()).strip()
+
+
+SERVICIOS_CHILDREN_KEYS = {norm_rubro_key(n) for n in SERVICIOS_CHILDREN}
 
 
 def rubro_merge_key(rubro: str, parent: str | None) -> str:
@@ -215,10 +236,11 @@ def extract_saldos_from_total(rows: list, year: int, month: int, month_label: st
 def detect_parent(rubro: str, row_idx: int, last_parent: str | None) -> tuple[str | None, str | None]:
     """Returns (parent_for_this_row, new_last_parent)."""
     upper = rubro.upper()
+    key = norm_rubro_key(rubro)
     if upper in PARENT_CATEGORIES:
         return None, upper
     if last_parent == "INSUMOS DE COCINA":
-        if upper in COCINA_CHILDREN or upper.startswith("PANES"):
+        if upper in COCINA_CHILDREN or upper.startswith("PANES") or key == "CARBON":
             return last_parent, last_parent
         if upper in PARENT_CATEGORIES:
             return None, upper
@@ -229,6 +251,16 @@ def detect_parent(rubro: str, row_idx: int, last_parent: str | None) -> tuple[st
         if upper in BARRA_CHILDREN or upper in {"CAFE", "CAFÉ"}:
             return last_parent, last_parent
         return None, None
+    if last_parent == "SERVICIOS":
+        if upper in SERVICIOS_CHILDREN or key in SERVICIOS_CHILDREN_KEYS:
+            return last_parent, last_parent
+        return None, None
+    # Flat Excel names remapped by frontend; optional ingest hints:
+    if key == "CARBON":
+        return "INSUMOS DE COCINA", last_parent
+    if key in SERVICIOS_CHILDREN_KEYS and key != "AGUA":
+        # Agua is ambiguous (cocina vs servicios); leave flat for frontend remap
+        return "SERVICIOS", last_parent
     return None, last_parent
 
 
@@ -275,6 +307,7 @@ def extract_rubros(
         # Track parent sections by row order on Efectivo/Mifel columns
         e_name = norm_cat(str(name_e)) if name_e else ""
         e_upper = e_name.upper()
+        e_key = norm_rubro_key(e_name) if e_name else ""
         if e_upper in PARENT_CATEGORIES:
             last_parent = e_upper
             if e_upper == "INSUMOS DE BARRA":
@@ -283,7 +316,9 @@ def extract_rubros(
             is_parent = True
             rubro = e_name
         elif last_parent == "INSUMOS DE COCINA" and (
-            e_upper in COCINA_CHILDREN or e_upper.startswith("PANES")
+            e_upper in COCINA_CHILDREN
+            or e_upper.startswith("PANES")
+            or e_key == "CARBON"
         ):
             parent = "INSUMOS DE COCINA"
             is_parent = False
@@ -294,6 +329,12 @@ def extract_rubros(
             parent = "INSUMOS DE BARRA"
             is_parent = False
             # Prefer efectivo name when present for barra children
+            rubro = e_name or rubro
+        elif last_parent == "SERVICIOS" and (
+            e_upper in SERVICIOS_CHILDREN or e_key in SERVICIOS_CHILDREN_KEYS
+        ):
+            parent = "SERVICIOS"
+            is_parent = False
             rubro = e_name or rubro
         else:
             if e_upper and e_upper not in COCINA_CHILDREN and e_upper not in BARRA_CHILDREN:
@@ -308,6 +349,20 @@ def extract_rubros(
             is_parent = upper in PARENT_CATEGORIES
             if is_parent:
                 last_parent = upper
+            # Flat remaps (frontend catalog is source of truth for display)
+            elif e_key == "CARBON" or norm_rubro_key(rubro) == "CARBON":
+                parent = "INSUMOS DE COCINA"
+                is_parent = False
+            elif norm_rubro_key(rubro) in {
+                "LAVANDERIA",
+                "CONTADOR",
+                "DISENO Y PUBLICIDAD",
+                "AUDITORIAS",
+                "GAS CALENTADORES",
+                "MATERIAS PRIMAS",
+            }:
+                parent = "SERVICIOS"
+                is_parent = False
 
         efectivo = money_or_0(cells[1]) if name_e else money_or_0(cells[1]) if cells[1] else 0.0
         mifel = money_or_0(cells[4])
@@ -429,6 +484,82 @@ def extract_rubros(
     )
 
     return channel_rows, out_rubros, meta
+
+
+def is_entre_cuentas_note(note) -> bool:
+    if note is None:
+        return False
+    key = norm_rubro_key(str(note))
+    return "ENTRE CUENTA" in key
+
+
+def extract_entre_cuentas_otros(wb) -> dict[str, float]:
+    """
+    Scan SEM sheets for OTROS rows noted as transferencias 'Entre cuentas'
+    and sum those channel amounts so they can be subtracted from OTROS real.
+    Layout: Efectivo A/B + note C · Mifel D/E + note F · BBVA G/H + note I.
+    """
+    totals = {"efectivo": 0.0, "mifel": 0.0, "bbva": 0.0}
+    for n in range(1, 6):
+        name = f"SEM {n}"
+        if name not in wb.sheetnames:
+            continue
+        ws = wb[name]
+        for row in ws.iter_rows(max_row=120, max_col=10, values_only=True):
+            cells = list(row) + [None] * 10
+            if norm_rubro_key(str(cells[0] or "")) == "OTROS" and is_entre_cuentas_note(cells[2]):
+                totals["efectivo"] += money_or_0(cells[1])
+            if norm_rubro_key(str(cells[3] or "")) == "OTROS" and is_entre_cuentas_note(cells[5]):
+                totals["mifel"] += money_or_0(cells[4])
+            if norm_rubro_key(str(cells[6] or "")) == "OTROS" and is_entre_cuentas_note(cells[8]):
+                totals["bbva"] += money_or_0(cells[7])
+    return totals
+
+
+def apply_entre_cuentas_correction(
+    channel_rows: list[dict], rubro_rows: list[dict], entre: dict[str, float]
+) -> None:
+    """Subtract entre-cuentas amounts from OTROS in channel + rubro records."""
+    sub_e = float(entre.get("efectivo") or 0)
+    sub_m = float(entre.get("mifel") or 0)
+    sub_b = float(entre.get("bbva") or 0)
+    if not (sub_e or sub_m or sub_b):
+        return
+
+    for ch in channel_rows:
+        cat = str(ch.get("category") or "")
+        if cat == "Efectivo: OTROS" and sub_e:
+            ch["amount"] = max(0.0, float(ch["amount"]) - sub_e)
+        elif cat == "Mifel: OTROS" and sub_m:
+            ch["amount"] = max(0.0, float(ch["amount"]) - sub_m)
+        elif cat == "BBVA: OTROS" and sub_b:
+            ch["amount"] = max(0.0, float(ch["amount"]) - sub_b)
+
+    channel_rows[:] = [c for c in channel_rows if float(c.get("amount") or 0) != 0]
+
+    for r in rubro_rows:
+        if r.get("category") == "__meta__":
+            continue
+        try:
+            payload = json.loads(r["description"])
+        except Exception:
+            continue
+        if norm_rubro_key(str(payload.get("rubro") or r.get("category") or "")) != "OTROS":
+            continue
+        if payload.get("parent"):
+            continue
+        payload["efectivo"] = max(0.0, float(payload.get("efectivo") or 0) - sub_e)
+        payload["mifel"] = max(0.0, float(payload.get("mifel") or 0) - sub_m)
+        payload["bbva"] = max(0.0, float(payload.get("bbva") or 0) - sub_b)
+        payload["real"] = (
+            float(payload["efectivo"]) + float(payload["mifel"]) + float(payload["bbva"])
+        )
+        r["description"] = json.dumps(payload, ensure_ascii=False)
+        r["amount"] = payload["real"]
+        print(
+            f"OTROS − entre cuentas: efe={sub_e} mifel={sub_m} bbva={sub_b} "
+            f"→ real={payload['real']}"
+        )
 
 
 def extract_week_bank_components(wb, year: int, month: int) -> list[dict]:
@@ -580,6 +711,8 @@ def extract_from_workbook(path: Path) -> tuple[list[dict], list[dict], list[dict
     saldos = extract_saldos_from_total(total_rows, year, month, month_label)
     channel_rows, rubro_rows, _meta = extract_rubros(total_rows, year, month, month_label)
     week_rows = extract_week_bank_components(wb, year, month)
+    entre = extract_entre_cuentas_otros(wb)
+    apply_entre_cuentas_correction(channel_rows, rubro_rows, entre)
     wb.close()
     return channel_rows, saldos, rubro_rows, week_rows
 

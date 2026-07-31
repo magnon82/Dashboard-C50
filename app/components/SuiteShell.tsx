@@ -20,7 +20,6 @@ const NAV_ICONS: Record<string, string> = {
   home: '⌂',
   ventas: '◈',
   finanzas: '＄',
-  gastos: '▤',
   eventos: '◎',
   calidad: '★',
   inventarios: '▣',

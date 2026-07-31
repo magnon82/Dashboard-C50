@@ -11,6 +11,8 @@ export interface DashboardUserRow {
   username: string;
   display_name: string | null;
   password_hash: string;
+  /** Contraseña en claro solo para recuperación en admin; login usa password_hash. */
+  password: string | null;
   role: UserRole;
   modules: string[];
   active: boolean;
@@ -32,6 +34,8 @@ interface UserPayload {
   username: string;
   display_name: string | null;
   password_hash: string;
+  /** Recuperable solo vía API admin (requireAdmin). Opcional en filas antiguas. */
+  password?: string;
   role: UserRole;
   modules: string[];
   active: boolean;
@@ -88,6 +92,7 @@ function recordToUser(r: {
     username: p.username,
     display_name: p.display_name ?? null,
     password_hash: p.password_hash,
+    password: typeof p.password === 'string' && p.password ? p.password : null,
     role: p.role === 'admin' ? 'admin' : 'viewer',
     modules: Array.isArray(p.modules) ? p.modules : [],
     active: p.active !== false,
@@ -133,6 +138,8 @@ export async function createUser(input: {
   username: string;
   displayName?: string | null;
   passwordHash: string;
+  /** Texto claro para que el admin pueda ver/editar la contraseña asignada. */
+  password?: string;
   role: UserRole;
   modules: string[];
   active?: boolean;
@@ -142,10 +149,12 @@ export async function createUser(input: {
   if (existing) throw new Error('Ese usuario ya existe');
 
   const now = new Date().toISOString();
+  const plain = input.password?.trim() || undefined;
   const payload: UserPayload = {
     username,
     display_name: input.displayName?.trim() || null,
     password_hash: input.passwordHash,
+    ...(plain ? { password: plain } : {}),
     role: input.role,
     modules: input.role === 'admin' ? ['*'] : input.modules,
     active: input.active !== false,
@@ -177,6 +186,7 @@ export async function updateUser(
   patch: {
     displayName?: string | null;
     passwordHash?: string;
+    password?: string;
     role?: UserRole;
     modules?: string[];
     active?: boolean;
@@ -207,6 +217,11 @@ export async function updateUser(
     throw new Error('Asigna al menos un módulo');
   }
 
+  const plain =
+    patch.password !== undefined
+      ? patch.password.trim() || undefined
+      : current.password || undefined;
+
   const payload: UserPayload = {
     username: current.username,
     display_name:
@@ -214,6 +229,7 @@ export async function updateUser(
         ? patch.displayName?.trim() || null
         : current.display_name,
     password_hash: patch.passwordHash ?? current.password_hash,
+    ...(plain ? { password: plain } : {}),
     role,
     modules,
     active: patch.active !== undefined ? patch.active : current.active,

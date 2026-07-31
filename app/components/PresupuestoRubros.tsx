@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { RubroRow, PresupuestoMeta } from '@/app/lib/presupuesto';
+import { COLLAPSIBLE_PARENTS } from '@/app/lib/presupuesto';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -21,10 +22,13 @@ interface Props {
   loading?: boolean;
 }
 
+const PARENT_SET = new Set<string>(COLLAPSIBLE_PARENTS);
+
 export function PresupuestoRubros({ rows, meta, loading }: Props) {
   const [openParents, setOpenParents] = useState<Record<string, boolean>>({
-    'INSUMOS DE COCINA': true,
-    'INSUMOS DE BARRA': true,
+    'INSUMOS DE COCINA': false,
+    'INSUMOS DE BARRA': false,
+    SERVICIOS: false,
   });
 
   const visible = useMemo(() => {
@@ -52,7 +56,7 @@ export function PresupuestoRubros({ rows, meta, loading }: Props) {
       }),
       { efectivo: 0, mifel: 0, bbva: 0, real: 0 }
     );
-    // Presupuesto vive en padres (cocina/barra) o en rubros sueltos — no en hijos
+    // Presupuesto vive en padres o en rubros sueltos — no en hijos
     const presupuesto = rows
       .filter((r) => r.isParent || !r.parent)
       .reduce((sum, r) => sum + r.presupuesto, 0);
@@ -60,7 +64,7 @@ export function PresupuestoRubros({ rows, meta, loading }: Props) {
   }, [rows]);
 
   function toggle(parent: string) {
-    if (parent !== 'INSUMOS DE COCINA' && parent !== 'INSUMOS DE BARRA') return;
+    if (!PARENT_SET.has(parent)) return;
     setOpenParents((prev) => ({ ...prev, [parent]: !prev[parent] }));
   }
 
@@ -111,13 +115,34 @@ export function PresupuestoRubros({ rows, meta, loading }: Props) {
             </thead>
             <tbody>
               {visible.map((row) => {
+                const isChildOfGroup = Boolean(row.parent && PARENT_SET.has(row.parent));
+                const isGroupParent = Boolean(row.isParent && PARENT_SET.has(row.rubro));
+
+                const childPctSum = isGroupParent
+                  ? rows
+                      .filter((r) => r.parent === row.rubro)
+                      .reduce((sum, r) => {
+                        const p =
+                          r.pct != null
+                            ? r.pct
+                            : meta.venta > 0
+                              ? r.real / meta.venta
+                              : 0;
+                        return sum + p;
+                      }, 0)
+                  : null;
+
                 const dif = row.presupuesto - row.real;
-                const pct =
-                  row.pct != null
+                const pct = isGroupParent
+                  ? childPctSum
+                  : row.pct != null
                     ? row.pct
                     : meta.venta > 0
                       ? row.real / meta.venta
                       : null;
+
+                const showBudgetDif = !isChildOfGroup;
+
                 return (
                   <tr
                     key={`${row.parent || ''}:${row.rubro}:${row.sort}`}
@@ -157,15 +182,21 @@ export function PresupuestoRubros({ rows, meta, loading }: Props) {
                       {money(row.real)}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">
-                      {row.presupuesto ? money(row.presupuesto) : '—'}
+                      {showBudgetDif && row.presupuesto ? money(row.presupuesto) : '—'}
                     </td>
                     <td
                       className="px-3 py-2.5 text-right tabular-nums font-semibold"
                       style={{
-                        color: dif < 0 ? '#B91C1C' : dif > 0 ? '#15803D' : theme.muted,
+                        color: !showBudgetDif
+                          ? theme.muted
+                          : dif < 0
+                            ? '#B91C1C'
+                            : dif > 0
+                              ? '#15803D'
+                              : theme.muted,
                       }}
                     >
-                      {row.presupuesto || row.real ? money(dif) : '—'}
+                      {showBudgetDif && (row.presupuesto || row.real) ? money(dif) : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
                       {pctLabel(pct)}

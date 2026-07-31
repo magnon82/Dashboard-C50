@@ -5,6 +5,7 @@ import { Card, Metric, Text } from '@tremor/react';
 import { WeeklyComparisonChart, colorForYear } from '@/app/components/WeeklyComparisonChart';
 import { MonthlyComparisonChart, MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
 import { PaymentMixPie } from '@/app/components/PaymentMixPie';
+import { WiEventosPie } from '@/app/components/WiEventosPie';
 import { SuiteShell } from '@/app/components/SuiteShell';
 import {
   SectionHeader,
@@ -381,11 +382,15 @@ export default function Dashboard() {
               <Metric className="mt-2 text-3xl font-bold text-slate-900 md:text-4xl">
                 {money(ventasAcumuladas)}
               </Metric>
-              <Text className="mt-2 text-sm text-slate-500">
-                <span className="font-medium text-slate-700">WI</span> {money(ventaWiPeriodo)}
-                <span className="mx-2 text-slate-300">|</span>
-                <span className="font-medium text-slate-700">Eventos</span> {money(eventosPeriodo)}
-              </Text>
+              <div className="mt-3 flex flex-wrap items-center gap-4">
+                <Text className="text-sm text-slate-500">
+                  <span className="font-medium text-slate-700">WI</span> {money(ventaWiPeriodo)}
+                  <span className="mx-2 text-slate-300">|</span>
+                  <span className="font-medium text-slate-700">Eventos</span>{' '}
+                  {money(eventosPeriodo)}
+                </Text>
+                <WiEventosPie wi={ventaWiPeriodo} eventos={eventosPeriodo} />
+              </div>
             </div>
             <div
               className="rounded-[20px] px-5 py-4 text-white"

@@ -77,6 +77,7 @@ export async function PATCH(
     const user = await updateUser(id, {
       displayName: body.displayName,
       passwordHash: body.password ? hashPassword(body.password) : undefined,
+      password: body.password || undefined,
       role,
       modules,
       active: body.active,
@@ -91,6 +92,7 @@ export async function PATCH(
         modules: user.modules || [],
         active: pub.active,
         canEdit: pub.canEdit,
+        password: user.password,
       },
     });
   } catch (e) {

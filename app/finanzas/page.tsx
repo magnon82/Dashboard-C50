@@ -28,16 +28,17 @@ export default function FinanzasPage() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      setError(null);
+
+    async function load(isInitial: boolean) {
+      if (isInitial) setError(null);
       try {
         const res = await fetch(
-          '/api/financial-records?sources=presupuesto_mensual,presupuesto_saldos,presupuesto_rubro,presupuesto_semana,flujo_efectivo_saldo,cxp_por_pagar',
+          '/api/financial-records?sources=presupuesto_mensual,presupuesto_saldos,presupuesto_rubro,presupuesto_semana,presupuesto_ajuste,flujo_efectivo_saldo,cxp_por_pagar',
           { cache: 'no-store' }
         );
         const json = await res.json();
         if (!res.ok) {
-          if (!cancelled) {
+          if (!cancelled && isInitial) {
             setError(json.error || `Error ${res.status}`);
             setRecords([]);
           }
@@ -45,16 +46,20 @@ export default function FinanzasPage() {
         }
         if (!cancelled) setRecords(json.records || []);
       } catch {
-        if (!cancelled) {
+        if (!cancelled && isInitial) {
           setError('No se pudo conectar con la API de registros');
           setRecords([]);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && isInitial) setLoading(false);
       }
-    })();
+    }
+
+    void load(true);
+    const id = window.setInterval(() => void load(false), 5 * 60 * 1000);
     return () => {
       cancelled = true;
+      window.clearInterval(id);
     };
   }, []);
 

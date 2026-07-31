@@ -5,7 +5,6 @@ import { SESSION_COOKIE, canAccessModule, canAccessAdmin, verifySessionToken } f
 const MODULE_PREFIXES = [
   '/ventas',
   '/finanzas',
-  '/gastos',
   '/eventos',
   '/calidad',
   '/inventarios',

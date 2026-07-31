@@ -31,9 +31,9 @@ export default function HubPage() {
         <p style={{ color: theme.muted }}>Cargando módulos…</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {visibleModules.map((m, i) => {
+          {visibleModules.map((m) => {
             const isActive = m.status === 'activo';
-            const dark = i === 0;
+            const dark = isActive;
             return (
               <Link key={m.id} href={m.href} className="group block">
                 <SuiteCard dark={dark} className="h-full transition-transform group-hover:-translate-y-0.5">
@@ -46,14 +46,8 @@ export default function HubPage() {
                       style={{
                         backgroundColor: dark
                           ? 'rgba(255,255,255,0.15)'
-                          : isActive
-                            ? SUITE.orangeSoft
-                            : '#F1F5F9',
-                        color: dark
-                          ? '#fff'
-                          : isActive
-                            ? SUITE.orangeDeep
-                            : theme.muted,
+                          : '#F1F5F9',
+                        color: dark ? '#fff' : theme.muted,
                       }}
                     >
                       {isActive ? 'Activo' : 'Próximo'}

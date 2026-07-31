@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { SESSION_COOKIE, verifySessionToken, canAccessAdmin, type SessionUser } from '@/app/lib/auth';
-import { hashPassword } from '@/app/lib/password';
+import {
+  SESSION_COOKIE,
+  verifySessionToken,
+  canAccessAdmin,
+  getDashboardPassword,
+  getDashboardUser,
+  type SessionUser,
+} from '@/app/lib/auth';
+import { hashPassword, verifyPassword } from '@/app/lib/password';
 import { createUser, listUsers, toPublicUser, type UserRole } from '@/app/lib/users';
 import { APP_MODULES } from '@/app/lib/modules';
 
@@ -34,9 +41,21 @@ export async function GET() {
 
   try {
     const rows = await listUsers();
+    const bootstrapUser = getDashboardUser();
+    const bootstrapPass = getDashboardPassword();
     return NextResponse.json({
       users: rows.map((r) => {
         const pub = toPublicUser(r);
+        let password = r.password;
+        // Filas antiguas solo tenían hash: si es el admin bootstrap y el hash
+        // aún coincide con DASHBOARD_PASSWORD, devolver esa para el formulario.
+        if (
+          !password &&
+          r.username === bootstrapUser &&
+          verifyPassword(bootstrapPass, r.password_hash)
+        ) {
+          password = bootstrapPass;
+        }
         return {
           id: pub.id,
           username: pub.username,
@@ -46,6 +65,8 @@ export async function GET() {
           active: pub.active,
           canEdit: pub.canEdit,
           createdAt: r.created_at,
+          /** Solo en respuesta admin: contraseña recuperable si está guardada. */
+          password,
         };
       }),
     });
@@ -104,6 +125,7 @@ export async function POST(request: Request) {
       username,
       displayName: body.displayName,
       passwordHash: hashPassword(password),
+      password,
       role,
       modules,
       active: body.active !== false,
@@ -118,6 +140,7 @@ export async function POST(request: Request) {
         modules: user.modules || [],
         active: pub.active,
         canEdit: pub.canEdit,
+        password: user.password,
       },
     });
   } catch (e) {

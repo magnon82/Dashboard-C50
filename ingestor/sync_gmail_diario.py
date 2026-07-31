@@ -63,8 +63,8 @@ def main() -> None:
         common.append("--dry-run")
 
     print(
-        "Modo: solo ventana reciente → upsert definitivo en Supabase. "
-        "No se re-descarga el histórico completo."
+        "Modo: solo ventana reciente -> upsert definitivo en Supabase. "
+        "No se re-descarga el historico completo."
     )
 
     codes = []

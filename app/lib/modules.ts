@@ -2,7 +2,6 @@ export type ModuleId =
   | 'hub'
   | 'ventas'
   | 'finanzas'
-  | 'gastos'
   | 'eventos'
   | 'calidad'
   | 'inventarios';
@@ -32,14 +31,6 @@ export const APP_MODULES: AppModule[] = [
     short: 'Finanzas',
     description: 'Saldos, flujo de efectivo, bancos y visión financiera consolidada',
     status: 'activo',
-  },
-  {
-    id: 'gastos',
-    href: '/gastos',
-    label: 'Gastos y presupuesto',
-    short: 'Gastos',
-    description: 'Presupuesto vs real, CXP y flujo de egresos',
-    status: 'próximo',
   },
   {
     id: 'eventos',
