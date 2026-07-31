@@ -13,9 +13,9 @@ function money(v: number) {
 const ROWS: Array<{
   key: keyof SemanaBancos;
   label: string;
-  tone?: 'muted' | 'invest' | 'total' | 'sub';
+  tone?: 'muted' | 'invest' | 'total' | 'sub' | 'inicial';
 }> = [
-  { key: 'inicial', label: 'inicial' },
+  { key: 'inicial', label: 'Saldo Inicial', tone: 'inicial' },
   { key: 'ingresos', label: 'ingresos' },
   { key: 'pagos_mifel', label: 'pagos mifel' },
   { key: 'comisiones', label: 'comisiones' },
@@ -64,7 +64,7 @@ export function ResumenBancosSemanal({ weeks, loading, filters }: Props) {
                 className="text-left text-xs uppercase tracking-wide text-white"
                 style={{ backgroundColor: theme.tableHead }}
               >
-                <th className="px-4 py-3">Concepto</th>
+                <th className="px-4 py-3">Semana</th>
                 {weeks.map((w) => (
                   <th key={w.week} className="px-3 py-3 text-right">
                     {w.week}
@@ -79,20 +79,29 @@ export function ResumenBancosSemanal({ weeks, loading, filters }: Props) {
                   className="border-t border-slate-100"
                   style={{
                     backgroundColor:
-                      row.tone === 'invest'
-                        ? SUITE.orangeSoft
-                        : row.tone === 'total'
-                          ? '#DCFCE7'
-                          : row.tone === 'sub'
-                            ? '#F8FAFC'
-                            : undefined,
+                      row.tone === 'inicial'
+                        ? '#E8EEF7'
+                        : row.tone === 'invest'
+                          ? SUITE.orangeSoft
+                          : row.tone === 'total'
+                            ? '#DCFCE7'
+                            : row.tone === 'sub'
+                              ? '#F8FAFC'
+                              : undefined,
                   }}
                 >
                   <td
-                    className={`px-4 py-2.5 capitalize ${
-                      row.tone === 'total' || row.tone === 'sub' ? 'font-bold' : ''
+                    className={`px-4 py-2.5 ${
+                      row.tone === 'inicial' ||
+                      row.tone === 'total' ||
+                      row.tone === 'sub'
+                        ? 'font-bold'
+                        : 'capitalize'
                     }`}
-                    style={{ color: theme.title }}
+                    style={{
+                      color:
+                        row.tone === 'inicial' ? SUITE.navy : theme.title,
+                    }}
                   >
                     {row.label}
                   </td>
@@ -100,13 +109,19 @@ export function ResumenBancosSemanal({ weeks, loading, filters }: Props) {
                     <td
                       key={w.week}
                       className={`px-3 py-2.5 text-right tabular-nums ${
-                        row.tone === 'total' || row.tone === 'sub'
+                        row.tone === 'inicial' ||
+                        row.tone === 'total' ||
+                        row.tone === 'sub'
                           ? 'font-bold'
                           : ''
                       }`}
                       style={{
                         color:
-                          row.tone === 'invest' ? SUITE.orangeDeep : theme.title,
+                          row.tone === 'inicial'
+                            ? SUITE.navy
+                            : row.tone === 'invest'
+                              ? SUITE.orangeDeep
+                              : theme.title,
                       }}
                     >
                       {money(Number(w[row.key] || 0))}
