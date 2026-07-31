@@ -1,11 +1,15 @@
 """
-Autenticación OAuth compartida (Gmail + Sheets + Drive).
+Autenticacion OAuth compartida (Gmail + Sheets + Drive).
 
-Primera vez (o si cambian los scopes): borra token.json y vuelve a autorizar.
+Local: ingestor/credentials.json + token.json
+CI/nube: variables GOOGLE_OAUTH_CLIENT_JSON + GOOGLE_OAUTH_TOKEN_JSON
 """
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from pathlib import Path
 
 from google.auth.transport.requests import Request
@@ -17,7 +21,6 @@ BASE_DIR = Path(__file__).resolve().parent
 CREDENTIALS_FILE = BASE_DIR / "credentials.json"
 TOKEN_FILE = BASE_DIR / "token.json"
 
-# Gmail + Sheets + Drive (solo lectura)
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -25,36 +28,62 @@ SCOPES = [
 ]
 
 
-def get_credentials():
+def _write_json_from_env(env_name: str, dest: Path) -> bool:
+    raw = (os.environ.get(env_name) or "").strip()
+    if not raw:
+        return False
+    dest.write_text(raw, encoding="utf-8")
+    return True
+
+
+def _ensure_credential_files() -> None:
+    """En CI escribe credentials/token desde env si no existen en disco."""
     if not CREDENTIALS_FILE.exists():
-        raise SystemExit(
-            f"Falta {CREDENTIALS_FILE}. Descarga el OAuth Desktop JSON en esa ruta."
-        )
+        if not _write_json_from_env("GOOGLE_OAUTH_CLIENT_JSON", CREDENTIALS_FILE):
+            raise SystemExit(
+                f"Falta {CREDENTIALS_FILE} o la env GOOGLE_OAUTH_CLIENT_JSON."
+            )
+    if not TOKEN_FILE.exists():
+        _write_json_from_env("GOOGLE_OAUTH_TOKEN_JSON", TOKEN_FILE)
 
-    creds = None
-    if TOKEN_FILE.exists():
+
+def get_credentials():
+    _ensure_credential_files()
+
+    # Prefer env token (siempre fresco en CI) sobre archivo viejo
+    token_env = (os.environ.get("GOOGLE_OAUTH_TOKEN_JSON") or "").strip()
+    if token_env:
+        info = json.loads(token_env)
+        creds = Credentials.from_authorized_user_info(info, SCOPES)
+    elif TOKEN_FILE.exists():
         creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+    else:
+        creds = None
 
-    need_reauth = (
-        not creds
-        or not creds.valid
-        or not creds.has_scopes(SCOPES)
-    )
+    need_reauth = not creds or not creds.valid or not creds.has_scopes(SCOPES)
 
     if need_reauth:
         if creds and creds.expired and creds.refresh_token and creds.has_scopes(SCOPES):
             creds.refresh(Request())
+            # Persistir refresh localmente si hay archivo
+            try:
+                TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+            except OSError:
+                pass
         else:
+            if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+                raise SystemExit(
+                    "Token Google invalido/expirado en CI. "
+                    "Actualiza el secret GOOGLE_OAUTH_TOKEN_JSON (con refresh_token)."
+                )
             print(
                 "Se abrira el navegador para autorizar Gmail + Sheets + Drive (solo lectura)."
             )
-            if TOKEN_FILE.exists() and (not creds or not creds.has_scopes(SCOPES)):
-                print(
-                    "Nota: scopes ampliados. Si falla el refresh, borra token.json y reautoriza."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(CREDENTIALS_FILE), SCOPES
+            )
             creds = flow.run_local_server(port=0)
-        TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+            TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
 
     return creds
 
@@ -69,3 +98,24 @@ def sheets_service():
 
 def drive_service():
     return build("drive", "v3", credentials=get_credentials())
+
+
+def download_drive_file_by_name(name: str, dest: Path | None = None) -> Path:
+    """Descarga el primer archivo de Drive con ese nombre exacto."""
+    drive = drive_service()
+    safe = name.replace("'", "\\'")
+    q = f"name = '{safe}' and trashed = false"
+    res = (
+        drive.files()
+        .list(q=q, spaces="drive", fields="files(id, name)", pageSize=5)
+        .execute()
+    )
+    files = res.get("files") or []
+    if not files:
+        raise FileNotFoundError(f"No se encontro en Drive: {name}")
+    file_id = files[0]["id"]
+    if dest is None:
+        dest = Path(tempfile.gettempdir()) / name
+    data = drive.files().get_media(fileId=file_id).execute()
+    dest.write_bytes(data)
+    return dest

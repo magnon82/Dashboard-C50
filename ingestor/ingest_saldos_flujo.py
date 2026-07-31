@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -17,12 +18,27 @@ from openpyxl import load_workbook
 from supabase import create_client
 
 load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env.local")
 
 SOURCE_FILE = "flujo_efectivo_saldo"
 DEFAULT_PATH = Path(r"I:\Mi unidad\Administración\FLUJO EFECTIVO CARRANZA 50.xlsx")
+DRIVE_FILE_NAME = "FLUJO EFECTIVO CARRANZA 50.xlsx"
 COL_FECHA = 2
 COL_CONCEPTO = 3
 COL_SALDO = 9
+
+
+def resolve_flujo_path(path: Path) -> Path:
+    """Usa ruta local si existe; si no, descarga desde Google Drive."""
+    if path.exists():
+        return path
+    from google_auth import download_drive_file_by_name
+
+    print(f"No hay archivo local ({path}); descargando desde Drive…")
+    dest = Path(tempfile.gettempdir()) / DRIVE_FILE_NAME
+    downloaded = download_drive_file_by_name(DRIVE_FILE_NAME, dest)
+    print(f"Descargado: {downloaded}")
+    return downloaded
 
 
 def sheet_name_for_year(year: int) -> str:
@@ -113,11 +129,9 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    if not args.file.exists():
-        raise SystemExit(f"No existe: {args.file}")
-
+    path = resolve_flujo_path(args.file)
     years = [args.year] if args.year else None
-    records = extract_all(args.file, years)
+    records = extract_all(path, years)
     latest = max(records, key=lambda r: r["date"]) if records else None
     print(f"TOTAL registros saldo: {len(records)}")
     if latest:
@@ -126,10 +140,14 @@ def main() -> None:
     if args.dry_run:
         return
 
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+    key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("SUPABASE_ANON_KEY")
+        or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    )
     if not url or not key:
-        raise SystemExit("Faltan variables en .env")
+        raise SystemExit("Faltan variables en .env / .env.local")
 
     supabase = create_client(url, key)
     supabase.table("financial_records").delete().eq("source_file", SOURCE_FILE).execute()
