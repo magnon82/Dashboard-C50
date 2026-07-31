@@ -129,9 +129,18 @@ def parse_from_eml(eml_path: Path) -> tuple[str, dict, Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingesta CORTE CARRANZA (cancelaciones/descuentos)")
-    parser.add_argument("--after", default="2026/01/01", help="Gmail after:YYYY/MM/DD")
+    parser.add_argument(
+        "--after",
+        default=None,
+        help="Gmail after:YYYY/MM/DD (omitir si usas --newer-than)",
+    )
     parser.add_argument("--before", default=None)
-    parser.add_argument("--newer-than", type=int, default=None)
+    parser.add_argument(
+        "--newer-than",
+        type=int,
+        default=None,
+        help="Solo últimos N días (default 90 si no hay --after)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument(
@@ -141,6 +150,9 @@ def main() -> None:
         help="Probar con un .eml local en lugar de Gmail",
     )
     args = parser.parse_args()
+
+    if args.newer_than is None and not args.after and not args.eml:
+        args.newer_than = 90
 
     url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get(
@@ -171,11 +183,12 @@ def main() -> None:
             print(f"Dry-run: {len(records)} registros")
             return
         n = upsert_day(supabase, fecha, records)
-        print(f"  -> {n} filas en Supabase ({SOURCE_FILE})")
+        print(f"  -> {n} filas en Supabase ({SOURCE_FILE}) [definitivo]")
         return
 
     service = gmail_service()
-    query = build_query(args.after, args.before, args.newer_than)
+    after = None if args.newer_than else args.after
+    query = build_query(after, args.before, args.newer_than)
     print(f"Query Gmail: {query}")
     message_ids = list_message_ids(service, query)
     if args.limit:

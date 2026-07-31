@@ -88,19 +88,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ingesta Infocaja desde Gmail → Supabase")
     parser.add_argument(
         "--after",
-        default="2026/01/01",
-        help="Gmail after:YYYY/MM/DD (default 2026/01/01)",
+        default=None,
+        help="Gmail after:YYYY/MM/DD (omitir si usas --newer-than)",
     )
     parser.add_argument("--before", default=None, help="Gmail before:YYYY/MM/DD")
     parser.add_argument(
         "--newer-than",
         type=int,
         default=None,
-        help="Alternativa: solo últimos N días (ej. 7)",
+        help="Solo últimos N días (ej. 90 ≈ 3 meses). Default 90 si no hay --after",
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None, help="Máx. correos a procesar")
     args = parser.parse_args()
+
+    # Ventana por defecto: últimos 3 meses. No re-descarga histórico completo.
+    if args.newer_than is None and not args.after:
+        args.newer_than = 90
 
     url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -108,7 +112,9 @@ def main() -> None:
         raise SystemExit("Faltan SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en .env")
 
     service = autenticar_gmail()
-    query = build_query(args.after, args.before, args.newer_than)
+    # Si hay newer-than, no mezclar con after por defecto
+    after = None if args.newer_than else args.after
+    query = build_query(after, args.before, args.newer_than)
     print(f"Query Gmail: {query}")
 
     message_ids = list_message_ids(service, query)
@@ -160,7 +166,7 @@ def main() -> None:
             continue
 
         n = upsert_day(supabase, parsed)
-        print(f"  -> {n} filas en Supabase ({SOURCE_FILE})")
+        print(f"  -> {n} filas en Supabase ({SOURCE_FILE}) [definitivo]")
         ok += 1
 
     print(f"\nResumen: ok={ok}, errores={errors}, dias unicos={len(seen_dates)}")
