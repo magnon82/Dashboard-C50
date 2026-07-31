@@ -102,10 +102,10 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Máx. correos a procesar")
     args = parser.parse_args()
 
-    url = os.environ.get("SUPABASE_URL")
+    url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not args.dry_run and (not url or not key):
-        raise SystemExit("Faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en .env")
+        raise SystemExit("Faltan SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en .env")
 
     service = autenticar_gmail()
     query = build_query(args.after, args.before, args.newer_than)
@@ -160,11 +160,11 @@ def main() -> None:
             continue
 
         n = upsert_day(supabase, parsed)
-        print(f"  → {n} filas en Supabase ({SOURCE_FILE})")
+        print(f"  -> {n} filas en Supabase ({SOURCE_FILE})")
         ok += 1
 
-    print(f"\nResumen: ok={ok}, errores={errors}, días únicos={len(seen_dates)}")
-    print(f"Hoy: {date.today().isoformat()} — recarga http://localhost:3000")
+    print(f"\nResumen: ok={ok}, errores={errors}, dias unicos={len(seen_dates)}")
+    print(f"Hoy: {date.today().isoformat()} -- recarga http://localhost:3000")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { Card, Metric, Text, Title } from '@tremor/react';
 import { WeeklyComparisonChart, colorForYear } from '@/app/components/WeeklyComparisonChart';
 import { MonthlyComparisonChart, MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
@@ -54,8 +54,13 @@ export default function Dashboard() {
   const [corteFilter, setCorteFilter] = useState<'todos' | 'descuentos' | 'cancelaciones'>(
     'descuentos'
   );
-  const [corteCollapsed, setCorteCollapsed] = useState(false);
+  const [corteCollapsed, setCorteCollapsed] = useState(true);
+  const [corteMonth, setCorteMonth] = useState(new Date().getMonth() + 1);
+  const [corteOpenId, setCorteOpenId] = useState<string | null>(null);
+  const CORTE_YEAR = new Date().getFullYear();
   const [detalleYear, setDetalleYear] = useState(2026);
+  const [detalleWeekFrom, setDetalleWeekFrom] = useState<number | null>(null);
+  const [detalleWeekTo, setDetalleWeekTo] = useState<number | null>(null);
   const [weekFrom, setWeekFrom] = useState<number | null>(null);
   const [weekTo, setWeekTo] = useState<number | null>(null);
 
@@ -150,13 +155,24 @@ export default function Dashboard() {
     let weeks = Array.from(wm.values())
       .filter((w) => w.total > 0)
       .sort((a, b) => a.week - b.week);
-    if (month !== null) {
-      weeks = weeks.filter((w) => w.mes === MESES[month - 1]);
-    }
+    if (detalleWeekFrom != null) weeks = weeks.filter((w) => w.week >= detalleWeekFrom);
+    if (detalleWeekTo != null) weeks = weeks.filter((w) => w.week <= detalleWeekTo);
     return weeks;
-  }, [weeklyByYear, detalleYear, month]);
+  }, [weeklyByYear, detalleYear, detalleWeekFrom, detalleWeekTo]);
 
   const weekRowsDisplay = detalleWeeks;
+
+  const detalleWeekOptions = useMemo(() => {
+    const wm = weeklyByYear.get(detalleYear);
+    if (!wm) return [];
+    return Array.from(wm.values())
+      .filter((w) => w.total > 0)
+      .sort((a, b) => a.week - b.week)
+      .map((w) => ({
+        week: w.week,
+        label: `S${w.week} · ${w.mes} · ${w.label}`,
+      }));
+  }, [weeklyByYear, detalleYear]);
 
   /** Totales del detalle semanal (año del filtro de detalle) */
   const totalesDetalle = useMemo(() => {
@@ -286,20 +302,13 @@ export default function Dashboard() {
     [records, mixMonth]
   );
 
-  /** Cancelaciones/descuentos: lo que va del mes calendario en curso */
-  const corteMesActual = useMemo(() => {
-    const now = new Date();
-    return buildCorteCancelacionesDescuentos(
-      records,
-      now.getFullYear(),
-      now.getMonth() + 1
-    );
-  }, [records]);
+  /** Cancelaciones/descuentos: mes del año en curso (default mes actual) */
+  const corteMesActual = useMemo(
+    () => buildCorteCancelacionesDescuentos(records, CORTE_YEAR, corteMonth),
+    [records, corteMonth]
+  );
 
-  const corteMesLabel = useMemo(() => {
-    const now = new Date();
-    return `${MESES[now.getMonth()]} ${now.getFullYear()}`;
-  }, []);
+  const corteMesLabel = `${MESES[corteMonth - 1]} ${CORTE_YEAR}`;
 
   const mixPeriodoLabel =
     mixMonth === null ? `${MIX_YEAR}` : `${MESES[mixMonth - 1]} ${MIX_YEAR}`;
@@ -369,7 +378,7 @@ export default function Dashboard() {
     });
   }
 
-  const cardClass = 'shadow-md rounded-xl border border-slate-200/80 overflow-hidden';
+  const cardClass = 'shadow-md rounded-xl border border-slate-200/80 overflow-hidden p-5 md:p-6';
 
   return (
     <main className="min-h-screen" style={{ backgroundColor: theme.pageBg }}>
@@ -383,52 +392,13 @@ export default function Dashboard() {
               Cluster Culinario · Carranza 50
             </p>
             <h1 className="mt-1 text-2xl font-bold text-white md:text-3xl">
-              Dashboard Ventas {year}
+              Dashboard
             </h1>
             <p className="mt-1 text-sm" style={{ color: theme.headerMuted }}>
               Actualizado al {hoy}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <label
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm backdrop-blur"
-              style={{ backgroundColor: theme.selectBg }}
-            >
-              <span style={{ color: theme.headerMuted }}>Año</span>
-              <select
-                className="bg-transparent font-semibold text-white outline-none"
-                value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
-              >
-                {availableYears.map((y) => (
-                  <option key={y} value={y} className="text-slate-900">
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm backdrop-blur"
-              style={{ backgroundColor: theme.selectBg }}
-            >
-              <span style={{ color: theme.headerMuted }}>Mes</span>
-              <select
-                className="bg-transparent font-semibold text-white outline-none"
-                value={month ?? ''}
-                onChange={(e) =>
-                  setMonth(e.target.value === '' ? null : Number(e.target.value))
-                }
-              >
-                <option value="" className="text-slate-900">
-                  Todo el año
-                </option>
-                {MESES.map((m, i) => (
-                  <option key={m} value={i + 1} className="text-slate-900">
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
             <button
               type="button"
               onClick={async () => {
@@ -582,9 +552,47 @@ export default function Dashboard() {
         >
           <div className="grid grid-cols-1 divide-y divide-slate-200 md:grid-cols-2 md:divide-x md:divide-y-0">
             <div className="px-2 py-1 md:pr-8">
-              <Text className="text-xs font-bold uppercase tracking-wide" style={{ color: theme.kpi[0].label }}>
-                Venta total · {periodoLabel}
-              </Text>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <Text
+                  className="text-xs font-bold uppercase tracking-wide"
+                  style={{ color: theme.kpi[0].label }}
+                >
+                  Venta total
+                </Text>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs">
+                    <span className="text-slate-500">Año</span>
+                    <select
+                      className="bg-transparent font-semibold text-slate-800 outline-none"
+                      value={year}
+                      onChange={(e) => setYear(Number(e.target.value))}
+                    >
+                      {availableYears.map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs">
+                    <span className="text-slate-500">Mes</span>
+                    <select
+                      className="bg-transparent font-semibold text-slate-800 outline-none"
+                      value={month ?? ''}
+                      onChange={(e) =>
+                        setMonth(e.target.value === '' ? null : Number(e.target.value))
+                      }
+                    >
+                      <option value="">Todo el año</option>
+                      {MESES.map((m, i) => (
+                        <option key={m} value={i + 1}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
               <Metric className="mt-2 text-3xl font-bold text-slate-900 md:text-4xl">
                 {money(ventasAcumuladas)}
               </Metric>
@@ -603,7 +611,7 @@ export default function Dashboard() {
               </Metric>
               <Text className="mt-2 text-sm text-slate-500">
                 {semanasTranscurridas} semana{semanasTranscurridas !== 1 ? 's' : ''} transcurridas
-                · {periodoLabel}
+                {month !== null ? ` · ${MESES[month - 1]}` : ''}
               </Text>
             </div>
           </div>
@@ -614,24 +622,23 @@ export default function Dashboard() {
           className={`mb-8 ${cardClass}`}
           style={{ backgroundColor: theme.cardBg, borderTop: `4px solid ${theme.kpi[2]?.border ?? theme.kpi[0].border}` }}
         >
-          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <Text
-                className="text-xs font-bold uppercase tracking-wide"
-                style={{ color: theme.kpi[2]?.label ?? theme.kpi[0].label }}
-              >
-                Ventas de la semana en curso
-              </Text>
-              <Metric className="mt-1 text-3xl font-bold text-slate-900 md:text-4xl">
-                {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
-              </Metric>
-              <Text className="mt-1 text-sm text-slate-500">
-                {formatShort(weekToDate.mondayKey)} – {formatShort(weekToDate.asOf)}
-                {' · '}
-                {weekToDate.days.filter((d) => d.total > 0).length} día
-                {weekToDate.days.filter((d) => d.total > 0).length !== 1 ? 's' : ''} con venta
-              </Text>
-            </div>
+          <div className="mb-4">
+            <Text
+              className="text-xs font-bold uppercase tracking-wide"
+              style={{ color: theme.kpi[2]?.label ?? theme.kpi[0].label }}
+            >
+              Ventas de la semana en curso
+              {weekToDate.weekNumber > 0 ? ` · S${weekToDate.weekNumber}` : ''}
+            </Text>
+            <Metric className="mt-1 text-3xl font-bold text-slate-900 md:text-4xl">
+              {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
+            </Metric>
+            <Text className="mt-1 text-sm text-slate-500">
+              {formatShort(weekToDate.mondayKey)} – {formatShort(weekToDate.asOf)}
+              {' · '}
+              {weekToDate.days.filter((d) => d.total > 0).length} día
+              {weekToDate.days.filter((d) => d.total > 0).length !== 1 ? 's' : ''} con venta
+            </Text>
           </div>
           {weekToDate.days.length === 0 ? (
             <p className="py-4 text-center text-slate-400">Sin datos Infocaja esta semana.</p>
@@ -646,6 +653,8 @@ export default function Dashboard() {
                     <th className="px-4 py-2.5">Día</th>
                     <th className="px-4 py-2.5">Fecha</th>
                     <th className="px-4 py-2.5 text-right">Venta</th>
+                    <th className="px-4 py-2.5 text-right">Venta {weekToDate.prevYear}</th>
+                    <th className="px-4 py-2.5 text-right">Var. %</th>
                     <th className="px-4 py-2.5 text-right">Desc. / Canc.</th>
                   </tr>
                 </thead>
@@ -653,12 +662,33 @@ export default function Dashboard() {
                   {weekToDate.days.map((d, i) => (
                     <tr key={d.date} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                       <td className="px-4 py-2 capitalize text-slate-700">{d.weekday}</td>
-                      <td className="px-4 py-2 text-slate-600">{d.label}</td>
+                      <td className="px-4 py-2 text-slate-600">
+                        {d.label}
+                        {d.prevLabel ? (
+                          <span className="ml-1 text-xs text-slate-400">· {d.prevLabel}</span>
+                        ) : null}
+                      </td>
                       <td
                         className="px-4 py-2 text-right font-semibold"
                         style={{ color: d.total > 0 ? theme.tableTotal : '#94a3b8' }}
                       >
                         {d.total > 0 ? money(d.total) : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-right font-medium text-slate-600">
+                        {(d.prevTotal ?? 0) > 0 ? money(d.prevTotal!) : '—'}
+                      </td>
+                      <td
+                        className={`px-4 py-2 text-right font-semibold ${
+                          d.changePct == null
+                            ? 'text-slate-400'
+                            : d.changePct >= 0
+                              ? 'text-emerald-700'
+                              : 'text-rose-700'
+                        }`}
+                      >
+                        {d.changePct == null
+                          ? '—'
+                          : `${d.changePct >= 0 ? '▲' : '▼'} ${Math.abs(d.changePct).toFixed(1)}%`}
                       </td>
                       <td
                         className="px-4 py-2 text-right font-medium"
@@ -672,10 +702,18 @@ export default function Dashboard() {
                 <tfoot>
                   <tr className="font-bold text-white" style={{ backgroundColor: theme.tableFoot }}>
                     <td className="px-4 py-2.5" colSpan={2}>
-                      Total semana
+                      Total (lun–hoy)
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {weekToDate.prevTotal > 0 ? money(weekToDate.prevTotal) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {weekToDate.changePct == null
+                        ? '—'
+                        : `${weekToDate.changePct >= 0 ? '▲' : '▼'} ${Math.abs(weekToDate.changePct).toFixed(1)}%`}
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       {weekToDate.totalCortes > 0 ? money(weekToDate.totalCortes) : '—'}
@@ -687,7 +725,7 @@ export default function Dashboard() {
           )}
         </Card>
 
-        {/* Cancelaciones y descuentos — lo que va del mes */}
+        {/* Cancelaciones y descuentos — mes del año en curso */}
         <Card className={`mb-8 ${cardClass} bg-white`}>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -695,18 +733,36 @@ export default function Dashboard() {
                 Cancelaciones y descuentos · {corteMesLabel}
               </Title>
               <Text className="text-sm text-slate-500">
-                Lo que va del mes · mouse over para ver el motivo
+                Clic en un renglón para ver el motivo
               </Text>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                <span className="text-slate-500">Mes</span>
+                <select
+                  className="bg-transparent font-semibold text-slate-800 outline-none"
+                  value={corteMonth}
+                  onChange={(e) => {
+                    setCorteMonth(Number(e.target.value));
+                    setCorteOpenId(null);
+                  }}
+                >
+                  {MESES.map((m, i) => (
+                    <option key={m} value={i + 1}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
                 <span className="text-slate-500">Ver</span>
                 <select
                   className="bg-transparent font-semibold text-slate-800 outline-none"
                   value={corteFilter}
-                  onChange={(e) =>
-                    setCorteFilter(e.target.value as 'todos' | 'descuentos' | 'cancelaciones')
-                  }
+                  onChange={(e) => {
+                    setCorteFilter(e.target.value as 'todos' | 'descuentos' | 'cancelaciones');
+                    setCorteOpenId(null);
+                  }}
                 >
                   <option value="descuentos">Solo descuentos</option>
                   <option value="cancelaciones">Solo cancelaciones</option>
@@ -715,7 +771,10 @@ export default function Dashboard() {
               </label>
               <button
                 type="button"
-                onClick={() => setCorteCollapsed((v) => !v)}
+                onClick={() => {
+                  setCorteCollapsed((v) => !v);
+                  setCorteOpenId(null);
+                }}
                 className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 {corteCollapsed ? 'Mostrar desglose' : 'Ocultar desglose'}
@@ -757,54 +816,78 @@ export default function Dashboard() {
                     </thead>
                     <tbody>
                       {corteItemsFiltrados.map((item, i) => {
-                        const tip = [
-                          item.motivo,
-                          item.grupo,
-                          item.persona && `Persona: ${item.persona}`,
-                          item.producto,
-                          item.mesero && `Mesero: ${item.mesero}`,
-                          item.autorizo && `Autorizó: ${item.autorizo}`,
-                          item.mesa && `Mesa: ${item.mesa}`,
-                          item.hora,
-                        ]
-                          .filter(Boolean)
-                          .join('\n');
+                        const isOpen = corteOpenId === item.id;
                         const detalle =
                           item.producto ||
                           item.persona ||
                           item.motivo ||
                           item.grupo ||
                           (item.kind === 'descuento' ? 'Descuento' : 'Cancelación');
+                        const motivoLines = [
+                          item.motivo && `Motivo: ${item.motivo}`,
+                          item.grupo && `Grupo: ${item.grupo}`,
+                          item.persona && `Persona: ${item.persona}`,
+                          item.producto && `Producto: ${item.producto}`,
+                          item.mesero && `Mesero: ${item.mesero}`,
+                          item.autorizo && `Autorizó: ${item.autorizo}`,
+                          item.mesa && `Mesa: ${item.mesa}`,
+                          item.hora && `Hora: ${item.hora}`,
+                        ].filter(Boolean) as string[];
                         return (
-                          <tr
-                            key={item.id}
-                            title={tip}
-                            className={`cursor-help ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-amber-50`}
-                          >
-                            <td className="px-4 py-2.5 text-slate-600">
-                              {formatShort(item.date)}
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <span
-                                className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                                  item.kind === 'cancelacion'
-                                    ? 'bg-rose-100 text-rose-700'
-                                    : 'bg-amber-100 text-amber-800'
-                                }`}
-                              >
-                                {item.kind === 'cancelacion' ? 'Cancelación' : 'Descuento'}
-                              </span>
-                            </td>
-                            <td
-                              className="max-w-xs truncate px-4 py-2.5 text-slate-700"
-                              title={tip}
+                          <Fragment key={item.id}>
+                            <tr
+                              onClick={() =>
+                                setCorteOpenId((cur) => (cur === item.id ? null : item.id))
+                              }
+                              className={`cursor-pointer ${
+                                i % 2 === 0 ? 'bg-white' : 'bg-slate-50'
+                              } ${isOpen ? 'bg-amber-50' : 'hover:bg-amber-50/70'}`}
                             >
-                              {detalle}
-                            </td>
-                            <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
-                              {money(item.amount)}
-                            </td>
-                          </tr>
+                              <td className="px-4 py-2.5 text-slate-600">
+                                {formatShort(item.date)}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span
+                                  className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                    item.kind === 'cancelacion'
+                                      ? 'bg-rose-100 text-rose-700'
+                                      : 'bg-amber-100 text-amber-800'
+                                  }`}
+                                >
+                                  {item.kind === 'cancelacion' ? 'Cancelación' : 'Descuento'}
+                                </span>
+                              </td>
+                              <td className="max-w-xs truncate px-4 py-2.5 text-slate-700">
+                                {detalle}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
+                                {money(item.amount)}
+                              </td>
+                            </tr>
+                            {isOpen && (
+                              <tr
+                                className="bg-amber-50"
+                                onClick={() => setCorteOpenId(null)}
+                              >
+                                <td colSpan={4} className="px-4 py-3">
+                                  <div className="cursor-pointer rounded-lg border border-amber-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
+                                    <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                                      Motivo · clic para cerrar
+                                    </p>
+                                    {motivoLines.length > 0 ? (
+                                      <ul className="space-y-0.5">
+                                        {motivoLines.map((line) => (
+                                          <li key={line}>{line}</li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <p>Sin detalle de motivo</p>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
                         );
                       })}
                     </tbody>
@@ -826,9 +909,9 @@ export default function Dashboard() {
           )}
         </Card>
 
-        {/* Mix de cobro: efectivo / bancos / propinas */}
+        {/* Mix de cobro: efectivo / bancos */}
         <Card className={`mb-8 ${cardClass} bg-white`}>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Title style={{ color: theme.title }}>
               Efectivo vs bancos · {mixPeriodoLabel}
             </Title>
@@ -973,22 +1056,84 @@ export default function Dashboard() {
 
         {/* Detalle semanal — antes del comparativo */}
         <Card className={`mb-8 ${cardClass} bg-white`}>
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Title style={{ color: theme.title }}>Detalle semanal</Title>
-            <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
-              <span className="text-slate-500">Año</span>
-              <select
-                className="bg-transparent font-semibold text-slate-800 outline-none"
-                value={detalleYear}
-                onChange={(e) => setDetalleYear(Number(e.target.value))}
-              >
-                {COMPARE_YEARS.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="mb-4 flex flex-col gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Title style={{ color: theme.title }}>Detalle semanal</Title>
+              <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                <span className="text-slate-500">Año</span>
+                <select
+                  className="bg-transparent font-semibold text-slate-800 outline-none"
+                  value={detalleYear}
+                  onChange={(e) => {
+                    setDetalleYear(Number(e.target.value));
+                    setDetalleWeekFrom(null);
+                    setDetalleWeekTo(null);
+                  }}
+                >
+                  {COMPARE_YEARS.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                <span className="shrink-0 text-slate-500">Desde</span>
+                <select
+                  className="w-full bg-transparent font-semibold text-slate-800 outline-none"
+                  value={detalleWeekFrom ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value === '' ? null : Number(e.target.value);
+                    setDetalleWeekFrom(v);
+                    if (v != null && detalleWeekTo != null && v > detalleWeekTo) {
+                      setDetalleWeekTo(v);
+                    }
+                  }}
+                >
+                  <option value="">Inicio</option>
+                  {detalleWeekOptions.map((o) => (
+                    <option key={o.week} value={o.week}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                <span className="shrink-0 text-slate-500">Hasta</span>
+                <select
+                  className="w-full bg-transparent font-semibold text-slate-800 outline-none"
+                  value={detalleWeekTo ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value === '' ? null : Number(e.target.value);
+                    setDetalleWeekTo(v);
+                    if (v != null && detalleWeekFrom != null && v < detalleWeekFrom) {
+                      setDetalleWeekFrom(v);
+                    }
+                  }}
+                >
+                  <option value="">Fin</option>
+                  {detalleWeekOptions.map((o) => (
+                    <option key={o.week} value={o.week}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {(detalleWeekFrom != null || detalleWeekTo != null) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDetalleWeekFrom(null);
+                    setDetalleWeekTo(null);
+                  }}
+                  className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Limpiar rango
+                </button>
+              )}
+            </div>
           </div>
           {weekRowsDisplay.length === 0 ? (
             <p className="py-8 text-center text-slate-400">Sin semanas en el periodo.</p>
@@ -1013,7 +1158,7 @@ export default function Dashboard() {
                     <tr key={w.week} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                       <td className="px-4 py-2.5 text-slate-700">{w.mes}</td>
                       <td className="px-4 py-2.5 font-semibold" style={{ color: theme.tableWeek }}>
-                        {w.week}
+                        S{w.week}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">{w.label}</td>
                       <td className="px-4 py-2.5 text-right text-slate-600">
@@ -1035,7 +1180,9 @@ export default function Dashboard() {
                   <tr className="font-bold text-white" style={{ backgroundColor: theme.tableFoot }}>
                     <td className="px-4 py-3" colSpan={3}>
                       Total {detalleYear}
-                      {month !== null ? ` · ${MESES[month - 1]}` : ''}
+                      {detalleWeekFrom != null || detalleWeekTo != null
+                        ? ` · S${detalleWeekFrom ?? '…'}–S${detalleWeekTo ?? '…'}`
+                        : ''}
                     </td>
                     <td className="px-4 py-3 text-right">{money(totalesDetalle.eventos)}</td>
                     <td className="px-4 py-3 text-right">{money(totalesDetalle.ventaWi)}</td>

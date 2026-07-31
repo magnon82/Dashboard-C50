@@ -537,6 +537,12 @@ export interface DaySale {
   total: number;
   /** Suma descuentos + cortesías + cancelaciones del día (CORTE) */
   cortes: number;
+  /** Mismo día de la semana (lun=0…) del año anterior */
+  prevDate?: string;
+  prevLabel?: string;
+  prevTotal?: number;
+  /** % vs mismo día año anterior; null si no hay base */
+  changePct?: number | null;
 }
 
 /** Viernes de la semana (lun–vie) a partir del lunes ISO */
@@ -553,15 +559,35 @@ export function weekRangeLabel(year: number, week: number): string {
   return `S${week} · ${formatShort(mon)} – ${formatShort(fri)}`;
 }
 
-/** Semana en curso (lun–hoy) con ventas diarias Infocaja + cortes CORTE */
+/** Semana en curso (lun–hoy) con ventas diarias Infocaja + cortes CORTE.
+ *  Compara día a día vs misma semana del año anterior (solo ventas diarias; no prorratea Acumulado). */
 export function buildWeekToDateSales(
   records: FinancialRecord[],
-  todayIso?: string
-): { days: DaySale[]; total: number; totalCortes: number; mondayKey: string; sundayKey: string; asOf: string } {
+  todayIso?: string,
+  _weeklyByYear?: Map<number, Map<number, WeekSale>>
+): {
+  days: DaySale[];
+  total: number;
+  totalCortes: number;
+  mondayKey: string;
+  sundayKey: string;
+  asOf: string;
+  weekNumber: number;
+  year: number;
+  prevYear: number;
+  prevTotal: number;
+  prevMondayKey: string;
+  prevAsOfKey: string;
+  changePct: number | null;
+} {
   const today = todayIso || toIsoLocal(new Date());
+  const todayParsed = parseIsoDate(today)!;
   const mon = mondayOf(today);
   const mondayKey = toIsoLocal(mon);
   const sundayKey = sundayOfWeek(mondayKey);
+  const weekNumber = acumuladoWeekForDate(today);
+  const year = todayParsed.y;
+  const prevYear = year - 1;
 
   const byDate = new Map<string, number>();
   for (const r of records) {
@@ -582,9 +608,24 @@ export function buildWeekToDateSales(
     cortesByDate.set(p.key, (cortesByDate.get(p.key) || 0) + Number(r.amount));
   }
 
+  // Ventas diarias Infocaja del año anterior (toda la semana comparable)
+  const prevByDate = new Map<string, number>();
+  for (const r of records) {
+    if (r.source_file !== 'infocaja' || r.category !== 'Venta Total') continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== prevYear) continue;
+    prevByDate.set(p.key, (prevByDate.get(p.key) || 0) + Number(r.amount));
+  }
+
+  const prevMondayKey = weekNumber > 0 ? weekMondayIso(prevYear, weekNumber) : '';
+  const prevMon = prevMondayKey ? mondayOf(prevMondayKey) : null;
+
   const days: DaySale[] = [];
   let total = 0;
   let totalCortes = 0;
+  let prevTotal = 0;
+  let prevAsOfKey = '';
+
   for (let i = 0; i < 7; i++) {
     const d = new Date(mon);
     d.setDate(d.getDate() + i);
@@ -594,16 +635,55 @@ export function buildWeekToDateSales(
     const cortes = cortesByDate.get(key) || 0;
     total += amt;
     totalCortes += cortes;
+
+    let prevDate = '';
+    let prevDayTotal = 0;
+    let dayChange: number | null = null;
+    if (prevMon) {
+      const pd = new Date(prevMon);
+      pd.setDate(pd.getDate() + i);
+      prevDate = toIsoLocal(pd);
+      prevAsOfKey = prevDate;
+      prevDayTotal = prevByDate.get(prevDate) || 0;
+      prevTotal += prevDayTotal;
+      if (prevDayTotal > 0) {
+        dayChange = ((amt - prevDayTotal) / prevDayTotal) * 100;
+      }
+    }
+
     days.push({
       date: key,
       label: formatShort(key),
       weekday: d.toLocaleDateString('es-MX', { weekday: 'short' }),
       total: amt,
       cortes,
+      prevDate,
+      prevLabel: prevDate ? formatShort(prevDate) : undefined,
+      prevTotal: prevDayTotal,
+      changePct: dayChange,
     });
   }
 
-  return { days, total, totalCortes, mondayKey, sundayKey, asOf: today };
+  let changePct: number | null = null;
+  if (prevTotal > 0) {
+    changePct = ((total - prevTotal) / prevTotal) * 100;
+  }
+
+  return {
+    days,
+    total,
+    totalCortes,
+    mondayKey,
+    sundayKey,
+    asOf: today,
+    weekNumber,
+    year,
+    prevYear,
+    prevTotal,
+    prevMondayKey,
+    prevAsOfKey,
+    changePct,
+  };
 }
 
 export interface PaymentMix {
@@ -634,11 +714,13 @@ export function buildPaymentMix(
     else if (r.category === 'Infocaja Propina') propina += amt;
   }
 
+  // Bancos = tarjetas + propinas (sin desglosar propinas en la gráfica)
+  const bancos = bancarias + propina;
   return {
     efectivo,
-    bancarias,
-    propina,
-    total: efectivo + bancarias + propina,
+    bancarias: bancos,
+    propina: 0,
+    total: efectivo + bancos,
   };
 }
 
