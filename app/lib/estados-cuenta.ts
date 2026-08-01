@@ -392,11 +392,11 @@ export function filterEstadoMovimientos(
       // presupuesto_ingreso: SEM lunes puede caer fuera del mes civil;
       // year/month del payload son los del Excel de presupuesto.
       const rawY =
-        m.raw.year != null && m.raw.year !== ''
+        m.raw.year != null
           ? Number(m.raw.year)
           : null;
       const rawM =
-        m.raw.month != null && m.raw.month !== ''
+        m.raw.month != null
           ? Number(m.raw.month)
           : null;
       if (rawY != null && !Number.isNaN(rawY) && rawM != null && !Number.isNaN(rawM)) {
@@ -597,9 +597,9 @@ export function availableEstadoMonths(
     const m = parseEstadoMovimiento(r);
     if (!m) continue;
     const rawY =
-      m.raw.year != null && m.raw.year !== '' ? Number(m.raw.year) : null;
+      m.raw.year != null ? Number(m.raw.year) : null;
     const rawM =
-      m.raw.month != null && m.raw.month !== '' ? Number(m.raw.month) : null;
+      m.raw.month != null ? Number(m.raw.month) : null;
     if (rawY != null && !Number.isNaN(rawY) && rawM != null && !Number.isNaN(rawM)) {
       set.add(`${rawY}-${String(rawM).padStart(2, '0')}`);
       continue;
@@ -634,9 +634,9 @@ export function availableEfectivoWeeks(
     const m = parseEstadoMovimiento(r);
     if (!m?.week) continue;
     const rawY =
-      m.raw.year != null && m.raw.year !== '' ? Number(m.raw.year) : null;
+      m.raw.year != null ? Number(m.raw.year) : null;
     const rawM =
-      m.raw.month != null && m.raw.month !== '' ? Number(m.raw.month) : null;
+      m.raw.month != null ? Number(m.raw.month) : null;
     if (rawY != null && !Number.isNaN(rawY) && rawM != null && !Number.isNaN(rawM)) {
       if (rawY === year && rawM === month) set.add(m.week);
       continue;
