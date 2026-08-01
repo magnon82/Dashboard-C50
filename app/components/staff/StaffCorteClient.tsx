@@ -502,18 +502,9 @@ export function StaffCorteClient() {
 
       {/* 1. Terminales */}
       <section className="space-y-3">
-        <div className="flex items-end justify-between gap-2 px-1">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-600">
-            1 · Terminales (bancos)
-          </h3>
-          <Link
-            href="/ventas/corte-tpv/guia"
-            className="text-xs font-semibold underline"
-            style={{ color: SUITE.navy }}
-          >
-            Guía de fotos
-          </Link>
-        </div>
+        <h3 className="px-1 text-sm font-bold uppercase tracking-wide text-slate-600">
+          1 · Terminales (bancos)
+        </h3>
 
         <div className="flex gap-2">
           {TPV_TERMINALS.map((n) => {
@@ -565,6 +556,14 @@ export function StaffCorteClient() {
                 La foto es el proceso de bancos (antes se tecleaba en el RPT).
                 Después de capturar, confirma Total y Propina mirando el ticket.
               </p>
+
+              <Link
+                href="/ventas/corte-tpv/guia"
+                className="mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl text-base font-bold text-white shadow-sm transition-opacity hover:opacity-95"
+                style={{ backgroundColor: '#0F9F9C' }}
+              >
+                Guía de fotografía
+              </Link>
 
               {upload?.image_url && !pending ? (
                 // eslint-disable-next-line @next/next/no-img-element
