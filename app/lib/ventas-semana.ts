@@ -697,7 +697,11 @@ export interface PaymentMix {
   total: number;
 }
 
-/** Efectivo / Bancarias / Propina desde Infocaja en el periodo filtrado */
+/** Efectivo / Tarjetas (TPV) desde reportes diarios Infocaja (Gmail).
+ *  Categorías: Infocaja Efectivo + Infocaja Bancarias (+ Propina → tarjetas).
+ *  Independiente de WI/Eventos (Acumulado ventas_semana ≤2025 / Infocaja ≥2026).
+ *  Requiere ingest histórico: `ingest_infocaja_gmail.py --after 2023/01/01`.
+ *  month = null → año acumulado (YTD si es el año en curso; año completo si es pasado). */
 export function buildPaymentMix(
   records: FinancialRecord[],
   year: number,
@@ -707,24 +711,32 @@ export function buildPaymentMix(
   let bancarias = 0;
   let propina = 0;
 
+  const now = new Date();
+  const isCurrentYear = year === now.getFullYear();
+  const ytdKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
   for (const r of records) {
     if (r.source_file !== 'infocaja') continue;
     const p = parseIsoDate(r.date);
     if (!p || p.y !== year) continue;
-    if (month !== null && p.m !== month) continue;
+    if (month !== null) {
+      if (p.m !== month) continue;
+    } else if (isCurrentYear && p.key > ytdKey) {
+      continue;
+    }
     const amt = Number(r.amount);
     if (r.category === 'Infocaja Efectivo') efectivo += amt;
     else if (r.category === 'Infocaja Bancarias') bancarias += amt;
     else if (r.category === 'Infocaja Propina') propina += amt;
   }
 
-  // Bancos = tarjetas + propinas (sin desglosar propinas en la gráfica)
-  const bancos = bancarias + propina;
+  // Tarjetas = bancarias (TPV) + propinas (sin desglosar propinas en la gráfica)
+  const tarjetas = bancarias + propina;
   return {
     efectivo,
-    bancarias: bancos,
+    bancarias: tarjetas,
     propina: 0,
-    total: efectivo + bancos,
+    total: efectivo + tarjetas,
   };
 }
 

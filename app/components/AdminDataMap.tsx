@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { ALL_SOURCE_FILES } from '@/app/lib/admin-resources';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -20,6 +21,7 @@ type IconKind =
   | 'hub'
   | 'ventas'
   | 'finanzas'
+  | 'rrhh'
   | 'admin'
   | 'google'
   | 'db'
@@ -54,6 +56,8 @@ type MapEdge = {
   labelAt?: [number, number];
   dashed?: boolean;
   accent?: boolean;
+  /** Dense corridors: pill only on hover / when edge selected */
+  labelHover?: boolean;
 };
 
 type Region = {
@@ -67,13 +71,21 @@ type Region = {
   icon: IconKind;
 };
 
-const VIEW_W = 1500;
-const VIEW_H = 860;
+const VIEW_W = 1720;
+const VIEW_H = 900;
 const EDGE_R = 12;
 const LINE = '#A8B0BD';
 const LINE_ACCENT = SUITE.orangeDeep;
+const LINE_SELECTED = SUITE.orange;
 const PILL = '#6B7585';
 const PILL_ACCENT = SUITE.orangeDeep;
+
+/**
+ * Mapa de orígenes — inventario canónico en app/lib/admin-resources.ts
+ * (SOURCE_FILE_GROUPS, ADMIN_STORAGE_PLATFORMS). Actualizar allí al agregar
+ * source_file / path Drive / ingest / ruta UI; este diagrama y la sección
+ * «Inventario de datos» leen de ese módulo.
+ */
 
 /** Simple Icons (v13) path data + brand hex — viewBox 0 0 24 24 */
 const SI = {
@@ -124,37 +136,42 @@ const SI = {
 } as const;
 
 const REGIONS: Region[] = [
-  { id: 'google', label: 'Google', sub: 'fuentes externas', x: 40, y: 40, w: 228, h: 740, icon: 'google' },
-  { id: 'github', label: 'GitHub Actions', sub: 'orquestación cloud', x: 316, y: 40, w: 260, h: 392, icon: 'github' },
-  { id: 'local', label: 'PC local', sub: 'manual / opcional', x: 316, y: 456, w: 260, h: 324, icon: 'pc' },
-  { id: 'supabase', label: 'Supabase', sub: 'hub · persistencia', x: 640, y: 140, w: 280, h: 500, icon: 'supabase' },
-  { id: 'vercel', label: 'Vercel', sub: 'dashboard-c50.vercel.app', x: 980, y: 40, w: 244, h: 740, icon: 'vercel' },
-  { id: 'browser', label: 'Navegador', sub: 'módulos del suite', x: 1276, y: 40, w: 192, h: 740, icon: 'browser' },
+  { id: 'google', label: 'Google', sub: 'fuentes externas', x: 36, y: 36, w: 210, h: 780, icon: 'google' },
+  { id: 'github', label: 'GitHub Actions', sub: 'orquestación cloud', x: 360, y: 36, w: 250, h: 400, icon: 'github' },
+  { id: 'local', label: 'PC local', sub: 'manual / opcional', x: 360, y: 456, w: 250, h: 360, icon: 'pc' },
+  { id: 'supabase', label: 'Supabase', sub: 'hub · persistencia', x: 780, y: 120, w: 280, h: 520, icon: 'supabase' },
+  { id: 'vercel', label: 'Vercel', sub: 'dashboard-c50.vercel.app', x: 1180, y: 36, w: 230, h: 780, icon: 'vercel' },
+  { id: 'browser', label: 'Navegador', sub: 'módulos del suite', x: 1500, y: 36, w: 186, h: 780, icon: 'browser' },
 ];
 
 const NODES: MapNode[] = [
   {
     id: 'gmail',
     label: 'Gmail',
-    sub: 'Infocaja + CORTE',
-    x: 76,
-    y: 100,
-    w: 156,
+    sub: 'Infocaja · CORTE · CFDI',
+    x: 64,
+    y: 96,
+    w: 154,
     h: 108,
     kind: 'system',
     icon: 'gmail',
     stack: true,
-    sources: ['infocaja', 'corte_caja'],
-    files: ['ingest_infocaja_gmail.py', 'ingest_corte_gmail.py'],
-    detail: 'Correos Infocaja Fin de Día y CORTE CARRANZA (adjunto XLS).',
+    sources: ['infocaja', 'corte_caja', 'factura_cfdi'],
+    files: [
+      'ingest_infocaja_gmail.py',
+      'ingest_corte_gmail.py',
+      'ingest_facturas_gmail.py',
+    ],
+    detail:
+      'Infocaja Fin de Día, CORTE CARRANZA (XLS) y facturas CFDI (XML/PDF → factura_cfdi; adjuntos en FACTURAS CFDI).',
   },
   {
     id: 'drive',
     label: 'Drive',
-    sub: 'Presupuesto + Flujo + Estados',
-    x: 76,
-    y: 248,
-    w: 156,
+    sub: 'Presup. · Flujo · Bancos',
+    x: 64,
+    y: 250,
+    w: 154,
     h: 108,
     kind: 'system',
     icon: 'drive',
@@ -168,33 +185,40 @@ const NODES: MapNode[] = [
       'estado_bbva',
       'estado_pdf_index',
       'estado_cuenta_pdf_index',
+      'ventas_semana',
     ],
-    files: ['ingest_presupuesto.py', 'ingest_saldos_flujo.py', 'ingest_estados_cuenta.py'],
+    files: [
+      'ingest_presupuesto.py',
+      'ingest_saldos_flujo.py',
+      'ingest_estados_cuenta.py',
+      'ingest_ventas_semana.py',
+    ],
     detail:
-      'PRESUPUESTO, FLUJO EFECTIVO, estados MIFEL/BBVA, COMPROBANTES BANCARIOS (pagos) y Administración\\Bancos (estados PDF).',
+      'PRESUPUESTOS, FLUJO EFECTIVO, estados MIFEL/BBVA, COMPROBANTES BANCARIOS (pagos → estado_pdf_index), Administración\\Bancos (estados PDF → estado_cuenta_pdf_index) y Acumulado ventas x semana.',
   },
   {
     id: 'sheets',
     label: 'Sheets',
-    sub: 'CXP proveedores',
-    x: 76,
-    y: 396,
-    w: 156,
+    sub: 'CXP sheet',
+    x: 64,
+    y: 404,
+    w: 154,
     h: 108,
     kind: 'system',
     icon: 'sheets',
     stack: true,
-    sources: ['cxp_por_pagar'],
-    files: ['ingest_cxp_por_pagar.py'],
-    detail: 'Google Sheet de cuentas por pagar (proveedores y servicios).',
+    sources: ['cxp_por_pagar', 'cxp', 'cxp_saldos'],
+    files: ['ingest_cxp_por_pagar.py', 'ingest_cxp.py'],
+    detail:
+      'Sheet CXP: saldos por pagar (Actions cada 5 min → cxp_por_pagar) y líneas pagadas / retornos (manual → cxp + cxp_saldos).',
   },
   {
     id: 'eventos',
     label: 'Eventos',
     sub: 'legacy / puntual',
-    x: 76,
-    y: 544,
-    w: 156,
+    x: 64,
+    y: 558,
+    w: 154,
     h: 108,
     kind: 'system',
     icon: 'eventos',
@@ -207,20 +231,21 @@ const NODES: MapNode[] = [
     id: 'wf-gmail',
     label: 'sync-gmail.yml',
     sub: '~5:00 AM CDMX',
-    x: 348,
-    y: 100,
+    x: 388,
+    y: 96,
     w: 196,
     h: 72,
     kind: 'runner',
     icon: 'github',
     files: ['.github/workflows/sync-gmail.yml', 'sync_gmail_diario.py'],
-    detail: 'GitHub Actions diario (11:00 UTC). Corre Infocaja + CORTE → Supabase.',
+    detail:
+      'Actions diario (11:00 UTC): Infocaja + CORTE. Facturas CFDI van en local (Actions usa --skip-facturas).',
   },
   {
     id: 'wf-saldos',
     label: 'sync-saldos.yml',
     sub: 'cada 5 min',
-    x: 348,
+    x: 388,
     y: 210,
     w: 196,
     h: 72,
@@ -228,14 +253,14 @@ const NODES: MapNode[] = [
     icon: 'github',
     files: ['.github/workflows/sync-saldos.yml', 'sync_saldos_al_dia.py'],
     detail:
-      'GitHub Actions cada 5 min: efectivo saldo + semanas + movimientos línea por Concepto (Drive) + CXP (Sheets) → Supabase.',
+      'Actions cada 5 min: flujo_efectivo_saldo/semana/mov (Drive) + cxp_por_pagar (Sheets). No corre ingest_cxp (líneas).',
   },
   {
     id: 'ingestor-cloud',
     label: 'ingestor/',
     sub: 'Python · OAuth',
-    x: 348,
-    y: 320,
+    x: 388,
+    y: 324,
     w: 196,
     h: 72,
     kind: 'runner',
@@ -247,10 +272,10 @@ const NODES: MapNode[] = [
     id: 'ingest-estados',
     label: 'ingest_estados',
     sub: 'carga manual PC',
-    x: 348,
-    y: 500,
+    x: 388,
+    y: 488,
     w: 196,
-    h: 72,
+    h: 64,
     kind: 'runner',
     icon: 'python',
     sources: ['estado_mifel', 'estado_bbva', 'estado_pdf_index', 'estado_cuenta_pdf_index'],
@@ -262,68 +287,74 @@ const NODES: MapNode[] = [
     id: 'ingest-prep',
     label: 'ingest_presupuesto',
     sub: 'carga manual',
-    x: 348,
-    y: 592,
-    w: 196,
-    h: 72,
-    kind: 'runner',
-    icon: 'python',
-    sources: ['presupuesto_mensual', 'presupuesto_saldos', 'presupuesto_rubro', 'presupuesto_semana', 'presupuesto_sem_detalle', 'presupuesto_ingreso'],
-    files: ['ingest_presupuesto.py'],
-    detail: 'Lee Excel de presupuesto (Drive/local): rubros, saldos, semanas, detalle SEM y ingresos bancarios semanales Mifel/BBVA (TOTAL, llenado manual → presupuesto_ingreso).',
-  },
-  {
-    id: 'win-tasks',
-    label: 'Tareas Windows',
-    sub: 'deshabilitadas',
-    x: 348,
-    y: 684,
+    x: 388,
+    y: 568,
     w: 196,
     h: 64,
-    kind: 'system',
-    icon: 'windows',
-    files: ['run_sync_gmail_diario.bat', 'run_sync_saldos_al_dia.bat', 'CLOUD_SYNC.md'],
-    detail: 'DashboardC50-Sync* quedaron deshabilitadas; el sync vive en Actions.',
+    kind: 'runner',
+    icon: 'python',
+    sources: [
+      'presupuesto_mensual',
+      'presupuesto_saldos',
+      'presupuesto_rubro',
+      'presupuesto_semana',
+      'presupuesto_sem_detalle',
+      'presupuesto_ingreso',
+    ],
+    files: ['ingest_presupuesto.py'],
+    detail:
+      'Excel PRESUPUESTOS: rubros, saldos, semanas, desglose SEM (presupuesto_sem_detalle) e ingresos Mifel/BBVA (ventas / entre_cuentas → presupuesto_ingreso).',
+  },
+  {
+    id: 'ingest-facturas',
+    label: 'ingest_facturas',
+    sub: 'Gmail CFDI · local',
+    x: 388,
+    y: 648,
+    w: 196,
+    h: 64,
+    kind: 'runner',
+    icon: 'python',
+    sources: ['factura_cfdi'],
+    files: ['ingest_facturas_gmail.py', 'sync_gmail_diario.py'],
+    detail:
+      'Indexa XML/PDF de Gmail → factura_cfdi; guarda adjuntos en FACTURAS CFDI. UI: /finanzas/facturas.',
+  },
+  {
+    id: 'ingest-cxp',
+    label: 'ingest_cxp',
+    sub: 'líneas · local',
+    x: 388,
+    y: 728,
+    w: 196,
+    h: 56,
+    kind: 'runner',
+    icon: 'python',
+    sources: ['cxp', 'cxp_saldos'],
+    files: ['ingest_cxp.py'],
+    detail:
+      'Pagos reales / retornos del Sheet CXP → cxp; saldos encabezado → cxp_saldos. Complementa cxp_por_pagar (Actions).',
   },
   {
     id: 'fr',
     label: 'financial_records',
     sub: 'tabla · source_file',
-    x: 680,
-    y: 230,
+    x: 820,
+    y: 210,
     w: 200,
     h: 136,
     kind: 'db',
     icon: 'db',
     stack: true,
-    sources: [
-      'infocaja',
-      'corte_caja',
-      'eventos',
-      'flujo_efectivo_saldo',
-      'flujo_efectivo_semana',
-      'flujo_efectivo_mov',
-      'cxp_por_pagar',
-      'presupuesto_mensual',
-      'presupuesto_saldos',
-      'saldos_bancos_manual',
-      'presupuesto_rubro',
-      'presupuesto_semana',
-      'presupuesto_sem_detalle',
-      'presupuesto_ingreso',
-      'presupuesto_ajuste',
-      'estado_mifel',
-      'estado_bbva',
-      'dashboard_auth',
-    ],
+    sources: [...ALL_SOURCE_FILES],
     detail: 'Almacén central. Cada fila lleva source_file para filtrar por dashboard.',
   },
   {
     id: 'sb-auth',
     label: 'Auth service role',
     sub: 'escritura / admin',
-    x: 700,
-    y: 430,
+    x: 840,
+    y: 420,
     w: 160,
     h: 108,
     kind: 'db',
@@ -336,39 +367,50 @@ const NODES: MapNode[] = [
     id: 'api-fr',
     label: 'API records',
     sub: 'GET /api/…',
-    x: 1016,
-    y: 110,
+    x: 1210,
+    y: 96,
     w: 172,
-    h: 100,
+    h: 88,
     kind: 'system',
     icon: 'api',
     stack: true,
-    files: ['app/api/financial-records/route.ts'],
-    detail: 'Lee financial_records (excluye dashboard_auth). Finanzas filtra por sources=.',
+    files: [
+      'app/api/financial-records/route.ts',
+      'app/api/facturas/route.ts',
+      'app/api/comprobantes/route.ts',
+      'app/api/estados-cuenta/route.ts',
+      'app/api/estados-cuenta-pdf/route.ts',
+    ],
+    detail:
+      'Lee financial_records (excluye dashboard_auth). Consultas: facturas, comprobantes, estados-cuenta (+ PDF).',
   },
   {
     id: 'api-ajustes',
-    label: 'API ajustes',
-    sub: 'PUT / DELETE',
-    x: 1016,
-    y: 270,
+    label: 'API admin write',
+    sub: 'ajustes · saldos',
+    x: 1210,
+    y: 220,
     w: 172,
-    h: 100,
+    h: 88,
     kind: 'system',
     icon: 'api',
     stack: true,
-    sources: ['presupuesto_ajuste'],
-    files: ['app/api/admin/presupuesto-ajustes/route.ts'],
-    detail: 'Ajustes de licencias/montos fijos por mes. Solo sergio en /admin.',
+    sources: ['presupuesto_ajuste', 'saldos_bancos_manual'],
+    files: [
+      'app/api/admin/presupuesto-ajustes/route.ts',
+      'app/api/admin/saldos-bancos/route.ts',
+    ],
+    detail:
+      'Escritura admin: presupuesto_ajuste y saldos_bancos_manual. Solo usuarios admin en /admin.',
   },
   {
     id: 'api-users',
     label: 'API users',
     sub: 'dashboard_auth',
-    x: 1016,
-    y: 430,
+    x: 1210,
+    y: 344,
     w: 172,
-    h: 100,
+    h: 88,
     kind: 'system',
     icon: 'api',
     stack: true,
@@ -380,36 +422,37 @@ const NODES: MapNode[] = [
     id: 'next',
     label: 'Next.js',
     sub: 'App Router',
-    x: 1016,
-    y: 590,
+    x: 1210,
+    y: 468,
     w: 172,
-    h: 100,
+    h: 88,
     kind: 'system',
     icon: 'nextjs',
     stack: true,
-    files: ['app/layout.tsx', 'middleware.ts'],
-    detail: 'App desplegada en Vercel. Auth de sesión y rutas por módulo.',
+    files: ['app/layout.tsx', 'middleware.ts', 'CLOUD_SYNC.md'],
+    detail:
+      'App en Vercel. Auth de sesión y rutas por módulo. Tareas Windows locales deshabilitadas (sync en Actions).',
   },
   {
     id: 'hub',
     label: 'Hub',
     sub: '/',
-    x: 1306,
-    y: 110,
+    x: 1528,
+    y: 100,
     w: 132,
     h: 100,
     kind: 'ui',
     icon: 'hub',
     stack: true,
     files: ['app/page.tsx'],
-    detail: 'Entrada al suite: enlaces a Ventas, Finanzas y Admin.',
+    detail: 'Entrada al suite: enlaces a Ventas, Finanzas, RR.HH. y Admin.',
   },
   {
     id: 'ventas',
     label: 'Ventas',
     sub: '/ventas',
-    x: 1306,
-    y: 260,
+    x: 1528,
+    y: 250,
     w: 132,
     h: 100,
     kind: 'ui',
@@ -422,9 +465,9 @@ const NODES: MapNode[] = [
   {
     id: 'finanzas',
     label: 'Finanzas',
-    sub: '/finanzas',
-    x: 1306,
-    y: 410,
+    sub: '/finanzas + consultas',
+    x: 1528,
+    y: 400,
     w: 132,
     h: 100,
     kind: 'ui',
@@ -442,34 +485,40 @@ const NODES: MapNode[] = [
       'flujo_efectivo_saldo',
       'flujo_efectivo_semana',
       'flujo_efectivo_mov',
+      'cxp',
       'cxp_por_pagar',
       'estado_mifel',
       'estado_bbva',
       'estado_pdf_index',
       'estado_cuenta_pdf_index',
+      'factura_cfdi',
     ],
     files: [
       'app/finanzas/page.tsx',
       'app/finanzas/gastos/page.tsx',
+      'app/finanzas/ingresos/page.tsx',
       'app/finanzas/comprobantes/page.tsx',
       'app/finanzas/estados-cuenta/page.tsx',
+      'app/finanzas/facturas/page.tsx',
       'app/lib/presupuesto.ts',
       'app/lib/saldos.ts',
       'app/lib/estados-cuenta.ts',
+      'app/lib/facturas.ts',
       'app/components/EstadosCuenta.tsx',
       'app/components/ComprobantesIndex.tsx',
       'app/components/EstadosCuentaPdfIndex.tsx',
+      'app/components/FacturasIndex.tsx',
       'app/components/ResumenBancosSemanal.tsx',
     ],
     detail:
-      'Saldos al día, resumen semanal bancos + efectivo, presupuesto vs real, consultas de comprobantes / estados de cuenta / gastos.',
+      'Saldos, presupuesto vs real, resumen semanal. Consultas: /gastos, /ingresos, /comprobantes, /estados-cuenta, /facturas.',
   },
   {
     id: 'admin',
     label: 'Admin',
     sub: '/admin',
-    x: 1306,
-    y: 560,
+    x: 1528,
+    y: 550,
     w: 132,
     h: 100,
     kind: 'ui',
@@ -480,14 +529,30 @@ const NODES: MapNode[] = [
       'app/admin/page.tsx',
       'AdminPresupuestoAjustes.tsx',
       'AdminSaldosBancos.tsx',
-      'app/api/admin/saldos-bancos/route.ts',
+      'AdminDataMap.tsx',
+      'AdminAlmacenamientoRecursos.tsx',
     ],
-    detail: 'Usuarios, saldos bancarios manuales, ajustes de presupuesto y este mapa de orígenes.',
+    detail:
+      'Usuarios, saldos bancarios manuales, ajustes de presupuesto, mapa de orígenes e inventario de datos.',
+  },
+  {
+    id: 'rrhh',
+    label: 'RR.HH.',
+    sub: '/rrhh',
+    x: 1528,
+    y: 700,
+    w: 132,
+    h: 100,
+    kind: 'ui',
+    icon: 'rrhh',
+    stack: true,
+    files: ['app/rrhh/page.tsx', 'app/lib/modules.ts'],
+    detail: 'Placeholder Recursos Humanos. Features (nómina, personal) pendientes.',
   },
 ];
 
 /**
- * Corredores L→R: Google→runners ~292 | runners→SB ~608 | SB→Vercel ~948 | Vercel→UI ~1250
+ * Corredores L→R: Google→runners ~250–340 | runners→SB ~640–760 | SB→Vercel ~1100–1160 | Vercel→UI ~1440–1490
  */
 const EDGES: MapEdge[] = [
   {
@@ -496,10 +561,23 @@ const EDGES: MapEdge[] = [
     to: 'wf-gmail',
     label: 'Gmail API',
     via: [
-      [294, 154],
-      [294, 136],
+      [310, 150],
+      [310, 132],
     ],
-    labelAt: [294, 145],
+    labelAt: [310, 141],
+  },
+  {
+    id: 'e-gmail-facturas',
+    from: 'gmail',
+    to: 'ingest-facturas',
+    label: 'CFDI local',
+    dashed: true,
+    labelHover: true,
+    via: [
+      [250, 170],
+      [250, 680],
+    ],
+    labelAt: [250, 420],
   },
   {
     id: 'e-drive-wf',
@@ -507,55 +585,72 @@ const EDGES: MapEdge[] = [
     to: 'wf-saldos',
     label: 'Drive API',
     via: [
-      [294, 288],
-      [294, 246],
+      [330, 304],
+      [330, 246],
     ],
-    labelAt: [294, 267],
+    labelAt: [330, 275],
   },
   {
     id: 'e-sheets-wf',
     from: 'sheets',
     to: 'wf-saldos',
-    label: 'Sheets API',
+    label: 'cxp_por_pagar',
+    labelHover: true,
     via: [
-      [278, 450],
-      [278, 260],
-      [348, 260],
+      [280, 458],
+      [280, 258],
+      [388, 258],
     ],
-    labelAt: [278, 355],
+    labelAt: [280, 360],
+  },
+  {
+    id: 'e-sheets-cxp',
+    from: 'sheets',
+    to: 'ingest-cxp',
+    label: 'cxp líneas',
+    dashed: true,
+    labelHover: true,
+    via: [
+      [236, 480],
+      [236, 756],
+    ],
+    labelAt: [236, 620],
   },
   {
     id: 'e-drive-estados',
     from: 'drive',
     to: 'ingest-estados',
-    label: 'estados xlsx',
+    label: 'estados / PDF',
+    labelHover: true,
     via: [
-      [262, 318],
-      [262, 536],
+      [266, 330],
+      [266, 520],
     ],
-    labelAt: [262, 420],
+    labelAt: [266, 425],
   },
   {
     id: 'e-drive-prep',
     from: 'drive',
     to: 'ingest-prep',
-    label: 'Excel',
+    label: 'PRESUPUESTOS',
+    labelHover: true,
     via: [
-      [250, 330],
-      [250, 628],
+      [252, 340],
+      [252, 600],
     ],
-    labelAt: [250, 520],
+    labelAt: [252, 510],
   },
   {
     id: 'e-ing-fr',
     from: 'ingestor-cloud',
     to: 'fr',
     label: 'upsert',
+    labelHover: true,
     via: [
-      [612, 356],
-      [612, 280],
+      [640, 360],
+      [640, 228],
     ],
-    labelAt: [612, 318],
+    labelAt: [640, 294],
     accent: true,
   },
   {
@@ -563,11 +658,12 @@ const EDGES: MapEdge[] = [
     from: 'ingest-estados',
     to: 'fr',
     label: 'estado_*',
+    labelHover: true,
     via: [
-      [600, 536],
-      [600, 320],
+      [670, 520],
+      [670, 250],
     ],
-    labelAt: [600, 430],
+    labelAt: [670, 385],
     accent: true,
   },
   {
@@ -575,11 +671,38 @@ const EDGES: MapEdge[] = [
     from: 'ingest-prep',
     to: 'fr',
     label: 'presupuesto_*',
+    labelHover: true,
     via: [
-      [588, 628],
-      [588, 360],
+      [700, 600],
+      [700, 278],
     ],
-    labelAt: [588, 500],
+    labelAt: [700, 440],
+    accent: true,
+  },
+  {
+    id: 'e-facturas-fr',
+    from: 'ingest-facturas',
+    to: 'fr',
+    label: 'factura_cfdi',
+    labelHover: true,
+    via: [
+      [730, 680],
+      [730, 306],
+    ],
+    labelAt: [730, 500],
+    accent: true,
+  },
+  {
+    id: 'e-cxp-fr',
+    from: 'ingest-cxp',
+    to: 'fr',
+    label: 'cxp',
+    labelHover: true,
+    via: [
+      [760, 756],
+      [760, 330],
+    ],
+    labelAt: [760, 550],
     accent: true,
   },
   {
@@ -588,13 +711,14 @@ const EDGES: MapEdge[] = [
     to: 'fr',
     label: 'ingest_eventos',
     dashed: true,
+    labelHover: true,
     via: [
-      [240, 598],
-      [240, 790],
-      [780, 790],
-      [780, 366],
+      [222, 612],
+      [222, 820],
+      [920, 820],
+      [920, 346],
     ],
-    labelAt: [510, 790],
+    labelAt: [560, 820],
   },
   {
     id: 'e-fr-api',
@@ -602,21 +726,21 @@ const EDGES: MapEdge[] = [
     to: 'api-fr',
     label: 'SELECT',
     via: [
-      [950, 278],
-      [950, 160],
+      [1120, 250],
+      [1120, 140],
     ],
-    labelAt: [950, 220],
+    labelAt: [1120, 195],
   },
   {
     id: 'e-api-aj-fr',
     from: 'api-ajustes',
     to: 'fr',
-    label: 'PUT ajuste',
+    label: 'PUT write',
     via: [
-      [950, 320],
-      [880, 320],
+      [1120, 264],
+      [1020, 264],
     ],
-    labelAt: [915, 320],
+    labelAt: [1070, 264],
     accent: true,
   },
   {
@@ -625,18 +749,18 @@ const EDGES: MapEdge[] = [
     to: 'fr',
     label: 'dashboard_auth',
     via: [
-      [962, 480],
-      [962, 380],
-      [880, 380],
+      [1145, 388],
+      [1145, 320],
+      [1020, 320],
     ],
-    labelAt: [962, 430],
+    labelAt: [1145, 354],
   },
   {
     id: 'e-api-hub',
     from: 'api-fr',
     to: 'hub',
     label: 'sesión',
-    labelAt: [1250, 140],
+    labelAt: [1460, 140],
   },
   {
     id: 'e-api-ventas',
@@ -644,10 +768,10 @@ const EDGES: MapEdge[] = [
     to: 'ventas',
     label: 'GET',
     via: [
-      [1240, 170],
-      [1240, 310],
+      [1450, 160],
+      [1450, 300],
     ],
-    labelAt: [1240, 240],
+    labelAt: [1450, 230],
   },
   {
     id: 'e-api-fin',
@@ -655,22 +779,23 @@ const EDGES: MapEdge[] = [
     to: 'finanzas',
     label: 'GET sources',
     via: [
-      [1256, 175],
-      [1256, 460],
+      [1475, 165],
+      [1475, 450],
     ],
-    labelAt: [1256, 340],
+    labelAt: [1475, 310],
   },
   {
     id: 'e-admin-aj',
     from: 'admin',
     to: 'api-ajustes',
-    label: 'ajustes',
+    label: 'ajustes / saldos',
+    labelHover: true,
     via: [
-      [1270, 610],
-      [1270, 320],
-      [1188, 320],
+      [1490, 600],
+      [1490, 264],
+      [1382, 264],
     ],
-    labelAt: [1270, 465],
+    labelAt: [1490, 430],
     accent: true,
   },
   {
@@ -679,11 +804,11 @@ const EDGES: MapEdge[] = [
     to: 'api-users',
     label: 'usuarios',
     via: [
-      [1286, 630],
-      [1286, 480],
-      [1188, 480],
+      [1480, 620],
+      [1480, 388],
+      [1382, 388],
     ],
-    labelAt: [1286, 555],
+    labelAt: [1480, 510],
     accent: true,
   },
 ];
@@ -697,10 +822,14 @@ function nodeAnchor(n: MapNode, towardX: number, towardY: number): [number, numb
   const cy = n.y + n.h / 2;
   const dx = towardX - cx;
   const dy = towardY - cy;
+  const pad = 8;
   if (Math.abs(dx) >= Math.abs(dy)) {
-    return dx >= 0 ? [n.x + n.w, cy] : [n.x, cy];
+    // Left/right: pin Y to the approach point so parallel edges fan on the node edge
+    const y = Math.max(n.y + pad, Math.min(n.y + n.h - pad, towardY));
+    return dx >= 0 ? [n.x + n.w, y] : [n.x, y];
   }
-  return dy >= 0 ? [cx, n.y + n.h] : [cx, n.y];
+  const x = Math.max(n.x + pad, Math.min(n.x + n.w - pad, towardX));
+  return dy >= 0 ? [x, n.y + n.h] : [x, n.y];
 }
 
 /** Orthogonal path with rounded elbows (Obsidian-style). */
@@ -770,7 +899,7 @@ function labelPoint(edge: MapEdge, pts: Array<[number, number]>): [number, numbe
 }
 
 function pillWidth(label: string): number {
-  return Math.max(52, label.length * 6.4 + 18);
+  return Math.max(44, label.length * 5.6 + 14);
 }
 
 function BrandIcon({ kind, x, y, size = 14 }: { kind: IconKind; x: number; y: number; size?: number }) {
@@ -878,6 +1007,23 @@ function BrandIcon({ kind, x, y, size = 14 }: { kind: IconKind; x: number; y: nu
           />
         </g>
       );
+    case 'rrhh':
+      return (
+        <g transform={`translate(${x},${y})`}>
+          <rect width={s} height={s} rx={s * 0.2} fill="#E8EEF7" stroke={SUITE.navy} strokeWidth={1} />
+          <circle cx={s * 0.38} cy={s * 0.38} r={s * 0.12} fill={SUITE.navy} />
+          <circle cx={s * 0.62} cy={s * 0.38} r={s * 0.12} fill={SUITE.navy} opacity={0.7} />
+          <path
+            d={`M ${s * 0.18} ${s * 0.78} C ${s * 0.18} ${s * 0.58} ${s * 0.58} ${s * 0.58} ${s * 0.58} ${s * 0.78}`}
+            fill={SUITE.navy}
+          />
+          <path
+            d={`M ${s * 0.42} ${s * 0.78} C ${s * 0.42} ${s * 0.58} ${s * 0.82} ${s * 0.58} ${s * 0.82} ${s * 0.78}`}
+            fill={SUITE.navy}
+            opacity={0.7}
+          />
+        </g>
+      );
     default:
       return null;
   }
@@ -886,10 +1032,12 @@ function BrandIcon({ kind, x, y, size = 14 }: { kind: IconKind; x: number; y: nu
 function NodeBox({
   node,
   selected,
+  dimmed,
   onSelect,
 }: {
   node: MapNode;
   selected: boolean;
+  dimmed?: boolean;
   onSelect: (id: string) => void;
 }) {
   const fill =
@@ -907,14 +1055,17 @@ function NodeBox({
     <g
       role="button"
       tabIndex={0}
-      onClick={() => onSelect(node.id)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect(node.id);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onSelect(node.id);
         }
       }}
-      style={{ cursor: 'pointer' }}
+      style={{ cursor: 'pointer', opacity: dimmed ? 0.28 : 1, transition: 'opacity 120ms ease' }}
     >
       <rect
         x={node.x}
@@ -1001,24 +1152,29 @@ function EdgeLabel({
   y,
   label,
   accent,
+  selected,
+  hidden,
 }: {
   x: number;
   y: number;
   label: string;
   accent?: boolean;
+  selected?: boolean;
+  hidden?: boolean;
 }) {
+  if (hidden) return null;
   const w = pillWidth(label);
-  const h = 20;
-  const fill = accent ? PILL_ACCENT : PILL;
+  const h = 16;
+  const fill = selected ? LINE_SELECTED : accent ? PILL_ACCENT : PILL;
   return (
-    <g>
-      <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={h / 2} fill={fill} />
+    <g style={{ pointerEvents: 'none' }}>
+      <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={h / 2} fill={fill} opacity={0.95} />
       <text
         x={x}
-        y={y + 4}
+        y={y + 3.5}
         textAnchor="middle"
         fill="#FFFFFF"
-        fontSize={10}
+        fontSize={9}
         fontWeight={600}
         style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
       >
@@ -1028,11 +1184,110 @@ function EdgeLabel({
   );
 }
 
+function MapEdgePath({
+  edge,
+  pts,
+  selected,
+  dimmed,
+  hovered,
+  onSelect,
+  onHover,
+}: {
+  edge: MapEdge;
+  pts: Array<[number, number]>;
+  selected: boolean;
+  dimmed: boolean;
+  hovered: boolean;
+  onSelect: (id: string) => void;
+  onHover: (id: string | null) => void;
+}) {
+  const d = roundedOrthoPath(pts);
+  const [lx, ly] = labelPoint(edge, pts);
+  const showLabel = !edge.labelHover || hovered || selected;
+  const stroke = selected ? LINE_SELECTED : edge.accent ? LINE_ACCENT : LINE;
+  const width = selected ? 4.2 : edge.accent ? 3 : 2.4;
+
+  return (
+    <g
+      opacity={dimmed ? 0.18 : 1}
+      style={{ transition: 'opacity 120ms ease' }}
+      onMouseEnter={() => onHover(edge.id)}
+      onMouseLeave={() => onHover(null)}
+    >
+      {/* Invisible hit target */}
+      <path
+        d={d}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={16}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ cursor: 'pointer' }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect(edge.id);
+        }}
+      />
+      <path
+        d={d}
+        fill="none"
+        stroke={stroke}
+        strokeWidth={width}
+        strokeDasharray={edge.dashed ? '7 5' : undefined}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        markerEnd={
+          selected
+            ? 'url(#arrow-selected)'
+            : edge.accent
+              ? 'url(#arrow-accent)'
+              : 'url(#arrow)'
+        }
+        style={{ pointerEvents: 'none' }}
+      />
+      <EdgeLabel
+        x={lx}
+        y={ly}
+        label={edge.label}
+        accent={edge.accent}
+        selected={selected}
+        hidden={!showLabel}
+      />
+    </g>
+  );
+}
+
 export function AdminDataMap() {
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>('fr');
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const byId = useMemo(() => new Map(NODES.map((n) => [n.id, n])), []);
+  const edgeById = useMemo(() => new Map(EDGES.map((e) => [e.id, e])), []);
   const selected = selectedId ? byId.get(selectedId) : undefined;
+  const selectedEdge = selectedEdgeId ? edgeById.get(selectedEdgeId) : undefined;
+  const edgeEndpoints = selectedEdge
+    ? new Set([selectedEdge.from, selectedEdge.to])
+    : null;
+
+  const selectNode = (id: string) => {
+    setSelectedEdgeId(null);
+    setSelectedId(id);
+  };
+
+  const selectEdge = (id: string) => {
+    if (selectedEdgeId === id) {
+      setSelectedEdgeId(null);
+      return;
+    }
+    setSelectedEdgeId(id);
+    setSelectedId(null);
+  };
+
+  const clearSelection = () => {
+    setSelectedEdgeId(null);
+    setSelectedId(null);
+  };
 
   return (
     <section
@@ -1049,8 +1304,7 @@ export function AdminDataMap() {
           </p>
           <p className="text-sm" style={{ color: theme.muted }}>
             Topología de plataformas, scripts y APIs: Google → GitHub Actions / PC → Supabase →
-            Vercel → módulos. Haz clic en un nodo para ver{' '}
-            <code className="text-xs">source_file</code> y archivos clave.
+            Vercel → módulos. Haz clic en un nodo o en una conexión para resaltar el flujo.
           </p>
         </div>
         <button
@@ -1077,9 +1331,10 @@ export function AdminDataMap() {
             viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
             width={VIEW_W}
             height={VIEW_H}
-            className="min-w-[980px] max-w-none"
+            className="min-w-[1100px] max-w-none"
             role="img"
             aria-label="Mapa de topología de orígenes de datos del dashboard"
+            onClick={clearSelection}
           >
             <defs>
               <marker
@@ -1104,6 +1359,17 @@ export function AdminDataMap() {
               >
                 <path d="M 0 0 L 10 5 L 0 10 z" fill={LINE_ACCENT} />
               </marker>
+              <marker
+                id="arrow-selected"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth={8}
+                markerHeight={8}
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill={LINE_SELECTED} />
+              </marker>
               <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
                 <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor={SUITE.orange} floodOpacity="0.4" />
               </filter>
@@ -1113,7 +1379,7 @@ export function AdminDataMap() {
             </defs>
 
             {REGIONS.map((r) => (
-              <g key={r.id}>
+              <g key={r.id} opacity={selectedEdgeId ? 0.55 : 1}>
                 <rect
                   x={r.x}
                   y={r.y}
@@ -1154,54 +1420,72 @@ export function AdminDataMap() {
             {EDGES.map((edge) => {
               const pts = edgePoints(edge, byId);
               if (!pts) return null;
-              const d = roundedOrthoPath(pts);
-              const [lx, ly] = labelPoint(edge, pts);
-              const stroke = edge.accent ? LINE_ACCENT : LINE;
               return (
-                <g key={edge.id}>
-                  <path
-                    d={d}
-                    fill="none"
-                    stroke={stroke}
-                    strokeWidth={edge.accent ? 3.2 : 2.8}
-                    strokeDasharray={edge.dashed ? '7 5' : undefined}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    markerEnd={edge.accent ? 'url(#arrow-accent)' : 'url(#arrow)'}
-                    opacity={0.95}
-                  />
-                  <EdgeLabel x={lx} y={ly} label={edge.label} accent={edge.accent} />
-                </g>
+                <MapEdgePath
+                  key={edge.id}
+                  edge={edge}
+                  pts={pts}
+                  selected={selectedEdgeId === edge.id}
+                  dimmed={!!selectedEdgeId && selectedEdgeId !== edge.id}
+                  hovered={hoveredEdgeId === edge.id}
+                  onSelect={selectEdge}
+                  onHover={setHoveredEdgeId}
+                />
               );
             })}
 
-            {NODES.map((node) => (
-              <NodeBox
-                key={node.id}
-                node={node}
-                selected={selectedId === node.id}
-                onSelect={setSelectedId}
-              />
-            ))}
+            {NODES.map((node) => {
+              const nodeSelected =
+                selectedId === node.id || (!!edgeEndpoints && edgeEndpoints.has(node.id));
+              // Only dim nodes when an edge is selected (keep the rest readable when browsing nodes).
+              const nodeDimmed = !!selectedEdgeId && !edgeEndpoints?.has(node.id);
+              return (
+                <NodeBox
+                  key={node.id}
+                  node={node}
+                  selected={nodeSelected}
+                  dimmed={nodeDimmed}
+                  onSelect={selectNode}
+                />
+              );
+            })}
 
             <g>
-              <rect x={40} y={812} width={540} height={32} rx={16} fill="#FFFFFF" stroke="#D5DCE8" />
-              <circle cx={60} cy={828} r={4} fill={LINE} />
+              <rect x={36} y={852} width={620} height={32} rx={16} fill="#FFFFFF" stroke="#D5DCE8" />
+              <circle cx={56} cy={868} r={4} fill={LINE} />
               <text
-                x={72}
-                y={832}
+                x={68}
+                y={872}
                 fill={SUITE.muted}
                 fontSize={11}
                 style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
               >
-                Flujo L→R · píldora naranja = escritura · punteada = opcional/legacy
+                Flujo L→R · clic en línea = resaltar · naranja = escritura · punteada = opcional
               </text>
             </g>
           </svg>
         </div>
 
         <div className="border-t border-slate-100 bg-white px-5 py-3.5">
-          {selected ? (
+          {selectedEdge ? (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: theme.muted }}>
+                Conexión seleccionada
+              </p>
+              <p className="mt-1.5 text-base font-bold" style={{ color: SUITE.navy }}>
+                {byId.get(selectedEdge.from)?.label ?? selectedEdge.from}
+                <span className="mx-2 font-normal" style={{ color: theme.muted }}>
+                  →
+                </span>
+                {byId.get(selectedEdge.to)?.label ?? selectedEdge.to}
+              </p>
+              <p className="mt-1 text-sm" style={{ color: theme.muted }}>
+                {selectedEdge.label}
+                {selectedEdge.dashed ? ' · opcional / legacy' : ''}
+                {selectedEdge.accent ? ' · escritura' : ''}
+              </p>
+            </div>
+          ) : selected ? (
             <div className="grid gap-3 sm:grid-cols-[1fr_1.2fr]">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: theme.muted }}>
@@ -1271,7 +1555,7 @@ export function AdminDataMap() {
             </div>
           ) : (
             <p className="text-sm" style={{ color: theme.muted }}>
-              Selecciona un nodo del diagrama.
+              Selecciona un nodo o una conexión del diagrama.
             </p>
           )}
         </div>

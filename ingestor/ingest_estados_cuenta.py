@@ -88,12 +88,31 @@ VENDOR_RULES: list[tuple[tuple[str, ...], str, str | None, float]] = [
     (("engie", "gas ", "tractebel"), "Gas", "Servicios", 0.9),
     (("cfe", "luz ", "energia electrica"), "Luz", "Servicios", 0.9),
     (("contador", "joseantonio mendoza", "mendoza pesquera"), "Contador", "Servicios", 0.9),
-    (("alarma", "sats", "soluciones de alta"), "Alarma", "Servicios", 0.9),
+    (("alarma", "soluciones de alta"), "Alarma", "Servicios", 0.9),
     (("diseño", "diseno", "publicidad", "redes", "lorena rodriguez"), "Diseño y publicidad", "Servicios", 0.8),
     (("auditoria",), "Auditorías", "Servicios", 0.85),
     (("materias primas",), "Materias primas", "Servicios", 0.85),
     (("imss",), "IMSS", None, 0.95),
-    (("impuestos", "sat", "isr", "iva"), "Impuestos", None, 0.85),
+    (
+        (
+            "impuestos",
+            "sat",
+            "isr",
+            "iva",
+            "hacienda",
+            "shcp",
+            "tesoreria",
+            "tesorería",
+            "secretaria de hacienda",
+            "infonavit",
+            "linea de captura",
+            "línea de captura",
+        ),
+        "Impuestos",
+        None,
+        0.85,
+    ),
+    (("infonavit",), "Impuestos", None, 0.9),
     (("nomina", "nómina", "quincena", "administraciones zen-nom", "nomina meseros"), "Nómina", None, 0.9),
     (("renta",), "Renta", None, 0.95),
     (("cristaleria", "cristalería", "equipo"), "Cristalería y Equipo", None, 0.9),
@@ -381,28 +400,68 @@ def resolve_bank_file(folder: Path, year: int, bank: str) -> Path | None:
     return None
 
 
+# Amount may be prefixed with $ (usual) or bare digits.
 PDF_NAME_RE = re.compile(
-    r"^(?P<bank>mifel|bbva)[-_](?P<body>.+?)[-_]?\$(?P<amount>[\d.,]+)\.pdf$",
+    r"^(?P<bank>mifel|bbva)[-_](?P<body>.+?)[-_]?\$?(?P<amount>[\d.,]+)\.pdf$",
+    re.IGNORECASE,
+)
+
+# IMSS / impuestos / instituciones de gobierno (filenames + matching).
+GOV_CONCEPTO_RE = re.compile(
+    r"(imss|infonavit|shcp|hacienda|impuesto|tesorer|secretaria|sat\b|isr|iva|"
+    r"linea\s*de\s*captura|l[ií]nea\s*de\s*captura)",
     re.IGNORECASE,
 )
 
 
-def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
-    m = PDF_NAME_RE.match(path.name)
-    if not m:
-        return None
-    bank = m.group("bank").upper()
-    body = m.group("body")
-    amount_raw = m.group("amount").replace(",", "")
-    try:
-        amount = float(amount_raw)
-    except ValueError:
-        amount = 0.0
+def is_gobierno_text(*parts: str) -> bool:
+    blob = " ".join(p for p in parts if p)
+    return bool(GOV_CONCEPTO_RE.search(blob))
 
-    # Infer month from parent folder e.g. FEBRERO 2026
+
+def concepto_from_body(body: str) -> str:
+    """Middle filename segment without bank/amount → readable Concepto.
+
+    Examples:
+      NominaMeserosSem28(26)  → Nomina Meseros Sem 28
+      ProveedorXYZ-Sem 3      → Proveedor XYZ Sem 3
+      Imss-Ene26              → IMSS Ene 26
+      ImpuestosSAT-IsrEnero26 → Impuestos SAT ISR Enero 26
+    """
+    s = (body or "").strip()
+    if not s:
+        return ""
+    # Drop year hints like (26) / (2026)
+    s = re.sub(r"\(\d{2,4}\)", "", s)
+    s = re.sub(r"[-_]+", " ", s)
+    # Normalize SemN / Sem N
+    s = re.sub(r"(?i)\bsem\s*(\d+)\b", r"Sem \1", s)
+    # CamelCase / digit boundaries
+    s = re.sub(r"(?<=[a-záéíóúñ])(?=[A-ZÁÉÍÓÚÑ])", " ", s)
+    s = re.sub(r"(?<=[A-Za-zÁÉÍÓÚáéíóúñÑ])(?=\d)", " ", s)
+    s = re.sub(r"(?<=\d)(?=[A-Za-zÁÉÍÓÚáéíóúñÑ])", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    # Canonical government / tax labels for search + UI
+    replacements = (
+        (r"(?i)\bimss\b", "IMSS"),
+        (r"(?i)\binfonavit\b", "INFONAVIT"),
+        (r"(?i)\bshcp\b", "SHCP"),
+        (r"(?i)\bsat\b", "SAT"),
+        (r"(?i)\bisr\b", "ISR"),
+        (r"(?i)\biva\b", "IVA"),
+        (r"(?i)\bimpuestos?\b", "Impuestos"),
+        (r"(?i)\btesorer[ií]a\b", "Tesorería"),
+        (r"(?i)\bsecretar[ií]a\s+de\s+hacienda\b", "Secretaría de Hacienda"),
+    )
+    for pat, repl in replacements:
+        s = re.sub(pat, repl, s)
+    return s
+
+
+def _month_year_from_parent(parent: str, year_hint: int | None) -> tuple[int | None, int | None]:
     month = None
     year = year_hint
-    parent = path.parent.name.upper()
+    upper = parent.upper()
     months = {
         "ENERO": 1,
         "FEBRERO": 2,
@@ -418,18 +477,61 @@ def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
         "DICIEMBRE": 12,
     }
     for name, num in months.items():
-        if name in parent:
+        if name in upper:
             month = num
             break
-    ym = re.search(r"(20\d{2})", parent)
+    ym = re.search(r"(20\d{2})", upper)
     if ym:
         year = int(ym.group(1))
+    return month, year
+
+
+def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
+    """Index payment PDFs under COMPROBANTES BANCARIOS.
+
+    Standard: MIFEL|BBVA-<concepto>-$<monto>.pdf
+    Fallback: still index IMSS/impuestos/gobierno PDFs with odd names.
+    """
+    month, year = _month_year_from_parent(path.parent.name, year_hint)
+    m = PDF_NAME_RE.match(path.name)
+    if m:
+        bank = m.group("bank").upper()
+        body = m.group("body")
+        amount_raw = m.group("amount").replace(",", "")
+        try:
+            amount = float(amount_raw)
+        except ValueError:
+            amount = 0.0
+    elif is_gobierno_text(path.name):
+        # Odd government receipt names — keep searchable in the index
+        bank = (
+            "BBVA"
+            if "bbva" in path.name.lower()
+            else "MIFEL"
+            if "mifel" in path.name.lower()
+            else ""
+        )
+        body = path.stem
+        amount_m = re.search(r"\$?\s*([\d.,]+)\s*$", path.stem)
+        try:
+            amount = float(amount_m.group(1).replace(",", "")) if amount_m else 0.0
+        except ValueError:
+            amount = 0.0
+    else:
+        return None
 
     week_m = re.search(r"Sem\s*(\d+)", body, re.IGNORECASE)
     week = int(week_m.group(1)) if week_m else None
 
     vendor = body.split("-")[0].strip() if body else ""
+    concepto = concepto_from_body(body)
     matched_rubro, matched_parent, confidence = match_rubro(body.replace("-", " "))
+    if not matched_rubro and is_gobierno_text(body, path.name):
+        # Prefer IMSS when IMSS appears; otherwise Impuestos for gov institutions
+        if re.search(r"(?i)\bimss\b", f"{body} {path.name}"):
+            matched_rubro, matched_parent, confidence = "IMSS", None, 0.9
+        else:
+            matched_rubro, matched_parent, confidence = "Impuestos", None, 0.85
     iso = f"{year or 2026:04d}-{month or 1:02d}-01"
 
     payload = {
@@ -438,6 +540,7 @@ def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
         "rel_path": str(path),
         "vendor": vendor,
         "body": body,
+        "concepto": concepto,
         "week": week,
         "amount": amount,
         "matched_rubro": matched_rubro,
@@ -445,6 +548,7 @@ def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
         "match_confidence": round(confidence, 3),
         "match_status": "matched" if matched_rubro and confidence >= 0.7 else "unmatched",
         "index_only": True,
+        "gobierno": bool(is_gobierno_text(body, path.name, concepto)),
     }
     return {
         "date": iso,

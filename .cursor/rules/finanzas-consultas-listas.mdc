@@ -1,0 +1,17 @@
+---
+description: UX estándar de listas en Finanzas Consultas
+globs: app/finanzas/**/*.tsx,app/components/{EstadosCuenta,ComprobantesIndex,EstadosCuentaPdfIndex,FacturasIndex}.tsx
+alwaysApply: false
+---
+
+# Finanzas Consultas — UX de listas
+
+Unless the user says otherwise, any list under Finanzas **Consultas** (Comprobantes, Estados de cuenta, Gastos, Ingresos, Facturas, and future similar lists) must follow this pattern:
+
+1. Show **10** items by default
+2. Use **Mostrar más** to reveal remaining items
+3. Filters: **Año / Mes / Día** plus a text **Buscar** field
+4. **Día** is enabled only when a month is selected
+5. Match the existing `FacturasIndex` / `EstadosCuenta` patterns (layout, filter wiring, and pagination behavior)
+
+Do not invent alternate pagination, infinite scroll, or filter layouts unless the user explicitly requests a different UX.

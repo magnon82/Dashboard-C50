@@ -20,6 +20,7 @@ const NAV_ICONS: Record<string, string> = {
   home: '⌂',
   ventas: '◈',
   finanzas: '＄',
+  rrhh: '♟',
   eventos: '◎',
   calidad: '★',
   inventarios: '▣',
@@ -91,7 +92,7 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
             onClick={() => setOpen(false)}
           >
             <span className="w-5 text-center opacity-80">{NAV_ICONS.admin}</span>
-            Admin
+            Master Panel
           </Link>
         )}
       </nav>

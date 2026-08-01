@@ -1,0 +1,12 @@
+---
+description: Recordatorio — Dashboard de Recursos Humanos (shell listo, features pendientes)
+alwaysApply: true
+---
+
+# Pendiente de producto — Recursos Humanos
+
+Existe la **ruta vacía** `/rrhh` (módulo `rrhh` en `APP_MODULES`, permisos en Admin, hub y nav). El shell/placeholder ya está; **las funcionalidades completas de RR.HH. siguen siendo TODO** (nómina, personal, etc.).
+
+Hoja de ruta del suite Cluster Culinario · Carranza 50: Ventas, Finanzas, **RR.HH.**, Eventos, Admin (y Calidad / Inventarios).
+
+Al ampliar el módulo, partir de `app/rrhh/page.tsx` y mantener el id de permisos `rrhh`.

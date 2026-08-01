@@ -2,6 +2,7 @@
 Sincroniza desde Gmail → Supabase (solo ventana reciente):
   1) Infocaja Fin de Día (ventas diarias)
   2) CORTE CARRANZA (cancelaciones y descuentos)
+  3) Facturas CFDI (XML adjuntos / facturacion@carranza50.com.mx) — opcional
 
 Por defecto solo descarga los últimos 3 meses (~90 días).
 Los días obtenidos se hacen upsert en Supabase como datos definitivos
@@ -11,6 +12,7 @@ Uso típico:
   python sync_gmail_diario.py
   python sync_gmail_diario.py --newer-than 90
   python sync_gmail_diario.py --after 2026/05/01
+  python sync_gmail_diario.py --skip-facturas
 
 Requiere ingestor/credentials.json + token.json (OAuth Gmail).
 """
@@ -36,7 +38,7 @@ def run(script: str, extra: list[str]) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Sync Gmail Infocaja + CORTE → Supabase (solo últimos N días / after)"
+        description="Sync Gmail Infocaja + CORTE + Facturas → Supabase"
     )
     parser.add_argument(
         "--after",
@@ -52,6 +54,11 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-infocaja", action="store_true")
     parser.add_argument("--skip-corte", action="store_true")
+    parser.add_argument(
+        "--skip-facturas",
+        action="store_true",
+        help="No sincronizar facturas CFDI (default: sí sincronizar)",
+    )
     args = parser.parse_args()
 
     common: list[str] = []
@@ -72,6 +79,8 @@ def main() -> None:
         codes.append(run("ingest_infocaja_gmail.py", common))
     if not args.skip_corte:
         codes.append(run("ingest_corte_gmail.py", common))
+    if not args.skip_facturas:
+        codes.append(run("ingest_facturas_gmail.py", common))
 
     failed = [c for c in codes if c != 0]
     if failed:

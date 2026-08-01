@@ -18,6 +18,7 @@ const GASTOS_SOURCES = [
   'estado_bbva',
   'estado_pdf_index',
   'estado_cuenta_pdf_index',
+  'factura_cfdi',
 ].join(',');
 
 const CURRENT_YEAR = new Date().getFullYear();

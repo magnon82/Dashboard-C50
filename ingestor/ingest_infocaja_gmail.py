@@ -102,7 +102,9 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Máx. correos a procesar")
     args = parser.parse_args()
 
-    # Ventana por defecto: últimos 3 meses. No re-descarga histórico completo.
+    # Ventana por defecto: últimos 3 meses (sync diario).
+    # Backfill histórico (efectivo/tarjetas en Ventas): --after 2023/01/01
+    # (sin --newer-than). Los correos Infocaja traen Bancarias/Efectivo desde ~2022.
     if args.newer_than is None and not args.after:
         args.newer_than = 90
 

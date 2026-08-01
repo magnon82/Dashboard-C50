@@ -54,7 +54,7 @@ export function ModuleNav({ activeId }: Props) {
               : 'bg-amber-400/90 text-slate-900 hover:bg-amber-300'
           }`}
         >
-          Admin
+          Master Panel
         </Link>
       )}
     </nav>

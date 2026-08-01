@@ -24,6 +24,9 @@ export const ESTADO_SOURCES = [
 export type EstadoBank = 'MIFEL' | 'BBVA' | 'EFECTIVO' | 'CXP';
 export type GastoCanal = 'all' | EstadoBank;
 export type MatchStatus = 'matched' | 'unmatched' | 'overridden';
+/** Clasificación de ingresos (presupuesto_ingreso + ventas efectivo) */
+export type IngresoTipo = 'ventas' | 'entre_cuentas' | 'otro';
+export type IngresoTipoFilter = 'all' | IngresoTipo;
 
 export interface EstadoMovimientoPayload {
   bank?: EstadoBank | string;
@@ -67,6 +70,9 @@ export interface EstadoMovimientoPayload {
   /** presupuesto_ingreso: ventas vs anticipos del TOTAL */
   ventas?: number | null;
   anticipos_entrada?: number | null;
+  /** ventas | entre_cuentas | otro */
+  tipo?: string | null;
+  nota?: string | null;
   source?: string | null;
 }
 
@@ -98,6 +104,8 @@ export interface EstadoMovimiento {
   week_annual: number | null;
   categoria: string | null;
   es_caja_chica: boolean;
+  /** presupuesto_ingreso / flujo_efectivo_mov ventas */
+  ingresoTipo: IngresoTipo | null;
   raw: EstadoMovimientoPayload;
 }
 
@@ -203,6 +211,7 @@ function parseCxpMovimiento(r: FinancialRecord): EstadoMovimiento | null {
     week_annual: d.week_annual != null ? Number(d.week_annual) : null,
     categoria: 'Retornos de efectivo',
     es_caja_chica: false,
+    ingresoTipo: null,
     raw: {
       ...d,
       bank: 'CXP',
@@ -227,6 +236,17 @@ function parseEfectivoMovimiento(r: FinancialRecord): EstadoMovimiento | null {
     d.ingreso ??
     (r.type === 'income' ? Number(r.amount) || null : null);
 
+  const week = d.week != null ? Number(d.week) : null;
+  const isIncome =
+    (abono != null && abono > 0) || r.type === 'income';
+  const ingresoTipo = isIncome ? classifyEfectivoIngresoTipo(d) : null;
+
+  let descripcion = (d.descripcion || d.concepto || r.category || '').trim();
+  if (ingresoTipo === 'ventas') {
+    descripcion =
+      week != null ? `Ventas efectivo · SEM ${week}` : 'Ventas efectivo';
+  }
+
   return {
     id: r.id,
     date: (d.fecha || r.date || '').slice(0, 10),
@@ -236,7 +256,7 @@ function parseEfectivoMovimiento(r: FinancialRecord): EstadoMovimiento | null {
     bank: 'EFECTIVO',
     isEfectivo: true,
     isCxp: false,
-    descripcion: d.descripcion || d.concepto || r.category || '',
+    descripcion,
     razonSocial: null,
     folio: null,
     referencia: d.categoria || r.category || null,
@@ -247,12 +267,52 @@ function parseEfectivoMovimiento(r: FinancialRecord): EstadoMovimiento | null {
     match_confidence: Number(d.match_confidence) || 0,
     match_status: 'unmatched',
     observaciones: d.observaciones || '',
-    week: d.week != null ? Number(d.week) : null,
+    week,
     week_annual: d.week_annual != null ? Number(d.week_annual) : null,
-    categoria: d.categoria || r.category || null,
+    categoria:
+      ingresoTipo === 'ventas'
+        ? 'Ventas'
+        : ingresoTipo === 'otro'
+          ? 'Otros ingresos'
+          : d.categoria || r.category || null,
     es_caja_chica: Boolean(d.es_caja_chica),
-    raw: { ...d, bank: 'EFECTIVO', canal: 'EFECTIVO' },
+    ingresoTipo,
+    raw: {
+      ...d,
+      bank: 'EFECTIVO',
+      canal: 'EFECTIVO',
+      tipo: ingresoTipo || d.tipo || null,
+      concepto: d.concepto || d.descripcion || null,
+    },
   };
+}
+
+/** Ventas en caja: columna Ventas, tipo persistido, o conceptos EFECTIVO SEMANA / ingreso ventas. */
+function classifyEfectivoIngresoTipo(
+  d: EstadoMovimientoPayload
+): IngresoTipo | null {
+  const tipoRaw = String(d.tipo || '').toLowerCase();
+  if (
+    tipoRaw === 'ventas' ||
+    tipoRaw === 'entre_cuentas' ||
+    tipoRaw === 'otro'
+  ) {
+    return tipoRaw;
+  }
+  const col = String(d.columna || '').toLowerCase();
+  const cat = String(d.categoria || '').toLowerCase();
+  if (col === 'ventas' || cat === 'ventas') return 'ventas';
+  if (col === 'otros_ingresos' || cat === 'otros ingresos') return 'otro';
+  const concept = `${d.concepto || ''} ${d.descripcion || ''}`;
+  if (/EFECTIVO\s+SEM(?:ANA)?\b/i.test(concept)) return 'ventas';
+  if (
+    /INGRESO\s+.*VENTAS/i.test(concept) ||
+    /VENTAS\s+(?:EN\s+)?(?:CAJA|EFECTIVO)/i.test(concept) ||
+    /VENTAS\s+CAJA/i.test(concept)
+  ) {
+    return 'ventas';
+  }
+  return null;
 }
 
 /** Ingresos Mifel/BBVA semanales tipados a mano en presupuesto Excel (TOTAL). */
@@ -260,11 +320,7 @@ function parsePresupuestoIngresoMovimiento(
   r: FinancialRecord
 ): EstadoMovimiento | null {
   if (!isPresupuestoIngresoSource(r.source_file)) return null;
-  const d: EstadoMovimientoPayload & {
-    ventas?: number;
-    anticipos_entrada?: number;
-    source?: string;
-  } = parseJson(r.description) || {};
+  const d: EstadoMovimientoPayload = parseJson(r.description) || {};
   const bankRaw = String(d.bank || '').toUpperCase();
   const bank: EstadoBank =
     bankRaw === 'BBVA' ? 'BBVA' : bankRaw === 'MIFEL' ? 'MIFEL' : 'MIFEL';
@@ -275,11 +331,43 @@ function parsePresupuestoIngresoMovimiento(
         ? Math.abs(Number(r.amount))
         : null;
   const week = d.week != null ? Number(d.week) : null;
-  const descripcion =
-    (d.descripcion || d.concepto || r.category || '').trim() ||
-    (week != null
-      ? `Ingresos ${bank} · SEM ${week} (presupuesto)`
-      : `Ingresos ${bank} (presupuesto)`);
+
+  const tipoRaw = String(d.tipo || '').toLowerCase();
+  let ingresoTipo: IngresoTipo | null = null;
+  if (
+    tipoRaw === 'ventas' ||
+    tipoRaw === 'entre_cuentas' ||
+    tipoRaw === 'otro'
+  ) {
+    ingresoTipo = tipoRaw;
+  } else {
+    // Legacy rows (pre-split): infer from amount split when possible
+    const ventas = Number(d.ventas) || 0;
+    const anticipos = Number(d.anticipos_entrada) || 0;
+    if (ventas > 0 && anticipos <= 0) ingresoTipo = 'ventas';
+    else if (anticipos > 0 && ventas <= 0) ingresoTipo = 'otro';
+    else ingresoTipo = null;
+  }
+
+  let descripcion = (d.descripcion || d.concepto || r.category || '').trim();
+  if (!descripcion) {
+    if (ingresoTipo === 'ventas') {
+      descripcion =
+        week != null
+          ? `Ventas ${bank} · SEM ${week}`
+          : `Ventas ${bank}`;
+    } else if (ingresoTipo === 'entre_cuentas') {
+      descripcion =
+        week != null
+          ? `Entre cuentas ${bank} · SEM ${week}`
+          : `Entre cuentas ${bank}`;
+    } else {
+      descripcion =
+        week != null
+          ? `Ingresos ${bank} · SEM ${week} (presupuesto)`
+          : `Ingresos ${bank} (presupuesto)`;
+    }
+  }
 
   return {
     id: r.id,
@@ -302,12 +390,14 @@ function parsePresupuestoIngresoMovimiento(
     match_status: 'unmatched',
     observaciones:
       d.observaciones ||
+      d.nota ||
       'Fuente: presupuesto Excel (TOTAL · ventas/anticipos, llenado manual)',
     week,
     week_annual: d.week_annual != null ? Number(d.week_annual) : null,
     categoria: r.category || `Ingreso ${bank}`,
     es_caja_chica: false,
-    raw: { ...d, bank, canal: bank },
+    ingresoTipo,
+    raw: { ...d, bank, canal: bank, tipo: ingresoTipo || d.tipo },
   };
 }
 
@@ -353,6 +443,7 @@ export function parseEstadoMovimiento(r: FinancialRecord): EstadoMovimiento | nu
     week_annual: null,
     categoria: null,
     es_caja_chica: false,
+    ingresoTipo: null,
     raw: { ...d, bank },
   };
 }
@@ -363,12 +454,16 @@ export function filterEstadoMovimientos(
     bank?: GastoCanal;
     year?: number;
     month?: number;
+    /** Día del mes (1–31); solo aplica si hay fecha parseable */
+    day?: number | 'all';
     week?: number | 'all';
     status?: 'all' | MatchStatus;
     /** Solo egresos (cargos) — útil para revisión de gastos */
     expensesOnly?: boolean;
     /** Solo ingresos (abonos) — efectivo, presupuesto Excel bancos, abonos estado */
     incomeOnly?: boolean;
+    /** Filtro opcional ventas / entre_cuentas / otro (presupuesto + efectivo) */
+    ingresoTipo?: IngresoTipoFilter;
     /** Busca en descripción, folio, referencia, RFC, cheque, categoría */
     query?: string;
   } = {}
@@ -376,6 +471,8 @@ export function filterEstadoMovimientos(
   const bank = opts.bank || 'all';
   const status = opts.status || 'all';
   const week = opts.week ?? 'all';
+  const day = opts.day ?? 'all';
+  const ingresoTipo = opts.ingresoTipo || 'all';
   const q = (opts.query || '').trim().toLowerCase();
   const out: EstadoMovimiento[] = [];
 
@@ -408,10 +505,17 @@ export function filterEstadoMovimientos(
         if (opts.month && mo !== opts.month) continue;
       }
     }
+    if (day !== 'all') {
+      const d = Number(String(m.date || '').slice(8, 10));
+      if (!d || d !== day) continue;
+    }
     if (week !== 'all' && m.week !== week) continue;
     if (status !== 'all' && m.match_status !== status) continue;
     if (opts.expensesOnly && !(m.cargo && m.cargo > 0)) continue;
     if (opts.incomeOnly && !(m.abono && m.abono > 0)) continue;
+    if (ingresoTipo !== 'all') {
+      if (m.ingresoTipo !== ingresoTipo) continue;
+    }
     if (q) {
       const hay = [
         m.descripcion,
@@ -424,6 +528,7 @@ export function filterEstadoMovimientos(
         m.raw.forma_pago,
         m.observaciones,
         m.matched_rubro,
+        m.ingresoTipo,
         m.week != null ? `sem ${m.week}` : '',
         m.week_annual != null ? `semana ${m.week_annual}` : '',
         m.es_caja_chica ? 'caja chica' : '',
@@ -452,6 +557,7 @@ export interface PdfComprobanteHit {
   date: string;
   vendor: string;
   body: string;
+  concepto: string;
 }
 
 function parsePdfIndexRecord(r: FinancialRecord): PdfComprobanteHit | null {
@@ -472,6 +578,8 @@ function parsePdfIndexRecord(r: FinancialRecord): PdfComprobanteHit | null {
   const filename = String(d.filename || '');
   const rel_path = String(d.rel_path || '');
   if (!filename && !rel_path) return null;
+  const body = String(d.body || '');
+  const storedConcepto = String(d.concepto || '').trim();
   return {
     filename,
     rel_path,
@@ -479,7 +587,10 @@ function parsePdfIndexRecord(r: FinancialRecord): PdfComprobanteHit | null {
     amount: Number(d.amount ?? r.amount) || 0,
     date: (r.date || '').slice(0, 10),
     vendor: String(d.vendor || ''),
-    body: String(d.body || ''),
+    body,
+    concepto:
+      storedConcepto ||
+      body.replace(/\(\d{2,4}\)/g, '').replace(/[-_]+/g, ' ').trim(),
   };
 }
 
@@ -513,6 +624,7 @@ export function findPdfForMovimiento(
       date: m.date,
       vendor: '',
       body: '',
+      concepto: '',
     };
   }
   if (!pdfs.length) return null;

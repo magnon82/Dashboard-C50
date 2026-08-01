@@ -7,7 +7,7 @@ import { SUITE } from '@/app/lib/themes';
 export default function ComprobantesPage() {
   return (
     <SuiteShell
-      title="Comprobantes"
+      title="Comprobantes de Pago"
       subtitle="Consulta independiente · PDFs de pagos"
       actions={
         <button

@@ -27,17 +27,20 @@ FIELD_PATTERNS = (
     ("Venta Total", re.compile(r"Venta\s*Total\s*:\s*\$?\s*([\d,]+\.\d{2})", re.I)),
     ("Venta Bruta", re.compile(r"Venta\s*Bruta\s*:\s*\$?\s*([\d,]+\.\d{2})", re.I)),
     ("Descuentos", re.compile(r"(?<!x )\bDescuentos\s*:\s*\$?\s*([\d,]+\.\d{2})", re.I)),
+    # Formato habitual: monto | propina | total (3 cifras). Fallback: solo monto.
     (
         "Bancarias",
         re.compile(
-            r"Bancarias\s*:\s*\$?\s*([\d,]+\.\d{2})\s+\$?\s*([\d,]+\.\d{2})\s+\$?\s*([\d,]+\.\d{2})",
+            r"Bancarias\s*:\s*\$?\s*([\d,]+\.\d{2})"
+            r"(?:\s+\$?\s*([\d,]+\.\d{2})\s+\$?\s*([\d,]+\.\d{2}))?",
             re.I,
         ),
     ),
     (
         "Efectivo",
         re.compile(
-            r"Efectivo\s*:\s*\$?\s*([\d,]+\.\d{2})\s+\$?\s*([\d,]+\.\d{2})\s+\$?\s*([\d,]+\.\d{2})",
+            r"Efectivo\s*:\s*\$?\s*([\d,]+\.\d{2})"
+            r"(?:\s+\$?\s*([\d,]+\.\d{2})\s+\$?\s*([\d,]+\.\d{2}))?",
             re.I,
         ),
     ),
@@ -70,9 +73,11 @@ def parse_infocaja_text(text: str, subject: str | None = None) -> dict:
             continue
         if name in ("Bancarias", "Efectivo"):
             fields[name] = parse_money(match.group(1))
-            tip = parse_money(match.group(2))
-            if name == "Bancarias" and tip > 0:
-                fields["Propina"] = tip
+            tip_raw = match.group(2)
+            if tip_raw is not None:
+                tip = parse_money(tip_raw)
+                if name == "Bancarias" and tip > 0:
+                    fields["Propina"] = tip
         else:
             fields[name] = parse_money(match.group(1))
 
@@ -114,17 +119,23 @@ def to_records(parsed: dict) -> list[dict]:
         ("Descuentos", "Infocaja Descuentos"),
         ("Propina", "Infocaja Propina"),
     ):
-        if key in fields and fields[key] > 0:
-            records.append(
-                {
-                    "date": fecha,
-                    "type": "income" if key != "Descuentos" else "expense",
-                    "category": category,
-                    "amount": fields[key],
-                    "description": f"Infocaja detalle {fecha}",
-                    "source_file": SOURCE_FILE,
-                }
-            )
+        # Guardar mix de pago aunque sea 0 (distingue “día sin efectivo” de “sin dato”).
+        # Descuentos/Propina solo si > 0 para no inflar filas vacías.
+        if key not in fields:
+            continue
+        amount = fields[key]
+        if key in ("Descuentos", "Propina") and amount <= 0:
+            continue
+        records.append(
+            {
+                "date": fecha,
+                "type": "income" if key != "Descuentos" else "expense",
+                "category": category,
+                "amount": amount,
+                "description": f"Infocaja detalle {fecha}",
+                "source_file": SOURCE_FILE,
+            }
+        )
     return records
 
 

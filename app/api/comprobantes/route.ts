@@ -36,6 +36,42 @@ const MONTHS: Record<string, number> = {
 const PDF_NAME_RE =
   /^(mifel|bbva)[-_](.+?)[-_]?\$?([\d.,]+)\.pdf$/i;
 
+/** IMSS / impuestos / instituciones de gobierno (filenames + búsqueda). */
+const GOV_CONCEPTO_RE =
+  /imss|infonavit|shcp|hacienda|impuesto|tesorer|secretaria|\bsat\b|\bisr\b|\biva\b|l[ií]nea\s*de\s*captura/i;
+
+export function isGobiernoText(...parts: string[]): boolean {
+  return GOV_CONCEPTO_RE.test(parts.filter(Boolean).join(' '));
+}
+
+/** Middle filename segment without bank/amount → readable Concepto. */
+export function conceptoFromBody(body: string): string {
+  let s = (body || '').trim();
+  if (!s) return '';
+  s = s.replace(/\(\d{2,4}\)/g, '');
+  s = s.replace(/[-_]+/g, ' ');
+  s = s.replace(/\bsem\s*(\d+)\b/gi, 'Sem $1');
+  s = s.replace(/([a-záéíóúñ])([A-ZÁÉÍÓÚÑ])/g, '$1 $2');
+  s = s.replace(/([A-Za-zÁÉÍÓÚáéíóúñÑ])(\d)/g, '$1 $2');
+  s = s.replace(/(\d)([A-Za-zÁÉÍÓÚáéíóúñÑ])/g, '$1 $2');
+  s = s.replace(/\s+/g, ' ').trim();
+  const replacements: [RegExp, string][] = [
+    [/\bimss\b/gi, 'IMSS'],
+    [/\binfonavit\b/gi, 'INFONAVIT'],
+    [/\bshcp\b/gi, 'SHCP'],
+    [/\bsat\b/gi, 'SAT'],
+    [/\bisr\b/gi, 'ISR'],
+    [/\biva\b/gi, 'IVA'],
+    [/\bimpuestos?\b/gi, 'Impuestos'],
+    [/\btesorer[ií]a\b/gi, 'Tesorería'],
+    [/\bsecretar[ií]a\s+de\s+hacienda\b/gi, 'Secretaría de Hacienda'],
+  ];
+  for (const [pat, repl] of replacements) {
+    s = s.replace(pat, repl);
+  }
+  return s;
+}
+
 export type ComprobanteItem = {
   filename: string;
   path: string;
@@ -48,6 +84,8 @@ export type ComprobanteItem = {
   week: number | null;
   vendor: string;
   body: string;
+  /** Concepto legible del nombre (sin banco ni monto). */
+  concepto: string;
   kind: 'comprobante' | 'estado';
   source: 'index' | 'scan';
 };
@@ -107,9 +145,18 @@ function parsePdfName(
 
   const m = PDF_NAME_RE.exec(filename);
   if (!m) {
-    // Still index estado PDFs / odd names under year/month folders
-    if (kind === 'estado' || filename.toLowerCase().endsWith('.pdf')) {
+    // Still index estado PDFs / odd names / gov receipts under year/month folders
+    if (
+      kind === 'estado' ||
+      isGobiernoText(filename) ||
+      filename.toLowerCase().endsWith('.pdf')
+    ) {
       const month = folderMonth;
+      const fallbackBody = filename.replace(/\.pdf$/i, '');
+      const amtM = fallbackBody.match(/\$?\s*([\d.,]+)\s*$/);
+      const amount = amtM
+        ? Number(String(amtM[1] || '0').replace(/,/g, '')) || 0
+        : 0;
       return {
         filename,
         path: fullPath,
@@ -119,13 +166,14 @@ function parsePdfName(
           : filename.toUpperCase().includes('MIFEL')
             ? 'MIFEL'
             : '',
-        amount: 0,
+        amount,
         date: `${year}-${String(month || 1).padStart(2, '0')}-01`,
         year,
         month,
         week: null,
         vendor: '',
-        body: filename.replace(/\.pdf$/i, ''),
+        body: fallbackBody,
+        concepto: conceptoFromBody(fallbackBody),
         kind,
         source: 'scan',
       };
@@ -151,6 +199,7 @@ function parsePdfName(
     week: weekM ? Number(weekM[1]) : null,
     vendor,
     body,
+    concepto: conceptoFromBody(body),
     kind,
     source: 'scan',
   };
@@ -214,6 +263,8 @@ async function loadFromIndex(): Promise<ComprobanteItem[]> {
       if (!filename && !rel) continue;
       const date = String(row.date || '').slice(0, 10);
       const [y, m] = date.split('-').map(Number);
+      const body = String(d.body || '');
+      const storedConcepto = String(d.concepto || '').trim();
       all.push({
         filename: filename || path.basename(rel),
         path: rel,
@@ -225,7 +276,8 @@ async function loadFromIndex(): Promise<ComprobanteItem[]> {
         month: m || null,
         week: d.week != null ? Number(d.week) : null,
         vendor: String(d.vendor || ''),
-        body: String(d.body || ''),
+        body,
+        concepto: storedConcepto || conceptoFromBody(body),
         kind: inferKind(filename || rel),
         source: 'index',
       });
@@ -268,6 +320,7 @@ function filterItems(
     if (kind !== 'all' && it.kind !== kind) return false;
     if (q) {
       const hay = [
+        it.concepto,
         it.vendor,
         it.body,
         it.filename,

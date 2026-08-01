@@ -74,7 +74,7 @@ export default function HubPage() {
             <Link href="/admin" className="group block">
               <SuiteCard accent className="h-full transition-transform group-hover:-translate-y-0.5">
                 <div className="flex items-start justify-between gap-3">
-                  <h2 className="text-lg font-bold">Administración</h2>
+                  <h2 className="text-lg font-bold">Master Panel</h2>
                   <span
                     className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                     style={{ backgroundColor: SUITE.orangeSoft, color: SUITE.orangeDeep }}

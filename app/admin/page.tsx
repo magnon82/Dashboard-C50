@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { SuiteShell } from '@/app/components/SuiteShell';
+import { AdminAlmacenamientoRecursos } from '@/app/components/AdminAlmacenamientoRecursos';
 import { AdminDataMap } from '@/app/components/AdminDataMap';
 import { AdminPresupuestoAjustes } from '@/app/components/AdminPresupuestoAjustes';
 import { AdminSaldosBancos } from '@/app/components/AdminSaldosBancos';
@@ -277,11 +278,14 @@ export default function AdminPage() {
 
   return (
     <SuiteShell
-      title="Administración"
-      subtitle="Mapa de datos, saldos bancarios, cuentas de solo lectura y ajustes de presupuesto."
+      title="Master Panel"
+      subtitle="Mapa de datos, inventario de recursos, saldos bancarios, cuentas de solo lectura y ajustes de presupuesto."
     >
       {/* 1. Mapa de orígenes (colapsado por defecto) */}
       <AdminDataMap />
+
+      {/* 1b. Inventario de datos (colapsado por defecto) */}
+      <AdminAlmacenamientoRecursos />
 
       {/* 2. Saldos bancarios manuales */}
       <AdminSaldosBancos />

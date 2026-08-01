@@ -22,14 +22,24 @@ import {
   SOURCE_PRESUPUESTO_INGRESO,
   type EstadoMovimiento,
   type GastoCanal,
+  type IngresoTipoFilter,
   type MatchStatus,
 } from '@/app/lib/estados-cuenta';
+import {
+  facturaLabel,
+  facturaPdfHref,
+  facturaXmlHref,
+  findFacturaForMovimiento,
+  listFacturas,
+  type FacturaItem,
+} from '@/app/lib/facturas';
 import { RUBRO_CATALOG, type RubroRow } from '@/app/lib/presupuesto';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import { MESES, type FinancialRecord } from '@/app/lib/ventas-semana';
 
 const theme = getTheme('suite');
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+const ALL_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const PAGE_SIZE = 10;
 
 function money(v: number) {
@@ -56,6 +66,102 @@ function origenLabel(bank: string) {
   if (bank === 'EFECTIVO') return 'Efectivo';
   if (bank === 'CXP') return 'CXP';
   return bank;
+}
+
+function ingresoTipoLabel(tipo: string | null | undefined) {
+  if (tipo === 'ventas') return 'Ventas';
+  if (tipo === 'entre_cuentas') return 'Entre cuentas';
+  if (tipo === 'otro') return 'Otros ingresos';
+  return null;
+}
+
+function ingresoTipoStyle(tipo: string | null | undefined): CSSProperties {
+  if (tipo === 'ventas') {
+    return { backgroundColor: '#E8F5E9', color: '#1B5E20' };
+  }
+  if (tipo === 'entre_cuentas') {
+    return { backgroundColor: SUITE.orangeSoft, color: SUITE.orangeDeep };
+  }
+  if (tipo === 'otro') {
+    return { backgroundColor: '#E2E8F0', color: '#1E3A5F' };
+  }
+  return { backgroundColor: '#F1F5F9', color: '#475569' };
+}
+
+function FacturaRefLink({
+  factura,
+  label,
+  mutedFallback,
+}: {
+  factura: FacturaItem | null;
+  label: string;
+  mutedFallback?: string;
+}) {
+  if (!label || label === '—') {
+    return (
+      <span className="text-slate-400">{mutedFallback || 'sin factura'}</span>
+    );
+  }
+
+  const xmlHref = factura ? facturaXmlHref(factura) : null;
+  const pdfHref = factura ? facturaPdfHref(factura) : null;
+
+  if (!xmlHref && !pdfHref) {
+    // Folio en CXP/estado pero sin CFDI indexado (PDF/XML)
+    return (
+      <span className="text-slate-500" title="Referencia sin XML/PDF indexado">
+        {label}
+        <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          sin XML
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="min-w-0">
+      <span
+        className="font-semibold"
+        style={{ color: SUITE.orangeDeep }}
+        title={factura ? `Factura ${facturaLabel(factura)}` : undefined}
+      >
+        {label}
+      </span>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10px] font-semibold leading-tight">
+        {xmlHref ? (
+          <a
+            href={xmlHref}
+            target="_blank"
+            rel="noreferrer"
+            title="Descargar XML"
+            className="underline-offset-2 hover:underline"
+            style={{ color: SUITE.orangeDeep }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            XML
+          </a>
+        ) : null}
+        {xmlHref && pdfHref ? (
+          <span className="text-slate-300" aria-hidden>
+            ·
+          </span>
+        ) : null}
+        {pdfHref ? (
+          <a
+            href={pdfHref}
+            target="_blank"
+            rel="noreferrer"
+            title="Descargar PDF"
+            className="underline-offset-2 hover:underline"
+            style={{ color: SUITE.orangeDeep }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            PDF
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 interface Props {
@@ -90,8 +196,10 @@ export function EstadosCuenta({
 }: Props) {
   const isIngresos = mode === 'ingresos';
   const [origen, setOrigen] = useState<GastoCanal>('all');
+  const [ingresoTipo, setIngresoTipo] = useState<IngresoTipoFilter>('all');
   const [browseYear, setBrowseYear] = useState(presupuestoYear);
   const [browseMonth, setBrowseMonth] = useState(presupuestoMonth);
+  const [browseDay, setBrowseDay] = useState<number | 'all'>('all');
   const [open, setOpen] = useState(defaultOpen || standalone);
   const [week, setWeek] = useState<number | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -138,32 +246,47 @@ export function EstadosCuenta({
 
   const pdfs = useMemo(() => listPdfComprobantes(records), [records]);
 
+  const facturas = useMemo(() => listFacturas(records), [records]);
+
   const movements = useMemo(
     () =>
       filterEstadoMovimientos(records, {
         bank: bankFilter,
         year: browseYear,
         month: browseMonth,
+        day: browseDay,
         week: showWeekFilter ? week : 'all',
         query,
         expensesOnly: !isIngresos,
         incomeOnly: isIngresos,
+        ingresoTipo: isIngresos ? ingresoTipo : 'all',
       }),
     [
       records,
       bankFilter,
       browseYear,
       browseMonth,
+      browseDay,
       week,
       showWeekFilter,
       query,
       isIngresos,
+      ingresoTipo,
     ]
   );
 
   useEffect(() => {
     setShowAll(false);
-  }, [bankFilter, browseYear, browseMonth, week, query, isIngresos]);
+  }, [
+    bankFilter,
+    browseYear,
+    browseMonth,
+    browseDay,
+    week,
+    query,
+    isIngresos,
+    ingresoTipo,
+  ]);
 
   const visibleMovements = useMemo(
     () => (showAll ? movements : movements.slice(0, PAGE_SIZE)),
@@ -183,6 +306,25 @@ export function EstadosCuenta({
     }
     return { cargos, abonos, cajaChica, n: movements.length };
   }, [movements]);
+
+  /** Propinas de tarjetas (Infocaja) — no son movimientos listados; solo KPI. */
+  const propinasBancarias = useMemo(() => {
+    if (!isIngresos) return 0;
+    let sum = 0;
+    for (const r of records) {
+      if (r.source_file !== 'infocaja') continue;
+      if (r.category !== 'Infocaja Propina') continue;
+      const p = String(r.date || '').slice(0, 10).split('-').map(Number);
+      const y = p[0];
+      const m = p[1];
+      const d = p[2];
+      if (!y || !m) continue;
+      if (y !== browseYear || m !== browseMonth) continue;
+      if (browseDay !== 'all' && d !== browseDay) continue;
+      sum += Math.abs(Number(r.amount) || 0);
+    }
+    return sum;
+  }, [isIngresos, records, browseYear, browseMonth, browseDay]);
 
   async function patch(
     id: string,
@@ -297,6 +439,23 @@ export function EstadosCuenta({
                 </select>
               </label>
             )}
+            {isIngresos && (
+              <label className={filterControlClass}>
+                <span className="text-slate-500">Tipo ingreso</span>
+                <select
+                  className={filterSelectClass}
+                  value={ingresoTipo}
+                  onChange={(e) =>
+                    setIngresoTipo(e.target.value as IngresoTipoFilter)
+                  }
+                >
+                  <option value="all">Todos</option>
+                  <option value="ventas">Ventas</option>
+                  <option value="entre_cuentas">Entre cuentas</option>
+                  <option value="otro">Otros ingresos</option>
+                </select>
+              </label>
+            )}
             <label className={filterControlClass}>
               <span className="text-slate-500">Año</span>
               <select
@@ -321,6 +480,7 @@ export function EstadosCuenta({
                 value={browseMonth}
                 onChange={(e) => {
                   setBrowseMonth(Number(e.target.value));
+                  setBrowseDay('all');
                   setWeek('all');
                 }}
               >
@@ -328,6 +488,24 @@ export function EstadosCuenta({
                   <option key={m} value={m}>
                     {MESES[m - 1]}
                     {monthsWithData.has(m) ? '' : ' · sin datos'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={filterControlClass}>
+              <span className="text-slate-500">Día</span>
+              <select
+                className={filterSelectClass}
+                value={browseDay === 'all' ? 'all' : String(browseDay)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setBrowseDay(v === 'all' ? 'all' : Number(v));
+                }}
+              >
+                <option value="all">Todos</option>
+                {ALL_DAYS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
                   </option>
                 ))}
               </select>
@@ -370,11 +548,19 @@ export function EstadosCuenta({
             </div>
           )}
 
-          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className={`mb-4 grid gap-3 sm:grid-cols-2 ${
+              isIngresos ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
+            }`}
+          >
             {(isIngresos
               ? [
                   { label: 'Movimientos', value: String(totals.n) },
                   { label: 'Total ingresos', value: money(totals.abonos) },
+                  {
+                    label: 'Propinas (Bancarias)',
+                    value: money(propinasBancarias),
+                  },
                   {
                     label: 'Mostrando',
                     value: `${visibleMovements.length} de ${totals.n}`,
@@ -409,6 +595,12 @@ export function EstadosCuenta({
               </div>
             ))}
           </div>
+
+          {isIngresos && (
+            <p className="mb-4 text-xs leading-relaxed text-slate-500">
+              Propinas de tarjetas (bancarias); se cubren con efectivo a meseros.
+            </p>
+          )}
 
           <div
             className="overflow-x-auto rounded-[24px] bg-white"
@@ -466,6 +658,26 @@ export function EstadosCuenta({
                     const busy = savingId === m.id || pending;
                     const rowOpen = expandedId === m.id;
                     const pdf = findPdfForMovimiento(m, pdfs);
+                    const matchedFac = !isIngresos
+                      ? findFacturaForMovimiento(
+                          {
+                            amount: Math.abs(m.cargo || m.amount || 0),
+                            date: m.date,
+                            folio: m.folio,
+                            rfc: m.raw.rfc ? String(m.raw.rfc) : null,
+                            razonSocial: m.razonSocial,
+                            descripcion: m.descripcion,
+                          },
+                          facturas
+                        )
+                      : null;
+                    const refLabel = m.isCxp
+                      ? m.folio
+                        ? `Fac ${m.folio}`
+                        : m.razonSocial || '—'
+                      : m.isEfectivo
+                        ? m.categoria || '—'
+                        : m.folio || m.referencia || '—';
                     return (
                       <Fragment key={m.id}>
                         <tr className="border-t border-slate-100 align-top">
@@ -497,6 +709,15 @@ export function EstadosCuenta({
                           <td className="max-w-[280px] px-3 py-2">
                             <div className="line-clamp-2" title={m.descripcion}>
                               {m.descripcion || '—'}
+                              {isIngresos &&
+                                ingresoTipoLabel(m.ingresoTipo) && (
+                                  <span
+                                    className="ml-1.5 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                                    style={ingresoTipoStyle(m.ingresoTipo)}
+                                  >
+                                    {ingresoTipoLabel(m.ingresoTipo)}
+                                  </span>
+                                )}
                               {!isIngresos && m.es_caja_chica && (
                                 <span
                                   className="ml-1.5 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
@@ -529,14 +750,15 @@ export function EstadosCuenta({
                                 ? money(Math.abs(m.cargo))
                                 : '—'}
                           </td>
-                          <td className="max-w-[140px] truncate px-3 py-2 text-xs text-slate-600">
-                            {m.isCxp
-                              ? m.folio
-                                ? `Fac ${m.folio}`
-                                : m.razonSocial || '—'
-                              : m.isEfectivo
-                                ? m.categoria || '—'
-                                : m.folio || m.referencia || '—'}
+                          <td className="max-w-[140px] px-3 py-2 text-xs text-slate-600">
+                            {!isIngresos && !m.isEfectivo ? (
+                              <FacturaRefLink
+                                factura={matchedFac}
+                                label={refLabel}
+                              />
+                            ) : (
+                              <span className="truncate">{refLabel}</span>
+                            )}
                           </td>
                           <td className="px-3 py-2">
                             <button
@@ -561,7 +783,7 @@ export function EstadosCuenta({
                                       Concepto
                                     </p>
                                     <p style={{ color: SUITE.navy }}>
-                                      {m.descripcion || '—'}
+                                      {m.raw.concepto || m.descripcion || '—'}
                                     </p>
                                   </div>
                                   <div>
@@ -577,11 +799,15 @@ export function EstadosCuenta({
                                       Tipo
                                     </p>
                                     <p style={{ color: SUITE.navy }}>
-                                      {m.cargo
-                                        ? 'Egreso'
-                                        : m.abono
-                                          ? 'Ingreso'
-                                          : '—'}
+                                      {m.ingresoTipo === 'ventas'
+                                        ? 'Ventas efectivo (caja · mismo tipo que TPV/MIFEL)'
+                                        : m.ingresoTipo === 'otro'
+                                          ? 'Otros ingresos (flujo efectivo)'
+                                          : m.cargo
+                                            ? 'Egreso'
+                                            : m.abono
+                                              ? 'Ingreso'
+                                              : '—'}
                                       {m.es_caja_chica
                                         ? ' · Caja chica (presupuesto efectivo)'
                                         : ''}
@@ -636,7 +862,10 @@ export function EstadosCuenta({
                                       No. de factura
                                     </p>
                                     <p style={{ color: SUITE.navy }}>
-                                      {m.folio || '—'}
+                                      <FacturaRefLink
+                                        factura={matchedFac}
+                                        label={m.folio || '—'}
+                                      />
                                     </p>
                                   </div>
                                   <div>
@@ -714,10 +943,17 @@ export function EstadosCuenta({
                                       Folio / referencia
                                     </p>
                                     <p style={{ color: SUITE.navy }}>
-                                      {m.folio || '—'}
-                                      {m.referencia
-                                        ? ` · ${m.referencia}`
-                                        : ''}
+                                      <FacturaRefLink
+                                        factura={matchedFac}
+                                        label={
+                                          [
+                                            m.folio || null,
+                                            m.referencia || null,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(' · ') || '—'
+                                        }
+                                      />
                                     </p>
                                   </div>
                                   {!isIngresos && (
@@ -853,8 +1089,20 @@ export function EstadosCuenta({
                                       <p style={{ color: SUITE.navy }}>
                                         {m.source_file ===
                                         SOURCE_PRESUPUESTO_INGRESO
-                                          ? 'Ingreso semanal (presupuesto Excel)'
-                                          : 'Abono bancario (estado de cuenta)'}
+                                          ? m.ingresoTipo === 'ventas'
+                                            ? 'Ventas (depósito real · presupuesto Excel)'
+                                            : m.ingresoTipo === 'entre_cuentas'
+                                              ? 'Entre cuentas (transferencia MIFEL↔BBVA)'
+                                              : m.ingresoTipo === 'otro'
+                                                ? 'Otros ingresos (presupuesto Excel)'
+                                                : 'Ingreso semanal (presupuesto Excel)'
+                                          : m.isEfectivo
+                                            ? m.ingresoTipo === 'ventas'
+                                              ? 'Ventas efectivo (caja · flujo)'
+                                              : m.ingresoTipo === 'otro'
+                                                ? 'Otros ingresos (flujo efectivo)'
+                                                : 'Ingreso efectivo (flujo)'
+                                            : 'Abono bancario (estado de cuenta)'}
                                       </p>
                                     </div>
                                   )}

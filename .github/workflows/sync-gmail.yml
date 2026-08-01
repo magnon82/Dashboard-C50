@@ -41,4 +41,5 @@ jobs:
           GOOGLE_OAUTH_TOKEN_JSON: ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}
           CI: "true"
           PYTHONUTF8: "1"
-        run: python sync_gmail_diario.py --newer-than 7
+        # Facturas CFDI se sincronizan en local (adjuntos a disco); no romper Infocaja en CI.
+        run: python sync_gmail_diario.py --newer-than 7 --skip-facturas

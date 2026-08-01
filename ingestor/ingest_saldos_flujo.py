@@ -62,6 +62,15 @@ AMOUNT_COLUMNS = (
 
 RE_CAJA_CHICA = re.compile(r"CAJA\s*CHICA", re.IGNORECASE)
 
+# Ventas en efectivo (caja / depósito semanal) — mismo tipo que Ventas MIFEL
+RE_VENTAS_EFECTIVO = re.compile(
+    r"EFECTIVO\s+SEM(?:ANA)?\b"
+    r"|INGRESO\s+.*VENTAS"
+    r"|VENTAS\s+(?:EN\s+)?(?:CAJA|EFECTIVO)"
+    r"|VENTAS\s+CAJA",
+    re.IGNORECASE,
+)
+
 # Semana anual tipo Acumulado / Concepto: SEMANA #N, SEM #N, SEMANA N, SEM N
 RE_ANNUAL_WEEK = re.compile(
     r"(?<![A-ZÁÉÍÓÚ])SEM(?:ANA)?\s*#?\s*(\d+)\b",
@@ -425,6 +434,15 @@ def annual_week_num_from_concepto(
     return week_num
 
 
+def is_ventas_efectivo(concepto: str, col_key: str, tipo: str) -> bool:
+    """Ingresos de ventas en caja: columna Ventas o conceptos tipo EFECTIVO SEMANA."""
+    if tipo != "income":
+        return False
+    if col_key == "ventas":
+        return True
+    return bool(RE_VENTAS_EFECTIVO.search(concepto or ""))
+
+
 def extract_movimientos(path: Path, year: int) -> list[dict]:
     """
     Movimientos línea a línea del flujo de efectivo.
@@ -470,12 +488,27 @@ def extract_movimientos(path: Path, year: int) -> list[dict]:
                 continue
             ingreso = amount if tipo == "income" else None
             egreso = amount if tipo == "expense" else None
+            es_ventas = is_ventas_efectivo(concepto, col_key, tipo)
+            if es_ventas:
+                descripcion = (
+                    f"Ventas efectivo · SEM {w}" if w is not None else "Ventas efectivo"
+                )
+                category = "Ventas"
+                ingreso_tipo = "ventas"
+            elif col_key == "otros_ingresos":
+                descripcion = concepto
+                category = categoria
+                ingreso_tipo = "otro"
+            else:
+                descripcion = concepto
+                category = categoria
+                ingreso_tipo = None
             payload = {
                 "canal": "EFECTIVO",
                 "fecha": fecha.isoformat(),
                 "concepto": concepto,
-                "descripcion": concepto,
-                "categoria": categoria,
+                "descripcion": descripcion,
+                "categoria": category,
                 "columna": col_key,
                 "ingreso": ingreso,
                 "egreso": egreso,
@@ -489,12 +522,13 @@ def extract_movimientos(path: Path, year: int) -> list[dict]:
                 "es_caja_chica": col_key == "caja_chica" or es_caja_concepto,
                 "saldo_efectivo": saldo_efectivo,
                 "source_path": DRIVE_FILE_NAME,
+                "tipo": ingreso_tipo,
             }
             records.append(
                 {
                     "date": fecha.isoformat(),
                     "type": tipo,
-                    "category": categoria,
+                    "category": category,
                     "amount": amount,
                     "description": json.dumps(payload, ensure_ascii=False),
                     "source_file": SOURCE_MOV,

@@ -2,6 +2,7 @@ export type ModuleId =
   | 'hub'
   | 'ventas'
   | 'finanzas'
+  | 'rrhh'
   | 'eventos'
   | 'calidad'
   | 'inventarios';
@@ -31,6 +32,14 @@ export const APP_MODULES: AppModule[] = [
     short: 'Finanzas',
     description: 'Saldos, flujo de efectivo, bancos y visión financiera consolidada',
     status: 'activo',
+  },
+  {
+    id: 'rrhh',
+    href: '/rrhh',
+    label: 'Recursos Humanos',
+    short: 'RR.HH.',
+    description: 'Personal, nómina y gestión de equipo · próximamente',
+    status: 'próximo',
   },
   {
     id: 'eventos',

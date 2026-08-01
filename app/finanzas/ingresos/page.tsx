@@ -12,6 +12,8 @@ const INGRESOS_SOURCES = [
   'estado_mifel',
   'estado_bbva',
   'presupuesto_ingreso',
+  // Infocaja Propina (tips bancarias; KPI only, not listed as movements)
+  'infocaja',
 ].join(',');
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -67,7 +69,7 @@ export default function IngresosConsultaPage() {
   return (
     <SuiteShell
       title="Ingresos"
-      subtitle="Consulta · efectivo, presupuesto bancario (Mifel/BBVA) y abonos de estado"
+      subtitle="Consulta · efectivo, presupuesto bancario (Mifel/BBVA), abonos de estado y propinas bancarias"
       actions={
         <button
           type="button"

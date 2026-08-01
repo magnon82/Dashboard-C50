@@ -56,8 +56,6 @@ export default function Dashboard() {
   const [month, setMonth] = useState<number | null>(null);
   const [compareYears, setCompareYears] = useState<number[]>([2026, 2025]);
   const [dataError, setDataError] = useState<string | null>(null);
-  const [mixMonth, setMixMonth] = useState<number | null>(new Date().getMonth() + 1);
-  const MIX_YEAR = 2026;
   const [corteFilter, setCorteFilter] = useState<'todos' | 'descuentos' | 'cancelaciones'>(
     'todos'
   );
@@ -256,7 +254,8 @@ export default function Dashboard() {
     [monthlyAvgByYear, compareYears]
   );
 
-  const periodoLabel = month === null ? `${year}` : `${MESES[month - 1]} ${year}`;
+  const periodoLabel =
+    month === null ? `${year} · acumulado` : `${MESES[month - 1]} ${year}`;
   const hoy = new Date().toLocaleDateString('es-MX', {
     day: 'numeric',
     month: 'long',
@@ -266,8 +265,8 @@ export default function Dashboard() {
   const weekToDate = useMemo(() => buildWeekToDateSales(records), [records]);
 
   const paymentMix = useMemo(
-    () => buildPaymentMix(records, MIX_YEAR, mixMonth),
-    [records, mixMonth]
+    () => buildPaymentMix(records, year, month),
+    [records, year, month]
   );
 
   /** Cancelaciones/descuentos: mes del año en curso (default mes actual) */
@@ -289,9 +288,6 @@ export default function Dashboard() {
   }, [records]);
 
   const corteMesLabel = `${MESES[corteMonth - 1]} ${CORTE_YEAR}`;
-
-  const mixPeriodoLabel =
-    mixMonth === null ? `${MIX_YEAR}` : `${MESES[mixMonth - 1]} ${MIX_YEAR}`;
 
   const corteItemsFiltrados = useMemo(() => {
     const items = corteMesActual.days.flatMap((d) => d.items);
@@ -370,7 +366,7 @@ export default function Dashboard() {
                         setMonth(e.target.value === '' ? null : Number(e.target.value))
                       }
                     >
-                      <option value="">Todo el año</option>
+                      <option value="">Año (acumulado)</option>
                       {MESES.map((m, i) => (
                         <option key={m} value={i + 1}>
                           {m}
@@ -383,15 +379,12 @@ export default function Dashboard() {
               <Metric className="mt-2 text-3xl font-bold text-slate-900 md:text-4xl">
                 {money(ventasAcumuladas)}
               </Metric>
-              <div className="mt-3 flex flex-wrap items-center gap-4">
-                <Text className="text-sm text-slate-500">
-                  <span className="font-medium text-slate-700">WI</span> {money(ventaWiPeriodo)}
-                  <span className="mx-2 text-slate-300">|</span>
-                  <span className="font-medium text-slate-700">Eventos</span>{' '}
-                  {money(eventosPeriodo)}
-                </Text>
-                <WiEventosPie wi={ventaWiPeriodo} eventos={eventosPeriodo} />
-              </div>
+              <Text className="mt-3 text-sm text-slate-500">
+                <span className="font-medium text-slate-700">WI</span> {money(ventaWiPeriodo)}
+                <span className="mx-2 text-slate-300">|</span>
+                <span className="font-medium text-slate-700">Eventos</span>{' '}
+                {money(eventosPeriodo)}
+              </Text>
             </div>
             <div
               className="rounded-[20px] px-5 py-4 text-white"
@@ -407,6 +400,26 @@ export default function Dashboard() {
                 {semanasTranscurridas} semana{semanasTranscurridas !== 1 ? 's' : ''} transcurridas
                 {month !== null ? ` · ${MESES[month - 1]}` : ''}
               </Text>
+            </div>
+          </div>
+          <div className="mt-5 grid grid-cols-1 gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2 sm:gap-8">
+            <div>
+              <p
+                className="mb-2 text-[10px] font-bold uppercase tracking-wide"
+                style={{ color: SUITE.navy }}
+              >
+                WI / Eventos
+              </p>
+              <WiEventosPie wi={ventaWiPeriodo} eventos={eventosPeriodo} />
+            </div>
+            <div>
+              <p
+                className="mb-2 text-[10px] font-bold uppercase tracking-wide"
+                style={{ color: SUITE.navy }}
+              >
+                Efectivo / Tarjetas · {periodoLabel}
+              </p>
+              <PaymentMixPie mix={paymentMix} periodoLabel={periodoLabel} />
             </div>
           </div>
         </Card>
@@ -837,30 +850,6 @@ export default function Dashboard() {
           ) : (
             <p className="py-16 text-center text-slate-400">Sin datos mensuales</p>
           )}
-        </Card>
-
-        {/* Mix de cobro: efectivo / bancos — debajo de promedio semanal */}
-        <Card className={`mb-8 ${cardClass}`} style={cardStyle}>
-          <SectionHeader title={`Pagos Efectivo vs bancos · ${mixPeriodoLabel}`}>
-            <label className={filterControlClass}>
-              <span className="text-slate-500">Mes</span>
-              <select
-                className={filterSelectClass}
-                value={mixMonth ?? ''}
-                onChange={(e) =>
-                  setMixMonth(e.target.value === '' ? null : Number(e.target.value))
-                }
-              >
-                <option value="">Todo el año</option>
-                {MESES.map((m, i) => (
-                  <option key={m} value={i + 1}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </SectionHeader>
-          <PaymentMixPie mix={paymentMix} periodoLabel={mixPeriodoLabel} />
         </Card>
 
         {/* Detalle semanal — antes del comparativo (colapsado por defecto) */}

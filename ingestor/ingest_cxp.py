@@ -193,6 +193,26 @@ def extract_summary_saldos(values: list[list], year: int) -> list[dict]:
     return list(by_cat.values())
 
 
+def normalize_factura_ref(value) -> str | None:
+    """Normaliza NO. DE FACTURA (Sheets float 791.0 → '791', multi 'a / b')."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        n = float(value)
+        if n != n:  # NaN
+            return None
+        if n == int(n):
+            return str(int(n))
+        return str(value).strip() or None
+    s = str(value).strip()
+    if not s or s in ("-", "—", "#REF!", "#DIV/0!"):
+        return None
+    # "791.0" from Sheets JSON / CSV exports
+    if re.fullmatch(r"\d+\.0+", s):
+        return str(int(float(s)))
+    return s
+
+
 def extract_payments(values: list[list], sheet_title: str) -> list[dict]:
     """Solo columnas A–M (índices 0–12). Ignora bloque de notas/resumen (N+)."""
     records: list[dict] = []
@@ -217,7 +237,7 @@ def extract_payments(values: list[list], sheet_title: str) -> list[dict]:
         semana = parse_semana(cells[4] if len(cells) > 4 else None)
         iva = parse_money_mx(cells[5] if len(cells) > 5 else None)
         forma = str(cells[9] or "").strip()
-        factura = str(cells[1] or "").strip()
+        factura = normalize_factura_ref(cells[1] if len(cells) > 1 else None)
 
         pagada = parse_money_mx(cells[7])
         if pagada is None:

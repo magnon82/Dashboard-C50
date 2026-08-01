@@ -212,6 +212,7 @@ export default function FinanzasPage() {
         month={month}
       />
 
+      {/* Listas de consulta: 10 + Mostrar más + año/mes/día + buscar (salvo indicación contraria). */}
       <section className="mb-8">
         <p
           className="mb-3 text-xs font-bold uppercase tracking-[0.16em]"
@@ -234,7 +235,7 @@ export default function FinanzasPage() {
               )
             }
           >
-            Consultar comprobantes
+            Comprobantes de Pago
           </button>
           <button
             type="button"
@@ -250,7 +251,20 @@ export default function FinanzasPage() {
               )
             }
           >
-            Consultar estados de cuenta
+            Estados de Cuenta
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-11 items-center gap-2 rounded-2xl px-5 text-sm font-semibold text-white transition-opacity hover:opacity-95"
+            style={{
+              backgroundColor: '#1D4ED8',
+              boxShadow: SUITE.shadow,
+            }}
+            onClick={() =>
+              openConsultaWindow('/finanzas/ingresos', 'finanzas-ingresos')
+            }
+          >
+            Ingresos
           </button>
           <button
             type="button"
@@ -269,14 +283,14 @@ export default function FinanzasPage() {
             type="button"
             className="inline-flex h-11 items-center gap-2 rounded-2xl px-5 text-sm font-semibold text-white transition-opacity hover:opacity-95"
             style={{
-              backgroundColor: '#1D4ED8',
+              backgroundColor: '#7C2D12',
               boxShadow: SUITE.shadow,
             }}
             onClick={() =>
-              openConsultaWindow('/finanzas/ingresos', 'finanzas-ingresos')
+              openConsultaWindow('/finanzas/facturas', 'finanzas-facturas')
             }
           >
-            Ingresos
+            Facturas
           </button>
         </div>
         <p className="mt-2 text-xs" style={{ color: theme.muted }}>

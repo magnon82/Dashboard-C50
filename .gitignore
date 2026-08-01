@@ -52,4 +52,5 @@ __pycache__/
 *.pyc
 ingestor/venv/
 ingestor/attachments/
+ingestor/data/
 reportes/

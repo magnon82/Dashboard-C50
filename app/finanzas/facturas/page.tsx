@@ -1,14 +1,14 @@
 'use client';
 
 import { SuiteShell } from '@/app/components/SuiteShell';
-import { EstadosCuentaPdfIndex } from '@/app/components/EstadosCuentaPdfIndex';
+import { FacturasIndex } from '@/app/components/FacturasIndex';
 import { SUITE } from '@/app/lib/themes';
 
-export default function EstadosCuentaConsultaPage() {
+export default function FacturasPage() {
   return (
     <SuiteShell
-      title="Estados de Cuenta"
-      subtitle="Consulta independiente · PDFs bancarios"
+      title="Facturas"
+      subtitle="Consulta · índice CFDI (Gmail) y faltantes"
       actions={
         <button
           type="button"
@@ -20,7 +20,7 @@ export default function EstadosCuentaConsultaPage() {
         </button>
       }
     >
-      <EstadosCuentaPdfIndex defaultOpen standalone />
+      <FacturasIndex />
     </SuiteShell>
   );
 }

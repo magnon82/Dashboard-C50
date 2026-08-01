@@ -12,6 +12,7 @@ import { MESES } from '@/app/lib/ventas-semana';
 const theme = getTheme('suite');
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 const ALL_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+const PAGE_SIZE = 10;
 
 type EstadoPdfItem = {
   filename: string;
@@ -54,6 +55,7 @@ export function EstadosCuentaPdfIndex({
   const [copied, setCopied] = useState<string | null>(null);
   const [preferScan, setPreferScan] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,11 +97,21 @@ export function EstadosCuentaPdfIndex({
     return () => window.clearTimeout(t);
   }, [load, query, open]);
 
+  useEffect(() => {
+    setShowAll(false);
+  }, [year, month, day, bank, query, preferScan]);
+
   const years = useMemo(() => [2026, 2025, 2024, 2023, 2022], []);
+
+  const visibleItems = useMemo(
+    () => (showAll ? items : items.slice(0, PAGE_SIZE)),
+    [items, showAll]
+  );
+  const hasMore = items.length > PAGE_SIZE && !showAll;
 
   const grouped = useMemo(() => {
     const map = new Map<string, EstadoPdfItem[]>();
-    for (const it of items) {
+    for (const it of visibleItems) {
       const mo = it.month || 0;
       const key = `${it.year}-${String(mo).padStart(2, '0')}|${it.bank || '—'}`;
       const list = map.get(key) || [];
@@ -119,7 +131,7 @@ export function EstadosCuentaPdfIndex({
       if (ymA !== ymB) return ymB.localeCompare(ymA);
       return a[0].localeCompare(b[0], 'es');
     });
-  }, [items]);
+  }, [visibleItems]);
 
   async function copyPath(p: string) {
     try {
@@ -352,6 +364,19 @@ export function EstadosCuentaPdfIndex({
               </div>
             )}
           </div>
+
+          {hasMore && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                className="inline-flex h-10 items-center rounded-2xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                style={{ boxShadow: SUITE.shadow }}
+                onClick={() => setShowAll(true)}
+              >
+                Mostrar más ({items.length - PAGE_SIZE} restantes)
+              </button>
+            </div>
+          )}
         </>
   );
 

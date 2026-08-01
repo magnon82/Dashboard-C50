@@ -51,9 +51,66 @@ python ingest_presupuesto.py --file "...JULIO 2026.xlsx" --dry-run
 ```
 
 **Ingresos bancarios en `/finanzas/ingresos`:** no vienen solo del estado de cuenta.
-Se tipan a mano en el Excel de presupuesto (hoja **TOTAL**, panel derecho Mifel/BBVA: ventas SEM + anticipos entradas) y se publican como `source_file=presupuesto_ingreso` (una fila por banco × SEM con monto > 0). Las hojas SEM no tienen líneas de ingreso bancario; solo pagos/gastos.
+Se tipan a mano en el Excel de presupuesto (hoja **TOTAL**, panel derecho Mifel/BBVA):
+- filas **SEM n** → `tipo: ventas` (depósitos reales, p. ej. «Ventas MIFEL · SEM 3»)
+- filas **ANTICIPOS SEM n** con comentario/nota Excel que contiene «Entre cuentas» → `tipo: entre_cuentas` (solo transferencias MIFEL↔BBVA)
+- otros anticipos → `tipo: otro`
+
+Fuente: `source_file=presupuesto_ingreso` (una fila por componente con monto > 0). Las hojas SEM no tienen líneas de ingreso bancario; solo pagos/gastos.
+
+**Ventas en efectivo** (`flujo_efectivo_mov`): conceptos `EFECTIVO SEMANA #N` / columna Ventas → `tipo: ventas`, etiqueta «Ventas efectivo · SEM n» (mismo filtro **Tipo ingreso → Ventas** que MIFEL).
 
 Tras editar el Excel, vuelve a correr `ingest_presupuesto.py` para ese mes.
+Para refrescar etiquetas de efectivo: `python ingest_saldos_flujo.py --year 2026`.
+
+## CLI local — Infocaja (Gmail → efectivo / tarjetas)
+
+Mismo OAuth (`credentials.json` + `token.json`). Cada correo «Fin de Día»
+guarda `Venta Total` + `Infocaja Efectivo` + `Infocaja Bancarias` (+ propina)
+en `source_file=infocaja`.
+
+La gráfica **Efectivo/Tarjetas** en `/ventas` solo usa esas categorías Infocaja
+(no el Acumulado `ventas_semana`, que sí alimenta WI/Eventos en 2021–2025).
+
+```bash
+# Sync diario (default: últimos 90 días)
+python ingest_infocaja_gmail.py
+python sync_gmail_diario.py --newer-than 7
+
+# Backfill histórico (Gmail tiene reportes ~2022+ con efectivo/bancarias)
+python ingest_infocaja_gmail.py --after 2023/01/01
+python ingest_infocaja_gmail.py --after 2022/01/01   # opcional, años previos
+```
+
+Sin el backfill, años como 2023 muestran WI/Eventos (Acumulado) pero
+«Sin datos de efectivo/tarjetas».
+
+## CLI local — facturas CFDI (Gmail)
+
+Mismo OAuth que Infocaja (`credentials.json` + `token.json`). Indexa PDF/XML
+hacia `source_file=factura_cfdi` y guarda adjuntos en `FACTURAS_PATH`
+(default `I:\Mi unidad\FACTURAS CFDI`).
+
+```bash
+# Solo facturas (últimos 90 días)
+python ingest_facturas_gmail.py
+python ingest_facturas_gmail.py --newer-than 30 --dry-run
+
+# Junto con Infocaja + CORTE
+python sync_gmail_diario.py --newer-than 7
+python sync_gmail_diario.py --skip-facturas   # no tocar facturas
+```
+
+UI: Finanzas → **Facturas** (`/finanzas/facturas`) — lista + descarga + faltantes.
+
+## CLI local — comprobantes (índice PDF)
+
+```bash
+python ingest_estados_cuenta.py --index-pdfs --pdf-only
+```
+
+Tras reindexar, la columna **Concepto** sale del nombre del archivo
+(`mifel-NominaMeserosSem28(26)-$4,410.56.pdf` → `Nomina Meseros Sem 28`).
 
 ## Tareas Windows locales
 

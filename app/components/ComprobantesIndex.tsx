@@ -12,6 +12,7 @@ import { MESES } from '@/app/lib/ventas-semana';
 const theme = getTheme('suite');
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 const ALL_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+const PAGE_SIZE = 10;
 
 type ComprobanteItem = {
   filename: string;
@@ -25,6 +26,7 @@ type ComprobanteItem = {
   week: number | null;
   vendor: string;
   body: string;
+  concepto: string;
   kind: 'comprobante' | 'estado';
   source: 'index' | 'scan';
 };
@@ -63,6 +65,7 @@ export function ComprobantesIndex({
   const [copied, setCopied] = useState<string | null>(null);
   const [preferScan, setPreferScan] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,11 +108,21 @@ export function ComprobantesIndex({
     return () => window.clearTimeout(t);
   }, [load, query, open]);
 
+  useEffect(() => {
+    setShowAll(false);
+  }, [year, month, day, bank, query, preferScan]);
+
   const years = useMemo(() => [2026, 2025, 2024, 2023], []);
+
+  const visibleItems = useMemo(
+    () => (showAll ? items : items.slice(0, PAGE_SIZE)),
+    [items, showAll]
+  );
+  const hasMore = items.length > PAGE_SIZE && !showAll;
 
   const grouped = useMemo(() => {
     const map = new Map<string, ComprobanteItem[]>();
-    for (const it of items) {
+    for (const it of visibleItems) {
       const mo = it.month || 0;
       const key = `${it.year}-${String(mo).padStart(2, '0')}|${it.bank || '—'}`;
       const list = map.get(key) || [];
@@ -123,7 +136,7 @@ export function ComprobantesIndex({
       });
     }
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [items]);
+  }, [visibleItems]);
 
   async function copyPath(p: string) {
     try {
@@ -214,7 +227,7 @@ export function ComprobantesIndex({
               <input
                 className={filterSelectClass}
                 style={{ minWidth: 180 }}
-                placeholder="Proveedor o fecha…"
+                placeholder="Concepto, proveedor, IMSS, SAT…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -230,7 +243,8 @@ export function ComprobantesIndex({
           </div>
 
           <p className="mb-3 text-sm" style={{ color: theme.muted }}>
-            PDFs de pagos (comprobantes), no estados de cuenta. Fuente:{' '}
+            PDFs de pagos (comprobantes), no estados de cuenta. Incluye IMSS,
+            impuestos SAT/SHCP y Secretaría de Hacienda. Fuente:{' '}
             {source === 'scan'
               ? 'escaneo local de COMPROBANTES BANCARIOS'
               : source === 'index'
@@ -282,6 +296,9 @@ export function ComprobantesIndex({
                         <thead>
                           <tr style={{ color: theme.muted }}>
                             <th className="pb-1.5 text-center font-semibold">
+                              Concepto
+                            </th>
+                            <th className="pb-1.5 text-center font-semibold">
                               Proveedor
                             </th>
                             <th className="pb-1.5 text-center font-semibold">
@@ -305,17 +322,20 @@ export function ComprobantesIndex({
                               className="border-t border-slate-50 align-top"
                             >
                               <td
-                                className="max-w-[240px] py-1.5 pr-3"
+                                className="max-w-[260px] py-1.5 pr-3"
                                 style={{ color: SUITE.navy }}
                               >
                                 <span className="font-medium">
-                                  {it.vendor || '—'}
+                                  {it.concepto || it.body || '—'}
                                 </span>
                                 {it.week != null && (
                                   <span className="mt-0.5 block text-[11px] text-slate-500">
                                     Sem {it.week}
                                   </span>
                                 )}
+                              </td>
+                              <td className="max-w-[180px] py-1.5 pr-3 text-slate-700">
+                                {it.vendor || '—'}
                               </td>
                               <td className="whitespace-nowrap py-1.5 tabular-nums text-slate-600">
                                 {it.date}
@@ -363,6 +383,19 @@ export function ComprobantesIndex({
               </div>
             )}
           </div>
+
+          {hasMore && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                className="inline-flex h-10 items-center rounded-2xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                style={{ boxShadow: SUITE.shadow }}
+                onClick={() => setShowAll(true)}
+              >
+                Mostrar más ({items.length - PAGE_SIZE} restantes)
+              </button>
+            </div>
+          )}
         </>
   );
 
@@ -375,7 +408,7 @@ export function ComprobantesIndex({
               className="m-0 text-xl font-semibold leading-tight"
               style={{ color: theme.title }}
             >
-              Índice de comprobantes (pagos)
+              Comprobantes de Pago
             </h2>
           }
         >

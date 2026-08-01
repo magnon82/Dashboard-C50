@@ -795,15 +795,77 @@ def apply_entre_cuentas_correction(
         )
 
 
+def read_anticipos_notes(path: Path) -> dict[tuple[str, int], str]:
+    """Read Excel cell comments (and note-like values) for ANTICIPOS SEM rows on TOTAL.
+
+    Returns {(bank, week): note_text}. Bank is MIFEL or BBVA.
+    Comments require a non-read-only workbook open (data_only=False).
+    """
+    notes: dict[tuple[str, int], str] = {}
+    try:
+        wb = load_workbook(path, read_only=False, data_only=False)
+    except Exception:
+        return notes
+    if "TOTAL" not in wb.sheetnames:
+        wb.close()
+        return notes
+    ws = wb["TOTAL"]
+    in_bbva = False
+    for row_idx in range(1, 46):
+        # Col O (15) marks BBVA block
+        o_val = str(ws.cell(row_idx, 15).value or "").strip().upper()
+        if o_val == "BBVA":
+            in_bbva = True
+        lab = str(ws.cell(row_idx, 12).value or "").strip().upper()  # L
+        ant = re.match(r"ANTICIPOS SEM\s*(\d+)", lab)
+        if not ant:
+            continue
+        w = int(ant.group(1))
+        bank = "BBVA" if in_bbva else "MIFEL"
+        parts: list[str] = []
+        # Comments on label (L) and entrada amount (M)
+        for col in (12, 13):
+            cell = ws.cell(row_idx, col)
+            if cell.comment and cell.comment.text:
+                parts.append(str(cell.comment.text))
+        # Some workbooks put the note as a neighboring cell value (col Q/R)
+        for col in (17, 18, 19, 20):
+            extra = ws.cell(row_idx, col).value
+            if extra is not None and str(extra).strip():
+                parts.append(str(extra))
+        text = " ".join(parts).strip()
+        if text:
+            notes[(bank, w)] = text
+    wb.close()
+    return notes
+
+
+def classify_anticipo_tipo(bank: str, note: str | None) -> str:
+    """ventas | entre_cuentas | otro — entre cuentas solo MIFEL↔BBVA con nota."""
+    if not note:
+        return "otro"
+    if bank not in ("MIFEL", "BBVA"):
+        return "otro"
+    if is_entre_cuentas_note(note):
+        return "entre_cuentas"
+    return "otro"
+
+
 def extract_week_bank_components(
-    wb, year: int, month: int
+    wb, year: int, month: int, anticipos_notes: dict[tuple[str, int], str] | None = None
 ) -> tuple[list[dict], list[dict]]:
     """Build per-week bank roll-forward + per-bank ingreso rows from SEM + TOTAL panel.
 
     Bank ingresos are weekly aggregates typed manually on TOTAL (ventas M+N +
     anticipos entradas). SEM sheets have no income line items — only pagos/gastos.
+
+    presupuesto_ingreso emits separate rows:
+      - tipo=ventas          (SEM n ventas M+N)
+      - tipo=entre_cuentas   (ANTICIPOS with Excel note «Entre cuentas», MIFEL↔BBVA)
+      - tipo=otro            (other anticipos entradas)
     """
     month_date = f"{year:04d}-{month:02d}-01"
+    notes = anticipos_notes or {}
     if "TOTAL" not in wb.sheetnames:
         return [], []
 
@@ -926,38 +988,78 @@ def extract_week_bank_components(
             }
         )
 
-        # Filas visibles en /finanzas/ingresos (agregado semanal por banco).
-        # date = mes-01 para wipe incremental; fecha display = lunes de la SEM.
+        # Filas visibles en /finanzas/ingresos — una por componente (ventas / anticipo).
         week_monday = monday_of_month_sem(year, month, w)
-        for bank, amount in (("MIFEL", ingresos_mifel), ("BBVA", ingresos_bbva)):
-            if amount <= 0:
-                continue
-            ingreso_payload = {
-                "bank": bank,
-                "week": w,
-                "year": year,
-                "month": month,
-                "abono": amount,
-                "ventas": mv["ventas"] if bank == "MIFEL" else bv["ventas"],
-                "anticipos_entrada": (
-                    mifel_inv_in.get(w, 0.0)
-                    if bank == "MIFEL"
-                    else bbva_inv_in.get(w, 0.0)
-                ),
-                "fecha": week_monday.isoformat(),
-                "descripcion": f"Ingresos {bank} · SEM {w} (presupuesto)",
-                "source": "presupuesto_excel",
-            }
-            ingreso_records.append(
-                {
-                    "date": month_date,
-                    "type": "income",
-                    "category": f"Ingreso {bank} SEM {w}",
-                    "amount": amount,
-                    "description": json.dumps(ingreso_payload, ensure_ascii=False),
-                    "source_file": SOURCE_INGRESO,
+        bank_parts = (
+            (
+                "MIFEL",
+                mv["ventas"],
+                mifel_inv_in.get(w, 0.0),
+            ),
+            (
+                "BBVA",
+                bv["ventas"],
+                bbva_inv_in.get(w, 0.0),
+            ),
+        )
+        for bank, ventas_amt, anticipo_amt in bank_parts:
+            if ventas_amt > 0:
+                ingreso_payload = {
+                    "bank": bank,
+                    "week": w,
+                    "year": year,
+                    "month": month,
+                    "abono": ventas_amt,
+                    "ventas": ventas_amt,
+                    "anticipos_entrada": 0.0,
+                    "tipo": "ventas",
+                    "fecha": week_monday.isoformat(),
+                    "descripcion": f"Ventas {bank} · SEM {w}",
+                    "source": "presupuesto_excel",
                 }
-            )
+                ingreso_records.append(
+                    {
+                        "date": month_date,
+                        "type": "income",
+                        "category": f"Ventas {bank} SEM {w}",
+                        "amount": ventas_amt,
+                        "description": json.dumps(ingreso_payload, ensure_ascii=False),
+                        "source_file": SOURCE_INGRESO,
+                    }
+                )
+            if anticipo_amt > 0:
+                note = notes.get((bank, w))
+                tipo = classify_anticipo_tipo(bank, note)
+                if tipo == "entre_cuentas":
+                    desc = f"Entre cuentas {bank} · SEM {w}"
+                    cat = f"Entre cuentas {bank} SEM {w}"
+                else:
+                    desc = f"Anticipo {bank} · SEM {w}"
+                    cat = f"Anticipo {bank} SEM {w}"
+                ingreso_payload = {
+                    "bank": bank,
+                    "week": w,
+                    "year": year,
+                    "month": month,
+                    "abono": anticipo_amt,
+                    "ventas": 0.0,
+                    "anticipos_entrada": anticipo_amt,
+                    "tipo": tipo,
+                    "nota": clean_sem_note(note),
+                    "fecha": week_monday.isoformat(),
+                    "descripcion": desc,
+                    "source": "presupuesto_excel",
+                }
+                ingreso_records.append(
+                    {
+                        "date": month_date,
+                        "type": "income",
+                        "category": cat,
+                        "amount": anticipo_amt,
+                        "description": json.dumps(ingreso_payload, ensure_ascii=False),
+                        "source_file": SOURCE_INGRESO,
+                    }
+                )
 
         inicial = total
 
@@ -973,6 +1075,8 @@ def extract_from_workbook(
     year, month = parsed
     month_label = path.stem.strip()
 
+    anticipos_notes = read_anticipos_notes(path)
+
     wb = load_workbook(path, read_only=True, data_only=True)
     if "TOTAL" not in wb.sheetnames:
         wb.close()
@@ -985,7 +1089,9 @@ def extract_from_workbook(
 
     saldos = extract_saldos_from_total(total_rows, year, month, month_label)
     channel_rows, rubro_rows, _meta = extract_rubros(total_rows, year, month, month_label)
-    week_rows, ingreso_rows = extract_week_bank_components(wb, year, month)
+    week_rows, ingreso_rows = extract_week_bank_components(
+        wb, year, month, anticipos_notes
+    )
     detalle_rows = extract_sem_detalle(wb, year, month)
     entre = extract_entre_cuentas_otros(wb)
     apply_entre_cuentas_correction(channel_rows, rubro_rows, entre)
