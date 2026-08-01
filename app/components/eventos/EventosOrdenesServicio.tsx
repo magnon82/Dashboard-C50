@@ -35,8 +35,14 @@ type OsItem = {
   event_date: string | null;
   activity_date: string | null;
   mtimeMs: number;
-  source: 'scan' | 'activity_seed';
+  source: 'scan' | 'activity_seed' | string;
   matched_client_name?: string | null;
+  kind?: 'pdf' | 'digital';
+  digital_id?: string | null;
+  celebration?: string | null;
+  pax?: number | null;
+  total?: number | null;
+  status?: string | null;
 };
 
 type PendingOsRow = {
@@ -45,9 +51,15 @@ type PendingOsRow = {
   title: string;
   client: string | null;
   source_label: string;
+  quote_id?: string | null;
+  lead_id?: string | null;
 };
 
 type WhenFilter = 'proximas' | 'pasadas' | 'todas';
+
+type TableRow =
+  | { kind: 'os'; item: OsItem }
+  | { kind: 'pending'; item: PendingOsRow };
 
 function openUrl(filePath: string) {
   return `/api/eventos/os?open=${encodeURIComponent(filePath)}`;
@@ -91,7 +103,6 @@ export function EventosOrdenesServicio() {
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<string>('');
   const [rootExists, setRootExists] = useState(false);
-  const [root, setRoot] = useState<string>('');
   const [note, setNote] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [pending, setPending] = useState<PendingOsRow[]>([]);
@@ -120,7 +131,6 @@ export function EventosOrdenesServicio() {
       setItems(osItems);
       setSource(json.source || '');
       setRootExists(Boolean(json.rootExists));
-      setRoot(json.root || '');
       setNote(json.note || null);
 
       // Próximas en Calendario (Anticipos/CRM) sin PDF → “Sin OS / pendiente”
@@ -135,7 +145,7 @@ export function EventosOrdenesServicio() {
         }
         const pendingRows: PendingOsRow[] = [];
         for (const ev of events) {
-          if (ev.os_path) continue;
+          if (ev.os_path || ev.digital_os_id) continue;
           if (ev.source === 'os') continue;
           const who = clientKey(ev.client || ev.title);
           if (who && osKeys.has(`${ev.event_date}|${who}`)) continue;
@@ -158,6 +168,8 @@ export function EventosOrdenesServicio() {
             title: ev.title,
             client: ev.client,
             source_label: ev.source_label,
+            quote_id: ev.quote_id,
+            lead_id: ev.lead_id,
           });
         }
         setPending(pendingRows);
@@ -196,25 +208,20 @@ export function EventosOrdenesServicio() {
   const counts = useMemo(() => {
     let proximas = 0;
     let pasadas = 0;
-    let sinFecha = 0;
     for (const it of items) {
-      if (!it.event_date) {
-        sinFecha += 1;
-        continue;
-      }
+      if (!it.event_date) continue;
       if (it.event_date >= today) proximas += 1;
       else pasadas += 1;
     }
     return {
       proximas: proximas + pending.length,
       pasadas,
-      sinFecha,
       total: items.length,
       pending: pending.length,
     };
   }, [items, today, pending.length]);
 
-  const filtered = useMemo(() => {
+  const filteredOs = useMemo(() => {
     let list: OsItem[];
     if (when === 'todas') list = items;
     else if (when === 'proximas') {
@@ -222,20 +229,52 @@ export function EventosOrdenesServicio() {
     } else {
       list = items.filter((it) => it.event_date && it.event_date < today);
     }
-    // Próximas: pronto primero; Pasadas/Todas: más reciente primero (API ya trae desc)
     if (when === 'proximas') {
       return [...list].sort((a, b) =>
         String(a.event_date).localeCompare(String(b.event_date))
       );
     }
-    return list;
+    // Pasadas / Todas: más reciente primero (API ya trae desc; reafirmar)
+    return [...list].sort((a, b) => {
+      const ea = a.event_date || '';
+      const eb = b.event_date || '';
+      if (ea && eb && ea !== eb) return eb.localeCompare(ea);
+      if (ea && !eb) return -1;
+      if (!ea && eb) return 1;
+      return (b.mtimeMs || 0) - (a.mtimeMs || 0);
+    });
   }, [items, when, today]);
 
+  /** Próximas: OS + Anticipos/CRM sin OS en una sola lista cronológica (cercana → lejana). */
+  const tableRows = useMemo((): TableRow[] => {
+    const osRows: TableRow[] = filteredOs.map((item) => ({
+      kind: 'os',
+      item,
+    }));
+    if (when !== 'proximas' || pending.length === 0) return osRows;
+
+    const pendingRows: TableRow[] = pending.map((item) => ({
+      kind: 'pending',
+      item,
+    }));
+    return [...osRows, ...pendingRows].sort((a, b) => {
+      const da =
+        a.kind === 'os' ? a.item.event_date || '' : a.item.event_date;
+      const db =
+        b.kind === 'os' ? b.item.event_date || '' : b.item.event_date;
+      if (da !== db) return da.localeCompare(db);
+      // Mismo día: OS antes que pendiente
+      if (a.kind !== b.kind) return a.kind === 'os' ? -1 : 1;
+      return 0;
+    });
+  }, [filteredOs, pending, when]);
+
+  const filtered = filteredOs;
   const visible = useMemo(
-    () => (showAll ? filtered : filtered.slice(0, PAGE_SIZE)),
-    [filtered, showAll]
+    () => (showAll ? tableRows : tableRows.slice(0, PAGE_SIZE)),
+    [tableRows, showAll]
   );
-  const hasMore = filtered.length > PAGE_SIZE && !showAll;
+  const hasMore = tableRows.length > PAGE_SIZE && !showAll;
 
   const whenTabs: { id: WhenFilter; label: string; count: number }[] = [
     { id: 'proximas', label: 'Próximas', count: counts.proximas },
@@ -249,27 +288,6 @@ export function EventosOrdenesServicio() {
         <h3 className="text-base font-bold" style={{ color: theme.title }}>
           Órdenes de servicio
         </h3>
-        <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-          PDFs en Drive. <strong>Próximas</strong> = hoy CDMX en adelante,
-          ordenadas por fecha del evento (la más cercana primero). Pasadas /
-          Todas: más reciente primero. Sin fecha → pestaña «Todas».
-        </p>
-        <p className="mt-2 text-xs text-amber-900 bg-amber-50 rounded-lg px-3 py-2">
-          Solo PDFs de Drive. Eventos solo en Anticipos (p. ej. Cena G7,
-          Rompehielos) aparecen en Calendario hasta generar OS.
-        </p>
-        {counts.sinFecha > 0 && when === 'proximas' && (
-          <p className="mt-1 text-xs text-slate-500">
-            {counts.sinFecha} OS sin fecha de evento — verlas en «Todas».
-          </p>
-        )}
-        <p className="mt-1 text-xs text-slate-500">
-          Ruta local:{' '}
-          <code className="text-[11px]">
-            {root || 'I:\\Mi unidad\\Eventos\\Ordenes de servicio'}
-          </code>
-          {rootExists ? ' · montada' : ' · no montada en este servidor'}
-        </p>
         {(note || (!rootExists && source === 'activity_seed')) && (
           <p className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
             {note ||
@@ -357,11 +375,11 @@ export function EventosOrdenesServicio() {
                   ? ` · ${pending.length} sin OS`
                   : ''
               }${
-                !showAll && filtered.length > PAGE_SIZE
+                !showAll && tableRows.length > PAGE_SIZE
                   ? ` · mostrando ${PAGE_SIZE}`
                   : ''
               }`}
-          {source ? ` · ${source === 'scan' ? 'disco' : 'seed'}` : ''}
+          {source ? ` · ${source.includes('digital') ? 'digital' : source === 'scan' ? 'disco' : 'seed'}` : ''}
         </span>
       </div>
 
@@ -379,7 +397,7 @@ export function EventosOrdenesServicio() {
                 <th className="px-4 py-3 font-semibold">Cliente / evento</th>
                 <th className="px-4 py-3 font-semibold">Folio</th>
                 <th className="px-4 py-3 font-semibold">CRM</th>
-                <th className="px-4 py-3 font-semibold">Archivo</th>
+                <th className="px-4 py-3 font-semibold">Documento</th>
               </tr>
             </thead>
             <tbody>
@@ -389,18 +407,17 @@ export function EventosOrdenesServicio() {
                     Escaneando órdenes de servicio…
                   </td>
                 </tr>
-              ) : filtered.length === 0 &&
-                !(when === 'proximas' && pending.length > 0) ? (
+              ) : tableRows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-6 text-slate-500">
-                    {items.length === 0 ? (
+                    {items.length === 0 && pending.length === 0 ? (
                       <>
-                        Sin PDFs de OS. Monta{' '}
+                        Sin OS digitales ni PDFs. Genera una desde Cotizador
+                        (cotización aceptada) o monta{' '}
                         <code className="text-xs">
                           I:\Mi unidad\Eventos\Ordenes de servicio
                         </code>
-                        . Eventos solo en Anticipos viven en Calendario hasta
-                        generar OS.
+                        .
                       </>
                     ) : when === 'proximas' ? (
                       'No hay OS próximas con los filtros actuales. Prueba «Pasadas» o «Todas», o revisa Calendario.'
@@ -412,8 +429,61 @@ export function EventosOrdenesServicio() {
                   </td>
                 </tr>
               ) : (
-                <>
-                  {visible.map((it) => (
+                visible.map((row) => {
+                  if (row.kind === 'pending') {
+                    const p = row.item;
+                    return (
+                      <tr
+                        key={p.id}
+                        className="border-t border-dashed border-slate-200 bg-slate-50/80"
+                      >
+                        <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
+                          {formatWhen(p.event_date, 0, true)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">
+                          {p.event_date.slice(0, 4)}
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-700">
+                          <span className="font-medium">{p.title}</span>
+                          {p.client &&
+                            clientKey(p.client) !== clientKey(p.title) && (
+                              <span className="mt-0.5 block text-xs text-slate-500">
+                                {p.client}
+                              </span>
+                            )}
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-400">—</td>
+                        <td className="px-4 py-2.5 text-xs text-slate-500">
+                          {p.source_label}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {p.quote_id || p.lead_id ? (
+                            <a
+                              href={
+                                p.quote_id
+                                  ? `/eventos/cotizacion/${p.quote_id}`
+                                  : '/eventos'
+                              }
+                              className="inline-flex rounded-lg bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                              title="Abre la cotización y usa «Aceptar y generar OS»"
+                            >
+                              Generar OS
+                            </a>
+                          ) : (
+                            <span
+                              className="inline-flex rounded-lg bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900"
+                              title="Visible en Calendario; aún no hay OS digital ni PDF"
+                            >
+                              Sin OS / pendiente
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  const it = row.item;
+                  return (
                     <tr
                       key={it.id}
                       className="border-t border-slate-100 hover:bg-slate-50"
@@ -433,6 +503,12 @@ export function EventosOrdenesServicio() {
                           (it.folio
                             ? `OS ${it.folio}`
                             : 'Sin nombre en archivo')}
+                        {it.kind === 'digital' && it.pax != null && (
+                          <span className="mt-0.5 block text-xs text-slate-500">
+                            {it.pax} pax
+                            {it.celebration ? ` · ${it.celebration}` : ''}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">
                         {it.folio || '—'}
@@ -447,7 +523,17 @@ export function EventosOrdenesServicio() {
                         )}
                       </td>
                       <td className="px-4 py-2.5">
-                        {it.path && it.source === 'scan' ? (
+                        {it.kind === 'digital' && it.digital_id ? (
+                          <a
+                            href={`/eventos/os/${it.digital_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex rounded-lg px-2 py-0.5 text-xs font-semibold text-white"
+                            style={{ backgroundColor: SUITE.navy }}
+                          >
+                            Ver OS digital
+                          </a>
+                        ) : it.path && it.source === 'scan' ? (
                           <a
                             href={openUrl(it.path)}
                             target="_blank"
@@ -468,44 +554,8 @@ export function EventosOrdenesServicio() {
                         )}
                       </td>
                     </tr>
-                  ))}
-                  {when === 'proximas' &&
-                    pending.map((row) => (
-                      <tr
-                        key={row.id}
-                        className="border-t border-dashed border-slate-200 bg-slate-50/80"
-                      >
-                        <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
-                          {formatWhen(row.event_date, 0, true)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">
-                          {row.event_date.slice(0, 4)}
-                        </td>
-                        <td className="px-4 py-2.5 text-slate-700">
-                          <span className="font-medium">{row.title}</span>
-                          {row.client &&
-                            clientKey(row.client) !==
-                              clientKey(row.title) && (
-                              <span className="mt-0.5 block text-xs text-slate-500">
-                                {row.client}
-                              </span>
-                            )}
-                        </td>
-                        <td className="px-4 py-2.5 text-slate-400">—</td>
-                        <td className="px-4 py-2.5 text-xs text-slate-500">
-                          {row.source_label}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <span
-                            className="inline-flex rounded-lg bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900"
-                            title="Visible en Calendario; aún no hay PDF de OS en Drive"
-                          >
-                            Sin OS / pendiente
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                </>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -518,7 +568,7 @@ export function EventosOrdenesServicio() {
               className="rounded-xl px-3 py-2 text-sm font-bold text-white"
               style={{ backgroundColor: SUITE.navy }}
             >
-              Mostrar más ({filtered.length - PAGE_SIZE} restantes)
+              Mostrar más ({tableRows.length - PAGE_SIZE} restantes)
             </button>
           </div>
         )}

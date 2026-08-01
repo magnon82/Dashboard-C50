@@ -4,7 +4,19 @@
  * + cadencia 15 días + holds + cierre.
  */
 
-import type { EventLead, LeadStage } from '@/app/lib/eventos';
+import { type EventLead, type LeadStage } from '@/app/lib/eventos';
+
+/**
+ * Go-live de alertas CRM (civil America/Mexico_City).
+ * Floor inclusivo: solo leads “nuevos” de esta fecha en adelante.
+ * Imports Seguimiento (`source=sheets`) nunca alertan (aunque el seed
+ * ponga created_at = día del import).
+ */
+export const FOLLOW_UP_ALERTS_FLOOR_ISO = '2026-08-01';
+
+/** Texto de ayuda en la franja de alertas del CRM. */
+export const FOLLOW_UP_ALERTS_SCOPE_HINT =
+  'Alertas desde el 1 ago 2026 · historial y Seguimiento importado no se alertan';
 
 export const FOLLOW_UP_STEP_IDS = [
   'captura',
@@ -147,6 +159,55 @@ function isDeferred(lead: EventLead, now: Date): boolean {
   return Number.isFinite(next.getTime()) && next.getTime() > now.getTime();
 }
 
+/** Fecha civil YYYY-MM-DD en America/Mexico_City. */
+function mexicoCivilDate(iso: string | Date): string | null {
+  const d = typeof iso === 'string' ? new Date(iso) : iso;
+  if (!Number.isFinite(d.getTime())) return null;
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+}
+
+function isSheetsImportLead(
+  lead: Pick<EventLead, 'source' | 'notes'>
+): boolean {
+  const src = (lead.source || '').trim().toLowerCase();
+  if (src === 'sheets' || src === 'seguimiento' || src === 'sheet') return true;
+  // Fallback si la columna source aún no existe / no se persistió
+  if ((lead.notes || '').includes('Status Sheet:')) return true;
+  return false;
+}
+
+/**
+ * Cutoff de alertas CRM (agresivo):
+ * 1) Sin created_at civil CDMX → fuera.
+ * 2) created_at &lt; FOLLOW_UP_ALERTS_FLOOR_ISO → fuera (historial).
+ * 3) source sheets / Seguimiento (o notes con Status Sheet) → fuera
+ *    (el seed suele poner created_at = día del import = hoy).
+ * 4) Si hay event_date civil &lt; floor → fuera (eventos ya pasados del historial).
+ * El checklist sigue en tarjetas; esto solo silencia alertas.
+ */
+export function isLeadInFollowUpAlertScope(
+  lead: Pick<
+    EventLead,
+    'created_at' | 'updated_at' | 'source' | 'event_date' | 'notes'
+  >,
+  _now = new Date()
+): boolean {
+  if (isSheetsImportLead(lead)) return false;
+
+  const createdDay = mexicoCivilDate(lead.created_at);
+  if (!createdDay || createdDay < FOLLOW_UP_ALERTS_FLOOR_ISO) return false;
+
+  if (lead.event_date) {
+    const eventDay =
+      /^\d{4}-\d{2}-\d{2}/.test(lead.event_date.trim())
+        ? lead.event_date.trim().slice(0, 10)
+        : mexicoCivilDate(lead.event_date);
+    if (eventDay && eventDay < FOLLOW_UP_ALERTS_FLOOR_ISO) return false;
+  }
+
+  return true;
+}
+
 function leadLabel(lead: EventLead): string {
   return (
     lead.celebration ||
@@ -200,12 +261,13 @@ export function suggestNextFollowUpAt(
   return null;
 }
 
-/** Alertas activas de un lead (vacío si ganado/perdido). */
+/** Alertas activas de un lead (vacío si cerrado / fuera de alcance). */
 export function computeLeadAlerts(
   lead: EventLead,
   now = new Date()
 ): FollowUpAlert[] {
   if (CLOSED.includes(lead.stage)) return [];
+  if (!isLeadInFollowUpAlertScope(lead, now)) return [];
 
   const done = normalizeFollowUpDone(lead.follow_up_done);
   const created = new Date(lead.created_at);

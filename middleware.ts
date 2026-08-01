@@ -1,9 +1,17 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { SESSION_COOKIE, canAccessModule, canAccessAdmin, verifySessionToken } from '@/app/lib/auth';
+import {
+  SESSION_COOKIE,
+  canAccessModule,
+  canAccessAdmin,
+  canAccessCorteTpv,
+  isCorteTpvPath,
+  verifySessionToken,
+} from '@/app/lib/auth';
 import { homePathForModules } from '@/app/lib/modules';
 
 const MODULE_PREFIXES = [
+  '/staff',
   '/ventas',
   '/finanzas',
   '/rrhh',
@@ -61,14 +69,22 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  for (const prefix of MODULE_PREFIXES) {
-    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
-      const moduleId = prefix.slice(1);
-      if (!canAccessModule(session, moduleId)) {
-        const home = homePathForModules(session.modules);
-        return NextResponse.redirect(new URL(home, request.url));
+  // Cortes TPV: accesible con Ventas o Staff (sin abrir todo /ventas al staff)
+  if (isCorteTpvPath(pathname)) {
+    if (!canAccessCorteTpv(session)) {
+      const home = homePathForModules(session.modules);
+      return NextResponse.redirect(new URL(home, request.url));
+    }
+  } else {
+    for (const prefix of MODULE_PREFIXES) {
+      if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
+        const moduleId = prefix.slice(1);
+        if (!canAccessModule(session, moduleId)) {
+          const home = homePathForModules(session.modules);
+          return NextResponse.redirect(new URL(home, request.url));
+        }
+        break;
       }
-      break;
     }
   }
 

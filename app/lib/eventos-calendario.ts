@@ -20,6 +20,8 @@ export type CalendarEventItem = {
   /** PDF en disco (scan). Vacío si solo hay seed / Anticipos. */
   os_path: string | null;
   os_filename: string | null;
+  /** id de event_service_orders (OS digital) */
+  digital_os_id: string | null;
   /** id de event_quotes si hay match en Supabase */
   quote_id: string | null;
   lead_id: string | null;
@@ -107,6 +109,7 @@ function mergeItem(
     detail: base.detail || other.detail,
     os_path: base.os_path || other.os_path,
     os_filename: base.os_filename || other.os_filename,
+    digital_os_id: base.digital_os_id || other.digital_os_id,
     quote_id: base.quote_id || other.quote_id,
     lead_id: base.lead_id || other.lead_id,
     client_id: base.client_id || other.client_id,
@@ -115,11 +118,12 @@ function mergeItem(
 
 function emptyLinks(): Pick<
   CalendarEventItem,
-  'os_path' | 'os_filename' | 'quote_id' | 'lead_id' | 'client_id'
+  'os_path' | 'os_filename' | 'digital_os_id' | 'quote_id' | 'lead_id' | 'client_id'
 > {
   return {
     os_path: null,
     os_filename: null,
+    digital_os_id: null,
     quote_id: null,
     lead_id: null,
     client_id: null,
@@ -396,6 +400,93 @@ export async function buildUpcomingCalendar(
   } catch (e) {
     errors.push(
       e instanceof Error ? e.message : 'Supabase no disponible para cotizaciones'
+    );
+  }
+
+  // 5) OS digitales (event_service_orders)
+  try {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb
+      .from('event_service_orders')
+      .select(
+        'id, os_number, event_date, client_name, celebration, client_id, lead_id, quote_id, pax'
+      )
+      .gte('event_date', today)
+      .order('event_date', { ascending: true })
+      .limit(300);
+
+    if (error) {
+      if (!/does not exist|schema cache|PGRST205/i.test(error.message)) {
+        errors.push(error.message);
+      }
+    } else if (data?.length) {
+      const byLead = new Map<string, string>();
+      const byQuote = new Map<string, string>();
+      const byClientDate = new Map<string, string>();
+      const byNameDate = new Map<string, string>();
+
+      for (const o of data) {
+        const oid = String(o.id);
+        const eventDate = isoDay(o.event_date);
+        if (o.lead_id) byLead.set(String(o.lead_id), oid);
+        if (o.quote_id) byQuote.set(String(o.quote_id), oid);
+        if (eventDate && o.client_id) {
+          byClientDate.set(`${eventDate}|${o.client_id}`, oid);
+        }
+        if (eventDate && o.client_name) {
+          byNameDate.set(
+            `${eventDate}|${normalizeClientKey(o.client_name)}`,
+            oid
+          );
+        }
+
+        const title =
+          (o.celebration || o.client_name || o.os_number || 'OS digital').trim();
+        mergeItem(map, {
+          id: `dos:${oid}`,
+          event_date: eventDate || today,
+          title,
+          client: o.client_name || null,
+          pax:
+            o.pax != null && Number.isFinite(Number(o.pax))
+              ? Number(o.pax)
+              : null,
+          source: 'os',
+          source_label: 'OS digital',
+          detail: o.os_number || null,
+          ...emptyLinks(),
+          digital_os_id: oid,
+          quote_id: o.quote_id ? String(o.quote_id) : null,
+          lead_id: o.lead_id ? String(o.lead_id) : null,
+          client_id: o.client_id ? String(o.client_id) : null,
+        });
+      }
+
+      for (const [key, item] of map) {
+        if (item.digital_os_id) continue;
+        let oid: string | null = null;
+        if (item.lead_id && byLead.has(item.lead_id)) {
+          oid = byLead.get(item.lead_id)!;
+        } else if (item.quote_id && byQuote.has(item.quote_id)) {
+          oid = byQuote.get(item.quote_id)!;
+        } else if (item.client_id) {
+          oid =
+            byClientDate.get(`${item.event_date}|${item.client_id}`) || null;
+        }
+        if (!oid && item.client) {
+          oid =
+            byNameDate.get(
+              `${item.event_date}|${normalizeClientKey(item.client)}`
+            ) || null;
+        }
+        if (oid) {
+          map.set(key, { ...item, digital_os_id: oid });
+        }
+      }
+    }
+  } catch (e) {
+    errors.push(
+      e instanceof Error ? e.message : 'Supabase no disponible para OS digitales'
     );
   }
 

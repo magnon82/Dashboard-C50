@@ -230,13 +230,68 @@ create table if not exists public.event_service_orders (
   id uuid primary key default gen_random_uuid(),
   booking_id uuid references public.event_bookings (id) on delete set null,
   quote_id uuid references public.event_quotes (id) on delete set null,
+  lead_id uuid references public.event_leads (id) on delete set null,
+  client_id uuid references public.event_clients (id) on delete set null,
   os_number text,
   status text not null default 'borrador'
     check (status in ('borrador', 'emitida', 'en_curso', 'cerrada')),
+  event_date date,
+  pax integer,
+  celebration text,
+  client_name text,
+  contact_name text,
+  notes text,
+  subtotal numeric(12, 2) not null default 0,
+  servicio_pct numeric(5, 4) not null default 0.15,
+  servicio_amount numeric(12, 2) not null default 0,
+  total numeric(12, 2) not null default 0,
+  apply_servicio boolean not null default true,
+  owner_username text,
+  -- Snapshot líneas / extras para vista imprimible (no depende de quote_lines)
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Bases ya creadas como stub → columnas densas + índices
+alter table public.event_service_orders
+  add column if not exists lead_id uuid references public.event_leads (id) on delete set null;
+alter table public.event_service_orders
+  add column if not exists client_id uuid references public.event_clients (id) on delete set null;
+alter table public.event_service_orders
+  add column if not exists event_date date;
+alter table public.event_service_orders
+  add column if not exists pax integer;
+alter table public.event_service_orders
+  add column if not exists celebration text;
+alter table public.event_service_orders
+  add column if not exists client_name text;
+alter table public.event_service_orders
+  add column if not exists contact_name text;
+alter table public.event_service_orders
+  add column if not exists notes text;
+alter table public.event_service_orders
+  add column if not exists subtotal numeric(12, 2) not null default 0;
+alter table public.event_service_orders
+  add column if not exists servicio_pct numeric(5, 4) not null default 0.15;
+alter table public.event_service_orders
+  add column if not exists servicio_amount numeric(12, 2) not null default 0;
+alter table public.event_service_orders
+  add column if not exists total numeric(12, 2) not null default 0;
+alter table public.event_service_orders
+  add column if not exists apply_servicio boolean not null default true;
+alter table public.event_service_orders
+  add column if not exists owner_username text;
+
+create unique index if not exists event_service_orders_quote_uidx
+  on public.event_service_orders (quote_id)
+  where quote_id is not null;
+
+create index if not exists event_service_orders_event_date_idx
+  on public.event_service_orders (event_date desc nulls last);
+
+create index if not exists event_service_orders_lead_idx
+  on public.event_service_orders (lead_id);
 
 create table if not exists public.event_payments (
   id uuid primary key default gen_random_uuid(),
@@ -258,7 +313,7 @@ alter table public.event_payments enable row level security;
 comment on table public.event_bookings is
   'Stub reservas / calendario. Sync GCal compartido = Fase 2.';
 comment on table public.event_service_orders is
-  'Stub órdenes de servicio (OS).';
+  'Órdenes de servicio digitales (desde cotización aceptada). Coexiste con PDFs en Drive (Ordenes de servicio). payload = snapshot de líneas.';
 comment on table public.event_payments is
   'Stub pagos / anticipos de eventos.';
 

@@ -3,10 +3,20 @@
 export const EVENTOS_SERVICIO_PCT = 0.15;
 export const EVENTOS_HOLD_BUSINESS_HOURS = 72;
 export const EVENTOS_NO_HOLD_WITHIN_DAYS = 15;
+/** Sin cambios a cotización (líneas / guardar) si faltan ≤ N días al evento (CDMX). */
+export const EVENTOS_QUOTE_LOCK_WITHIN_DAYS = 7;
 export const EVENTOS_MIN_PAX_GRUPOS = 10;
 export const EVENTOS_MAX_PAX = 150;
 export const EVENTOS_DESAYUNOS_PACK_MIN_PAX = 50;
 export const EVENTOS_DESAYUNOS_PACK_PRICE = 30_000;
+
+/** Categorías de alimentos cuya cantidad (unit=persona) reparte invitados del pax total. */
+export const EVENTOS_PAX_ALLOC_CATEGORIES = [
+  'tres_tiempos',
+  'desayunos',
+  'parejas',
+  'paquete',
+] as const;
 
 export const LEAD_STAGES = [
   'nuevo',
@@ -78,6 +88,8 @@ export type EventLead = {
   follow_up_done?: string[] | null;
   /** Próxima acción de seguimiento; difiere alertas de cadencia hasta esa fecha. */
   next_follow_up_at?: string | null;
+  /** Origen: manual | sheets (Seguimiento) | import | cotizador */
+  source?: string | null;
   created_at: string;
   updated_at: string;
   client?: EventClient | null;
@@ -349,10 +361,114 @@ export function daysUntilEvent(eventDate: string | null | undefined, from = new 
   return Math.round((target.getTime() - start.getTime()) / 86_400_000);
 }
 
+/**
+ * Días calendario hasta el evento usando hoy civil en CDMX (America/Mexico_City).
+ * event_date YYYY-MM-DD vs mexicoTodayIso().
+ */
+export function daysUntilEventMexico(
+  eventDate: string | null | undefined,
+  from = new Date()
+): number | null {
+  if (!eventDate) return null;
+  const today = mexicoTodayIso(from);
+  const [y, m, d] = eventDate.slice(0, 10).split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  if (!y || !m || !d || !ty || !tm || !td) return null;
+  const target = Date.UTC(y, m - 1, d);
+  const start = Date.UTC(ty, tm - 1, td);
+  return Math.round((target - start) / 86_400_000);
+}
+
 export function canPlaceHold(eventDate: string | null | undefined, from = new Date()): boolean {
   const days = daysUntilEvent(eventDate, from);
   if (days === null) return true;
   return days >= EVENTOS_NO_HOLD_WITHIN_DAYS;
+}
+
+/**
+ * Cotización bloqueada: hoy CDMX está dentro de la ventana
+ * (event_date − N días ≤ hoy), es decir faltan ≤ EVENTOS_QUOTE_LOCK_WITHIN_DAYS.
+ * Sin fecha de evento → no bloquea.
+ */
+export function isQuoteLockedByEventDate(
+  eventDate: string | null | undefined,
+  from = new Date()
+): boolean {
+  const days = daysUntilEventMexico(eventDate, from);
+  if (days === null) return false;
+  return days <= EVENTOS_QUOTE_LOCK_WITHIN_DAYS;
+}
+
+export function quoteLockMessage(
+  eventDate: string | null | undefined,
+  from = new Date()
+): string | null {
+  if (!isQuoteLockedByEventDate(eventDate, from)) return null;
+  const days = daysUntilEventMexico(eventDate, from);
+  const when =
+    days === null
+      ? ''
+      : days < 0
+        ? ' (evento ya pasó)'
+        : days === 0
+          ? ' (evento hoy)'
+          : ` (faltan ${days} día${days === 1 ? '' : 's'})`;
+  return `Sin cambios: la fecha del evento está a ${EVENTOS_QUOTE_LOCK_WITHIN_DAYS} días o menos${when}. No se pueden editar líneas ni guardar cotizaciones nuevas.`;
+}
+
+/** Línea de alimentos por persona que reparte invitados del pax del evento. */
+export function isPaxAllocationLine(line: {
+  unit?: string | null;
+  category?: string | null;
+}): boolean {
+  const unit = String(line.unit || 'persona');
+  if (unit !== 'persona') return false;
+  return (EVENTOS_PAX_ALLOC_CATEGORIES as readonly string[]).includes(
+    String(line.category || '')
+  );
+}
+
+export type PaxAllocationSummary = {
+  assigned: number;
+  total: number;
+  remaining: number;
+  hasAllocLines: boolean;
+};
+
+export function summarizePaxAllocation(
+  pax: number,
+  lines: { quantity: number; unit?: string | null; category?: string | null }[]
+): PaxAllocationSummary {
+  const total = Math.max(0, Math.floor(Number(pax) || 0));
+  const alloc = lines.filter(isPaxAllocationLine);
+  const assigned = roundMoney(
+    alloc.reduce((sum, l) => sum + Number(l.quantity || 0), 0)
+  );
+  // cantidades de menú suelen ser enteras; redondeamos display a entero si aplica
+  const assignedInt = Math.round(assigned);
+  return {
+    assigned: assignedInt,
+    total,
+    remaining: total - assignedInt,
+    hasAllocLines: alloc.length > 0,
+  };
+}
+
+/**
+ * Exige que la suma de cantidades de menús de alimentos (persona)
+ * iguale el pax total cuando hay al menos una línea asignable.
+ */
+export function validatePaxAllocation(
+  pax: number,
+  lines: { quantity: number; unit?: string | null; category?: string | null }[]
+): string | null {
+  const summary = summarizePaxAllocation(pax, lines);
+  if (!summary.hasAllocLines) return null;
+  if (summary.assigned === summary.total) return null;
+  if (summary.assigned < summary.total) {
+    return `Asigna todos los invitados: Asignados ${summary.assigned} / Total ${summary.total} · faltan ${summary.total - summary.assigned}.`;
+  }
+  return `Sobran asignaciones: Asignados ${summary.assigned} / Total ${summary.total} · sobran ${summary.assigned - summary.total}. Ajusta las cantidades de menú.`;
 }
 
 /** Aproxima 72 h hábiles como 3 días hábiles a partir de ahora (MVP). */
@@ -387,7 +503,7 @@ export function validateQuotePax(
   if (!Number.isFinite(pax) || pax < 1) return 'Indica un número de personas válido.';
   const hasBarra = lines.some((l) => l.category === 'barra_libre');
   const hasFood = lines.some((l) =>
-    ['tres_tiempos', 'desayunos', 'parejas', 'paquete'].includes(
+    (EVENTOS_PAX_ALLOC_CATEGORIES as readonly string[]).includes(
       String(l.category || '')
     )
   );

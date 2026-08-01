@@ -16,6 +16,7 @@ import {
   suggestNextFollowUpAt,
   type FollowUpStepId,
 } from '@/app/lib/eventos-follow-up';
+import { createServiceOrderFromLead } from '@/app/lib/eventos-service-order';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,7 @@ export async function GET() {
 
   try {
     const sb = getServiceSupabase();
+    // * incluye source, created_at, event_date, notes (cutoff de alertas).
     const { data, error } = await sb
       .from('event_leads')
       .select('*, client:event_clients(*)')
@@ -41,7 +43,17 @@ export async function GET() {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    return NextResponse.json({ leads: data || [], count: data?.length || 0 });
+
+    // Normaliza imports Seguimiento sin columna source / source null.
+    const leads = (data || []).map((row) => {
+      const notes = typeof row.notes === 'string' ? row.notes : '';
+      if (!row.source && notes.includes('Status Sheet:')) {
+        return { ...row, source: 'sheets' };
+      }
+      return row;
+    });
+
+    return NextResponse.json({ leads, count: leads.length });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Error al leer leads' },
@@ -126,6 +138,7 @@ export async function POST(request: Request) {
         notes: trimOrNull(body.notes),
         owner_username: auth.username,
         hold_until,
+        source: 'manual',
         created_at: now,
         updated_at: now,
       })
@@ -339,7 +352,29 @@ export async function PATCH(request: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    return NextResponse.json({ lead: data });
+
+    // Lead ganado → OS digital desde cotización vinculada (si existe)
+    let service_order = null;
+    let os_error: string | null = null;
+    let os_hint: string | null = null;
+    if (body.stage === 'ganado') {
+      const osResult = await createServiceOrderFromLead(sb, {
+        leadId: body.id,
+        ownerUsername: auth.username,
+      });
+      service_order = osResult.order;
+      os_error = osResult.error || null;
+      os_hint = osResult.hint || null;
+    }
+
+    return NextResponse.json({
+      lead: data,
+      service_order,
+      service_order_id: service_order?.id || null,
+      os_error,
+      os_hint,
+      href: service_order ? `/eventos/os/${service_order.id}` : null,
+    });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Error al actualizar lead' },

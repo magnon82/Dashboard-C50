@@ -10,7 +10,7 @@ alwaysApply: false
 
 ## Regla de negocio
 
-Cobrado en terminales → desglose propina → **neto a banco** → vs presupuesto semanal bancario (`presupuesto_ingreso` tipo ventas MIFEL/BBVA).
+Cobrado en terminales + propinas (solo display) → **neto banco = cobrado + propinas** (depósito diario) → vs presupuesto semanal bancario (`presupuesto_ingreso` tipo ventas MIFEL/BBVA).
 
 Hay **3 terminales**. Cada día, cada una queda:
 1. Foto que pasa calidad (resolución + nitidez), o
@@ -27,12 +27,13 @@ Día incompleto hasta que las 3 estén contabilizadas.
 
 ## UI
 
-Entrada: botón Master Panel (`/admin`) «Cortes TPV · tomar fotos» → `/ventas/corte-tpv`.
+Master Panel (`/admin` → Financieros): **Guía de fotografía** (antes de Caja) + sección **Caja · fotos TPV** (galería por fecha T1–T3, API `GET /api/tpv-cortes?recent=1&urls=1`) + enlace a captura.
+Captura: `/ventas/corte-tpv` (también desde Staff → Corte del día / detalle).
 No poner el acceso en `/ventas` ni en reportes-socios.
 Página: captura móvil + revisar + verificación vs semana.
 Cuando el día está completo (3/3), mostrar éxito («Proceso concluido correctamente»), no empujar «Volver a Ventas».
-Guía de fotos in-app: `/ventas/corte-tpv/guia` · ejemplos en `public/ventas/tpv-guia/` (propina + totalización).
-Auth: módulo `ventas` o admin (viewers con ventas pueden subir; mesero/PIN después).
+Guía de fotos: `/ventas/corte-tpv/guia` · ejemplos en `public/ventas/tpv-guia/`. Aparece en Master (antes de Caja) y **dentro** del flujo de corte (`StaffCorteClient` / `TpvCorteClient`). **No** como tarjeta separada en el hub `/staff`.
+Auth: módulo `ventas`, módulo `staff`, o admin (viewers con esos módulos pueden subir). Staff-only aterriza en `/staff` vía `homePathForModules`.
 
 ## Setup SQL (one-shot)
 

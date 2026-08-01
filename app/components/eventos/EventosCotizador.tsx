@@ -5,13 +5,19 @@ import { SuiteCard } from '@/app/components/SuiteShell';
 import {
   EVENTOS_MIN_PAX_GRUPOS,
   EVENTOS_NO_HOLD_WITHIN_DAYS,
+  EVENTOS_QUOTE_LOCK_WITHIN_DAYS,
   EVENTOS_SERVICIO_PCT,
   canPlaceHold,
   computeQuoteTotals,
   formatMxn,
   formatQuoteLineDescription,
+  isPaxAllocationLine,
+  isQuoteLockedByEventDate,
+  quoteLockMessage,
   resolveItemUnitPrice,
+  summarizePaxAllocation,
   validateChoiceSelections,
+  validatePaxAllocation,
   validateQuotePax,
   type EventClient,
   type EventMenu,
@@ -59,6 +65,7 @@ type SavedQuote = {
   pax?: number | null;
   updated_at?: string | null;
   client?: { id: string; company_name: string } | null;
+  service_order_id?: string | null;
 };
 
 export function EventosCotizador({
@@ -86,6 +93,15 @@ export function EventosCotizador({
   const [pax, setPax] = useState(EVENTOS_MIN_PAX_GRUPOS);
   const [clientId, setClientId] = useState('');
   const [clientFilter, setClientFilter] = useState('');
+  /** Contacto de envío (prefill CRM; editable por cotización → sync a event_clients al guardar) */
+  const [clientContactName, setClientContactName] = useState('');
+  const [clientCompanyName, setClientCompanyName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
+  /** 'alta' | 'existente' — cuál camino de cliente está activo en el UI */
+  const [clientPath, setClientPath] = useState<'alta' | 'existente' | null>(
+    null
+  );
   const [eventDate, setEventDate] = useState('');
   const [celebration, setCelebration] = useState('');
   const [notes, setNotes] = useState('');
@@ -93,6 +109,8 @@ export function EventosCotizador({
   const [placeHold, setPlaceHold] = useState(false);
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [choices, setChoices] = useState<QuoteLineOptions>({});
+  /** Cantidad (pax) para la próxima línea de menú por persona. */
+  const [lineQty, setLineQty] = useState(EVENTOS_MIN_PAX_GRUPOS);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -100,7 +118,6 @@ export function EventosCotizador({
   const [quotesReady, setQuotesReady] = useState<boolean | null>(null);
   const [quotesError, setQuotesError] = useState<string | null>(null);
   const [quotesLoading, setQuotesLoading] = useState(true);
-  const [showAlta, setShowAlta] = useState(false);
   const [altaBusy, setAltaBusy] = useState(false);
   const [altaForm, setAltaForm] = useState({
     company_name: '',
@@ -144,25 +161,70 @@ export function EventosCotizador({
     setChoices({});
   }, [itemId]);
 
+  // Prefill contacto/empresa/tel/correo solo al cambiar de cliente (no pisar ediciones locales)
+  useEffect(() => {
+    if (!clientId) {
+      setClientContactName('');
+      setClientCompanyName('');
+      setClientPhone('');
+      setClientEmail('');
+      return;
+    }
+    const c = clients.find((x) => x.id === clientId);
+    if (!c) return;
+    setClientContactName(c.contact_name || '');
+    setClientCompanyName(c.company_name || '');
+    setClientPhone(c.phone || '');
+    setClientEmail(c.email || '');
+    // clients intencional fuera de deps: alta ya setea contacto; refresh CRM no debe borrar overrides
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambiar clientId
+  }, [clientId]);
+
   const previewUnitPrice = useMemo(() => {
     if (!selectedItem) return 0;
     return resolveItemUnitPrice(selectedItem, choices);
   }, [selectedItem, choices]);
 
-  // Líneas por persona siguen el pax del formulario
-  useEffect(() => {
-    setLines((prev) => {
-      let changed = false;
-      const next = prev.map((l) => {
-        if (l.unit !== 'persona') return l;
-        const q = Math.max(1, pax);
-        if (l.quantity === q) return l;
-        changed = true;
-        return { ...l, quantity: q };
-      });
-      return changed ? next : prev;
+  const paxAlloc = useMemo(
+    () => summarizePaxAllocation(pax, lines),
+    [pax, lines]
+  );
+
+  const allocHint = useMemo(
+    () => validatePaxAllocation(pax, lines),
+    [pax, lines]
+  );
+
+  const quoteLocked = isQuoteLockedByEventDate(eventDate || null);
+  const lockMsg = quoteLockMessage(eventDate || null);
+
+  const nextLineIsAlloc =
+    !!selectedItem &&
+    !!selectedMenu &&
+    isPaxAllocationLine({
+      unit: selectedItem.unit || 'persona',
+      category: selectedMenu.category,
     });
-  }, [pax]);
+
+  // Al cambiar pax / líneas / ítem: sugerir cantidad = pax restantes (menús alimentos)
+  useEffect(() => {
+    if (!selectedItem || !selectedMenu) return;
+    if (
+      isPaxAllocationLine({
+        unit: selectedItem.unit || 'persona',
+        category: selectedMenu.category,
+      })
+    ) {
+      const rem = Math.max(0, paxAlloc.remaining);
+      setLineQty(rem > 0 ? rem : Math.max(1, pax));
+      return;
+    }
+    if (selectedItem.unit === 'persona') {
+      setLineQty(Math.max(1, pax));
+      return;
+    }
+    setLineQty(1);
+  }, [selectedItem, selectedMenu, pax, paxAlloc.remaining]);
 
   const sortedClients = useMemo(() => {
     const needle = clientFilter.trim().toLowerCase();
@@ -171,7 +233,7 @@ export function EventosCotizador({
     );
     if (!needle) return list;
     return list.filter((c) => {
-      const hay = [c.company_name, c.contact_name, c.email]
+      const hay = [c.company_name, c.contact_name, c.email, c.phone]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
@@ -198,6 +260,11 @@ export function EventosCotizador({
 
   const holdBlocked = placeHold && !canPlaceHold(eventDate || null);
 
+  const clientQuotes = useMemo(() => {
+    if (!clientId) return [];
+    return quotes.filter((q) => q.client?.id === clientId);
+  }, [quotes, clientId]);
+
   const loadQuotes = useCallback(async () => {
     setQuotesLoading(true);
     try {
@@ -220,6 +287,7 @@ export function EventosCotizador({
             pax?: number | null;
             updated_at?: string | null;
             client?: { id: string; company_name: string } | null;
+            service_order_id?: string | null;
           }) => ({
             id: q.id,
             quote_number: q.quote_number || null,
@@ -229,6 +297,7 @@ export function EventosCotizador({
             pax: q.pax ?? null,
             updated_at: q.updated_at || null,
             client: q.client || null,
+            service_order_id: q.service_order_id || null,
           })
         )
       );
@@ -248,6 +317,10 @@ export function EventosCotizador({
   }, [loadQuotes]);
 
   function addLine() {
+    if (quoteLocked) {
+      setErr(lockMsg || 'Cotización bloqueada por fecha del evento.');
+      return;
+    }
     const item: EventMenuItem | undefined = items.find((i) => i.id === itemId);
     if (!item || !selectedMenu) {
       setErr('Selecciona un ítem del catálogo');
@@ -258,9 +331,41 @@ export function EventosCotizador({
       setErr(choiceErr);
       return;
     }
+
+    const isAlloc = isPaxAllocationLine({
+      unit: item.unit || 'persona',
+      category: selectedMenu.category,
+    });
+    let qty: number;
+    if (isAlloc) {
+      qty = Math.max(0, Math.floor(Number(lineQty) || 0));
+      if (qty < 1) {
+        setErr(
+          paxAlloc.remaining <= 0
+            ? 'Todos los invitados ya están asignados. Ajusta cantidades o el pax total.'
+            : 'Indica cuántas personas llevan este menú (mínimo 1).'
+        );
+        return;
+      }
+      if (paxAlloc.remaining <= 0) {
+        setErr(
+          'Todos los invitados ya están asignados. Quita o reduce una línea antes de agregar otra.'
+        );
+        return;
+      }
+      if (qty > paxAlloc.remaining) {
+        setErr(
+          `Solo faltan ${paxAlloc.remaining} persona${paxAlloc.remaining === 1 ? '' : 's'} por asignar.`
+        );
+        return;
+      }
+    } else if (item.unit === 'persona') {
+      qty = Math.max(1, Math.floor(Number(lineQty) || pax));
+    } else {
+      qty = item.unit === 'paquete' ? 1 : Math.max(1, Number(lineQty) || 1);
+    }
+
     setErr('');
-    const qty =
-      item.unit === 'persona' ? Math.max(1, pax) : item.unit === 'paquete' ? 1 : 1;
 
     if (selectedMenu.includes_servicio) {
       setApplyServicio(false);
@@ -296,16 +401,35 @@ export function EventosCotizador({
   }
 
   function removeLine(key: string) {
+    if (quoteLocked) {
+      setErr(lockMsg || 'Cotización bloqueada por fecha del evento.');
+      return;
+    }
     setLines((prev) => prev.filter((l) => l.key !== key));
+  }
+
+  /** Limpia líneas para armar otra cotización (mismo cliente / fecha / pax). */
+  function startNuevaCotizacion() {
+    setLines([]);
+    setChoices({});
+    setNotes('');
+    setPlaceHold(false);
+    setErr('');
+    setMsg(
+      'Nueva cotización: cada guardado crea una versión distinta; no sobrescribe las anteriores.'
+    );
+    const rem = Math.max(1, pax);
+    setLineQty(rem);
   }
 
   async function createClientAlta() {
     if (!canEdit) return;
-    const company = altaForm.company_name.trim();
-    if (!company) {
-      setErr('Indica empresa o nombre para el alta de cliente');
+    const contact = altaForm.contact_name.trim();
+    if (!contact) {
+      setErr('Indica el nombre completo de quien solicita el evento');
       return;
     }
+    const company = altaForm.company_name.trim() || contact;
     setAltaBusy(true);
     setErr('');
     setMsg('');
@@ -315,7 +439,7 @@ export function EventosCotizador({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           company_name: company,
-          contact_name: altaForm.contact_name.trim() || null,
+          contact_name: contact,
           phone: altaForm.phone.trim() || null,
           email: altaForm.email.trim() || null,
           source: 'cotizador',
@@ -327,10 +451,27 @@ export function EventosCotizador({
         return;
       }
       const newId = json.client?.id as string | undefined;
+      const createdContact =
+        (json.client?.contact_name as string | null | undefined) || contact;
+      const createdPhone =
+        (json.client?.phone as string | null | undefined) ||
+        altaForm.phone.trim() ||
+        '';
+      const createdEmail =
+        (json.client?.email as string | null | undefined) ||
+        altaForm.email.trim() ||
+        '';
       await onSaved();
       if (newId) {
         setClientId(newId);
         setClientFilter('');
+        setClientContactName(createdContact);
+        setClientCompanyName(
+          (json.client?.company_name as string | undefined) || company
+        );
+        setClientPhone(createdPhone);
+        setClientEmail(createdEmail);
+        setClientPath('existente');
       }
       setAltaForm({
         company_name: '',
@@ -338,7 +479,6 @@ export function EventosCotizador({
         phone: '',
         email: '',
       });
-      setShowAlta(false);
       setMsg(
         `Cliente «${json.client?.company_name || company}» creado · listo para cotizar`
       );
@@ -355,7 +495,7 @@ export function EventosCotizador({
       quote_number: null,
       status: 'borrador',
       client_name: client?.company_name || null,
-      contact_name: client?.contact_name || null,
+      contact_name: clientContactName.trim() || client?.contact_name || null,
       celebration: celebration.trim() || null,
       event_date: eventDate || null,
       pax,
@@ -399,6 +539,11 @@ export function EventosCotizador({
       setErr(validation);
       return;
     }
+    const allocErr = validatePaxAllocation(pax, lines);
+    if (allocErr) {
+      setErr(allocErr);
+      return;
+    }
     setErr('');
     sessionStorage.setItem(
       COTIZACION_DRAFT_STORAGE_KEY,
@@ -412,6 +557,15 @@ export function EventosCotizador({
     setBusy(true);
     setErr('');
     setMsg('');
+
+    if (quoteLocked) {
+      setErr(
+        lockMsg ||
+          `Sin cambios: faltan ${EVENTOS_QUOTE_LOCK_WITHIN_DAYS} días o menos para el evento.`
+      );
+      setBusy(false);
+      return;
+    }
 
     if (!clientId) {
       setErr(
@@ -436,6 +590,12 @@ export function EventosCotizador({
       setBusy(false);
       return;
     }
+    const allocErr = validatePaxAllocation(pax, lines);
+    if (allocErr) {
+      setErr(allocErr);
+      setBusy(false);
+      return;
+    }
     if (placeHold && !canPlaceHold(eventDate || null)) {
       setErr(
         `No se puede poner hold: faltan menos de ${EVENTOS_NO_HOLD_WITHIN_DAYS} días para el evento.`
@@ -454,6 +614,9 @@ export function EventosCotizador({
           pax,
           celebration,
           notes,
+          phone: clientPhone.trim() || null,
+          email: clientEmail.trim() || null,
+          contact_name: clientContactName.trim() || null,
           apply_servicio: applyServicio,
           place_hold: placeHold,
           lines: lines.map((l) => ({
@@ -461,6 +624,7 @@ export function EventosCotizador({
             description: l.description,
             quantity: l.quantity,
             unit_price: l.unit_price,
+            unit: l.unit,
             category: l.category,
             min_pax: l.min_pax,
             requires_food: l.requires_food,
@@ -515,11 +679,13 @@ export function EventosCotizador({
             ? ` · Lead no creado: ${json.lead_error}`
             : '';
       setMsg(
-        `Cotización ${json.quote?.quote_number || ''} guardada · ${formatMxn(
+        `Nueva cotización ${json.quote?.quote_number || ''} guardada · ${formatMxn(
           Number(json.quote?.total || totals.total)
-        )}${leadNote}${holdNote}`
+        )}${leadNote}${holdNote}. Puedes armar otra con otros platillos (no sobrescribe).`
       );
       setLines([]);
+      setNotes('');
+      setPlaceHold(false);
       await Promise.all([onSaved(), loadQuotes()]);
       if (savedId) {
         window.open(
@@ -530,6 +696,41 @@ export function EventosCotizador({
       }
     } catch {
       setErr('Error de red al guardar cotización');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateOsFromQuote(quoteId: string) {
+    if (!canEdit) return;
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await fetch('/api/eventos/os', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quote_id: quoteId }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(
+          [json.error, json.hint].filter(Boolean).join(' — ') ||
+            'No se pudo generar OS'
+        );
+        return;
+      }
+      setMsg(
+        json.created
+          ? `OS ${json.order?.os_number || ''} generada`
+          : `OS ${json.order?.os_number || ''} ya existía — actualizada`
+      );
+      await loadQuotes();
+      if (json.href) {
+        window.open(json.href, '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      setErr('Error de red al generar OS');
     } finally {
       setBusy(false);
     }
@@ -552,128 +753,294 @@ export function EventosCotizador({
         )}
 
         <SuiteCard>
-          <h3 className="text-base font-bold" style={{ color: theme.title }}>
-            Armar cotización
-          </h3>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold" style={{ color: theme.title }}>
+                Armar cotización
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Cada guardado crea una cotización nueva (no sobrescribe). Cambia
+                platillos = otra versión para el mismo cliente.
+              </p>
+            </div>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={startNuevaCotizacion}
+                disabled={quoteLocked}
+                className="rounded-xl border px-3 py-2 text-xs font-bold disabled:opacity-50"
+                style={{ borderColor: SUITE.navy, color: SUITE.navy }}
+              >
+                Nueva cotización
+              </button>
+            )}
+          </div>
+
+          {lockMsg && (
+            <p className="mt-3 text-sm font-medium text-red-800 bg-red-50 rounded-lg px-3 py-2">
+              {lockMsg}
+            </p>
+          )}
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="text-sm md:col-span-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-slate-700">Cliente</span>
+              <span className="font-semibold text-slate-700">Cliente</span>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Alta de cliente nuevo o selecciona uno existente en CRM
+              </p>
+
+              <div className="mt-3 space-y-3">
                 {canEdit && (
+                  <div
+                    className="rounded-xl border-2 p-3 transition-colors"
+                    style={{
+                      borderColor:
+                        clientPath === 'alta' ? SUITE.orange : '#e2e8f0',
+                      backgroundColor:
+                        clientPath === 'alta' ? SUITE.orangeSoft : '#fff',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClientPath('alta');
+                        setClientId('');
+                        setClientFilter('');
+                      }}
+                      className="w-full rounded-xl px-4 py-3.5 text-base font-bold text-white shadow-sm active:scale-[0.99]"
+                      style={{ backgroundColor: SUITE.navy }}
+                    >
+                      Alta cliente
+                    </button>
+                    {clientPath === 'alta' && (
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <label className="text-xs text-slate-600 sm:col-span-2">
+                          <span className="font-semibold text-slate-700">
+                            Nombre completo de quien solicita el evento *
+                          </span>
+                          <input
+                            value={altaForm.contact_name}
+                            onChange={(e) =>
+                              setAltaForm((f) => ({
+                                ...f,
+                                contact_name: e.target.value,
+                              }))
+                            }
+                            placeholder="Nombre y apellidos"
+                            required
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-slate-600 sm:col-span-2">
+                          <span className="font-semibold text-slate-700">
+                            Empresa
+                          </span>
+                          <input
+                            value={altaForm.company_name}
+                            onChange={(e) =>
+                              setAltaForm((f) => ({
+                                ...f,
+                                company_name: e.target.value,
+                              }))
+                            }
+                            placeholder="Si aplica"
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-slate-600">
+                          <span className="font-semibold text-slate-700">
+                            Teléfono
+                          </span>
+                          <input
+                            type="tel"
+                            value={altaForm.phone}
+                            onChange={(e) =>
+                              setAltaForm((f) => ({
+                                ...f,
+                                phone: e.target.value,
+                              }))
+                            }
+                            placeholder="Ej. 442 123 4567"
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-slate-600">
+                          <span className="font-semibold text-slate-700">
+                            Correo electrónico
+                          </span>
+                          <input
+                            type="email"
+                            value={altaForm.email}
+                            onChange={(e) =>
+                              setAltaForm((f) => ({
+                                ...f,
+                                email: e.target.value,
+                              }))
+                            }
+                            placeholder="cliente@correo.com"
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"
+                          />
+                          <span className="mt-0.5 block text-[11px] text-slate-500">
+                            Donde se enviará la cotización
+                          </span>
+                        </label>
+                        <button
+                          type="button"
+                          disabled={altaBusy || !altaForm.contact_name.trim()}
+                          onClick={() => void createClientAlta()}
+                          className="rounded-xl px-3 py-2.5 text-sm font-bold text-white disabled:opacity-50 sm:col-span-2"
+                          style={{ backgroundColor: SUITE.orange }}
+                        >
+                          {altaBusy ? 'Creando…' : 'Crear y seleccionar'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {canEdit && (
+                  <div className="flex items-center gap-3 px-1">
+                    <div className="h-px flex-1 bg-slate-200" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      o
+                    </span>
+                    <div className="h-px flex-1 bg-slate-200" />
+                  </div>
+                )}
+
+                <div
+                  className="rounded-xl border-2 p-3 transition-colors"
+                  style={{
+                    borderColor:
+                      clientPath === 'existente' || (!canEdit && clientId)
+                        ? SUITE.navy
+                        : '#e2e8f0',
+                    backgroundColor:
+                      clientPath === 'existente' || (!canEdit && clientId)
+                        ? '#f8fafc'
+                        : '#fff',
+                  }}
+                >
                   <button
                     type="button"
-                    onClick={() => setShowAlta((v) => !v)}
-                    className="text-xs font-bold"
-                    style={{ color: SUITE.navy }}
+                    onClick={() => setClientPath('existente')}
+                    className="w-full rounded-xl border-2 px-4 py-3 text-base font-bold active:scale-[0.99]"
+                    style={{
+                      borderColor: SUITE.navy,
+                      color: SUITE.navy,
+                      backgroundColor: '#fff',
+                    }}
                   >
-                    {showAlta ? 'Cerrar alta' : '+ Alta cliente'}
+                    Seleccionar cliente existente
                   </button>
-                )}
-              </div>
-              {clients.length === 0 && !showAlta ? (
-                <p className="mt-1 text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
-                  Sin clientes CRM. Usa «Alta cliente» aquí o créalo en CRM
-                  antes de cotizar.
-                </p>
-              ) : (
-                <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    value={clientFilter}
-                    onChange={(e) => setClientFilter(e.target.value)}
-                    placeholder="Filtrar cliente…"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 sm:max-w-[200px]"
-                  />
-                  <select
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                    required
-                    className="w-full flex-1 rounded-lg border border-slate-300 px-3 py-2"
-                  >
-                    <option value="" disabled>
-                      Selecciona cliente
-                    </option>
-                    {sortedClients.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.company_name}
-                        {c.contact_name ? ` · ${c.contact_name}` : ''}
-                      </option>
-                    ))}
-                  </select>
+
+                  {(clientPath === 'existente' ||
+                    clientId ||
+                    !canEdit) && (
+                    <div className="mt-3 space-y-2">
+                      {clients.length === 0 ? (
+                        <p className="text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+                          {canEdit
+                            ? 'Sin clientes CRM. Usa «Alta cliente» arriba o créalo en CRM antes de cotizar.'
+                            : 'Sin clientes CRM. Pide a un editor que dé de alta el cliente.'}
+                        </p>
+                      ) : (
+                        <>
+                          <input
+                            value={clientFilter}
+                            onChange={(e) => {
+                              setClientFilter(e.target.value);
+                              setClientPath('existente');
+                            }}
+                            onFocus={() => setClientPath('existente')}
+                            placeholder="Filtrar por empresa, contacto, tel o correo…"
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
+                          />
+                          <select
+                            value={clientId}
+                            onChange={(e) => {
+                              setClientId(e.target.value);
+                              setClientPath('existente');
+                            }}
+                            onFocus={() => setClientPath('existente')}
+                            required
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5"
+                          >
+                            <option value="" disabled>
+                              Elige un cliente
+                            </option>
+                            {sortedClients.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.company_name}
+                                {c.contact_name ? ` · ${c.contact_name}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          {sortedClients.length === 0 && clientFilter.trim() ? (
+                            <p className="text-xs text-slate-500">
+                              Ningún cliente coincide con el filtro.
+                            </p>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
-              {showAlta && canEdit && (
-                <div className="mt-2 grid gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3 sm:grid-cols-2">
-                  <p className="sm:col-span-2 text-xs font-semibold text-slate-600">
-                    Alta rápida · contacto, teléfono y correo alimentan el lead
-                    al guardar la cotización
-                  </p>
+              </div>
+            </div>
+            {clientId && clientPath !== 'alta' ? (
+              <>
+                <label className="text-sm md:col-span-2">
+                  <span className="font-semibold text-slate-700">
+                    Nombre completo de quien solicita el evento
+                  </span>
                   <input
-                    value={altaForm.company_name}
-                    onChange={(e) =>
-                      setAltaForm((f) => ({
-                        ...f,
-                        company_name: e.target.value,
-                      }))
-                    }
-                    placeholder="Empresa *"
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    value={clientContactName}
+                    onChange={(e) => setClientContactName(e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Nombre y apellidos"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
                   />
+                </label>
+                <label className="text-sm md:col-span-2">
+                  <span className="font-semibold text-slate-700">Empresa</span>
                   <input
-                    value={altaForm.contact_name}
-                    onChange={(e) =>
-                      setAltaForm((f) => ({
-                        ...f,
-                        contact_name: e.target.value,
-                      }))
-                    }
-                    placeholder="Contacto"
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    value={clientCompanyName}
+                    onChange={(e) => setClientCompanyName(e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Empresa / razón social"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
                   />
+                </label>
+                <label className="text-sm">
+                  <span className="font-semibold text-slate-700">Teléfono</span>
                   <input
                     type="tel"
-                    value={altaForm.phone}
-                    onChange={(e) =>
-                      setAltaForm((f) => ({ ...f, phone: e.target.value }))
-                    }
-                    placeholder="Teléfono"
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    value={clientPhone}
+                    onChange={(e) => setClientPhone(e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Ej. 442 123 4567"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
                   />
+                </label>
+                <label className="text-sm">
+                  <span className="font-semibold text-slate-700">
+                    Correo electrónico
+                  </span>
                   <input
                     type="email"
-                    value={altaForm.email}
-                    onChange={(e) =>
-                      setAltaForm((f) => ({ ...f, email: e.target.value }))
-                    }
-                    placeholder="Correo"
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    value={clientEmail}
+                    onChange={(e) => setClientEmail(e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="cliente@correo.com"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
                   />
-                  <button
-                    type="button"
-                    disabled={altaBusy || !altaForm.company_name.trim()}
-                    onClick={() => void createClientAlta()}
-                    className="rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-50 sm:col-span-2"
-                    style={{ backgroundColor: SUITE.navy }}
-                  >
-                    {altaBusy ? 'Creando…' : 'Crear y seleccionar'}
-                  </button>
-                </div>
-              )}
-              {clientId && (
-                <p className="mt-1 text-xs text-slate-500">
-                  {(() => {
-                    const c = clients.find((x) => x.id === clientId);
-                    if (!c) return null;
-                    const bits = [c.contact_name, c.phone, c.email].filter(
-                      Boolean
-                    );
-                    return bits.length
-                      ? `Lead usará: ${bits.join(' · ')}`
-                      : 'Cliente sin contacto/tel/correo — completa en CRM o alta.';
-                  })()}
-                </p>
-              )}
-            </div>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    Donde se enviará la cotización
+                  </span>
+                </label>
+              </>
+            ) : null}
             <label className="text-sm">
               <span className="font-semibold text-slate-700">Fecha evento</span>
               <input
@@ -682,12 +1049,17 @@ export function EventosCotizador({
                 onChange={(e) => setEventDate(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Sin cambios si faltan {EVENTOS_QUOTE_LOCK_WITHIN_DAYS} días o
+                menos (hora CDMX).
+              </p>
             </label>
             <label className="text-sm">
               <span className="font-semibold text-slate-700">Personas (pax)</span>
               <EventosPaxCounter
                 value={pax}
                 onChange={setPax}
+                disabled={quoteLocked}
               />
             </label>
             <label className="text-sm md:col-span-2">
@@ -698,8 +1070,9 @@ export function EventosCotizador({
                 type="text"
                 value={celebration}
                 onChange={(e) => setCelebration(e.target.value)}
+                disabled={quoteLocked}
                 placeholder="Boda, XV años, corporativo, aniversario…"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
               />
               <p className="mt-1 text-xs text-slate-500">
                 Se copia al lead CRM al guardar (título + celebración).
@@ -714,7 +1087,8 @@ export function EventosCotizador({
                   setItemId('');
                   setChoices({});
                 }}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                disabled={quoteLocked}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
               >
                 {menus.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -754,7 +1128,7 @@ export function EventosCotizador({
               <select
                 value={itemId}
                 onChange={(e) => setItemId(e.target.value)}
-                disabled={!items.length}
+                disabled={!items.length || quoteLocked}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
               >
                 {!items.length ? (
@@ -772,14 +1146,34 @@ export function EventosCotizador({
                 )}
               </select>
             </label>
+            {(nextLineIsAlloc || selectedItem?.unit === 'persona') && (
+              <label className="w-[140px] text-sm">
+                <span className="font-semibold text-slate-700">
+                  {nextLineIsAlloc ? 'Personas (línea)' : 'Cantidad'}
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={lineQty}
+                  disabled={quoteLocked}
+                  onChange={(e) =>
+                    setLineQty(Math.max(0, Math.floor(Number(e.target.value) || 0)))
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
+                />
+              </label>
+            )}
             <button
               type="button"
               onClick={addLine}
               disabled={
+                quoteLocked ||
                 !items.length ||
                 !itemId ||
                 !selectedItem ||
-                !!validateChoiceSelections(selectedItem, choices)
+                !!validateChoiceSelections(selectedItem, choices) ||
+                (nextLineIsAlloc && paxAlloc.remaining <= 0)
               }
               className="rounded-xl px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
               style={{ backgroundColor: SUITE.navy }}
@@ -787,6 +1181,18 @@ export function EventosCotizador({
               Agregar línea
             </button>
           </div>
+
+          {nextLineIsAlloc && !quoteLocked && (
+            <p className="mt-2 text-xs text-slate-600">
+              Asigna cuántas personas del evento llevan este menú
+              {paxAlloc.remaining > 0
+                ? ` · quedan ${paxAlloc.remaining} por asignar`
+                : paxAlloc.hasAllocLines
+                  ? ' · todos asignados'
+                  : ''}
+              .
+            </p>
+          )}
 
           {choiceGroups.length > 0 && selectedItem && (
             <div className="mt-3 grid gap-3 rounded-xl border border-amber-100 bg-amber-50/60 p-3 md:grid-cols-2">
@@ -810,7 +1216,8 @@ export function EventosCotizador({
                         [g.id]: e.target.value,
                       }))
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-50"
+                    disabled={quoteLocked}
                   >
                     <option value="">
                       {g.required ? `Selecciona ${g.label.toLowerCase()}…` : 'Sin elegir'}
@@ -877,22 +1284,33 @@ export function EventosCotizador({
                       <td className="px-3 py-2">
                         <input
                           type="number"
-                          min={0.01}
-                          step="0.01"
+                          min={isPaxAllocationLine(l) ? 1 : 0.01}
+                          step={isPaxAllocationLine(l) ? 1 : 0.01}
                           value={l.quantity}
+                          disabled={quoteLocked}
                           onChange={(e) =>
                             setLines((prev) =>
                               prev.map((x) =>
                                 x.key === l.key
                                   ? {
                                       ...x,
-                                      quantity: Number(e.target.value) || 0,
+                                      quantity: isPaxAllocationLine(x)
+                                        ? Math.max(
+                                            0,
+                                            Math.floor(Number(e.target.value) || 0)
+                                          )
+                                        : Number(e.target.value) || 0,
                                     }
                                   : x
                               )
                             )
                           }
-                          className="w-20 rounded border border-slate-200 px-2 py-1"
+                          className="w-20 rounded border border-slate-200 px-2 py-1 disabled:bg-slate-50"
+                          title={
+                            isPaxAllocationLine(l)
+                              ? 'Personas con este menú'
+                              : undefined
+                          }
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -901,6 +1319,7 @@ export function EventosCotizador({
                           min={0}
                           step="0.01"
                           value={l.unit_price}
+                          disabled={quoteLocked}
                           onChange={(e) =>
                             setLines((prev) =>
                               prev.map((x) =>
@@ -913,7 +1332,7 @@ export function EventosCotizador({
                               )
                             )
                           }
-                          className="w-28 rounded border border-slate-200 px-2 py-1"
+                          className="w-28 rounded border border-slate-200 px-2 py-1 disabled:bg-slate-50"
                           title="Editar precio (útil en bebidas a la carta)"
                         />
                       </td>
@@ -924,7 +1343,8 @@ export function EventosCotizador({
                         <button
                           type="button"
                           onClick={() => removeLine(l.key)}
-                          className="text-xs font-semibold text-red-600"
+                          disabled={quoteLocked}
+                          className="text-xs font-semibold text-red-600 disabled:opacity-40"
                         >
                           Quitar
                         </button>
@@ -936,9 +1356,32 @@ export function EventosCotizador({
             </table>
           </div>
 
+          {paxAlloc.hasAllocLines && (
+            <p
+              className={`mt-2 text-xs font-medium rounded-lg px-3 py-2 ${
+                allocHint
+                  ? 'text-amber-900 bg-amber-50'
+                  : 'text-emerald-900 bg-emerald-50'
+              }`}
+            >
+              Asignados {paxAlloc.assigned} / Total {paxAlloc.total}
+              {paxAlloc.remaining > 0
+                ? ` · faltan ${paxAlloc.remaining}`
+                : paxAlloc.remaining < 0
+                  ? ` · sobran ${Math.abs(paxAlloc.remaining)}`
+                  : ' · completo'}
+            </p>
+          )}
+
           {liveHint && (
             <p className="mt-2 text-xs font-medium text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
               {liveHint}
+            </p>
+          )}
+
+          {allocHint && !liveHint && (
+            <p className="mt-2 text-xs font-medium text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+              {allocHint}
             </p>
           )}
 
@@ -948,7 +1391,8 @@ export function EventosCotizador({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+              disabled={quoteLocked}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
               placeholder="Detalle del evento, horario, observaciones…"
             />
           </label>
@@ -958,6 +1402,7 @@ export function EventosCotizador({
               <input
                 type="checkbox"
                 checked={applyServicio}
+                disabled={quoteLocked}
                 onChange={(e) => setApplyServicio(e.target.checked)}
               />
               Aplicar servicio {(EVENTOS_SERVICIO_PCT * 100).toFixed(0)}%
@@ -966,6 +1411,7 @@ export function EventosCotizador({
               <input
                 type="checkbox"
                 checked={placeHold}
+                disabled={quoteLocked}
                 onChange={(e) => setPlaceHold(e.target.checked)}
               />
               Reservar hold 72 h hábiles
@@ -991,7 +1437,12 @@ export function EventosCotizador({
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={busy || lines.length === 0 || !!liveHint}
+                disabled={
+                  busy ||
+                  lines.length === 0 ||
+                  !!liveHint ||
+                  !!allocHint
+                }
                 onClick={openPreview}
                 className="rounded-xl border px-4 py-2.5 text-sm font-bold disabled:opacity-50"
                 style={{ borderColor: SUITE.navy, color: SUITE.navy }}
@@ -1002,8 +1453,10 @@ export function EventosCotizador({
                 type="button"
                 disabled={
                   busy ||
+                  quoteLocked ||
                   lines.length === 0 ||
                   !!liveHint ||
+                  !!allocHint ||
                   holdBlocked ||
                   !persistQuotes
                 }
@@ -1015,14 +1468,16 @@ export function EventosCotizador({
                   ? 'Guardando…'
                   : !persistQuotes
                     ? 'Guardar (requiere SQL)'
-                    : 'Guardar borrador'}
+                    : quoteLocked
+                      ? 'Bloqueada (≤7 días)'
+                      : 'Guardar nueva cotización'}
               </button>
             </div>
           )}
           {!canEdit && lines.length > 0 && (
             <button
               type="button"
-              disabled={!!liveHint}
+              disabled={!!liveHint || !!allocHint}
               onClick={openPreview}
               className="mt-4 rounded-xl border px-4 py-2.5 text-sm font-bold disabled:opacity-50"
               style={{ borderColor: SUITE.navy, color: SUITE.navy }}
@@ -1093,6 +1548,51 @@ export function EventosCotizador({
               Actualizar
             </button>
           </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Varias cotizaciones por cliente están permitidas; cada una es una
+            versión distinta.
+          </p>
+
+          {clientId && clientQuotes.length > 0 && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                De este cliente ({clientQuotes.length})
+              </p>
+              <ul className="mt-2 max-h-[160px] space-y-1.5 overflow-y-auto">
+                {clientQuotes.map((q) => (
+                  <li key={`client-${q.id}`} className="text-sm">
+                    <div className="flex justify-between gap-2">
+                      <a
+                        href={`/eventos/cotizacion/${q.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold hover:underline"
+                        style={{ color: SUITE.navy }}
+                      >
+                        {q.quote_number || q.id.slice(0, 8)}
+                      </a>
+                      <span className="font-semibold text-slate-700">
+                        {formatMxn(q.total)}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {STATUS_LABELS[q.status] || q.status}
+                      {q.event_date
+                        ? ` · ${new Date(
+                            q.event_date + 'T12:00:00'
+                          ).toLocaleDateString('es-MX', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}`
+                        : ''}
+                      {q.pax ? ` · ${q.pax} pax` : ''}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {quotesLoading ? (
             <p className="mt-2 text-sm text-slate-500">Cargando…</p>
@@ -1111,10 +1611,13 @@ export function EventosCotizador({
             </div>
           ) : quotes.length === 0 ? (
             <p className="mt-2 text-sm text-slate-500">
-              Aún no hay cotizaciones. Arma líneas y guarda un borrador.
+              Aún no hay cotizaciones. Arma líneas y guarda una nueva.
             </p>
           ) : (
             <ul className="mt-3 max-h-[420px] space-y-2 overflow-y-auto">
+              <li className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Recientes
+              </li>
               {quotes.map((q) => (
                 <li
                   key={q.id}
@@ -1150,6 +1653,30 @@ export function EventosCotizador({
                   >
                     Ver cotización →
                   </a>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {q.service_order_id ? (
+                      <a
+                        href={`/eventos/os/${q.service_order_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-white"
+                        style={{ backgroundColor: SUITE.navy }}
+                      >
+                        Ver OS
+                      </a>
+                    ) : canEdit ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void generateOsFromQuote(q.id)}
+                        className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                        style={{ backgroundColor: SUITE.navy }}
+                        title="Marca cotización aceptada, lead ganado y crea OS digital"
+                      >
+                        Generar OS
+                      </button>
+                    ) : null}
+                  </div>
                 </li>
               ))}
             </ul>

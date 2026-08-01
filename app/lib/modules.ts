@@ -1,5 +1,6 @@
 export type ModuleId =
   | 'hub'
+  | 'staff'
   | 'ventas'
   | 'finanzas'
   | 'rrhh'
@@ -20,6 +21,14 @@ export interface AppModule {
 }
 
 export const APP_MODULES: AppModule[] = [
+  {
+    id: 'staff',
+    href: '/staff',
+    label: 'Staff',
+    short: 'Staff',
+    description: 'Herramientas operativas de piso · Cortes TPV y captura diaria',
+    status: 'activo',
+  },
   {
     id: 'ventas',
     href: '/ventas',
@@ -61,7 +70,8 @@ export const APP_MODULES: AppModule[] = [
     status: 'activo',
   },
   {
-    id: 'cocina',    href: '/cocina',
+    id: 'cocina',
+    href: '/cocina',
     label: 'Cocina',
     short: 'Cocina',
     description: 'Operación y tablero de cocina · Carranza 50',

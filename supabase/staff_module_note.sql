@@ -1,0 +1,26 @@
+-- Staff module (Cortes TPV) — NO schema change required.
+--
+-- El módulo `staff` se guarda en dashboard_users.modules (text[]), igual que
+-- `ventas`, `finanzas`, etc. No hace falta ALTER TABLE ni nuevo rol SQL.
+--
+-- Para crear un usuario staff a mano (opcional; preferir Master Panel → Usuarios):
+--
+--   -- Reemplaza el hash: genera uno desde la app (Crear usuario) o deja que
+--   -- el Master Panel lo haga. Este bloque es solo documentación.
+--
+--   insert into public.dashboard_users (username, display_name, password_hash, role, modules, active)
+--   values (
+--     'mesero1',
+--     'Mesero 1',
+--     'scrypt$...$',  -- usar hashPassword de la app; no pegues plaintext aquí
+--     'viewer',
+--     array['staff']::text[],
+--     true
+--   );
+--
+-- Acceso resultante:
+--   - Login → redirect a /staff
+--   - Flujo principal: /staff/corte (Corte del día = TPV fotos + cierre)
+--   - También /ventas/corte-tpv, /ventas/corte-tpv/guia
+--   - SQL cierre: supabase/staff_rpt_diario.sql (+ tpv_cortes.sql)
+--   - No ve Finanzas / Socios / Ventas completo / etc. salvo que se añadan módulos

@@ -10,6 +10,7 @@ import {
   buildDayCompleteness,
   computeNetoBanco,
   parseTerminalNumber,
+  defaultCorteDateCdmx,
   todayCdmxIso,
   validateTpvImageQuality,
   asTpvRow,
@@ -65,7 +66,7 @@ function mondaySundayCdmx(today = todayCdmxIso()): { mon: string; sun: string } 
   return { mon, sun: sunKey };
 }
 
-/** GET /api/tpv-cortes?date= | from=&to= | week=1 */
+/** GET /api/tpv-cortes?date= | from=&to= | week=1 | recent=1 */
 export async function GET(request: Request) {
   const auth = await requireVentasSession();
   if (auth instanceof NextResponse) return auth;
@@ -75,6 +76,7 @@ export async function GET(request: Request) {
   const from = url.searchParams.get('from')?.slice(0, 10) || null;
   const to = url.searchParams.get('to')?.slice(0, 10) || null;
   const week = url.searchParams.get('week');
+  const recent = url.searchParams.get('recent') === '1';
   const withUrls = url.searchParams.get('urls') === '1';
   const withDay = url.searchParams.get('day') === '1';
 
@@ -85,11 +87,13 @@ export async function GET(request: Request) {
       .select('*')
       .order('corte_date', { ascending: false })
       .order('terminal_number', { ascending: true })
-      .limit(200);
+      .limit(recent ? 300 : 200);
 
-    const corteDateForDay = date || todayCdmxIso();
+    const corteDateForDay = date || defaultCorteDateCdmx();
 
-    if (week === '1' || week === 'current') {
+    if (recent) {
+      // Sin filtro de fecha: galería admin / listado reciente (más nuevos primero).
+    } else if (week === '1' || week === 'current') {
       const { mon, sun } = mondaySundayCdmx();
       q = q.gte('corte_date', mon).lte('corte_date', sun);
     } else if (date) {
@@ -97,7 +101,7 @@ export async function GET(request: Request) {
     } else if (from && to) {
       q = q.gte('corte_date', from).lte('corte_date', to);
     } else {
-      q = q.eq('corte_date', todayCdmxIso());
+      q = q.eq('corte_date', corteDateForDay);
     }
 
     const { data, error } = await q;
@@ -129,8 +133,11 @@ export async function GET(request: Request) {
     }
 
     const day =
-      withDay || date || (!week && !from)
-        ? buildDayCompleteness(rows, week ? todayCdmxIso() : corteDateForDay)
+      withDay || (!recent && (date || (!week && !from)))
+        ? buildDayCompleteness(
+            rows,
+            week ? defaultCorteDateCdmx() : corteDateForDay
+          )
         : null;
 
     return NextResponse.json({
@@ -175,7 +182,7 @@ export async function POST(request: Request) {
         );
       }
       const corteDate =
-        String(body.corte_date || '').slice(0, 10) || todayCdmxIso();
+        String(body.corte_date || '').slice(0, 10) || defaultCorteDateCdmx();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) {
         return NextResponse.json({ error: 'Fecha inválida' }, { status: 400 });
       }
@@ -323,7 +330,8 @@ export async function POST(request: Request) {
     }
 
     const corteDate =
-      String(form.get('corte_date') || '').slice(0, 10) || todayCdmxIso();
+      String(form.get('corte_date') || '').slice(0, 10) ||
+      defaultCorteDateCdmx();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) {
       return NextResponse.json({ error: 'Fecha de corte inválida' }, { status: 400 });
     }

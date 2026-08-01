@@ -356,15 +356,21 @@ export function EventosCalendario() {
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <ActionChip
                         href={
-                          ev.os_path ? osOpenUrl(ev.os_path) : null
+                          ev.digital_os_id
+                            ? `/eventos/os/${ev.digital_os_id}`
+                            : ev.os_path
+                              ? osOpenUrl(ev.os_path)
+                              : null
                         }
-                        label="Descargar OS"
-                        disabled={!ev.os_path}
+                        label={ev.digital_os_id ? 'Ver OS' : 'Descargar OS'}
+                        disabled={!ev.digital_os_id && !ev.os_path}
                         disabledLabel="Sin OS"
                         title={
-                          ev.os_path
-                            ? ev.os_filename || 'Abrir PDF de orden de servicio'
-                            : 'Sin PDF en Drive para este evento (p. ej. solo Anticipos)'
+                          ev.digital_os_id
+                            ? 'Abrir orden de servicio digital'
+                            : ev.os_path
+                              ? ev.os_filename || 'Abrir PDF de orden de servicio'
+                              : 'Sin OS digital ni PDF en Drive'
                         }
                       />
                       <ActionChip

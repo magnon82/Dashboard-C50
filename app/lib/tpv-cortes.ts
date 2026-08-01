@@ -76,14 +76,49 @@ export interface TpvDayCompleteness {
   missing: TpvTerminalNumber[];
 }
 
+const CDMX_TZ = 'America/Mexico_City';
+
+/** Texto de ayuda junto al campo Fecha (captura de cortes). */
+export const TPV_CORTE_DATE_HELP =
+  'Fecha del día de corte. Hasta las 23:59 se registra el día en curso. De 00:00 a 05:59 se asigna el día anterior (cierre nocturno).';
+
 /** Hoy en zona America/Mexico_City (YYYY-MM-DD). */
-export function todayCdmxIso(): string {
+export function todayCdmxIso(at: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Mexico_City',
+    timeZone: CDMX_TZ,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).format(at);
+}
+
+/** Hora local CDMX (0–23). */
+export function cdmxHour(at: Date = new Date()): number {
+  const hourPart = new Intl.DateTimeFormat('en-GB', {
+    timeZone: CDMX_TZ,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  })
+    .formatToParts(at)
+    .find((p) => p.type === 'hour')?.value;
+  const h = Number(hourPart);
+  return Number.isFinite(h) ? h : 0;
+}
+
+/**
+ * Fecha de corte por defecto (CDMX):
+ * - 00:00–05:59 → día anterior (cierre nocturno)
+ * - 06:00–23:59 → día en curso
+ */
+export function defaultCorteDateCdmx(at: Date = new Date()): string {
+  const today = todayCdmxIso(at);
+  if (cdmxHour(at) <= 5) {
+    const [y, m, d] = today.split('-').map(Number);
+    const prev = new Date(Date.UTC(y, m - 1, d));
+    prev.setUTCDate(prev.getUTCDate() - 1);
+    return prev.toISOString().slice(0, 10);
+  }
+  return today;
 }
 
 export function moneyMx(v: number | null | undefined): string {
@@ -98,7 +133,10 @@ export function terminalLabel(n: TpvTerminalNumber): string {
   return `Terminal ${n}`;
 }
 
-/** Neto esperado: cobrado − propina (si ambos existen). */
+/**
+ * Depósito diario bancario (neto banco): cobrado + propinas.
+ * Las propinas se muestran aparte; no se descuentan del depósito.
+ */
 export function computeNetoBanco(
   cobrado: number | null | undefined,
   propina: number | null | undefined
@@ -106,7 +144,7 @@ export function computeNetoBanco(
   if (cobrado == null || Number.isNaN(Number(cobrado))) return null;
   const tip =
     propina == null || Number.isNaN(Number(propina)) ? 0 : Number(propina);
-  return Math.round((Number(cobrado) - tip) * 100) / 100;
+  return Math.round((Number(cobrado) + tip) * 100) / 100;
 }
 
 /**
@@ -316,10 +354,7 @@ export function buildTpvWeekVerify(
     if (u.status === 'verified') verifiedCount += 1;
     const c = u.total_cobrado != null ? Number(u.total_cobrado) : 0;
     const tip = u.propina != null ? Number(u.propina) : 0;
-    const n =
-      u.neto_banco != null
-        ? Number(u.neto_banco)
-        : computeNetoBanco(u.total_cobrado, u.propina) ?? 0;
+    const n = computeNetoBanco(u.total_cobrado, u.propina) ?? 0;
     cobrado += c;
     propina += tip;
     neto += n;

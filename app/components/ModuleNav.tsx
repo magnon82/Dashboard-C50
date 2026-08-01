@@ -30,7 +30,12 @@ export function ModuleNav({ activeId }: Props) {
       {!loading &&
         visible.map((m) => {
           const active =
-            activeId === m.id || pathname === m.href || pathname.startsWith(`${m.href}/`);
+            activeId === m.id ||
+            pathname === m.href ||
+            pathname.startsWith(`${m.href}/`) ||
+            (m.id === 'staff' &&
+              (pathname === '/ventas/corte-tpv' ||
+                pathname.startsWith('/ventas/corte-tpv/')));
           return (
             <Link
               key={m.id}

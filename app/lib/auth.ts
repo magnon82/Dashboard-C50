@@ -111,6 +111,15 @@ export function canAccessModule(session: SessionUser, moduleId: string): boolean
   return session.modules.includes(moduleId);
 }
 
+/** Cortes TPV: módulo Ventas o Staff (piso operativo). */
+export function canAccessCorteTpv(session: SessionUser): boolean {
+  return canAccessModule(session, 'ventas') || canAccessModule(session, 'staff');
+}
+
+export function isCorteTpvPath(pathname: string): boolean {
+  return pathname === '/ventas/corte-tpv' || pathname.startsWith('/ventas/corte-tpv/');
+}
+
 /** Solo el admin bootstrap (DASHBOARD_USER) ve y usa /admin */
 export function canAccessAdmin(session: SessionUser): boolean {
   return (

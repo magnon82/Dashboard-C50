@@ -5,10 +5,14 @@ import {
   requireEventosWrite,
 } from '@/app/lib/eventos-api';
 import {
+  EVENTOS_QUOTE_LOCK_WITHIN_DAYS,
   EVENTOS_SERVICIO_PCT,
   canPlaceHold,
   computeQuoteTotals,
   defaultHoldUntil,
+  isQuoteLockedByEventDate,
+  quoteLockMessage,
+  validatePaxAllocation,
   validateQuotePax,
   type QuoteLineInput,
 } from '@/app/lib/eventos';
@@ -22,6 +26,7 @@ type QuoteLineBody = QuoteLineInput & {
   category?: string;
   min_pax?: number | null;
   requires_food?: boolean;
+  unit?: string | null;
   options?: Record<string, string> | null;
 };
 
@@ -75,7 +80,31 @@ export async function GET() {
         error: error.message,
       });
     }
-    return NextResponse.json({ ready: true, quotes: data || [] });
+
+    const quotes = data || [];
+    const quoteIds = quotes.map((q) => String(q.id));
+    const osByQuote = new Map<string, string>();
+    if (quoteIds.length) {
+      try {
+        const { data: orders } = await sb
+          .from('event_service_orders')
+          .select('id, quote_id')
+          .in('quote_id', quoteIds);
+        for (const o of orders || []) {
+          if (o.quote_id) osByQuote.set(String(o.quote_id), String(o.id));
+        }
+      } catch {
+        /* tabla OS aún no migrada */
+      }
+    }
+
+    return NextResponse.json({
+      ready: true,
+      quotes: quotes.map((q) => ({
+        ...q,
+        service_order_id: osByQuote.get(String(q.id)) || null,
+      })),
+    });
   } catch (e) {
     return NextResponse.json({
       ready: false,
@@ -98,6 +127,10 @@ export async function POST(request: Request) {
     pax?: number;
     celebration?: string | null;
     notes?: string;
+    /** Contacto de envío: actualiza event_clients antes de crear el lead */
+    phone?: string | null;
+    email?: string | null;
+    contact_name?: string | null;
     apply_servicio?: boolean;
     place_hold?: boolean;
     lines?: QuoteLineBody[];
@@ -144,6 +177,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: paxErr }, { status: 400 });
   }
 
+  const allocErr = validatePaxAllocation(
+    pax,
+    lines.map((l) => ({
+      quantity: Number(l.quantity),
+      unit: l.unit || 'persona',
+      category: l.category,
+    }))
+  );
+  if (allocErr) {
+    return NextResponse.json({ error: allocErr }, { status: 400 });
+  }
+
+  if (isQuoteLockedByEventDate(body.event_date || null)) {
+    return NextResponse.json(
+      {
+        error:
+          quoteLockMessage(body.event_date || null) ||
+          `Sin cambios: faltan ${EVENTOS_QUOTE_LOCK_WITHIN_DAYS} días o menos para el evento.`,
+      },
+      { status: 400 }
+    );
+  }
+
   const applyServicio = body.apply_servicio !== false;
   const totals = computeQuoteTotals(lines, applyServicio, EVENTOS_SERVICIO_PCT);
   const celebration = (body.celebration || '').trim() || null;
@@ -166,6 +222,39 @@ export async function POST(request: Request) {
   try {
     const sb = getServiceSupabase();
     const now = new Date().toISOString();
+
+    // Cotizador puede sobreescribir contacto/tel/correo del cliente (sin schema en event_quotes)
+    const patchPhone = body.phone !== undefined;
+    const patchEmail = body.email !== undefined;
+    const patchContact = body.contact_name !== undefined;
+    if (patchPhone || patchEmail || patchContact) {
+      const clientPatch: Record<string, string | null> = { updated_at: now };
+      if (patchPhone) {
+        clientPatch.phone =
+          typeof body.phone === 'string' ? body.phone.trim() || null : null;
+      }
+      if (patchEmail) {
+        clientPatch.email =
+          typeof body.email === 'string' ? body.email.trim() || null : null;
+      }
+      if (patchContact) {
+        clientPatch.contact_name =
+          typeof body.contact_name === 'string'
+            ? body.contact_name.trim() || null
+            : null;
+      }
+      const { error: clientUpdErr } = await sb
+        .from('event_clients')
+        .update(clientPatch)
+        .eq('id', clientId);
+      if (clientUpdErr) {
+        return NextResponse.json(
+          { error: `No se pudo actualizar contacto del cliente: ${clientUpdErr.message}` },
+          { status: 500 }
+        );
+      }
+    }
+
     const quoteNumber = `EVT-${now.slice(0, 10).replace(/-/g, '')}-${Math.floor(
       Math.random() * 900 + 100
     )}`;

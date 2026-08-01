@@ -4,42 +4,83 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { EventosCotizacionDocument } from '@/app/components/eventos/EventosCotizacionDocument';
 import type { CotizacionDoc } from '@/app/lib/eventos-cotizacion-doc';
+import { useSession } from '@/app/lib/useSession';
 import { SUITE } from '@/app/lib/themes';
 
 export default function CotizacionByIdPage() {
   const params = useParams();
   const id = String(params?.id || '');
+  const { user } = useSession();
+  const canEdit = !!user?.canEdit;
   const [doc, setDoc] = useState<CotizacionDoc | null>(null);
+  const [serviceOrderId, setServiceOrderId] = useState<string | null>(null);
   const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  async function load() {
     if (!id) return;
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/eventos/quotes/${id}`, {
-          cache: 'no-store',
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          if (!cancelled) {
-            setErr(json.error || 'No se pudo cargar la cotización');
-          }
-          return;
-        }
-        if (!cancelled) setDoc(json.doc as CotizacionDoc);
-      } catch {
-        if (!cancelled) setErr('Error de red al cargar la cotización');
-      } finally {
-        if (!cancelled) setLoading(false);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/eventos/quotes/${id}`, {
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(json.error || 'No se pudo cargar la cotización');
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      setDoc(json.doc as CotizacionDoc);
+      setServiceOrderId(json.service_order_id || null);
+      setErr('');
+    } catch {
+      setErr('Error de red al cargar la cotización');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function generateOs() {
+    if (!canEdit || !id) return;
+    setBusy(true);
+    setMsg('');
+    setErr('');
+    try {
+      const res = await fetch('/api/eventos/os', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quote_id: id }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(
+          [json.error, json.hint].filter(Boolean).join(' — ') ||
+            'No se pudo generar OS'
+        );
+        return;
+      }
+      setServiceOrderId(json.order?.id || null);
+      setMsg(
+        json.created
+          ? `OS ${json.order?.os_number || ''} generada`
+          : `OS ${json.order?.os_number || ''} actualizada`
+      );
+      await load();
+      if (json.href) {
+        window.open(json.href, '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      setErr('Error de red al generar OS');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -49,7 +90,7 @@ export default function CotizacionByIdPage() {
     );
   }
 
-  if (err || !doc) {
+  if (err && !doc) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         <p className="text-sm font-medium" style={{ color: SUITE.navy }}>
@@ -66,8 +107,33 @@ export default function CotizacionByIdPage() {
     );
   }
 
+  if (!doc) return null;
+
   return (
     <div style={{ backgroundColor: SUITE.pageBg, minHeight: '100vh' }}>
+      <div className="mx-auto flex max-w-[820px] flex-wrap items-center gap-2 px-4 pt-6 print:hidden">
+        {serviceOrderId ? (
+          <a
+            href={`/eventos/os/${serviceOrderId}`}
+            className="rounded-lg px-4 py-2 text-sm font-bold text-white"
+            style={{ backgroundColor: SUITE.navy }}
+          >
+            Ver OS digital
+          </a>
+        ) : canEdit ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void generateOs()}
+            className="rounded-lg px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            style={{ backgroundColor: SUITE.navy }}
+          >
+            {busy ? 'Generando…' : 'Aceptar y generar OS'}
+          </button>
+        ) : null}
+        {msg && <p className="text-xs font-medium text-emerald-700">{msg}</p>}
+        {err && <p className="text-xs font-medium text-red-700">{err}</p>}
+      </div>
       <EventosCotizacionDocument doc={doc} />
     </div>
   );

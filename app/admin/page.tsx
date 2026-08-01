@@ -3,6 +3,7 @@
 import { FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import { SuiteShell } from '@/app/components/SuiteShell';
 import { AdminAlmacenamientoRecursos } from '@/app/components/AdminAlmacenamientoRecursos';
+import { AdminCajaTpv } from '@/app/components/AdminCajaTpv';
 import { AdminDataMap } from '@/app/components/AdminDataMap';
 import { AdminPresupuestoAjustes } from '@/app/components/AdminPresupuestoAjustes';
 import { AdminSaldosBancos } from '@/app/components/AdminSaldosBancos';
@@ -31,6 +32,16 @@ const emptyForm = {
   role: 'viewer' as 'admin' | 'viewer',
   modules: ['ventas'] as string[],
 };
+
+/** Contraseña legible en cliente (sin caracteres ambiguos). */
+function generateClientPassword(length = 10): string {
+  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  let out = '';
+  for (let i = 0; i < length; i++) out += chars[bytes[i]! % chars.length];
+  return out;
+}
 
 function EyeIcon({ open }: { open: boolean }) {
   const common = {
@@ -82,6 +93,7 @@ function PasswordField({
   required,
   placeholder,
   hint,
+  onGenerate,
 }: {
   id: string;
   label: string;
@@ -90,6 +102,7 @@ function PasswordField({
   required?: boolean;
   placeholder?: string;
   hint?: string;
+  onGenerate?: () => void;
 }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -118,6 +131,16 @@ function PasswordField({
         >
           <EyeIcon open={visible} />
         </button>
+        {onGenerate && (
+          <button
+            type="button"
+            onClick={onGenerate}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            title="Generar contraseña aleatoria"
+          >
+            Generar
+          </button>
+        )}
       </div>
       {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
     </div>
@@ -172,6 +195,11 @@ export default function AdminPage() {
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [createdCreds, setCreatedCreds] = useState<{
+    username: string;
+    password: string;
+  } | null>(null);
+  const [credsCopied, setCredsCopied] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
@@ -200,6 +228,8 @@ export default function AdminPage() {
     setSaving(true);
     setError('');
     setOkMsg('');
+    setCreatedCreds(null);
+    setCredsCopied(false);
     try {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
@@ -211,13 +241,38 @@ export default function AdminPage() {
         setError(json.error || 'No se pudo crear');
         return;
       }
-      setOkMsg(`Usuario ${form.username} creado`);
+      const createdUser = form.username.trim().toLowerCase();
+      const createdPass = form.password;
+      setOkMsg(`Usuario ${createdUser} creado`);
+      setCreatedCreds({ username: createdUser, password: createdPass });
       setForm(emptyForm);
       await load();
     } catch {
       setError('Error de red al crear usuario');
     } finally {
       setSaving(false);
+    }
+  }
+
+  function applyStaffTemplate() {
+    setForm((f) => ({
+      ...f,
+      modules: ['staff'],
+      password: f.password || generateClientPassword(),
+    }));
+    setOkMsg('');
+    setError('');
+  }
+
+  async function copyCreatedCreds() {
+    if (!createdCreds) return;
+    const text = `Usuario: ${createdCreds.username}\nContraseña: ${createdCreds.password}\nEntrada: /login → Staff / Cortes TPV`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCredsCopied(true);
+    } catch {
+      setCredsCopied(false);
+      setError('No se pudo copiar al portapapeles');
     }
   }
 
@@ -358,38 +413,9 @@ export default function AdminPage() {
       {/* 1. Financieros */}
       <AdminSection
         title="Financieros"
-        description="Captura diaria de terminales, saldos bancarios y ajustes ligados al presupuesto."
+        description="Caja (fotos TPV), saldos bancarios y ajustes ligados al presupuesto."
       >
-        <div
-          className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-slate-100 bg-white p-5"
-          style={{ boxShadow: SUITE.shadow, borderTop: `4px solid ${SUITE.navy}` }}
-        >
-          <div className="min-w-0 flex-1">
-            <p
-              className="text-[11px] font-bold uppercase tracking-[0.14em]"
-              style={{ color: SUITE.navy }}
-            >
-              Captura diaria · celular
-            </p>
-            <h3 className="mt-1 text-lg font-bold" style={{ color: theme.title }}>
-              Cortes TPV
-            </h3>
-            <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-              Aquí se toman las fotos de las terminales 1–3 (o se marca «no se
-              usó») y se verifica vs presupuesto bancario.
-            </p>
-            <p className="mt-1 font-mono text-xs text-slate-400">
-              /ventas/corte-tpv
-            </p>
-          </div>
-          <a
-            href="/ventas/corte-tpv"
-            className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-xl px-5 text-sm font-bold text-white"
-            style={{ backgroundColor: SUITE.navy }}
-          >
-            Cortes TPV · tomar fotos
-          </a>
-        </div>
+        <AdminCajaTpv />
 
         <AdminSaldosBancos />
         <AdminPresupuestoAjustes />
@@ -398,7 +424,7 @@ export default function AdminPage() {
       {/* 2. Usuarios */}
       <AdminSection
         title="Usuarios"
-        description="Solo tú gestionas cuentas. Los usuarios nuevos tienen solo lectura en los módulos que les asignes."
+        description="Solo tú gestionas cuentas. Asigna módulos: Staff = solo Cortes TPV; Ventas/Finanzas/etc. según necesidad."
       >
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -408,6 +434,51 @@ export default function AdminPage() {
         {okMsg && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
             {okMsg}
+          </div>
+        )}
+        {createdCreds && (
+          <div
+            className="rounded-[24px] border border-emerald-200 bg-emerald-50/80 p-5"
+            style={{ boxShadow: SUITE.shadow }}
+          >
+            <h3 className="text-lg font-bold text-emerald-900">
+              Credenciales listas para entregar
+            </h3>
+            <p className="mt-1 text-sm text-emerald-800/80">
+              Copia y envíalas al staff. También quedan recuperables en Editar.
+            </p>
+            <dl className="mt-3 space-y-2 font-mono text-sm text-emerald-950">
+              <div className="flex flex-wrap gap-2">
+                <dt className="font-sans font-semibold text-emerald-800">Usuario</dt>
+                <dd>{createdCreds.username}</dd>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <dt className="font-sans font-semibold text-emerald-800">
+                  Contraseña
+                </dt>
+                <dd>{createdCreds.password}</dd>
+              </div>
+            </dl>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={copyCreatedCreds}
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-white"
+                style={{ backgroundColor: SUITE.navy }}
+              >
+                {credsCopied ? 'Copiado' : 'Copiar usuario y contraseña'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatedCreds(null);
+                  setCredsCopied(false);
+                }}
+                className="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-50"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         )}
 
@@ -420,6 +491,18 @@ export default function AdminPage() {
             <h3 className="text-lg font-bold text-slate-900">Nuevo usuario</h3>
             <p className="mt-1 text-sm text-slate-500">
               Solo lectura en los módulos que les asignes. Solo tú gestionas cuentas.
+            </p>
+
+            <button
+              type="button"
+              onClick={applyStaffTemplate}
+              className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+            >
+              Plantilla Staff · solo Cortes TPV
+            </button>
+            <p className="mt-1 text-xs text-slate-500">
+              Marca el módulo Staff, genera contraseña y al iniciar sesión van a{' '}
+              <span className="font-mono">/staff</span>.
             </p>
 
             <label className="mt-4 block text-sm font-semibold text-slate-700">
@@ -447,6 +530,10 @@ export default function AdminPage() {
               value={form.password}
               onChange={(password) => setForm({ ...form, password })}
               required
+              onGenerate={() =>
+                setForm((f) => ({ ...f, password: generateClientPassword() }))
+              }
+              hint="Usa Generar para una clave aleatoria legible (se muestra al crear)."
             />
 
             <fieldset className="mt-4">
@@ -462,6 +549,9 @@ export default function AdminPage() {
                       onChange={() => toggleModule(m.id)}
                     />
                     {m.label}
+                    {m.id === 'staff' ? (
+                      <span className="text-xs text-slate-400">(Cortes TPV)</span>
+                    ) : null}
                   </label>
                 ))}
               </div>
@@ -682,6 +772,7 @@ export default function AdminPage() {
                       ? 'Contraseña vigente (oculta). Usa el ícono del ojo para revelarla.'
                       : 'Solo hay hash (no recuperable). Escribe una nueva para guardarla aquí.'
                   }
+                  onGenerate={() => setEditPassword(generateClientPassword())}
                 />
 
                 {editingUser.role !== 'admin' && (
@@ -701,6 +792,9 @@ export default function AdminPage() {
                           onChange={() => toggleEditModule(m.id)}
                         />
                         {m.label}
+                        {m.id === 'staff' ? (
+                          <span className="text-xs text-slate-400">(Cortes TPV)</span>
+                        ) : null}
                       </label>
                     ))}
                   </div>

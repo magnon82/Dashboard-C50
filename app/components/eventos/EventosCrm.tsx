@@ -298,6 +298,15 @@ export function EventosCrm({
         setErr(json.error || 'No se pudo mover lead');
         return;
       }
+      if (stage === 'ganado' && json.href) {
+        window.open(json.href, '_blank', 'noopener,noreferrer');
+      } else if (stage === 'ganado' && json.os_error) {
+        setErr(
+          `Lead ganado, pero OS no generada: ${[json.os_error, json.os_hint]
+            .filter(Boolean)
+            .join(' — ')}`
+        );
+      }
       await onRefresh();
     } catch {
       setErr('Error de red al actualizar lead');

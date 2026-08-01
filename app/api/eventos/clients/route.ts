@@ -144,6 +144,11 @@ export async function POST(request: Request) {
   try {
     const sb = getServiceSupabase();
     const now = new Date().toISOString();
+    // source 'cotizador' no está en el check SQL → persistir como manual
+    const sourceRaw = (body.source || 'manual').trim();
+    const source = ['manual', 'excel_seed', 'import', 'sheets'].includes(sourceRaw)
+      ? sourceRaw
+      : 'manual';
     const { data, error } = await sb
       .from('event_clients')
       .insert({
@@ -152,7 +157,7 @@ export async function POST(request: Request) {
         email: (body.email || '').trim() || null,
         phone: (body.phone || '').trim() || null,
         notes: (body.notes || '').trim() || null,
-        source: body.source || 'manual',
+        source,
         owner_username: auth.username,
         created_at: now,
         updated_at: now,
@@ -167,6 +172,79 @@ export async function POST(request: Request) {
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Error al crear cliente' },
+      { status: 500 }
+    );
+  }
+}
+
+/** Actualiza contacto (tel/correo) del cliente CRM — p. ej. desde el cotizador. */
+export async function PATCH(request: Request) {
+  const auth = await requireEventosSession();
+  if (auth instanceof NextResponse) return auth;
+  const denied = requireEventosWrite(auth);
+  if (denied) return denied;
+
+  let body: {
+    id?: string;
+    phone?: string | null;
+    email?: string | null;
+    contact_name?: string | null;
+  };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
+  }
+
+  const id = typeof body.id === 'string' ? body.id.trim() : '';
+  if (!id) {
+    return NextResponse.json({ error: 'id es requerido' }, { status: 400 });
+  }
+
+  const patch: Record<string, string | null> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (body.phone !== undefined) {
+    patch.phone =
+      typeof body.phone === 'string' ? body.phone.trim() || null : null;
+  }
+  if (body.email !== undefined) {
+    patch.email =
+      typeof body.email === 'string' ? body.email.trim() || null : null;
+  }
+  if (body.contact_name !== undefined) {
+    patch.contact_name =
+      typeof body.contact_name === 'string'
+        ? body.contact_name.trim() || null
+        : null;
+  }
+  if (
+    body.phone === undefined &&
+    body.email === undefined &&
+    body.contact_name === undefined
+  ) {
+    return NextResponse.json(
+      { error: 'Indica phone, email o contact_name' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb
+      .from('event_clients')
+      .update(patch)
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ client: data });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'Error al actualizar cliente' },
       { status: 500 }
     );
   }

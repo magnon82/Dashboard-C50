@@ -100,7 +100,6 @@ export function BalanceMensualSociosCard({
               label="Balance"
               value={ytd.balance}
               valueColor={balanceColor(ytd.balance)}
-              hint="Ingresos − Gastos · Acumulado (meses incorporados)"
             />
           </div>
 
@@ -193,12 +192,10 @@ function Kpi({
   label,
   value,
   valueColor,
-  hint,
 }: {
   label: string;
   value: number;
   valueColor?: string;
-  hint?: string;
 }) {
   return (
     <div className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3">
@@ -214,11 +211,6 @@ function Kpi({
       >
         {money(value)}
       </p>
-      {hint ? (
-        <p className="mt-0.5 text-[11px]" style={{ color: theme.muted }}>
-          {hint}
-        </p>
-      ) : null}
     </div>
   );
 }

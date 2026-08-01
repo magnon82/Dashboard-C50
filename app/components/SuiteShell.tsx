@@ -18,6 +18,7 @@ interface Props {
 
 const NAV_ICONS: Record<string, string> = {
   home: '⌂',
+  staff: '☷',
   ventas: '◈',
   finanzas: '＄',
   rrhh: '♟',
@@ -29,6 +30,26 @@ const NAV_ICONS: Record<string, string> = {
   inventarios: '▣',
   admin: '⚙',
 };
+
+function navActive(pathname: string, href: string, moduleId: string): boolean {
+  if (pathname === href || pathname.startsWith(`${href}/`)) return true;
+  // Staff también opera Cortes TPV bajo /ventas/corte-tpv
+  if (
+    moduleId === 'staff' &&
+    (pathname === '/ventas/corte-tpv' || pathname.startsWith('/ventas/corte-tpv/'))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function roleLabel(user: { canEdit: boolean; modules: string[] } | null): string {
+  if (!user) return '…';
+  if (user.canEdit) return 'Administrador';
+  const mods = user.modules.filter((m) => m !== '*');
+  if (mods.length === 1 && mods[0] === 'staff') return 'Staff';
+  return 'Solo lectura';
+}
 
 export function SuiteShell({ title, subtitle, children, actions }: Props) {
   const pathname = usePathname();
@@ -65,7 +86,7 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
           {user?.username || 'Usuario'}
         </p>
         <p className="mt-0.5 text-xs" style={{ color: theme.sidebarMuted }}>
-          {user?.canEdit ? 'Administrador' : 'Solo lectura'}
+          {roleLabel(user)}
         </p>
       </div>
 
@@ -79,9 +100,7 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
             <Link
               key={m.id}
               href={m.href}
-              className={linkClass(
-                pathname === m.href || pathname.startsWith(`${m.href}/`)
-              )}
+              className={linkClass(navActive(pathname, m.href, m.id))}
               onClick={() => setOpen(false)}
             >
               <span className="w-5 text-center opacity-80">{NAV_ICONS[m.id] || '•'}</span>

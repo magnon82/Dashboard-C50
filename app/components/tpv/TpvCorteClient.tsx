@@ -9,7 +9,8 @@ import {
   computeNetoBanco,
   estimateSharpnessFromImageData,
   moneyMx,
-  todayCdmxIso,
+  defaultCorteDateCdmx,
+  TPV_CORTE_DATE_HELP,
   validateTpvImageQuality,
   type TpvCorteUpload,
   type TpvDayCompleteness,
@@ -65,9 +66,22 @@ function statusLabel(u: TpvCorteUpload | null, state: string): string {
   return u.status;
 }
 
+/** Muestra YYYY-MM-DD en español (UTC noon evita desfase de zona). */
+function formatCorteDateDisplay(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('es-MX', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export function TpvCorteClient() {
   const [tab, setTab] = useState<Tab>('captura');
-  const [corteDate, setCorteDate] = useState(todayCdmxIso);
+  const [corteDate, setCorteDate] = useState(defaultCorteDateCdmx);
   const [day, setDay] = useState<TpvDayCompleteness | null>(null);
   const [uploads, setUploads] = useState<TpvCorteUpload[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,13 +101,25 @@ export function TpvCorteClient() {
   const [verify, setVerify] = useState<TpvWeekVerify | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const refresh = useCallback(async () => {
+  // Fecha fija por regla CDMX; recompute al montar y al recuperar foco (p. ej. tras medianoche).
+  useEffect(() => {
+    function syncCorteDate() {
+      const next = defaultCorteDateCdmx();
+      setCorteDate((prev) => (prev === next ? prev : next));
+    }
+    syncCorteDate();
+    window.addEventListener('focus', syncCorteDate);
+    return () => window.removeEventListener('focus', syncCorteDate);
+  }, []);
+
+  const refresh = useCallback(async (dateOverride?: string) => {
+    const date = dateOverride ?? corteDate;
     setLoading(true);
     setError(null);
     try {
       const [tpvRes, finRes] = await Promise.all([
         fetch(
-          `/api/tpv-cortes?date=${encodeURIComponent(corteDate)}&urls=1&day=1`,
+          `/api/tpv-cortes?date=${encodeURIComponent(date)}&urls=1&day=1`,
           { cache: 'no-store' }
         ),
         fetch('/api/financial-records?sources=infocaja,presupuesto_ingreso', {
@@ -115,7 +141,7 @@ export function TpvCorteClient() {
       setUploads(list);
       setDay(
         tpvJson.day ||
-          buildDayCompleteness(list, corteDate)
+          buildDayCompleteness(list, date)
       );
 
       let records: FinancialRecord[] = [];
@@ -132,7 +158,7 @@ export function TpvCorteClient() {
         buildTpvWeekVerify(
           (weekJson.uploads || list) as TpvCorteUpload[],
           records,
-          corteDate
+          date
         )
       );
     } catch (e) {
@@ -195,10 +221,12 @@ export function TpvCorteClient() {
     setError(null);
     setMsg(null);
     try {
+      const dateForUpload = defaultCorteDateCdmx();
+      if (dateForUpload !== corteDate) setCorteDate(dateForUpload);
       const fd = new FormData();
       fd.set('file', pendingFile.file);
       fd.set('terminal_number', String(activeTerminal));
-      fd.set('corte_date', corteDate);
+      fd.set('corte_date', dateForUpload);
       fd.set('width_px', String(pendingFile.width));
       fd.set('height_px', String(pendingFile.height));
       fd.set('sharpness', String(pendingFile.sharpness));
@@ -226,7 +254,7 @@ export function TpvCorteClient() {
           ? 'Proceso concluido correctamente. Las 3 terminales ya están listas.'
           : `Terminal ${activeTerminal}: foto guardada.`
       );
-      await refresh();
+      await refresh(dateForUpload);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al subir');
     } finally {
@@ -235,9 +263,11 @@ export function TpvCorteClient() {
   }
 
   async function markUnused(terminal: TpvTerminalNumber) {
+    const dateForUpload = defaultCorteDateCdmx();
+    if (dateForUpload !== corteDate) setCorteDate(dateForUpload);
     if (
       !confirm(
-        `¿Confirmas que no se utilizó la terminal ${terminal} el ${corteDate}?`
+        `¿Confirmas que no se utilizó la terminal ${terminal} el ${dateForUpload}?`
       )
     ) {
       return;
@@ -252,7 +282,7 @@ export function TpvCorteClient() {
         body: JSON.stringify({
           entry_kind: 'unused',
           terminal_number: terminal,
-          corte_date: corteDate,
+          corte_date: dateForUpload,
         }),
       });
       const json = await res.json();
@@ -266,7 +296,7 @@ export function TpvCorteClient() {
           ? 'Proceso concluido correctamente. Las 3 terminales ya están listas.'
           : `Terminal ${terminal}: marcada como no utilizada.`
       );
-      await refresh();
+      await refresh(dateForUpload);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
     } finally {
@@ -358,18 +388,25 @@ export function TpvCorteClient() {
         </p>
       </header>
 
-      <label className="mb-4 flex items-center gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm">
-        <span className="text-sm font-medium text-slate-600">Fecha</span>
-        <input
-          type="date"
-          className="min-h-11 flex-1 rounded-xl border border-slate-200 px-3 text-base"
-          value={corteDate}
-          onChange={(e) => {
-            clearPending();
-            setCorteDate(e.target.value || todayCdmxIso());
-          }}
-        />
-      </label>
+      <div className="mb-4 rounded-2xl bg-white px-4 py-3 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-slate-600">Fecha</span>
+          <input
+            type="text"
+            readOnly
+            tabIndex={-1}
+            aria-readonly="true"
+            className="min-h-11 flex-1 cursor-default rounded-xl border border-slate-200 bg-slate-50 px-3 text-base text-slate-800"
+            value={formatCorteDateDisplay(corteDate)}
+          />
+        </div>
+        <p
+          className="mt-2 rounded-xl border border-amber-200/80 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950"
+          role="note"
+        >
+          {TPV_CORTE_DATE_HELP}
+        </p>
+      </div>
 
       {/* Completeness / success */}
       {dayComplete ? (
@@ -388,15 +425,8 @@ export function TpvCorteClient() {
             3 / 3 terminales · {corteDate}
           </p>
           <p className="mt-3 text-sm text-white/75">
-            No hace falta volver a Ventas. Puedes revisar montos abajo o cerrar
-            esta pantalla.
+            Puedes revisar montos abajo o cerrar esta pantalla.
           </p>
-          <Link
-            href="/ventas"
-            className="mt-4 inline-block text-xs text-white/60 underline underline-offset-2"
-          >
-            Ir a Ventas
-          </Link>
         </div>
       ) : (
         <div
@@ -504,12 +534,13 @@ export function TpvCorteClient() {
               (ventas). Encuadre completo · mín. {TPV_MIN_LONG_SIDE}px · nitidez ≥{' '}
               {TPV_MIN_SHARPNESS}.
             </p>
+
             <Link
               href="/ventas/corte-tpv/guia"
-              className="mt-2 inline-block text-sm font-semibold underline underline-offset-2"
-              style={{ color: SUITE.orange }}
+              className="mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl text-base font-bold text-white shadow-sm"
+              style={{ backgroundColor: '#0F9F9C' }}
             >
-              Ver guía con ejemplos de foto
+              Guía de fotos · ver ejemplos
             </Link>
 
             <input
@@ -524,7 +555,7 @@ export function TpvCorteClient() {
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="mt-4 flex min-h-14 w-full items-center justify-center rounded-2xl text-base font-bold text-white"
+              className="mt-3 flex min-h-14 w-full items-center justify-center rounded-2xl text-base font-bold text-white"
               style={{ backgroundColor: SUITE.orange }}
             >
               Tomar / elegir foto
@@ -570,7 +601,7 @@ export function TpvCorteClient() {
                   />
                 </label>
                 <p className="text-sm text-slate-600">
-                  Neto a banco:{' '}
+                  Neto banco (cobrado + propinas):{' '}
                   <strong>{netoPreview != null ? moneyMx(netoPreview) : '—'}</strong>
                 </p>
                 <button
@@ -794,36 +825,6 @@ export function TpvCorteClient() {
             </p>
           ) : null}
         </section>
-      )}
-
-      {!dayComplete ? (
-        <p className="mt-8 text-center text-xs text-slate-400">
-          <Link
-            href="/ventas/corte-tpv/guia"
-            className="underline underline-offset-2"
-            style={{ color: SUITE.navy }}
-          >
-            Guía de fotos
-          </Link>
-          <span className="mx-2 text-slate-300">·</span>
-          <Link
-            href="/ventas"
-            className="underline underline-offset-2"
-            style={{ color: SUITE.navy }}
-          >
-            Ventas
-          </Link>
-        </p>
-      ) : (
-        <p className="mt-8 text-center text-xs text-slate-400">
-          <Link
-            href="/ventas/corte-tpv/guia"
-            className="underline underline-offset-2"
-            style={{ color: SUITE.navy }}
-          >
-            Guía de fotos
-          </Link>
-        </p>
       )}
     </div>
   );

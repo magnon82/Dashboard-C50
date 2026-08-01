@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { SUITE } from '@/app/lib/themes';
 import type { EventLead } from '@/app/lib/eventos';
 import {
+  FOLLOW_UP_ALERTS_SCOPE_HINT,
   FOLLOW_UP_SEVERITY_LABELS,
   FOLLOW_UP_STEPS,
   computeCrmFollowUpAlerts,
@@ -82,7 +83,8 @@ export function EventosFollowUpAlertsStrip({
           Sin alertas de seguimiento
         </p>
         <p className="mt-0.5 text-xs text-emerald-700/80">
-          Ningún lead abierto requiere acción según la cadencia del manual.
+          {FOLLOW_UP_ALERTS_SCOPE_HINT}. Ningún lead en alcance requiere
+          acción según la cadencia del manual.
         </p>
       </div>
     );
@@ -106,8 +108,8 @@ export function EventosFollowUpAlertsStrip({
             {urgent > 0 ? ` (${urgent} urgentes)` : ''}
           </p>
           <p className="mt-0.5 text-xs" style={{ color: SUITE.muted }}>
-            Cadencia del manual (captura &lt;1 h, cotización 24 h, días 3 / 5 /
-            15) + holds 72 h.
+            {FOLLOW_UP_ALERTS_SCOPE_HINT}. Cadencia del manual (captura &lt;1
+            h, cotización 24 h, días 3 / 5 / 15) + holds 72 h.
           </p>
         </div>
       </div>
