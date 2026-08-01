@@ -34,12 +34,23 @@ SKIP_EXT = {".gsheet", ".gdoc", ".gslides", ".gform", ".tmp"}
 READABLE_EXT = {".pdf", ".xlsx", ".docx", ".doc"}
 PARENS = re.compile(r"\s*\(\d+\)\s*$")
 G_ONLY = re.compile(r"^G\d+$", re.I)
-DATE_IN_NAME = re.compile(
+MONTH_THEN_DAY = re.compile(
     r"\b(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC|MZO|"
     r"ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|"
-    r"SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\s*\.?\s*(\d{1,2})?\b",
+    r"SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\s*\.?\s*(\d{1,2})\b",
     re.I,
 )
+DAY_THEN_MONTH = re.compile(
+    r"\b(\d{1,2})\s+(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC|MZO|"
+    r"ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|"
+    r"SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\b",
+    re.I,
+)
+ISO_IN_NAME = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
+DMY_IN_NAME = re.compile(r"\b(\d{1,2})[/\-.](\d{1,2})[/\-.](20\d{2})\b")
+YEAR_IN_NAME = re.compile(r"\b(20\d{2})\b")
+# Compat: builders antiguos
+DATE_IN_NAME = MONTH_THEN_DAY
 MESES = {
     "ene": 1,
     "enero": 1,
@@ -168,10 +179,12 @@ def parse_date_any(value) -> str | None:
 def clean_os_label(stem: str) -> str | None:
     label = PARENS.sub("", stem).strip()
     label = re.sub(r"(?i)orden\s*de?\s*servicio", " ", label)
+    label = re.sub(r"(?i)cotizaci[oó]n", " ", label)
     label = re.sub(r"(?i)folio\s*\d+", " ", label)
     label = re.sub(r"(?i)sin\s*folio|s\s*n", " ", label)
     label = re.sub(r"(?i)\bG\s*[-]?\s*\d+(?:-\d+)?\b", " ", label)
-    label = re.sub(r"(?i)^27\s*", " ", label)  # year glued in FOLIO 01 27ORDEN…
+    # year glued in FOLIO 01 27ORDEN… → leftover "27 BODA…"
+    label = re.sub(r"(?i)^\s*(20)?\d{2}\s+(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])", " ", label)
     label = re.sub(r"\s+", " ", label).strip(" -_")
     if not label or G_ONLY.match(label.replace(" ", "")):
         return None
@@ -181,6 +194,221 @@ def clean_os_label(stem: str) -> str | None:
     if re.fullmatch(r"\d{1,4}", label):
         return None
     return label
+
+
+def to_iso_date(year: int, month: int, day: int) -> str | None:
+    try:
+        return datetime(year, month, day).date().isoformat()
+    except ValueError:
+        return None
+
+
+def event_date_from_stem(stem: str, folder_year: int | None) -> str | None:
+    """Paridad con app/lib/eventos-os.ts eventDateFromStem."""
+    iso_m = ISO_IN_NAME.search(stem)
+    if iso_m:
+        return to_iso_date(int(iso_m.group(1)), int(iso_m.group(2)), int(iso_m.group(3)))
+
+    dmy = DMY_IN_NAME.search(stem)
+    if dmy:
+        day, month, year = int(dmy.group(1)), int(dmy.group(2)), int(dmy.group(3))
+        as_dmy = to_iso_date(year, month, day)
+        if as_dmy:
+            return as_dmy
+        if day <= 12:
+            return to_iso_date(year, day, month)
+
+    yin = YEAR_IN_NAME.search(stem)
+    year = int(yin.group(1)) if yin else folder_year
+    if not year:
+        return None
+
+    day_first = DAY_THEN_MONTH.search(stem)
+    if day_first:
+        mon = MESES.get(day_first.group(2).lower().rstrip("."))
+        if mon:
+            iso = to_iso_date(year, mon, int(day_first.group(1)))
+            if iso:
+                return iso
+
+    month_first = MONTH_THEN_DAY.search(stem)
+    if month_first:
+        mon = MESES.get(month_first.group(1).lower().rstrip("."))
+        if mon:
+            iso = to_iso_date(year, mon, int(month_first.group(2)))
+            if iso:
+                return iso
+    return None
+
+
+DATE_MATCH_STOP = {
+    "y",
+    "de",
+    "del",
+    "la",
+    "el",
+    "los",
+    "las",
+    "un",
+    "una",
+    "boda",
+    "preboda",
+    "rompe",
+    "hielos",
+    "rompehielos",
+    "evento",
+    "cena",
+    "cumpleanos",
+    "os",
+    "orden",
+    "servicio",
+    "folio",
+    "sin",
+}
+
+
+def significant_tokens(key: str) -> set[str]:
+    return {
+        t
+        for t in key.split()
+        if len(t) >= 3 and t not in DATE_MATCH_STOP and not re.match(r"^g\d", t)
+    }
+
+
+def is_weak_os_label(label: str | None) -> bool:
+    key = norm(label)
+    if not key:
+        return True
+    if G_ONLY.match(key.replace(" ", "")):
+        return True
+    if key.startswith("os g"):
+        return True
+    return not significant_tokens(key)
+
+
+def best_date_from_list(
+    dates: list[str], year: int | None, require_year: bool
+) -> str | None:
+    if not dates:
+        return None
+    uniq = sorted(set(dates), reverse=True)
+    if year:
+        same = [d for d in uniq if d.startswith(str(year))]
+        if same:
+            return same[0]
+        if require_year:
+            return None
+    return None if require_year else uniq[0]
+
+
+def pick_activity_event_date(
+    raw_name: str | None,
+    by_client_key: dict[str, list[str]],
+    year: int | None,
+) -> str | None:
+    key = norm(raw_name)
+    if not key or is_weak_os_label(raw_name):
+        return None
+    if key in by_client_key:
+        return best_date_from_list(
+            by_client_key[key], year, require_year=year is not None
+        )
+
+    key_tokens = significant_tokens(key)
+    if not key_tokens:
+        return None
+
+    best_score = 0.0
+    best_dates: list[str] | None = None
+    for ck, dates in by_client_key.items():
+        if not ck or not dates:
+            continue
+        ck_tokens = significant_tokens(ck)
+        if not ck_tokens:
+            continue
+        score = 0.0
+        if key in ck or ck in key:
+            score = min(len(key), len(ck)) / max(len(key), len(ck))
+        inter = len(key_tokens & ck_tokens)
+        if inter >= 2:
+            score = max(
+                score, inter / max(len(key_tokens), len(ck_tokens))
+            )
+        elif (
+            inter == 1
+            and len(key_tokens) <= 2
+            and any(len(t) >= 4 and t in ck_tokens for t in key_tokens)
+        ):
+            score = max(score, 0.55)
+        if score < 0.5:
+            continue
+        if score > best_score:
+            best_score = score
+            best_dates = dates
+    if not best_dates:
+        return None
+    return best_date_from_list(best_dates, year, require_year=True)
+
+
+def backfill_os_event_dates(events: list[dict]) -> int:
+    """Rellena event_date de os_pdf desde anticipos/seguimiento (fuzzy + año + folio G)."""
+    by_client: dict[str, list[str]] = defaultdict(list)
+    by_folio_year: dict[str, str] = {}
+
+    def push_folio(folio: str | None, ed: str) -> None:
+        if not folio or not ed:
+            return
+        by_folio_year[f"{folio.upper()}|{ed[:4]}"] = ed
+
+    for ev in events:
+        ed = ev.get("event_date")
+        if not ed:
+            continue
+        if ev.get("source") in (
+            "anticipos_c50",
+            "seguimiento",
+            "seguimiento_eventos",
+        ):
+            for raw in (ev.get("company_hint"), ev.get("display_name")):
+                k = norm(raw)
+                if k:
+                    by_client[k].append(ed)
+            push_folio(ev.get("folio"), ed)
+            g_embed = re.search(
+                r"\bG\s*[-]?\s*(\d+(?:-\d+)?)\b",
+                str(ev.get("display_name") or ev.get("company_hint") or ""),
+                re.I,
+            )
+            if g_embed:
+                push_folio(f"G{g_embed.group(1)}", ed)
+
+    filled = 0
+    for ev in events:
+        if ev.get("source") != "os_pdf" or ev.get("event_date"):
+            continue
+        detail = ev.get("detail") or ""
+        folder_year = (
+            int(detail[:4]) if len(detail) >= 4 and detail[:4].isdigit() else None
+        )
+        folio = ev.get("folio")
+        if folio and folder_year:
+            from_folio = by_folio_year.get(f"{str(folio).upper()}|{folder_year}")
+            if from_folio:
+                ev["event_date"] = from_folio
+                ev["activity_date"] = from_folio
+                filled += 1
+                continue
+        picked = pick_activity_event_date(
+            ev.get("company_hint") or ev.get("display_name"),
+            by_client,
+            folder_year,
+        )
+        if picked:
+            ev["event_date"] = picked
+            ev["activity_date"] = picked
+            filled += 1
+    print(f"  OS event_date backfill: {filled}")
+    return filled
 
 
 def scan_os_folder(folder: Path) -> list[dict]:
@@ -206,16 +434,7 @@ def scan_os_folder(folder: Path) -> list[dict]:
         )
         label = clean_os_label(stem)
         mtime = datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
-        event_date = None
-        dm = DATE_IN_NAME.search(stem)
-        if dm and year:
-            mon = MESES.get(dm.group(1).lower().rstrip("."))
-            day = int(dm.group(2)) if dm.group(2) else None
-            if mon and day:
-                try:
-                    event_date = f"{year:04d}-{mon:02d}-{day:02d}"
-                except ValueError:
-                    pass
+        event_date = event_date_from_stem(stem, year)
         display = label or (f"OS {folio}" if folio else path.name)
         events.append(
             {
@@ -232,7 +451,8 @@ def scan_os_folder(folder: Path) -> list[dict]:
                 "folio": folio,
             }
         )
-    print(f"  OS: {len(events)} archivos legibles")
+    dated = sum(1 for e in events if e.get("event_date"))
+    print(f"  OS: {len(events)} archivos legibles ({dated} con fecha en nombre)")
     return events
 
 
@@ -622,6 +842,8 @@ def main() -> None:
             print(f"  Anticipos SKIP: {exc}")
     else:
         print("Sheets omitidos (--skip-sheets)")
+
+    backfill_os_event_dates(events)
 
     seed = load_seed()
     print(f"Seed clientes: {len(seed)}")

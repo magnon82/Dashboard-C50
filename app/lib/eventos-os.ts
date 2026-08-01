@@ -93,7 +93,8 @@ function cleanOsLabel(stem: string): string | null {
   label = label.replace(/folio\s*\d+/gi, ' ');
   label = label.replace(/sin\s*folio|\bs\s*n\b/gi, ' ');
   label = label.replace(/\bG\s*[-]?\s*\d+(?:-\d+)?\b/gi, ' ');
-  label = label.replace(/^27\s*/i, ' ');
+  // year glued in «FOLIO 01 27ORDEN…» → leftover «27 BODA…»
+  label = label.replace(/^\s*(20)?\d{2}\s+(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/i, ' ');
   label = label.replace(/\s+/g, ' ').trim().replace(/^[-_]+|[-_]+$/g, '');
   if (!label || G_ONLY.test(label.replace(/\s/g, ''))) return null;
   const n = normalizeClientKey(label);
@@ -180,6 +181,125 @@ export function eventDateFromStem(
   return null;
 }
 
+/** Tokens genéricos que no deben decidir un match de fecha de evento. */
+const DATE_MATCH_STOP = new Set([
+  'y',
+  'de',
+  'del',
+  'la',
+  'el',
+  'los',
+  'las',
+  'un',
+  'una',
+  'boda',
+  'preboda',
+  'rompe',
+  'hielos',
+  'rompehielos',
+  'evento',
+  'cena',
+  'cumpleanos',
+  'os',
+  'orden',
+  'servicio',
+  'folio',
+  'sin',
+]);
+
+function significantTokens(key: string): Set<string> {
+  return new Set(
+    key
+      .split(' ')
+      .filter((t) => t.length >= 3 && !DATE_MATCH_STOP.has(t) && !/^g\d/i.test(t))
+  );
+}
+
+function isWeakOsLabel(label: string | null | undefined): boolean {
+  const key = normalizeClientKey(label);
+  if (!key) return true;
+  if (G_ONLY.test(key.replace(/\s/g, ''))) return true;
+  if (/^os g\d/.test(key)) return true;
+  if (significantTokens(key).size === 0) return true;
+  return false;
+}
+
+function bestDateFromList(
+  dates: string[],
+  year: number | null,
+  requireYear: boolean
+): string | null {
+  if (!dates.length) return null;
+  const uniq = [...new Set(dates)].sort().reverse();
+  if (year) {
+    const sameYear = uniq.filter((d) => d.startsWith(String(year)));
+    if (sameYear.length) return sameYear[0];
+    if (requireYear) return null;
+  }
+  return requireYear ? null : uniq[0];
+}
+
+/**
+ * Fecha de anticipos/seguimiento por clave exacta o fuzzy (nombres propios).
+ * Fuzzy exige año de carpeta coincidente para evitar cruces tipo "boda X"→"boda Y".
+ */
+export function pickActivityEventDate(
+  rawName: string | null | undefined,
+  byClientKey: Map<string, string[]>,
+  year: number | null
+): string | null {
+  const key = normalizeClientKey(rawName);
+  if (!key || isWeakOsLabel(rawName)) return null;
+
+  const exact = byClientKey.get(key);
+  if (exact?.length) {
+    // Con año de carpeta OS: solo fechas de ese año (evita PSL 2025→2023)
+    return bestDateFromList(exact, year, year != null);
+  }
+
+  const keyTokens = significantTokens(key);
+  if (!keyTokens.size) return null;
+
+  let bestScore = 0;
+  let bestDates: string[] | null = null;
+
+  for (const [ck, dates] of byClientKey) {
+    if (!ck || !dates.length) continue;
+    const ckTokens = significantTokens(ck);
+    if (!ckTokens.size) continue;
+
+    let score = 0;
+    if (key.includes(ck) || ck.includes(key)) {
+      score =
+        Math.min(key.length, ck.length) / Math.max(key.length, ck.length);
+    }
+    let inter = 0;
+    for (const t of keyTokens) if (ckTokens.has(t)) inter += 1;
+    if (inter >= 2) {
+      score = Math.max(
+        score,
+        inter / Math.max(keyTokens.size, ckTokens.size)
+      );
+    } else if (
+      inter === 1 &&
+      keyTokens.size <= 2 &&
+      [...keyTokens].some((t) => t.length >= 4 && ckTokens.has(t))
+    ) {
+      // Token distintivo corto: «bdmx» ⊂ «evento capacitacion bdmx»
+      score = Math.max(score, 0.55);
+    }
+    if (score < 0.5) continue;
+    if (score > bestScore) {
+      bestScore = score;
+      bestDates = dates;
+    }
+  }
+
+  if (!bestDates) return null;
+  // Fuzzy: solo mismo año de carpeta OS
+  return bestDateFromList(bestDates, year, true);
+}
+
 /**
  * Completa event_date faltante desde seed de actividad
  * (os_pdf por ruta, anticipos/seguimiento por nombre de cliente).
@@ -202,6 +322,12 @@ async function enrichEventDatesFromActivity(
     byClientKey.set(key, arr);
   };
 
+  const pushFolioDate = (folio: string | null | undefined, date: string) => {
+    if (!folio || !date) return;
+    const y = date.slice(0, 4);
+    byFolioYear.set(`${String(folio).toUpperCase()}|${y}`, date);
+  };
+
   for (const client of payload.clients) {
     for (const t of client.timeline || []) {
       const ed = t.event_date || null;
@@ -209,10 +335,7 @@ async function enrichEventDatesFromActivity(
       if (t.source === 'os_pdf' && t.detail) {
         const rel = t.detail.replace(/\\/g, '/');
         byRel.set(rel, ed);
-        if (t.folio) {
-          const y = ed.slice(0, 4);
-          byFolioYear.set(`${String(t.folio).toUpperCase()}|${y}`, ed);
-        }
+        pushFolioDate(t.folio, ed);
       }
       if (
         t.source === 'anticipos_c50' ||
@@ -221,23 +344,15 @@ async function enrichEventDatesFromActivity(
       ) {
         pushClientDate(normalizeClientKey(client.company_name), ed);
         pushClientDate(normalizeClientKey(t.label), ed);
+        pushFolioDate(t.folio, ed);
+        // Folio G embebido en etiqueta: «Rompehielos (G1-26)»
+        const gEmbed = String(t.label || '').match(
+          /\bG\s*[-]?\s*(\d+(?:-\d+)?)\b/i
+        );
+        if (gEmbed) pushFolioDate(`G${gEmbed[1]}`, ed);
       }
     }
   }
-
-  const pickClientDate = (
-    key: string,
-    year: number | null
-  ): string | null => {
-    const dates = byClientKey.get(key);
-    if (!dates?.length) return null;
-    const uniq = [...new Set(dates)].sort().reverse();
-    if (year) {
-      const sameYear = uniq.filter((d) => d.startsWith(String(year)));
-      if (sameYear.length) return sameYear[0];
-    }
-    return uniq[0];
-  };
 
   return items.map((it) => {
     if (it.event_date) {
@@ -247,7 +362,9 @@ async function enrichEventDatesFromActivity(
       };
     }
 
-    const fromRel = it.rel_path ? byRel.get(it.rel_path.replace(/\\/g, '/')) : null;
+    const fromRel = it.rel_path
+      ? byRel.get(it.rel_path.replace(/\\/g, '/'))
+      : null;
     if (fromRel) {
       return { ...it, event_date: fromRel, activity_date: fromRel };
     }
@@ -262,8 +379,7 @@ async function enrichEventDatesFromActivity(
     }
 
     for (const raw of [it.matched_client_name, it.label]) {
-      const key = normalizeClientKey(raw);
-      const picked = pickClientDate(key, it.year);
+      const picked = pickActivityEventDate(raw, byClientKey, it.year);
       if (picked) {
         return { ...it, event_date: picked, activity_date: picked };
       }
