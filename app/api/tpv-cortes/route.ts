@@ -9,13 +9,23 @@ import {
   TPV_STORAGE_BUCKET,
   buildDayCompleteness,
   computeNetoBanco,
+  parsePhotoKind,
   parseTerminalNumber,
   defaultCorteDateCdmx,
   todayCdmxIso,
   validateTpvImageQuality,
   asTpvRow,
+  type TpvCorteUpload,
+  type TpvPhotoKind,
   type TpvTerminalNumber,
 } from '@/app/lib/tpv-cortes';
+import {
+  TPV_OCR_RETAKE_MSG,
+  amountsFromOcr,
+  decodeTicketTotalFromOcrText,
+  reconcilePairAmounts,
+  runTpvOcr,
+} from '@/app/lib/tpv-ocr';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +38,7 @@ const ALLOWED_MIME = new Set([
   'image/heif',
 ]);
 
+/** Borra todas las filas (fotos + unused) de una terminal/día. */
 async function deleteExistingForTerminal(
   sb: ReturnType<typeof getServiceSupabase>,
   corteDate: string,
@@ -51,6 +62,103 @@ async function deleteExistingForTerminal(
     .delete()
     .eq('corte_date', corteDate)
     .eq('terminal_number', terminal);
+}
+
+/** Borra solo la foto de un kind (+ cualquier unused) al subir una foto. */
+async function deleteExistingForPhotoKind(
+  sb: ReturnType<typeof getServiceSupabase>,
+  corteDate: string,
+  terminal: TpvTerminalNumber,
+  photoKind: TpvPhotoKind
+) {
+  const { data: existing } = await sb
+    .from('tpv_corte_uploads')
+    .select('id, storage_path, entry_kind, photo_kind')
+    .eq('corte_date', corteDate)
+    .eq('terminal_number', terminal);
+
+  if (!existing?.length) return;
+
+  const toRemove = existing.filter(
+    (r) =>
+      r.entry_kind === 'unused' ||
+      (r.entry_kind === 'photo' && r.photo_kind === photoKind) ||
+      // Legacy sin photo_kind: tratar como venta
+      (r.entry_kind === 'photo' &&
+        photoKind === 'venta' &&
+        (r.photo_kind == null || r.photo_kind === ''))
+  );
+  if (!toRemove.length) return;
+
+  const paths = toRemove
+    .map((r) => r.storage_path)
+    .filter((p): p is string => Boolean(p));
+  if (paths.length) {
+    await sb.storage.from(TPV_STORAGE_BUCKET).remove(paths);
+  }
+  const ids = toRemove.map((r) => r.id);
+  await sb.from('tpv_corte_uploads').delete().in('id', ids);
+}
+
+/**
+ * Tras tener venta + propina: cobrado = ticket_total − propina;
+ * neto banco = cobrado + propinas (depósito).
+ */
+async function reconcileTerminalAfterUpload(
+  sb: ReturnType<typeof getServiceSupabase>,
+  corteDate: string,
+  terminal: TpvTerminalNumber
+): Promise<void> {
+  const { data } = await sb
+    .from('tpv_corte_uploads')
+    .select('*')
+    .eq('corte_date', corteDate)
+    .eq('terminal_number', terminal)
+    .eq('entry_kind', 'photo');
+
+  if (!data?.length) return;
+  const rows = data.map((r) => asTpvRow(r as Record<string, unknown>));
+  const venta = rows.find((r) => r.photo_kind === 'venta') || null;
+  const propinaRow = rows.find((r) => r.photo_kind === 'propina') || null;
+  if (!venta || !propinaRow) return;
+
+  const tip = propinaRow.propina;
+  if (tip == null) return;
+
+  const ticketFromMeta = decodeTicketTotalFromOcrText(venta.ocr_text);
+  const consumoFromMeta = (() => {
+    const m = propinaRow.ocr_text?.match(/consumo=([\d.]+)/);
+    return m ? Number(m[1]) : null;
+  })();
+
+  const reconciled = reconcilePairAmounts({
+    ventaTicketTotal: ticketFromMeta ?? venta.neto_banco,
+    ventaCobrado: venta.total_cobrado,
+    propinaAmount: tip,
+    propinaConsumo: Number.isFinite(consumoFromMeta) ? consumoFromMeta : null,
+  });
+  if (!reconciled) return;
+
+  const now = new Date().toISOString();
+  await sb
+    .from('tpv_corte_uploads')
+    .update({
+      total_cobrado: reconciled.cobrado,
+      neto_banco: reconciled.neto,
+      status: 'parsed',
+      updated_at: now,
+    })
+    .eq('id', venta.id);
+
+  await sb
+    .from('tpv_corte_uploads')
+    .update({
+      propina: reconciled.propina,
+      neto_banco: reconciled.neto,
+      status: 'parsed',
+      updated_at: now,
+    })
+    .eq('id', propinaRow.id);
 }
 
 function mondaySundayCdmx(today = todayCdmxIso()): { mon: string; sun: string } {
@@ -87,7 +195,8 @@ export async function GET(request: Request) {
       .select('*')
       .order('corte_date', { ascending: false })
       .order('terminal_number', { ascending: true })
-      .limit(recent ? 300 : 200);
+      .order('photo_kind', { ascending: true })
+      .limit(recent ? 500 : 200);
 
     const corteDateForDay = date || defaultCorteDateCdmx();
 
@@ -155,7 +264,7 @@ export async function GET(request: Request) {
 
 /**
  * POST:
- * - multipart file + terminal_number → foto (reemplaza slot del día)
+ * - multipart file + terminal_number + photo_kind (venta|propina) → foto
  * - JSON { entry_kind: 'unused', terminal_number, corte_date? } → no se usó
  */
 export async function POST(request: Request) {
@@ -196,6 +305,7 @@ export async function POST(request: Request) {
         corte_date: corteDate,
         terminal_number: terminal,
         entry_kind: 'unused',
+        photo_kind: null,
         terminal_label: `Terminal ${terminal}`,
         uploader_username: auth.username,
         storage_path: null,
@@ -228,7 +338,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error: error.message,
-            hint: '¿Ejecutaste supabase/tpv_cortes.sql?',
+            hint: '¿Ejecutaste supabase/tpv_cortes.sql o tpv_cortes_two_photos.sql?',
           },
           { status: 500 }
         );
@@ -258,6 +368,19 @@ export async function POST(request: Request) {
     if (!terminal) {
       return NextResponse.json(
         { error: 'Elige la terminal: 1, 2 o 3' },
+        { status: 400 }
+      );
+    }
+
+    const photoKind =
+      parsePhotoKind(form.get('photo_kind')) ||
+      parsePhotoKind(form.get('kind'));
+    if (!photoKind) {
+      return NextResponse.json(
+        {
+          error:
+            'Indica photo_kind: venta (Totalización) o propina (Reporte de propinas)',
+        },
         { status: 400 }
       );
     }
@@ -336,22 +459,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Fecha de corte inválida' }, { status: 400 });
     }
 
+    // Montos manuales opcionales (override / fallback si OCR no corre)
     const totalCobradoRaw = form.get('total_cobrado');
     const propinaRaw = form.get('propina');
-    const netoRaw = form.get('neto_banco');
-    const totalCobrado =
+    const manualCobrado =
       totalCobradoRaw != null && String(totalCobradoRaw) !== ''
         ? Number(totalCobradoRaw)
         : null;
-    const propina =
+    const manualPropina =
       propinaRaw != null && String(propinaRaw) !== ''
         ? Number(propinaRaw)
         : null;
-    let netoBanco =
-      netoRaw != null && String(netoRaw) !== '' ? Number(netoRaw) : null;
-    if (netoBanco == null && totalCobrado != null) {
-      netoBanco = computeNetoBanco(totalCobrado, propina);
-    }
 
     const notes = String(form.get('notes') || '').trim() || null;
     const ext = mime.includes('png')
@@ -363,11 +481,76 @@ export async function POST(request: Request) {
           : 'jpg';
 
     const id = crypto.randomUUID();
-    const storagePath = `${corteDate}/t${terminal}-${id}.${ext}`;
+    const storagePath = `${corteDate}/t${terminal}-${photoKind}-${id}.${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
 
+    // --- OCR: lee montos del ticket; si no legible → retake (no guarda) ---
+    const ocr = await runTpvOcr(buffer, photoKind);
+    const fromOcr = amountsFromOcr(photoKind, ocr);
+
+    let rowCobrado: number | null = null;
+    let rowPropina: number | null = null;
+    let ticketTotal: number | null = null;
+    let ocrText: string | null = null;
+    let ocrStatus: 'done' | 'failed' | 'skipped' = 'skipped';
+
+    if (fromOcr && ocr.ok && fromOcr.ocrStatus === 'done') {
+      ocrStatus = 'done';
+      ocrText = fromOcr.ocrText;
+      ticketTotal = fromOcr.ticketTotal;
+      if (photoKind === 'venta') {
+        rowCobrado = fromOcr.totalCobrado;
+      } else {
+        rowPropina = fromOcr.propina;
+      }
+    } else if (
+      photoKind === 'venta' &&
+      manualCobrado != null &&
+      !Number.isNaN(manualCobrado) &&
+      manualCobrado >= 0
+    ) {
+      // Fallback manual solo si el cliente envió monto (edición / sin OCR)
+      rowCobrado = manualCobrado;
+      ticketTotal = manualCobrado;
+      ocrStatus = ocr.rawText ? 'failed' : 'skipped';
+      ocrText = fromOcr?.ocrText || ocr.rawText || null;
+    } else if (
+      photoKind === 'propina' &&
+      manualPropina != null &&
+      !Number.isNaN(manualPropina) &&
+      manualPropina >= 0
+    ) {
+      rowPropina = manualPropina;
+      ocrStatus = ocr.rawText ? 'failed' : 'skipped';
+      ocrText = fromOcr?.ocrText || ocr.rawText || null;
+    } else {
+      return NextResponse.json(
+        {
+          error: ocr.error || TPV_OCR_RETAKE_MSG,
+          retake: true,
+          ocr_status: 'failed',
+          ocr_confidence: ocr.meanConfidence,
+        },
+        { status: 400 }
+      );
+    }
+
+    let netoBanco =
+      photoKind === 'venta' && ticketTotal != null
+        ? ticketTotal
+        : photoKind === 'propina' && ticketTotal != null
+          ? ticketTotal
+          : null;
+    if (
+      netoBanco == null &&
+      rowCobrado != null &&
+      rowPropina != null
+    ) {
+      netoBanco = computeNetoBanco(rowCobrado, rowPropina);
+    }
+
     const sb = getServiceSupabase();
-    await deleteExistingForTerminal(sb, corteDate, terminal);
+    await deleteExistingForPhotoKind(sb, corteDate, terminal, photoKind);
 
     const { error: upErr } = await sb.storage
       .from(TPV_STORAGE_BUCKET)
@@ -383,14 +566,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const hasAmounts =
-      totalCobrado != null || propina != null || netoBanco != null;
+    const hasAmount =
+      photoKind === 'venta'
+        ? rowCobrado != null && !Number.isNaN(rowCobrado)
+        : rowPropina != null && !Number.isNaN(rowPropina);
     const row = {
       id,
       corte_date: corteDate,
       terminal_number: terminal,
       entry_kind: 'photo',
-      terminal_label: `Terminal ${terminal}`,
+      photo_kind: photoKind,
+      terminal_label: `Terminal ${terminal} · ${photoKind === 'venta' ? 'Venta' : 'Propinas'}`,
       uploader_username: auth.username,
       storage_path: storagePath,
       mime_type: mime,
@@ -398,12 +584,12 @@ export async function POST(request: Request) {
       width_px: widthPx || null,
       height_px: heightPx || null,
       sharpness_score: sharpness ?? null,
-      total_cobrado: totalCobrado,
-      propina,
+      total_cobrado: rowCobrado,
+      propina: rowPropina,
       neto_banco: netoBanco,
-      ocr_text: null,
-      ocr_status: 'skipped',
-      status: hasAmounts ? 'parsed' : 'pending',
+      ocr_text: ocrText,
+      ocr_status: ocrStatus,
+      status: hasAmount ? 'parsed' : 'pending',
       notes,
       verified_by: null,
       verified_at: null,
@@ -421,13 +607,24 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: error.message,
-          hint: '¿Ejecutaste supabase/tpv_cortes.sql (tabla + terminal_number)?',
+          hint: '¿Ejecutaste supabase/tpv_cortes_two_photos.sql (columna photo_kind)?',
         },
         { status: 500 }
       );
     }
 
-    const upload = asTpvRow(data as Record<string, unknown>);
+    // Reconciliar cobrado = ticket_total − propina cuando ya hay ambas fotos
+    await reconcileTerminalAfterUpload(sb, corteDate, terminal);
+
+    const { data: refreshed } = await sb
+      .from('tpv_corte_uploads')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    const upload = asTpvRow(
+      (refreshed || data) as Record<string, unknown>
+    ) as TpvCorteUpload;
     const { data: signed } = await sb.storage
       .from(TPV_STORAGE_BUCKET)
       .createSignedUrl(storagePath, 60 * 30);
@@ -442,7 +639,37 @@ export async function POST(request: Request) {
       corteDate
     );
 
-    return NextResponse.json({ upload, day }, { status: 201 });
+    const sibling = (dayRows || [])
+      .map((r) => asTpvRow(r as Record<string, unknown>))
+      .filter(
+        (r) =>
+          r.terminal_number === terminal &&
+          r.entry_kind === 'photo' &&
+          r.id !== upload.id
+      );
+
+    return NextResponse.json(
+      {
+        upload,
+        day,
+        ocr: {
+          status: ocrStatus,
+          confidence: ocr.meanConfidence,
+          ticket_total: ticketTotal,
+          total_cobrado: upload.total_cobrado,
+          propina: upload.propina,
+          sibling: sibling[0]
+            ? {
+                photo_kind: sibling[0].photo_kind,
+                total_cobrado: sibling[0].total_cobrado,
+                propina: sibling[0].propina,
+                neto_banco: sibling[0].neto_banco,
+              }
+            : null,
+        },
+      },
+      { status: 201 }
+    );
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Error al subir corte TPV' },

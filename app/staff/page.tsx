@@ -33,8 +33,7 @@ export default function StaffPage() {
             </span>
           </div>
           <p className="mt-3 text-sm leading-relaxed text-white/75">
-            T1–T3 con foto + montos del ticket, luego WI, Eventos, efectivo y
-            tómbola. Un solo «Cerrar corte».
+            prepara la cámara de tu teléfono
           </p>
           <p className="mt-5 text-sm font-bold" style={{ color: SUITE.orange }}>
             Presiona aqui para realizar el corte diario

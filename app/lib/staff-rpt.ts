@@ -34,8 +34,10 @@ export interface StaffRptRow {
 
 export interface StaffRptTpvTerminalView {
   terminal: 1 | 2 | 3;
-  state: 'missing' | 'photo' | 'unused';
+  state: 'missing' | 'partial' | 'photo' | 'unused';
   hasAmounts: boolean;
+  hasVentaPhoto: boolean;
+  hasPropinaPhoto: boolean;
   total_cobrado: number | null;
   propina: number | null;
   neto_banco: number | null;
@@ -47,9 +49,9 @@ export interface StaffRptBancosFromTpv {
   cobrado: number;
   propina: number;
   neto: number;
-  /** 3/3 foto o unused */
+  /** 3/3 con ambas fotos o unused */
   complete: boolean;
-  /** Todas las fotos tienen total_cobrado (unused no requiere montos) */
+  /** Todas las fotos tienen montos (venta→cobrado, propina→propina) */
   amountsReady: boolean;
   /** Puede guardar RPT: complete && amountsReady */
   canSaveRpt: boolean;
@@ -93,10 +95,19 @@ export function asStaffRptRow(r: Record<string, unknown>): StaffRptRow {
   };
 }
 
-function slotHasAmounts(upload: TpvCorteUpload | null, state: string): boolean {
+function slotHasAmounts(
+  state: string,
+  venta: TpvCorteUpload | null,
+  propinaUpload: TpvCorteUpload | null
+): boolean {
   if (state === 'unused') return true;
-  if (state !== 'photo' || !upload) return false;
-  return upload.total_cobrado != null && !Number.isNaN(Number(upload.total_cobrado));
+  if (state !== 'photo') return false;
+  const cobOk =
+    venta?.total_cobrado != null && !Number.isNaN(Number(venta.total_cobrado));
+  const tipOk =
+    propinaUpload?.propina != null &&
+    !Number.isNaN(Number(propinaUpload.propina));
+  return cobOk && tipOk;
 }
 
 /** Bancos del RPT = suma de montos confirmados en fotos TPV del día (no tecleo en RPT). */
@@ -106,17 +117,26 @@ export function buildBancosFromTpv(
 ): StaffRptBancosFromTpv {
   const day = buildDayCompleteness(uploads, corteDate);
   const terminals: StaffRptTpvTerminalView[] = day.slots.map((s) => {
-    const u = s.upload;
-    const cobrado = u?.total_cobrado != null ? Number(u.total_cobrado) : null;
-    const propina = u?.propina != null ? Number(u.propina) : null;
-    // Siempre derivar: neto_banco = cobrado + propinas (no confiar en neto guardado viejo).
+    const venta = s.venta;
+    const propinaUpload = s.propinaUpload;
+    const cobrado =
+      venta?.total_cobrado != null ? Number(venta.total_cobrado) : null;
+    // Preferir propina de la foto de propinas; legacy: propina en la misma fila venta
+    const propina =
+      propinaUpload?.propina != null
+        ? Number(propinaUpload.propina)
+        : venta?.propina != null
+          ? Number(venta.propina)
+          : null;
     const neto = computeNetoBanco(cobrado, propina);
     return {
       terminal: s.terminal,
       state: s.state,
-      hasAmounts: slotHasAmounts(u, s.state),
-      total_cobrado: s.state === 'photo' ? cobrado : null,
-      propina: s.state === 'photo' ? propina : null,
+      hasAmounts: slotHasAmounts(s.state, venta, propinaUpload),
+      hasVentaPhoto: Boolean(venta),
+      hasPropinaPhoto: Boolean(propinaUpload),
+      total_cobrado: s.state === 'photo' || s.state === 'partial' ? cobrado : null,
+      propina: s.state === 'photo' || s.state === 'partial' ? propina : null,
       neto_banco: s.state === 'photo' ? neto : null,
     };
   });
@@ -138,7 +158,7 @@ export function buildBancosFromTpv(
   if (!day.complete) {
     const missing = day.missing.map((n) => `T${n}`).join(', ');
     blockers.push(
-      `Faltan Cortes TPV (${missing}). Completa foto o «no se usó» en las 3 terminales.`
+      `Faltan Cortes TPV (${missing}). Cada terminal necesita foto de venta + foto de propinas, o «no se usó».`
     );
   }
   const withoutAmounts = terminals.filter(
@@ -148,7 +168,7 @@ export function buildBancosFromTpv(
     blockers.push(
       `Faltan montos leídos del ticket en: ${withoutAmounts
         .map((t) => `T${t.terminal}`)
-        .join(', ')}. Ábrelos en Cortes TPV y confirma Total + Propina mirando la foto.`
+        .join(', ')}. Confirma Total (Totalización) y Propina (Reporte) mirando las fotos.`
     );
   }
 

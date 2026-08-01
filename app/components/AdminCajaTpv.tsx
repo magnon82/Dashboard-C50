@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   TPV_TERMINALS,
+  computeNetoBanco,
   moneyMx,
   type TpvCorteUpload,
   type TpvTerminalNumber,
@@ -24,22 +25,45 @@ function formatCorteDateDisplay(iso: string): string {
   });
 }
 
-type DayGroup = {
-  date: string;
-  byTerminal: Map<TpvTerminalNumber, TpvCorteUpload>;
+type TerminalBundle = {
+  unused: TpvCorteUpload | null;
+  venta: TpvCorteUpload | null;
+  propina: TpvCorteUpload | null;
 };
 
+type DayGroup = {
+  date: string;
+  byTerminal: Map<TpvTerminalNumber, TerminalBundle>;
+};
+
+function emptyBundle(): TerminalBundle {
+  return { unused: null, venta: null, propina: null };
+}
+
 function groupByDate(uploads: TpvCorteUpload[]): DayGroup[] {
-  const map = new Map<string, Map<TpvTerminalNumber, TpvCorteUpload>>();
+  const map = new Map<string, Map<TpvTerminalNumber, TerminalBundle>>();
   for (const u of uploads) {
     let byT = map.get(u.corte_date);
     if (!byT) {
       byT = new Map();
       map.set(u.corte_date, byT);
     }
-    const prev = byT.get(u.terminal_number);
+    let bundle = byT.get(u.terminal_number);
+    if (!bundle) {
+      bundle = emptyBundle();
+      byT.set(u.terminal_number, bundle);
+    }
+    if (u.entry_kind === 'unused') {
+      if (!bundle.unused || bundle.unused.updated_at < u.updated_at) {
+        bundle.unused = u;
+      }
+      continue;
+    }
+    const kind = u.photo_kind === 'propina' ? 'propina' : 'venta';
+    const prev = kind === 'propina' ? bundle.propina : bundle.venta;
     if (!prev || prev.updated_at < u.updated_at) {
-      byT.set(u.terminal_number, u);
+      if (kind === 'propina') bundle.propina = u;
+      else bundle.venta = u;
     }
   }
   return [...map.entries()]
@@ -47,14 +71,73 @@ function groupByDate(uploads: TpvCorteUpload[]): DayGroup[] {
     .map(([date, byTerminal]) => ({ date, byTerminal }));
 }
 
-function TerminalSlot({
-  terminal,
+function PhotoThumb({
+  label,
   upload,
 }: {
-  terminal: TpvTerminalNumber;
-  upload: TpvCorteUpload | undefined;
+  label: string;
+  upload: TpvCorteUpload | null;
 }) {
   if (!upload) {
+    return (
+      <div className="rounded-lg border border-dashed border-slate-200 bg-white/60 p-2">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+          {label}
+        </p>
+        <p className="mt-1 text-center text-[11px] text-slate-400">Sin foto</p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-slate-100 bg-white p-2">
+      <div className="flex items-center justify-between gap-1">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          {label}
+        </p>
+        {upload.image_url ? (
+          <a
+            href={upload.image_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] font-bold underline"
+            style={{ color: SUITE.orangeDeep }}
+          >
+            Ver
+          </a>
+        ) : null}
+      </div>
+      {upload.image_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <a
+          href={upload.image_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 block overflow-hidden rounded-md bg-slate-50"
+        >
+          <img
+            src={upload.image_url}
+            alt={label}
+            className="max-h-28 w-full object-contain"
+          />
+        </a>
+      ) : null}
+      <p className="mt-1 text-center text-[11px] font-semibold text-slate-700">
+        {upload.photo_kind === 'propina'
+          ? moneyMx(upload.propina)
+          : moneyMx(upload.total_cobrado)}
+      </p>
+    </div>
+  );
+}
+
+function TerminalSlot({
+  terminal,
+  bundle,
+}: {
+  terminal: TpvTerminalNumber;
+  bundle: TerminalBundle | undefined;
+}) {
+  if (!bundle || (!bundle.unused && !bundle.venta && !bundle.propina)) {
     return (
       <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-3">
         <p className="text-sm font-bold" style={{ color: SUITE.navy }}>
@@ -65,7 +148,7 @@ function TerminalSlot({
     );
   }
 
-  if (upload.entry_kind === 'unused') {
+  if (bundle.unused) {
     return (
       <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
         <p className="text-sm font-bold" style={{ color: SUITE.navy }}>
@@ -73,73 +156,47 @@ function TerminalSlot({
         </p>
         <p className="mt-1 text-xs font-semibold text-slate-500">No se usó</p>
         <p className="mt-0.5 text-[11px] text-slate-400">
-          {upload.uploader_username}
+          {bundle.unused.uploader_username}
         </p>
       </div>
     );
   }
 
+  const neto = computeNetoBanco(
+    bundle.venta?.total_cobrado ?? null,
+    bundle.propina?.propina ?? null
+  );
+
   return (
     <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-bold" style={{ color: SUITE.navy }}>
-            T{terminal}
-          </p>
-          <p className="mt-0.5 truncate text-[11px] text-slate-400">
-            {upload.uploader_username}
-            {upload.status === 'verified' ? ' · verificado' : ''}
-          </p>
-        </div>
-        {upload.image_url ? (
-          <a
-            href={upload.image_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 text-xs font-bold underline"
-            style={{ color: SUITE.orangeDeep }}
-          >
-            Ver foto
-          </a>
-        ) : (
-          <span className="shrink-0 text-xs text-slate-400">Sin archivo</span>
-        )}
-      </div>
+      <p className="text-sm font-bold" style={{ color: SUITE.navy }}>
+        T{terminal}
+      </p>
+      <p className="mt-0.5 truncate text-[11px] text-slate-400">
+        {(bundle.venta || bundle.propina)?.uploader_username}
+      </p>
 
-      {upload.image_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <a
-          href={upload.image_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 block overflow-hidden rounded-lg bg-slate-50"
-        >
-          <img
-            src={upload.image_url}
-            alt={`Corte T${terminal} · ${upload.corte_date}`}
-            className="max-h-36 w-full object-contain"
-          />
-        </a>
-      ) : null}
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <PhotoThumb label="Venta" upload={bundle.venta} />
+        <PhotoThumb label="Propinas" upload={bundle.propina} />
+      </div>
 
       <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px]">
         <div>
           <p className="text-slate-400">Cobrado</p>
           <p className="font-semibold text-slate-700">
-            {moneyMx(upload.total_cobrado)}
+            {moneyMx(bundle.venta?.total_cobrado)}
           </p>
         </div>
         <div>
           <p className="text-slate-400">Propina</p>
           <p className="font-semibold text-slate-700">
-            {moneyMx(upload.propina)}
+            {moneyMx(bundle.propina?.propina)}
           </p>
         </div>
         <div>
           <p className="text-slate-400">Neto</p>
-          <p className="font-semibold text-slate-700">
-            {moneyMx(upload.neto_banco)}
-          </p>
+          <p className="font-semibold text-slate-700">{moneyMx(neto)}</p>
         </div>
       </div>
     </div>
@@ -214,8 +271,8 @@ export function AdminCajaTpv() {
               Caja · fotos TPV
             </h3>
             <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-              Cortes de terminales T1–T3 por fecha (más recientes primero). Abre
-              cada foto para revisar el ticket.
+              Por terminal: foto de venta (Totalización) + foto de propinas. Más
+              recientes primero.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -275,7 +332,7 @@ export function AdminCajaTpv() {
                   <TerminalSlot
                     key={n}
                     terminal={n}
-                    upload={day.byTerminal.get(n)}
+                    bundle={day.byTerminal.get(n)}
                   />
                 ))}
               </div>

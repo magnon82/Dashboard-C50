@@ -12,8 +12,10 @@ import {
   defaultCorteDateCdmx,
   TPV_CORTE_DATE_HELP,
   validateTpvImageQuality,
+  photoKindLabel,
   type TpvCorteUpload,
   type TpvDayCompleteness,
+  type TpvPhotoKind,
   type TpvTerminalNumber,
   type TpvWeekVerify,
   buildDayCompleteness,
@@ -55,15 +57,31 @@ async function loadImageMetrics(file: File): Promise<{
   return { width: img.width, height: img.height, sharpness, previewUrl };
 }
 
-function statusLabel(u: TpvCorteUpload | null, state: string): string {
-  if (state === 'missing') return 'Falta';
-  if (state === 'unused') return 'No se usó';
-  if (!u) return 'Falta';
+function statusLabel(
+  slot: {
+    state: string;
+    venta: TpvCorteUpload | null;
+    propinaUpload: TpvCorteUpload | null;
+  } | null
+): string {
+  if (!slot || slot.state === 'missing') return 'Falta';
+  if (slot.state === 'unused') return 'No se usó';
+  if (slot.state === 'partial') {
+    if (slot.venta && !slot.propinaUpload) return 'Falta propinas';
+    if (!slot.venta && slot.propinaUpload) return 'Falta venta';
+    return 'Parcial';
+  }
+  const u = slot.venta || slot.propinaUpload;
+  if (!u) return 'Fotos OK';
   if (u.status === 'verified') return 'Verificado';
-  if (u.status === 'parsed') return 'Con montos';
-  if (u.status === 'pending') return 'Foto sin montos';
-  if (u.status === 'rejected') return 'Rechazado';
-  return u.status;
+  if (
+    (slot.venta?.total_cobrado != null || slot.venta?.status === 'parsed') &&
+    slot.propinaUpload?.propina != null
+  ) {
+    return 'Con montos';
+  }
+  if (slot.venta || slot.propinaUpload) return 'Fotos OK';
+  return 'Pendiente';
 }
 
 /** Muestra YYYY-MM-DD en español (UTC noon evita desfase de zona). */
@@ -88,6 +106,7 @@ export function TpvCorteClient() {
   const [error, setError] = useState<string | null>(null);
   const [busyTerminal, setBusyTerminal] = useState<number | null>(null);
   const [activeTerminal, setActiveTerminal] = useState<TpvTerminalNumber>(1);
+  const [activeKind, setActiveKind] = useState<TpvPhotoKind>('venta');
   const [preview, setPreview] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<{
     file: File;
@@ -217,6 +236,7 @@ export function TpvCorteClient() {
       setError('Primero toma o elige la foto del corte.');
       return;
     }
+    // Montos opcionales: el servidor lee el ticket (OCR). Manual solo como respaldo.
     setBusyTerminal(activeTerminal);
     setError(null);
     setMsg(null);
@@ -226,34 +246,46 @@ export function TpvCorteClient() {
       const fd = new FormData();
       fd.set('file', pendingFile.file);
       fd.set('terminal_number', String(activeTerminal));
+      fd.set('photo_kind', activeKind);
       fd.set('corte_date', dateForUpload);
       fd.set('width_px', String(pendingFile.width));
       fd.set('height_px', String(pendingFile.height));
       fd.set('sharpness', String(pendingFile.sharpness));
-      if (cobrado.trim()) fd.set('total_cobrado', cobrado.trim());
-      if (propina.trim()) fd.set('propina', propina.trim());
-      const neto = computeNetoBanco(
-        cobrado.trim() ? Number(cobrado) : null,
-        propina.trim() ? Number(propina) : null
-      );
-      if (neto != null) fd.set('neto_banco', String(neto));
+      if (activeKind === 'venta' && cobrado.trim()) {
+        fd.set('total_cobrado', cobrado.trim());
+      }
+      if (activeKind === 'propina' && propina.trim() !== '') {
+        fd.set('propina', propina.trim());
+      }
 
       const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
       const json = await res.json();
       if (!res.ok) {
         setError(
           json.error ||
-            'No se pudo subir. Vuelve a tomar la foto si salió borrosa.'
+            'No se pudo leer el ticket. Vuelve a tomar la foto.'
         );
         return;
       }
       clearPending();
       if (json.day) setDay(json.day);
+      const ocrBit =
+        json.ocr?.status === 'done'
+          ? activeKind === 'venta'
+            ? ` · cobrado ${moneyMx(json.ocr.total_cobrado ?? json.upload?.total_cobrado)}`
+            : ` · propina ${moneyMx(json.ocr.propina ?? json.upload?.propina)}`
+          : '';
       setMsg(
         json.day?.complete
           ? 'Proceso concluido correctamente. Las 3 terminales ya están listas.'
-          : `Terminal ${activeTerminal}: foto guardada.`
+          : `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}.`
       );
+      const slotAfter = (json.day?.slots || []).find(
+        (s: { terminal: number }) => s.terminal === activeTerminal
+      );
+      if (slotAfter?.state === 'partial') {
+        setActiveKind(activeKind === 'venta' ? 'propina' : 'venta');
+      }
       await refresh(dateForUpload);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al subir');
@@ -308,30 +340,44 @@ export function TpvCorteClient() {
     setBusyTerminal(u.terminal_number);
     setError(null);
     try {
-      const cob = prompt('Total cobrado (tarjetas)', String(u.total_cobrado ?? ''));
-      if (cob === null) return;
-      const tip = prompt('Propina', String(u.propina ?? '0'));
-      if (tip === null) return;
-      const neto = computeNetoBanco(
-        cob === '' ? null : Number(cob),
-        tip === '' ? null : Number(tip)
-      );
-      const res = await fetch(`/api/tpv-cortes/${u.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          total_cobrado: cob === '' ? null : Number(cob),
-          propina: tip === '' ? null : Number(tip),
-          neto_banco: neto,
-          status: 'parsed',
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || 'No se guardaron montos');
-        return;
+      const kind = u.photo_kind === 'propina' ? 'propina' : 'venta';
+      if (kind === 'venta') {
+        const cob = prompt(
+          'Total cobrado (TOTALIZACIÓN)',
+          String(u.total_cobrado ?? '')
+        );
+        if (cob === null) return;
+        const res = await fetch(`/api/tpv-cortes/${u.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            total_cobrado: cob === '' ? null : Number(cob),
+            status: 'parsed',
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          setError(json.error || 'No se guardaron montos');
+          return;
+        }
+      } else {
+        const tip = prompt('Propina (REPORTE)', String(u.propina ?? '0'));
+        if (tip === null) return;
+        const res = await fetch(`/api/tpv-cortes/${u.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            propina: tip === '' ? 0 : Number(tip),
+            status: 'parsed',
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          setError(json.error || 'No se guardaron montos');
+          return;
+        }
       }
-      setMsg(`Terminal ${u.terminal_number}: montos actualizados.`);
+      setMsg(`Terminal ${u.terminal_number}: monto actualizado.`);
       await refresh();
     } finally {
       setBusyTerminal(null);
@@ -357,12 +403,16 @@ export function TpvCorteClient() {
     }
   }
 
-  const netoPreview = computeNetoBanco(
-    cobrado.trim() ? Number(cobrado) : null,
-    propina.trim() ? Number(propina) : null
-  );
+  const netoPreview =
+    activeKind === 'venta'
+      ? computeNetoBanco(
+          cobrado.trim() ? Number(cobrado.replace(/,/g, '')) : null,
+          null
+        )
+      : null;
 
   const dayComplete = Boolean(day?.complete);
+  const activeSlot = day?.slots.find((s) => s.terminal === activeTerminal);
 
   return (
     <div className="mx-auto max-w-lg px-3 pb-16 pt-3">
@@ -383,8 +433,8 @@ export function TpvCorteClient() {
         </h1>
         <p className="mt-2 text-sm text-slate-600">
           {dayComplete
-            ? `Las 3 terminales del ${corteDate} ya están contabilizadas (foto o «No se utilizó»).`
-            : 'Hay 3 terminales. Cada una necesita foto nítida o «No se utilizó».'}
+            ? `Las 3 terminales del ${corteDate} ya están contabilizadas (2 fotos o «No se utilizó»).`
+            : 'Hay 3 terminales. Cada una necesita foto de venta + foto de propinas, o «No se utilizó».'}
         </p>
       </header>
 
@@ -456,7 +506,9 @@ export function TpvCorteClient() {
               ? '#DCFCE7'
               : state === 'unused'
                 ? '#E2E8F0'
-                : '#FEF3C7';
+                : state === 'partial'
+                  ? '#FEF3C7'
+                  : '#FEF3C7';
           const border =
             activeTerminal === n ? SUITE.orange : 'transparent';
           return (
@@ -466,6 +518,8 @@ export function TpvCorteClient() {
               onClick={() => {
                 setActiveTerminal(n);
                 setTab('captura');
+                if (!slot?.venta) setActiveKind('venta');
+                else if (!slot?.propinaUpload) setActiveKind('propina');
               }}
               className="min-h-[72px] rounded-2xl px-2 py-3 text-center shadow-sm"
               style={{ backgroundColor: bg, border: `3px solid ${border}` }}
@@ -474,7 +528,7 @@ export function TpvCorteClient() {
                 T{n}
               </span>
               <span className="mt-1 block text-xs text-slate-600">
-                {statusLabel(slot?.upload || null, state)}
+                {statusLabel(slot || null)}
               </span>
             </button>
           );
@@ -523,16 +577,9 @@ export function TpvCorteClient() {
               Terminal {activeTerminal}
             </p>
             <p className="mt-1 text-sm text-slate-500">
-              Foto del ticket: prioridad{' '}
-              <strong className="font-semibold text-slate-700">
-                Reporte de propinas
-              </strong>
-              ; también sirve la{' '}
-              <strong className="font-semibold text-slate-700">
-                Totalización
-              </strong>{' '}
-              (ventas). Encuadre completo · mín. {TPV_MIN_LONG_SIDE}px · nitidez ≥{' '}
-              {TPV_MIN_SHARPNESS}.
+              Dos fotos: <strong>Totalización</strong> (cobrado) y{' '}
+              <strong>Reporte de propinas</strong>. Encuadre completo · mín.{' '}
+              {TPV_MIN_LONG_SIDE}px · nitidez ≥ {TPV_MIN_SHARPNESS}.
             </p>
 
             <Link
@@ -543,6 +590,45 @@ export function TpvCorteClient() {
               Guía de fotos · ver ejemplos
             </Link>
 
+            {activeSlot?.state !== 'unused' && !pendingFile ? (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-slate-50 p-2">
+                  <p className="text-[11px] font-bold text-slate-600">
+                    Venta{activeSlot?.venta ? ' ✓' : ''}
+                  </p>
+                  {activeSlot?.venta?.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={activeSlot.venta.image_url}
+                      alt="Venta"
+                      className="mt-1 max-h-24 w-full rounded-lg object-contain"
+                    />
+                  ) : (
+                    <p className="mt-2 text-center text-xs text-slate-400">
+                      Sin foto
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-xl bg-slate-50 p-2">
+                  <p className="text-[11px] font-bold text-slate-600">
+                    Propinas{activeSlot?.propinaUpload ? ' ✓' : ''}
+                  </p>
+                  {activeSlot?.propinaUpload?.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={activeSlot.propinaUpload.image_url}
+                      alt="Propinas"
+                      className="mt-1 max-h-24 w-full rounded-lg object-contain"
+                    />
+                  ) : (
+                    <p className="mt-2 text-center text-xs text-slate-400">
+                      Sin foto
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
             <input
               ref={fileRef}
               type="file"
@@ -552,58 +638,99 @@ export function TpvCorteClient() {
               onChange={(e) => void onPickFile(e.target.files?.[0] || null)}
             />
 
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="mt-3 flex min-h-14 w-full items-center justify-center rounded-2xl text-base font-bold text-white"
-              style={{ backgroundColor: SUITE.orange }}
-            >
-              Tomar / elegir foto
-            </button>
+            {activeSlot?.state !== 'unused' ? (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveKind('venta');
+                    fileRef.current?.click();
+                  }}
+                  className="flex min-h-14 items-center justify-center rounded-2xl px-2 text-sm font-bold text-white"
+                  style={{ backgroundColor: SUITE.orange }}
+                >
+                  {activeSlot?.venta ? 'Retomar venta' : 'Foto venta'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveKind('propina');
+                    fileRef.current?.click();
+                  }}
+                  className="flex min-h-14 items-center justify-center rounded-2xl px-2 text-sm font-bold text-white"
+                  style={{ backgroundColor: '#0F9F9C' }}
+                >
+                  {activeSlot?.propinaUpload
+                    ? 'Retomar propinas'
+                    : 'Foto propinas'}
+                </button>
+              </div>
+            ) : null}
 
             {preview ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={preview}
-                alt={`Vista previa terminal ${activeTerminal}`}
+                alt={`Vista previa ${photoKindLabel(activeKind)}`}
                 className="mt-4 max-h-64 w-full rounded-xl object-contain bg-slate-100"
               />
             ) : null}
 
             {pendingFile ? (
               <div className="mt-4 space-y-3">
+                <p
+                  className="rounded-xl px-3 py-2 text-sm font-semibold text-white"
+                  style={{
+                    backgroundColor:
+                      activeKind === 'venta' ? SUITE.orange : '#0F9F9C',
+                  }}
+                >
+                  {photoKindLabel(activeKind)} · T{activeTerminal}
+                </p>
                 <p className="text-xs text-slate-500">
                   {pendingFile.width}×{pendingFile.height}px · nitidez{' '}
                   {pendingFile.sharpness.toFixed(0)}
                 </p>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-600">
-                    Total cobrado (opcional ahora)
-                  </span>
-                  <input
-                    inputMode="decimal"
-                    className="mt-1 min-h-12 w-full rounded-xl border border-slate-200 px-3 text-lg"
-                    placeholder="0.00"
-                    value={cobrado}
-                    onChange={(e) => setCobrado(e.target.value)}
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-600">
-                    Propina (opcional ahora)
-                  </span>
-                  <input
-                    inputMode="decimal"
-                    className="mt-1 min-h-12 w-full rounded-xl border border-slate-200 px-3 text-lg"
-                    placeholder="0.00"
-                    value={propina}
-                    onChange={(e) => setPropina(e.target.value)}
-                  />
-                </label>
-                <p className="text-sm text-slate-600">
-                  Neto banco (cobrado + propinas):{' '}
-                  <strong>{netoPreview != null ? moneyMx(netoPreview) : '—'}</strong>
+                <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  Al guardar se lee el ticket automáticamente
+                  {activeKind === 'venta'
+                    ? ' (TOTAL GENERAL).'
+                    : ' (total propina).'}{' '}
+                  Si no se entiende, te pedirá volver a tomar la foto. Monto
+                  manual solo si hace falta corregir:
                 </p>
+                {activeKind === 'venta' ? (
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-600">
+                      Cobrado (opcional / corrección)
+                    </span>
+                    <input
+                      inputMode="decimal"
+                      className="mt-1 min-h-12 w-full rounded-xl border border-slate-200 px-3 text-lg"
+                      placeholder="Auto desde foto"
+                      value={cobrado}
+                      onChange={(e) => setCobrado(e.target.value)}
+                    />
+                  </label>
+                ) : (
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-600">
+                      Propina (opcional / corrección)
+                    </span>
+                    <input
+                      inputMode="decimal"
+                      className="mt-1 min-h-12 w-full rounded-xl border border-slate-200 px-3 text-lg"
+                      placeholder="Auto desde foto"
+                      value={propina}
+                      onChange={(e) => setPropina(e.target.value)}
+                    />
+                  </label>
+                )}
+                {activeKind === 'venta' && netoPreview != null ? (
+                  <p className="text-sm text-slate-600">
+                    Vista previa: <strong>{moneyMx(netoPreview)}</strong>
+                  </p>
+                ) : null}
                 <button
                   type="button"
                   disabled={busyTerminal === activeTerminal}
@@ -612,8 +739,8 @@ export function TpvCorteClient() {
                   style={{ backgroundColor: SUITE.navy }}
                 >
                   {busyTerminal === activeTerminal
-                    ? 'Subiendo…'
-                    : `Guardar foto · Terminal ${activeTerminal}`}
+                    ? 'Leyendo ticket…'
+                    : `Guardar ${activeKind === 'venta' ? 'venta' : 'propinas'} · T${activeTerminal}`}
                 </button>
                 <button
                   type="button"
@@ -643,7 +770,12 @@ export function TpvCorteClient() {
           ) : (
             TPV_TERMINALS.map((n) => {
               const slot = day?.slots.find((s) => s.terminal === n);
-              const u = slot?.upload || null;
+              const venta = slot?.venta || null;
+              const propinaUp = slot?.propinaUpload || null;
+              const terminalNeto = computeNetoBanco(
+                venta?.total_cobrado ?? null,
+                propinaUp?.propina ?? null
+              );
               return (
                 <div
                   key={n}
@@ -655,8 +787,10 @@ export function TpvCorteClient() {
                         Terminal {n}
                       </p>
                       <p className="text-sm text-slate-500">
-                        {statusLabel(u, slot?.state || 'missing')}
-                        {u ? ` · ${u.uploader_username}` : ''}
+                        {statusLabel(slot || null)}
+                        {venta || propinaUp
+                          ? ` · ${(venta || propinaUp)!.uploader_username}`
+                          : ''}
                       </p>
                     </div>
                     <span
@@ -667,7 +801,9 @@ export function TpvCorteClient() {
                             ? '#FEF3C7'
                             : slot?.state === 'unused'
                               ? '#E2E8F0'
-                              : '#DCFCE7',
+                              : slot?.state === 'partial'
+                                ? '#FEF3C7'
+                                : '#DCFCE7',
                         color: SUITE.navy,
                       }}
                     >
@@ -675,66 +811,95 @@ export function TpvCorteClient() {
                         ? 'Falta'
                         : slot?.state === 'unused'
                           ? 'No usada'
-                          : 'Foto'}
+                          : slot?.state === 'partial'
+                            ? 'Parcial'
+                            : '2 fotos'}
                     </span>
                   </div>
 
-                  {u?.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={u.image_url}
-                      alt={`Corte terminal ${n}`}
-                      className="mt-3 max-h-48 w-full rounded-xl object-contain bg-slate-50"
-                    />
-                  ) : null}
-
-                  {u && u.entry_kind === 'photo' ? (
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
+                  {slot?.state !== 'unused' ? (
+                    <div className="mt-3 grid grid-cols-2 gap-2">
                       <div>
-                        <p className="text-xs text-slate-500">Cobrado</p>
-                        <p className="font-semibold">{moneyMx(u.total_cobrado)}</p>
+                        <p className="text-[11px] font-bold text-slate-500">
+                          Venta
+                        </p>
+                        {venta?.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={venta.image_url}
+                            alt={`Venta T${n}`}
+                            className="mt-1 max-h-36 w-full rounded-xl object-contain bg-slate-50"
+                          />
+                        ) : (
+                          <p className="mt-2 text-xs text-slate-400">Sin foto</p>
+                        )}
+                        {venta ? (
+                          <button
+                            type="button"
+                            className="mt-1 w-full rounded-lg bg-slate-100 py-1.5 text-[11px] font-bold"
+                            style={{ color: SUITE.navy }}
+                            onClick={() => void saveAmounts(venta)}
+                          >
+                            Cobrado: {moneyMx(venta.total_cobrado)}
+                          </button>
+                        ) : null}
                       </div>
                       <div>
-                        <p className="text-xs text-slate-500">Propina</p>
-                        <p className="font-semibold">{moneyMx(u.propina)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500">Neto banco</p>
-                        <p className="font-semibold">{moneyMx(u.neto_banco)}</p>
+                        <p className="text-[11px] font-bold text-slate-500">
+                          Propinas
+                        </p>
+                        {propinaUp?.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={propinaUp.image_url}
+                            alt={`Propinas T${n}`}
+                            className="mt-1 max-h-36 w-full rounded-xl object-contain bg-slate-50"
+                          />
+                        ) : (
+                          <p className="mt-2 text-xs text-slate-400">Sin foto</p>
+                        )}
+                        {propinaUp ? (
+                          <button
+                            type="button"
+                            className="mt-1 w-full rounded-lg bg-slate-100 py-1.5 text-[11px] font-bold"
+                            style={{ color: SUITE.navy }}
+                            onClick={() => void saveAmounts(propinaUp)}
+                          >
+                            Propina: {moneyMx(propinaUp.propina)}
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   ) : null}
 
-                  {u && u.entry_kind === 'photo' ? (
-                    <div className="mt-3 flex flex-col gap-2">
-                      <button
-                        type="button"
-                        className="min-h-12 rounded-xl bg-slate-100 text-sm font-bold"
-                        style={{ color: SUITE.navy }}
-                        onClick={() => void saveAmounts(u)}
-                      >
-                        Editar montos
-                      </button>
-                      {u.status !== 'verified' ? (
-                        <button
-                          type="button"
-                          className="min-h-12 rounded-xl text-sm font-bold text-white"
-                          style={{ backgroundColor: '#0F766E' }}
-                          onClick={() => void markVerified(u)}
-                        >
-                          Marcar verificado
-                        </button>
-                      ) : null}
-                    </div>
+                  {slot?.state === 'photo' ? (
+                    <p className="mt-3 text-center text-sm">
+                      Neto banco:{' '}
+                      <strong style={{ color: SUITE.navy }}>
+                        {moneyMx(terminalNeto)}
+                      </strong>
+                    </p>
                   ) : null}
 
-                  {slot?.state === 'missing' ? (
+                  {venta && venta.status !== 'verified' ? (
+                    <button
+                      type="button"
+                      className="mt-3 min-h-12 w-full rounded-xl text-sm font-bold text-white"
+                      style={{ backgroundColor: '#0F766E' }}
+                      onClick={() => void markVerified(venta)}
+                    >
+                      Marcar verificado
+                    </button>
+                  ) : null}
+
+                  {slot?.state === 'missing' || slot?.state === 'partial' ? (
                     <button
                       type="button"
                       className="mt-3 min-h-12 w-full rounded-xl text-sm font-bold text-white"
                       style={{ backgroundColor: SUITE.orange }}
                       onClick={() => {
                         setActiveTerminal(n);
+                        setActiveKind(slot?.venta ? 'propina' : 'venta');
                         setTab('captura');
                       }}
                     >
@@ -814,7 +979,7 @@ export function TpvCorteClient() {
               </dl>
               <p className="mt-3 text-xs text-slate-400">
                 Fotos semana: {verify.tpv.photoCount} · No usadas:{' '}
-                {verify.tpv.unusedCount} · OCR: manual (stub)
+                {verify.tpv.unusedCount} · OCR: auto (Mifel)
               </p>
             </div>
           ) : null}

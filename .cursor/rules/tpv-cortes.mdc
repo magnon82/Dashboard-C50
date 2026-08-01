@@ -13,15 +13,19 @@ alwaysApply: false
 Cobrado en terminales + propinas (solo display) → **neto banco = cobrado + propinas** (depósito diario) → vs presupuesto semanal bancario (`presupuesto_ingreso` tipo ventas MIFEL/BBVA).
 
 Hay **3 terminales**. Cada día, cada una queda:
-1. Foto que pasa calidad (resolución + nitidez), o
-2. Marcado explícito **«No se utilizó la terminal N»**
+1. **2 fotos** que pasan calidad: **venta** (TOTALIZACIÓN) + **propinas** (REPORTE DE PROPINAS), con montos leídos de cada ticket, o
+2. Marcado explícito **«No se utilizó la terminal N»** (ambas fotos no aplican)
 
-Día incompleto hasta que las 3 estén contabilizadas.
+Día incompleto hasta que las 3 estén contabilizadas (3 × 2 fotos, o unused).
+
+Schema: `photo_kind` (`venta`|`propina`); unique `(corte_date, terminal_number, photo_kind)` para fotos. Patch: `supabase/tpv_cortes_two_photos.sql`.
 
 ## Fuentes
 
 - Fotos: Supabase Storage `tpv-cortes` + tabla `tpv_corte_uploads` (`supabase/tpv_cortes.sql`)
-- Montos MVP: **manuales** (OCR stub `ocr_status=skipped`)
+- Montos: **OCR automático** al subir (`tesseract.js` + parse Mifel en `app/lib/tpv-ocr.ts`). Si no legible → rechazo «Vuelve a tomar la foto».
+- TOTALIZACIÓN → `ticket_total` (liquidación; a menudo incluye tips). Propina → `amount_propina`. Con ambas: `cobrado = ticket_total − propina`. Neto banco = cobrado + propinas.
+- Override manual opcional en el form / PATCH.
 - Cross-check opcional: Infocaja `Infocaja Bancarias` / `Infocaja Propina`
 - No confundir con `corte_caja` (cancelaciones/descuentos Infocaja)
 

@@ -11,6 +11,10 @@ export const TPV_STORAGE_BUCKET = 'tpv-cortes';
 export const TPV_TERMINALS = [1, 2, 3] as const;
 export type TpvTerminalNumber = (typeof TPV_TERMINALS)[number];
 
+/** Dos tickets por terminal: Totalización (venta) + Reporte de propinas. */
+export const TPV_PHOTO_KINDS = ['venta', 'propina'] as const;
+export type TpvPhotoKind = (typeof TPV_PHOTO_KINDS)[number];
+
 export const TPV_MAX_BYTES = 8 * 1024 * 1024;
 export const TPV_MIN_BYTES = 40 * 1024;
 export const TPV_MIN_LONG_SIDE = 1200;
@@ -31,6 +35,8 @@ export interface TpvCorteUpload {
   corte_date: string;
   terminal_number: TpvTerminalNumber;
   entry_kind: TpvEntryKind;
+  /** venta | propina para fotos; null si unused */
+  photo_kind: TpvPhotoKind | null;
   terminal_label: string | null;
   uploader_username: string;
   storage_path: string | null;
@@ -64,8 +70,12 @@ export interface ImageQualityResult {
 
 export interface TpvDayTerminalSlot {
   terminal: TpvTerminalNumber;
-  state: 'missing' | 'photo' | 'unused';
+  /** missing | partial (1 de 2 fotos) | photo (ambas) | unused */
+  state: 'missing' | 'partial' | 'photo' | 'unused';
+  /** @deprecated Prefer venta/propina; apunta a venta o la única foto legacy */
   upload: TpvCorteUpload | null;
+  venta: TpvCorteUpload | null;
+  propinaUpload: TpvCorteUpload | null;
 }
 
 export interface TpvDayCompleteness {
@@ -74,6 +84,19 @@ export interface TpvDayCompleteness {
   accounted: number;
   complete: boolean;
   missing: TpvTerminalNumber[];
+}
+
+export function photoKindLabel(kind: TpvPhotoKind): string {
+  return kind === 'venta' ? 'Venta (Totalización)' : 'Propinas (Reporte)';
+}
+
+export function parsePhotoKind(raw: unknown): TpvPhotoKind | null {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'venta' || s === 'totalizacion' || s === 'totalización') {
+    return 'venta';
+  }
+  if (s === 'propina' || s === 'propinas') return 'propina';
+  return null;
 }
 
 const CDMX_TZ = 'America/Mexico_City';
@@ -213,34 +236,98 @@ export function estimateSharpnessFromImageData(data: ImageData): number {
   return Math.round((sumSq / n - mean * mean) * 100) / 100;
 }
 
-/** Completitud del día: las 3 terminales con foto o unused. */
+/** Completitud del día: las 3 terminales con (venta+propina) o unused. */
 export function buildDayCompleteness(
   uploads: TpvCorteUpload[],
   corteDate: string
 ): TpvDayCompleteness {
-  const byTerm = new Map<number, TpvCorteUpload>();
+  type Bundle = {
+    unused: TpvCorteUpload | null;
+    venta: TpvCorteUpload | null;
+    propina: TpvCorteUpload | null;
+  };
+  const byTerm = new Map<number, Bundle>();
+
+  function ensure(n: number): Bundle {
+    let b = byTerm.get(n);
+    if (!b) {
+      b = { unused: null, venta: null, propina: null };
+      byTerm.set(n, b);
+    }
+    return b;
+  }
+
+  function newer(a: TpvCorteUpload | null, b: TpvCorteUpload): TpvCorteUpload {
+    if (!a) return b;
+    return String(b.updated_at) > String(a.updated_at) ? b : a;
+  }
+
   for (const u of uploads) {
     if (String(u.corte_date).slice(0, 10) !== corteDate) continue;
     if (u.status === 'rejected') continue;
     const n = Number(u.terminal_number);
     if (n < 1 || n > 3) continue;
-    const prev = byTerm.get(n);
-    if (!prev || String(u.updated_at) > String(prev.updated_at)) {
-      byTerm.set(n, u);
+    const b = ensure(n);
+    if (u.entry_kind === 'unused' || u.status === 'unused') {
+      b.unused = newer(b.unused, u);
+      continue;
     }
+    const kind = u.photo_kind === 'propina' ? 'propina' : 'venta';
+    if (kind === 'propina') b.propina = newer(b.propina, u);
+    else b.venta = newer(b.venta, u);
   }
 
   const slots: TpvDayTerminalSlot[] = TPV_TERMINALS.map((terminal) => {
-    const upload = byTerm.get(terminal) || null;
-    if (!upload) return { terminal, state: 'missing' as const, upload: null };
-    if (upload.entry_kind === 'unused' || upload.status === 'unused') {
-      return { terminal, state: 'unused' as const, upload };
+    const b = byTerm.get(terminal);
+    if (!b) {
+      return {
+        terminal,
+        state: 'missing' as const,
+        upload: null,
+        venta: null,
+        propinaUpload: null,
+      };
     }
-    return { terminal, state: 'photo' as const, upload };
+    if (b.unused) {
+      return {
+        terminal,
+        state: 'unused' as const,
+        upload: b.unused,
+        venta: null,
+        propinaUpload: null,
+      };
+    }
+    const venta = b.venta;
+    const propinaUpload = b.propina;
+    if (venta && propinaUpload) {
+      return {
+        terminal,
+        state: 'photo' as const,
+        upload: venta,
+        venta,
+        propinaUpload,
+      };
+    }
+    if (venta || propinaUpload) {
+      return {
+        terminal,
+        state: 'partial' as const,
+        upload: venta || propinaUpload,
+        venta,
+        propinaUpload,
+      };
+    }
+    return {
+      terminal,
+      state: 'missing' as const,
+      upload: null,
+      venta: null,
+      propinaUpload: null,
+    };
   });
 
   const missing = slots
-    .filter((s) => s.state === 'missing')
+    .filter((s) => s.state === 'missing' || s.state === 'partial')
     .map((s) => s.terminal);
   const accounted = 3 - missing.length;
 
@@ -341,23 +428,57 @@ export function buildTpvWeekVerify(
   let unusedCount = 0;
   let verifiedCount = 0;
 
+  /** Agrupa por fecha+terminal para no contar 2 fotos como 2 terminales. */
+  const terminalDays = new Map<
+    string,
+    { unused: boolean; venta: TpvCorteUpload | null; propina: TpvCorteUpload | null }
+  >();
+
   for (const u of uploads) {
     const d = String(u.corte_date || '').slice(0, 10);
     if (d < mondayKey || d > sundayKey) continue;
     if (u.status === 'rejected') continue;
-    count += 1;
+    const key = `${d}|${u.terminal_number}`;
+    let g = terminalDays.get(key);
+    if (!g) {
+      g = { unused: false, venta: null, propina: null };
+      terminalDays.set(key, g);
+    }
     if (u.entry_kind === 'unused' || u.status === 'unused') {
+      g.unused = true;
+      continue;
+    }
+    if (u.photo_kind === 'propina') g.propina = u;
+    else g.venta = u;
+  }
+
+  for (const g of terminalDays.values()) {
+    count += 1;
+    if (g.unused) {
       unusedCount += 1;
       continue;
     }
     photoCount += 1;
-    if (u.status === 'verified') verifiedCount += 1;
-    const c = u.total_cobrado != null ? Number(u.total_cobrado) : 0;
-    const tip = u.propina != null ? Number(u.propina) : 0;
-    const n = computeNetoBanco(u.total_cobrado, u.propina) ?? 0;
+    const c = g.venta?.total_cobrado != null ? Number(g.venta.total_cobrado) : 0;
+    const tip =
+      g.propina?.propina != null
+        ? Number(g.propina.propina)
+        : g.venta?.propina != null
+          ? Number(g.venta.propina)
+          : 0;
+    const n = computeNetoBanco(
+      g.venta?.total_cobrado ?? null,
+      g.propina?.propina ?? g.venta?.propina ?? null
+    ) ?? 0;
     cobrado += c;
     propina += tip;
     neto += n;
+    if (
+      g.venta?.status === 'verified' ||
+      g.propina?.status === 'verified'
+    ) {
+      verifiedCount += 1;
+    }
   }
 
   let bancarias = 0;
@@ -450,11 +571,16 @@ export function asTpvRow(r: Record<string, unknown>): TpvCorteUpload {
   ) as TpvTerminalNumber;
   const entry_kind: TpvEntryKind =
     r.entry_kind === 'unused' ? 'unused' : 'photo';
+  let photo_kind: TpvPhotoKind | null = null;
+  if (entry_kind === 'photo') {
+    photo_kind = parsePhotoKind(r.photo_kind) || 'venta';
+  }
   return {
     id: String(r.id),
     corte_date: String(r.corte_date).slice(0, 10),
     terminal_number,
     entry_kind,
+    photo_kind,
     terminal_label: r.terminal_label != null ? String(r.terminal_label) : null,
     uploader_username: String(r.uploader_username || ''),
     storage_path: r.storage_path != null ? String(r.storage_path) : null,
