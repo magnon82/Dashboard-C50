@@ -14,8 +14,10 @@ Ya no dependen de que tu PC esté encendido ni abren ventanas de PowerShell.
 
 ## Workflows
 
-- `.github/workflows/sync-saldos.yml` — cada 5 minutos + manual
-- `.github/workflows/sync-gmail.yml` — diario 11:00 UTC (~5:00 AM Ciudad de México en horario estándar) + manual
+- `.github/workflows/sync-saldos.yml` — cada ~15 min (`7,22,37,52`) + manual
+- `.github/workflows/sync-gmail.yml` — diario 11:17 UTC (~5:17 AM CDMX) + respaldo 12:47 UTC (~6:47 AM) + manual
+
+Tras agregar o cambiar secrets, dispara **Run workflow** una vez en Actions (el cron de GitHub es best-effort y puede saltarse el primer día).
 
 ## CLI local — flujo efectivo (saldo + semanas + movimientos)
 

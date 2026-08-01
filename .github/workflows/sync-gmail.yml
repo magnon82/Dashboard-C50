@@ -1,12 +1,16 @@
 name: Sync Gmail diario
 
-# 5:00 AM hora Ciudad de México ≈ 11:00 UTC (CST) / 10:00 UTC (CDT)
+# ~5:00 AM Ciudad de México = 11:00 UTC (CDMX sin DST desde 2022).
+# Minutos fuera de :00 para reducir drops del scheduler de GitHub.
 # Infocaja (ventas) + CORTE (cancelaciones/descuentos/cortesías) → Supabase
 # Dashboard: Ventas
 
 on:
   schedule:
-    - cron: "0 11 * * *"
+    # Principal ~5:17 AM CDMX
+    - cron: "17 11 * * *"
+    # Respaldo ~6:47 AM CDMX por si el cron de :00 se pierde
+    - cron: "47 12 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -31,6 +35,30 @@ jobs:
 
       - name: Install deps
         run: pip install -r requirements.txt
+
+      - name: Check required secrets
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_OAUTH_TOKEN_JSON: ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}
+        run: |
+          missing=0
+          check() {
+            name="$1"
+            val="$2"
+            if [ -z "$val" ]; then
+              echo "::error::Falta secret Actions: $name (Settings → Secrets and variables → Actions)"
+              missing=1
+            else
+              echo "OK secret $name (len=${#val})"
+            fi
+          }
+          check NEXT_PUBLIC_SUPABASE_URL "$NEXT_PUBLIC_SUPABASE_URL"
+          check SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
+          check GOOGLE_OAUTH_CLIENT_JSON "$GOOGLE_OAUTH_CLIENT_JSON"
+          check GOOGLE_OAUTH_TOKEN_JSON "$GOOGLE_OAUTH_TOKEN_JSON"
+          exit $missing
 
       - name: Sync Infocaja + CORTE
         env:
