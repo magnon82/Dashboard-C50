@@ -8,6 +8,7 @@ Descubre mensajes con:
   - Enlaces MyBusinessPOS (poscloud -> Azure blob)
   - Enlaces Interfactura ("Descargar XML/PDF", Heineken/Moctezuma)
   - Recibos Mifel de contribuciones (comprobante de pago sin CFDI)
+  - Acuses SAT / líneas de captura del contador (CP Oscar Noguez · onoguez8a@hotmail.com)
 
 Alias opcional: deliveredto:facturacion@carranza50.com.mx
 
@@ -149,6 +150,14 @@ def build_queries(
                     "from:sat.gob.mx OR from:imss.gob.mx OR from:gob.mx"
                     ")"
                 ),
+                # Contador (CP Oscar Noguez): acuses SAT / líneas de captura (sin CFDI)
+                wrap(
+                    "has:attachment filename:pdf ("
+                    "from:onoguez8a@hotmail.com OR from:onoguez OR "
+                    "subject:impuestos OR filename:sat1 OR filename:sat2 OR "
+                    "\"hojas de impuestos\" OR \"linea de captura\" OR "
+                    "\"línea de captura\" OR \"acuse de recibo\")"
+                ),
                 wrap(
                     "has:attachment filename:pdf "
                     "(subject:\"Compras y venta\" OR filename:VCC- OR "
@@ -188,13 +197,93 @@ def build_query(
 GOV_PDF_RE = re.compile(
     r"(imss|infonavit|shcp|hacienda|impuesto|tesorer|secretaria|"
     r"\bsat\b|\bisr\b|\biva\b|linea\s*de\s*captura|acuse|gob\.mx|"
-    r"contribuci[oó]nes|recibo\s*bancario|predial|municipio)",
+    r"contribuci[oó]nes|recibo\s*bancario|predial|municipio|"
+    r"onoguez|noguez)",
     re.IGNORECASE,
 )
 
 
 def is_gobierno_factura(filename: str, subject: str = "") -> bool:
     return bool(GOV_PDF_RE.search(f"{filename} {subject}"))
+
+
+def _pdf_extract_text(data: bytes, max_pages: int = 4) -> str:
+    """Best-effort text from PDF bytes (SAT acuses are text-based)."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        try:
+            from PyPDF2 import PdfReader  # type: ignore
+        except ImportError:
+            return ""
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        parts: list[str] = []
+        for page in reader.pages[:max_pages]:
+            parts.append(page.extract_text() or "")
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
+def extract_sat_acuse_meta(data: bytes) -> dict:
+    """Parse SAT 'Acuse de recibo' / línea de captura PDFs from the contador.
+
+    Returns keys: folio (número de operación), total, fecha (ISO), emisor.
+    Empty dict if not an acuse.
+    """
+    text = _pdf_extract_text(data)
+    if not text:
+        return {}
+    low = text.lower()
+    if not (
+        "número de operación" in low
+        or "numero de operacion" in low
+        or "línea de captura" in low
+        or "linea de captura" in low
+        or "acuse de recibo" in low
+    ):
+        return {}
+
+    out: dict = {"emisor": "Secretaría de Hacienda / SAT"}
+
+    m_op = re.search(
+        r"N[uú]mero\s+de\s+operaci[oó]n\s*:?\s*(\d{6,})",
+        text,
+        re.I,
+    )
+    if m_op:
+        out["folio"] = m_op.group(1)
+
+    # Prefer "Importe total a pagar: $8,325" over intermediate "A cargo"
+    m_pay = re.search(
+        r"Importe\s+total\s*\n?\s*a\s+pagar\s*:?\s*\$?\s*([\d,]+(?:\.\d+)?)",
+        text,
+        re.I,
+    )
+    if not m_pay:
+        m_pay = re.search(
+            r"Cantidad\s+a\s+pagar\s*:?\s*\$?\s*([\d,]+(?:\.\d+)?)",
+            text,
+            re.I,
+        )
+    if m_pay:
+        try:
+            out["total"] = float(m_pay.group(1).replace(",", ""))
+        except ValueError:
+            pass
+
+    m_fecha = re.search(
+        r"Fecha\s+y\s+hora\s+de\s+presentaci[oó]n\s*:?\s*"
+        r"(\d{1,2})/(\d{1,2})/(\d{4})",
+        text,
+        re.I,
+    )
+    if m_fecha:
+        d, mo, y = m_fecha.group(1), m_fecha.group(2), m_fecha.group(3)
+        out["fecha"] = f"{y}-{int(mo):02d}-{int(d):02d}"
+
+    return out
 
 
 def _mime_body_text(payload: dict | None) -> str:
@@ -659,9 +748,33 @@ def list_message_ids(service, query: str) -> list[str]:
 
 
 def list_message_ids_union(service, queries: list[str]) -> list[str]:
+    """Union of Gmail message IDs. Contador/gobierno PDF queries are appended
+    first so --limit does not starve them behind bulk CFDI XML results.
+    """
     seen: set[str] = set()
     out: list[str] = []
-    for q in queries:
+    # Prefer queries that mention impuestos/contador/gobierno keywords
+    def _priority(q: str) -> int:
+        ql = q.lower()
+        if any(
+            k in ql
+            for k in (
+                "onoguez",
+                "impuestos",
+                "sat1",
+                "linea de captura",
+                "imss",
+                "hacienda",
+                "gob.mx",
+            )
+        ):
+            return 0
+        if "filename:pdf" in ql:
+            return 1
+        return 2
+
+    ordered = sorted(queries, key=_priority)
+    for q in ordered:
         print(f"  Query: {q}")
         try:
             ids = list_message_ids(service, q)
@@ -1071,16 +1184,29 @@ def process_message(
         if stem in used_pdf_stems:
             continue
         serie, folio = folio_from_filename(filename)
-        gov = is_gobierno_factura(filename, subject)
+        sat_meta = extract_sat_acuse_meta(data)
+        gov = is_gobierno_factura(filename, subject) or bool(sat_meta)
         file_emisor = emisor_hint_from_filename(filename)
+        if sat_meta.get("folio"):
+            folio = str(sat_meta["folio"])
+            serie = serie or None
         if not folio:
             m = re.search(r"(QROFA|QROPC|QROR|VCC)[-_]?(\d+)", subject or "", re.I)
             if m and len(pdfs) <= 3 and not xmls:
                 serie = m.group(1).upper()
                 folio = m.group(2)
             elif gov:
-                dig = re.search(r"(\d{5,})", f"{filename} {subject}")
-                folio = dig.group(1) if dig else Path(filename).stem[:40]
+                # Avoid treating year "2026" in "junio 2026 sat1.pdf" as folio
+                dig = None
+                for hit in re.finditer(r"(\d{6,})", f"{filename} {subject}"):
+                    cand = hit.group(1)
+                    if cand.startswith("20") and len(cand) == 4:
+                        continue
+                    if 2000 <= int(cand[:4]) <= 2099 and len(cand) == 4:
+                        continue
+                    dig = cand
+                    break
+                folio = dig if dig else Path(filename).stem[:40]
             elif barra and re.search(
                 r"(VCC|QROFA|QROR|QROPC|PRO\d|MIEM|FFE\d|INV-)",
                 filename,
@@ -1090,19 +1216,32 @@ def process_message(
                 continue
             else:
                 continue
-        fecha = msg_date or date.today().isoformat()
-        year = fecha[:4]
+        fecha = (
+            sat_meta.get("fecha")
+            or msg_date
+            or date.today().isoformat()
+        )
+        year = str(fecha)[:4]
         dest_dir = save_root / year
         pdf_path = _save_bytes(dest_dir, filename, data, dry_run)
-        amount = float(subj_amount or 0)
-        emisor = file_emisor or subj_emisor or ""
+        amount = float(
+            sat_meta.get("total")
+            or subj_amount
+            or 0
+        )
+        emisor = (
+            file_emisor
+            or sat_meta.get("emisor")
+            or subj_emisor
+            or ""
+        )
         if gov and not emisor:
             if re.search(r"(?i)\bimss\b", f"{filename} {subject}"):
                 emisor = "IMSS"
             elif re.search(r"(?i)infonavit", f"{filename} {subject}"):
                 emisor = "INFONAVIT"
             elif re.search(
-                r"(?i)(hacienda|shcp|sat|impuesto|contribuci)",
+                r"(?i)(hacienda|shcp|sat|impuesto|contribuci|acuse|noguez)",
                 f"{filename} {subject}",
             ):
                 emisor = "Secretaría de Hacienda / SAT"
@@ -1127,6 +1266,7 @@ def process_message(
             "filename": Path(pdf_path).name,
             "source": "gmail_facturacion_pdf",
             "gobierno": gov,
+            "sat_acuse": bool(sat_meta),
         }
         rows.append(
             _record_from_payload(

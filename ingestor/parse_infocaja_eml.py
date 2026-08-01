@@ -27,6 +27,8 @@ FIELD_PATTERNS = (
     ("Venta Total", re.compile(r"Venta\s*Total\s*:\s*\$?\s*([\d,]+\.\d{2})", re.I)),
     ("Venta Bruta", re.compile(r"Venta\s*Bruta\s*:\s*\$?\s*([\d,]+\.\d{2})", re.I)),
     ("Descuentos", re.compile(r"(?<!x )\bDescuentos\s*:\s*\$?\s*([\d,]+\.\d{2})", re.I)),
+    # Comensales / covers (entero; Infocaja etiqueta "Personas")
+    ("Personas", re.compile(r"Personas\s*:\s*([\d,]+)", re.I)),
     # Formato habitual: monto | propina | total (3 cifras). Fallback: solo monto.
     (
         "Bancarias",
@@ -78,6 +80,8 @@ def parse_infocaja_text(text: str, subject: str | None = None) -> dict:
                 tip = parse_money(tip_raw)
                 if name == "Bancarias" and tip > 0:
                     fields["Propina"] = tip
+        elif name == "Personas":
+            fields[name] = float(match.group(1).replace(",", ""))
         else:
             fields[name] = parse_money(match.group(1))
 
@@ -118,13 +122,17 @@ def to_records(parsed: dict) -> list[dict]:
         ("Bancarias", "Infocaja Bancarias"),
         ("Descuentos", "Infocaja Descuentos"),
         ("Propina", "Infocaja Propina"),
+        ("Personas", "Infocaja Personas"),
     ):
         # Guardar mix de pago aunque sea 0 (distingue “día sin efectivo” de “sin dato”).
         # Descuentos/Propina solo si > 0 para no inflar filas vacías.
+        # Personas: comensales (covers); amount = conteo, no dinero.
         if key not in fields:
             continue
         amount = fields[key]
         if key in ("Descuentos", "Propina") and amount <= 0:
+            continue
+        if key == "Personas" and amount <= 0:
             continue
         records.append(
             {
@@ -132,7 +140,11 @@ def to_records(parsed: dict) -> list[dict]:
                 "type": "income" if key != "Descuentos" else "expense",
                 "category": category,
                 "amount": amount,
-                "description": f"Infocaja detalle {fecha}",
+                "description": (
+                    f"Infocaja comensales {fecha}"
+                    if key == "Personas"
+                    else f"Infocaja detalle {fecha}"
+                ),
                 "source_file": SOURCE_FILE,
             }
         )

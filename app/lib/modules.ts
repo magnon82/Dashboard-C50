@@ -46,8 +46,8 @@ export const APP_MODULES: AppModule[] = [
     href: '/eventos',
     label: 'Eventos',
     short: 'Eventos',
-    description: 'Calendarización, venta de eventos y margen',
-    status: 'próximo',
+    description: 'CRM, cotizador, pipeline y operación de eventos',
+    status: 'activo',
   },
   {
     id: 'calidad',

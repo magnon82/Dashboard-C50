@@ -537,6 +537,13 @@ export interface DaySale {
   total: number;
   /** Suma descuentos + cortesías + cancelaciones del día (CORTE) */
   cortes: number;
+  /** Comensales Infocaja (Personas); 0 si no hay dato */
+  comensales: number;
+  /**
+   * Cheque promedio = cuenta sin propina ÷ comensales.
+   * Infocaja Venta Total ya excluye propina; null si comensales ≤ 0.
+   */
+  chequePromedio: number | null;
   /** Mismo día de la semana (lun=0…) del año anterior */
   prevDate?: string;
   prevLabel?: string;
@@ -559,8 +566,11 @@ export function weekRangeLabel(year: number, week: number): string {
   return `S${week} · ${formatShort(mon)} – ${formatShort(fri)}`;
 }
 
-/** Semana en curso (lun–hoy) con ventas diarias Infocaja + cortes CORTE.
- *  Compara día a día vs misma semana del año anterior (solo ventas diarias; no prorratea Acumulado). */
+/** Semana en curso (siempre Lun→Dom) con ventas diarias Infocaja + cortes CORTE.
+ *  Días futuros del semana: fila presente, venta "—" (0), comparación año anterior si hay dato.
+ *  Totales agregados = lun–hoy (no incluyen días futuros).
+ *  Compara día a día vs misma semana del año anterior (solo ventas diarias; no prorratea Acumulado).
+ *  Cheque promedio = Venta Total (sin propina) ÷ Infocaja Personas. */
 export function buildWeekToDateSales(
   records: FinancialRecord[],
   todayIso?: string,
@@ -569,6 +579,10 @@ export function buildWeekToDateSales(
   days: DaySale[];
   total: number;
   totalCortes: number;
+  /** Suma comensales (días con dato); 0 si ninguno */
+  totalComensales: number;
+  /** Promedio ponderado: Σ Venta Total / Σ Personas (días con comensales > 0) */
+  chequePromedio: number | null;
   mondayKey: string;
   sundayKey: string;
   asOf: string;
@@ -590,12 +604,18 @@ export function buildWeekToDateSales(
   const prevYear = year - 1;
 
   const byDate = new Map<string, number>();
+  const comensalesByDate = new Map<string, number>();
   for (const r of records) {
-    if (r.source_file !== 'infocaja' || r.category !== 'Venta Total') continue;
+    if (r.source_file !== 'infocaja') continue;
     const p = parseIsoDate(r.date);
     if (!p) continue;
     if (p.key < mondayKey || p.key > today) continue;
-    byDate.set(p.key, (byDate.get(p.key) || 0) + Number(r.amount));
+    const amt = Number(r.amount);
+    if (r.category === 'Venta Total') {
+      byDate.set(p.key, (byDate.get(p.key) || 0) + amt);
+    } else if (r.category === 'Infocaja Personas') {
+      comensalesByDate.set(p.key, (comensalesByDate.get(p.key) || 0) + amt);
+    }
   }
 
   const cortesByDate = new Map<string, number>();
@@ -623,6 +643,8 @@ export function buildWeekToDateSales(
   const days: DaySale[] = [];
   let total = 0;
   let totalCortes = 0;
+  let totalComensales = 0;
+  let sinPropinaConComensales = 0;
   let prevTotal = 0;
   let prevAsOfKey = '';
 
@@ -630,11 +652,20 @@ export function buildWeekToDateSales(
     const d = new Date(mon);
     d.setDate(d.getDate() + i);
     const key = toIsoLocal(d);
-    if (key > today) break;
-    const amt = byDate.get(key) || 0;
-    const cortes = cortesByDate.get(key) || 0;
-    total += amt;
-    totalCortes += cortes;
+    const isFuture = key > today;
+    const amt = isFuture ? 0 : byDate.get(key) || 0;
+    const cortes = isFuture ? 0 : cortesByDate.get(key) || 0;
+    const comensales = isFuture ? 0 : comensalesByDate.get(key) || 0;
+    // Venta Total Infocaja ya es sin propina (propina va en Infocaja Propina)
+    const chequePromedio = !isFuture && comensales > 0 ? amt / comensales : null;
+    if (!isFuture) {
+      total += amt;
+      totalCortes += cortes;
+      if (comensales > 0) {
+        totalComensales += comensales;
+        sinPropinaConComensales += amt;
+      }
+    }
 
     let prevDate = '';
     let prevDayTotal = 0;
@@ -645,7 +676,7 @@ export function buildWeekToDateSales(
       prevDate = toIsoLocal(pd);
       prevDayTotal = prevByDate.get(prevDate) || 0;
       // Solo comparar días ya transcurridos (antes de hoy), o hoy si ya hay venta
-      const comparable = key < today || amt > 0;
+      const comparable = !isFuture && (key < today || amt > 0);
       if (comparable) {
         prevAsOfKey = prevDate;
         prevTotal += prevDayTotal;
@@ -661,6 +692,8 @@ export function buildWeekToDateSales(
       weekday: d.toLocaleDateString('es-MX', { weekday: 'short' }),
       total: amt,
       cortes,
+      comensales,
+      chequePromedio,
       prevDate,
       prevLabel: prevDate ? formatShort(prevDate) : undefined,
       prevTotal: prevDayTotal,
@@ -673,10 +706,15 @@ export function buildWeekToDateSales(
     changePct = ((total - prevTotal) / prevTotal) * 100;
   }
 
+  const weekChequePromedio =
+    totalComensales > 0 ? sinPropinaConComensales / totalComensales : null;
+
   return {
     days,
     total,
     totalCortes,
+    totalComensales,
+    chequePromedio: weekChequePromedio,
     mondayKey,
     sundayKey,
     asOf: today,
@@ -837,4 +875,54 @@ export function buildCorteCancelacionesDescuentos(
     totalDescuentos,
     total: totalCancelaciones + totalDescuentos,
   };
+}
+
+/** Reject ingest bugs (e.g. misparse → 2029). */
+function isPlausibleCorteYear(year: number, now = new Date()): boolean {
+  return (
+    Number.isFinite(year) &&
+    Number.isInteger(year) &&
+    year >= 2020 &&
+    year <= now.getFullYear() + 1
+  );
+}
+
+function isPlausibleCorteMonth(month: number): boolean {
+  return (
+    Number.isFinite(month) &&
+    Number.isInteger(month) &&
+    month >= 1 &&
+    month <= 12
+  );
+}
+
+/** Meses con ≥1 cancelación/descuento de corte (más reciente primero). */
+export function availableCorteCancelacionesMonths(
+  records: FinancialRecord[],
+  now = new Date()
+): Array<{ year: number; month: number }> {
+  const set = new Set<string>();
+  for (const r of records) {
+    if (r.source_file !== 'corte_caja') continue;
+    if (r.category !== 'Corte Cancelacion' && r.category !== 'Corte Descuento') continue;
+    const p = parseIsoDate(r.date);
+    if (!p) continue;
+    if (!isPlausibleCorteYear(p.y, now) || !isPlausibleCorteMonth(p.m)) continue;
+    set.add(`${p.y}-${String(p.m).padStart(2, '0')}`);
+  }
+  return Array.from(set)
+    .map((k) => {
+      const [y, m] = k.split('-').map(Number);
+      return { year: y, month: m };
+    })
+    .sort((a, b) => b.year - a.year || b.month - a.month);
+}
+
+/** Último mes con cancelaciones/descuentos de corte (o null si no hay). */
+export function latestMonthWithCorteCancelaciones(
+  records: FinancialRecord[],
+  now = new Date()
+): { year: number; month: number } | null {
+  const months = availableCorteCancelacionesMonths(records, now);
+  return months[0] ?? null;
 }

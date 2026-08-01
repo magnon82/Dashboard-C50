@@ -279,7 +279,8 @@ def parse_concepto_week(
         has_hash = re.search(r"SEM(?:ANA)?\s*#\s*\d+", text, re.I)
         if not false_plural or has_hash:
             week_num = int(m.group(1))
-            if week_num >= 1:
+            # Reject typos like "SEM 325" (would map ~6 years ahead → e.g. 2029).
+            if 1 <= week_num <= 53:
                 y = resolve_year_for_annual_week(week_num, fecha, sheet_year)
                 mapped = month_sem_for_annual_week(y, week_num)
                 if mapped:
@@ -429,7 +430,7 @@ def annual_week_num_from_concepto(
     if false_plural and not has_hash:
         return None
     week_num = int(m.group(1))
-    if week_num < 1:
+    if week_num < 1 or week_num > 53:
         return None
     return week_num
 

@@ -29,7 +29,17 @@ type ComprobanteItem = {
   concepto: string;
   kind: 'comprobante' | 'estado';
   source: 'index' | 'scan';
+  mtimeMs?: number | null;
 };
+
+/** Newest → oldest: file mtime, then calendar date, then filename. */
+function sortByRecency(a: ComprobanteItem, b: ComprobanteItem): number {
+  const ma = a.mtimeMs ?? 0;
+  const mb = b.mtimeMs ?? 0;
+  if (ma !== mb) return mb - ma;
+  if (a.date !== b.date) return b.date.localeCompare(a.date);
+  return a.filename.localeCompare(b.filename, 'es');
+}
 
 function money(v: number) {
   if (!v) return '—';
@@ -63,7 +73,8 @@ export function ComprobantesIndex({
   const [source, setSource] = useState<string>('');
   const [rootExists, setRootExists] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
-  const [preferScan, setPreferScan] = useState(false);
+  /** When true, force Supabase index even if I: is mounted (sparse). Default: disk scan. */
+  const [preferIndex, setPreferIndex] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
@@ -78,8 +89,9 @@ export function ComprobantesIndex({
       if (bank !== 'all') params.set('bank', bank);
       params.set('kind', 'comprobante');
       if (query.trim()) params.set('q', query.trim());
-      if (preferScan) params.set('scan', '1');
-      params.set('years', '2023,2024,2025,2026');
+      if (preferIndex) params.set('index', '1');
+      // Limit disk walk to the selected year (hundreds of PDFs per year).
+      params.set('years', String(year));
 
       const res = await fetch(`/api/comprobantes?${params}`, {
         cache: 'no-store',
@@ -100,7 +112,7 @@ export function ComprobantesIndex({
     } finally {
       setLoading(false);
     }
-  }, [year, month, day, bank, query, preferScan]);
+  }, [year, month, day, bank, query, preferIndex]);
 
   useEffect(() => {
     if (!open) return;
@@ -110,33 +122,20 @@ export function ComprobantesIndex({
 
   useEffect(() => {
     setShowAll(false);
-  }, [year, month, day, bank, query, preferScan]);
+  }, [year, month, day, bank, query, preferIndex]);
 
   const years = useMemo(() => [2026, 2025, 2024, 2023], []);
 
-  const visibleItems = useMemo(
-    () => (showAll ? items : items.slice(0, PAGE_SIZE)),
-    [items, showAll]
+  const sortedItems = useMemo(
+    () => [...items].sort(sortByRecency),
+    [items]
   );
-  const hasMore = items.length > PAGE_SIZE && !showAll;
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, ComprobanteItem[]>();
-    for (const it of visibleItems) {
-      const mo = it.month || 0;
-      const key = `${it.year}-${String(mo).padStart(2, '0')}|${it.bank || '—'}`;
-      const list = map.get(key) || [];
-      list.push(it);
-      map.set(key, list);
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) => {
-        if (a.date !== b.date) return b.date.localeCompare(a.date);
-        return a.filename.localeCompare(b.filename, 'es');
-      });
-    }
-    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [visibleItems]);
+  const visibleItems = useMemo(
+    () => (showAll ? sortedItems : sortedItems.slice(0, PAGE_SIZE)),
+    [sortedItems, showAll]
+  );
+  const hasMore = sortedItems.length > PAGE_SIZE && !showAll;
 
   async function copyPath(p: string) {
     try {
@@ -235,10 +234,14 @@ export function ComprobantesIndex({
             <button
               type="button"
               className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700"
-              onClick={() => setPreferScan((v) => !v)}
-              title="Releer carpeta local I:\ si el índice está vacío o desactualizado"
+              onClick={() => setPreferIndex((v) => !v)}
+              title={
+                preferIndex
+                  ? 'Volver a listar desde la carpeta local I: (completo, más reciente primero)'
+                  : 'Forzar índice Supabase (puede estar incompleto)'
+              }
             >
-              {preferScan ? 'Usar índice' : 'Escanear disco'}
+              {preferIndex ? 'Escanear disco' : 'Usar índice'}
             </button>
           </div>
 
@@ -249,8 +252,15 @@ export function ComprobantesIndex({
               ? 'escaneo local de COMPROBANTES BANCARIOS'
               : source === 'index'
                 ? 'índice Supabase (estado_pdf_index)'
-                : source || '—'}
+                : source === 'index+scan'
+                  ? 'disco + índice'
+                  : source || '—'}
             {rootExists ? '' : ' · carpeta I: no visible en este servidor'}.
+            {!showAll && sortedItems.length > PAGE_SIZE
+              ? ` · mostrando ${PAGE_SIZE} de ${sortedItems.length}`
+              : sortedItems.length
+                ? ` · ${sortedItems.length} comprobantes`
+                : ''}
           </p>
 
           {error && (
@@ -267,7 +277,7 @@ export function ComprobantesIndex({
               <p className="px-4 py-8 text-center text-sm text-slate-500">
                 Cargando comprobantes…
               </p>
-            ) : items.length === 0 ? (
+            ) : sortedItems.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-slate-500">
                 Sin resultados. Ejecuta{' '}
                 <code className="text-xs">
@@ -276,111 +286,91 @@ export function ComprobantesIndex({
                 o usa «Escanear disco» en local.
               </p>
             ) : (
-              <div className="divide-y divide-slate-100">
-                {grouped.map(([key, rows]) => {
-                  const [ym, bankLabel] = key.split('|');
-                  const [yStr, mStr] = ym.split('-');
-                  const mNum = Number(mStr);
-                  const title = `${mNum >= 1 && mNum <= 12 ? MESES[mNum - 1] : 'Sin mes'} ${yStr} · ${bankLabel}`;
-                  return (
-                    <div key={key} className="px-4 py-3">
-                      <p
-                        className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em]"
-                        style={{ color: theme.muted }}
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr
+                    style={{ backgroundColor: theme.tableHead, color: '#fff' }}
+                  >
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Fecha
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Concepto
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Proveedor
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Banco
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Monto
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Acciones
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleItems.map((it) => (
+                    <tr
+                      key={`${it.path}-${it.filename}`}
+                      className="border-t border-slate-100 align-top"
+                    >
+                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-600">
+                        {it.date}
+                        {it.week != null && (
+                          <span className="mt-0.5 block text-[11px] text-slate-500">
+                            Sem {it.week}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className="max-w-[260px] px-3 py-2"
+                        style={{ color: SUITE.navy }}
                       >
-                        {title} · {rows.length} comprobante
-                        {rows.length === 1 ? '' : 's'}
-                        {loading ? ' · actualizando…' : ''}
-                      </p>
-                      <table className="min-w-full text-sm">
-                        <thead>
-                          <tr style={{ color: theme.muted }}>
-                            <th className="pb-1.5 text-center font-semibold">
-                              Concepto
-                            </th>
-                            <th className="pb-1.5 text-center font-semibold">
-                              Proveedor
-                            </th>
-                            <th className="pb-1.5 text-center font-semibold">
-                              Fecha
-                            </th>
-                            <th className="pb-1.5 text-center font-semibold">
-                              Banco
-                            </th>
-                            <th className="pb-1.5 text-center font-semibold">
-                              Monto
-                            </th>
-                            <th className="pb-1.5 text-center font-semibold">
-                              Acciones
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((it) => (
-                            <tr
-                              key={`${it.path}-${it.filename}`}
-                              className="border-t border-slate-50 align-top"
+                        <span className="font-medium">
+                          {it.concepto || it.body || '—'}
+                        </span>
+                      </td>
+                      <td className="max-w-[180px] px-3 py-2 text-slate-700">
+                        {it.vendor || '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-700">
+                        {it.bank || '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                        {money(it.amount)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                        <div className="inline-flex flex-wrap items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className="text-xs font-semibold underline-offset-2 hover:underline"
+                            style={{ color: SUITE.navy }}
+                            onClick={() => copyPath(it.path || it.rel_path)}
+                          >
+                            {copied === (it.path || it.rel_path)
+                              ? 'Copiado'
+                              : 'Copiar ruta'}
+                          </button>
+                          {rootExists && (it.path || it.rel_path) ? (
+                            <a
+                              className="text-xs font-semibold underline-offset-2 hover:underline"
+                              style={{ color: SUITE.orangeDeep }}
+                              href={openUrl(it.path || it.rel_path)}
+                              target="_blank"
+                              rel="noreferrer"
                             >
-                              <td
-                                className="max-w-[260px] py-1.5 pr-3"
-                                style={{ color: SUITE.navy }}
-                              >
-                                <span className="font-medium">
-                                  {it.concepto || it.body || '—'}
-                                </span>
-                                {it.week != null && (
-                                  <span className="mt-0.5 block text-[11px] text-slate-500">
-                                    Sem {it.week}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="max-w-[180px] py-1.5 pr-3 text-slate-700">
-                                {it.vendor || '—'}
-                              </td>
-                              <td className="whitespace-nowrap py-1.5 tabular-nums text-slate-600">
-                                {it.date}
-                              </td>
-                              <td className="whitespace-nowrap py-1.5 font-medium text-slate-700">
-                                {it.bank || '—'}
-                              </td>
-                              <td className="whitespace-nowrap py-1.5 text-right tabular-nums">
-                                {money(it.amount)}
-                              </td>
-                              <td className="whitespace-nowrap py-1.5 text-right">
-                                <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    className="text-xs font-semibold underline-offset-2 hover:underline"
-                                    style={{ color: SUITE.navy }}
-                                    onClick={() =>
-                                      copyPath(it.path || it.rel_path)
-                                    }
-                                  >
-                                    {copied === (it.path || it.rel_path)
-                                      ? 'Copiado'
-                                      : 'Copiar ruta'}
-                                  </button>
-                                  {rootExists && (it.path || it.rel_path) ? (
-                                    <a
-                                      className="text-xs font-semibold underline-offset-2 hover:underline"
-                                      style={{ color: SUITE.orangeDeep }}
-                                      href={openUrl(it.path || it.rel_path)}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                    >
-                                      Abrir
-                                    </a>
-                                  ) : null}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  );
-                })}
-              </div>
+                              Abrir
+                            </a>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
 
@@ -392,7 +382,7 @@ export function ComprobantesIndex({
                 style={{ boxShadow: SUITE.shadow }}
                 onClick={() => setShowAll(true)}
               >
-                Mostrar más ({items.length - PAGE_SIZE} restantes)
+                Mostrar más ({sortedItems.length - PAGE_SIZE} restantes)
               </button>
             </div>
           )}

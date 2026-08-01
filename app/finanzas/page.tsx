@@ -12,8 +12,10 @@ import {
 import { buildSaldosAlDia } from '@/app/lib/saldos';
 import {
   availablePresupuestoMonths,
+  availableSemanasBancosMonths,
   buildPresupuestoRubros,
   buildResumenBancosSemanal,
+  latestMonthWithSemanasBancos,
 } from '@/app/lib/presupuesto';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import { MESES } from '@/app/lib/ventas-semana';
@@ -106,31 +108,51 @@ export default function FinanzasPage() {
     [records]
   );
 
+  /** Meses con ≥1 semana de bancos ya cerrada (para default y marca del dropdown). */
+  const monthsWithSemanas = useMemo(
+    () => availableSemanasBancosMonths(records),
+    [records]
+  );
+
   const yearsAvailable = useMemo(() => {
-    const ys = new Set(monthsAvailable.map((m) => m.year));
+    const ys = new Set([
+      ...monthsAvailable.map((m) => m.year),
+      ...monthsWithSemanas.map((m) => m.year),
+    ]);
     ys.add(CURRENT_YEAR);
     if (ys.size === 0) ys.add(year);
     return Array.from(ys).sort((a, b) => b - a);
-  }, [monthsAvailable, year]);
+  }, [monthsAvailable, monthsWithSemanas, year]);
 
   const monthsWithData = useMemo(() => {
     return new Set(
-      monthsAvailable.filter((m) => m.year === year).map((m) => m.month)
+      monthsWithSemanas.filter((m) => m.year === year).map((m) => m.month)
     );
-  }, [monthsAvailable, year]);
+  }, [monthsWithSemanas, year]);
 
-  // Solo al cargar: si el mes actual no tiene datos, ir al más reciente con datos.
-  // Después el usuario puede elegir cualquier mes Ene–Dic (incl. sin datos).
+  // Solo al cargar: default = último mes con semanas de bancos transcurridas
+  // (no el mes calendario vacío). Después el usuario puede elegir cualquier mes.
   useEffect(() => {
-    if (didSnapMonth || !monthsAvailable.length) return;
-    const has = monthsAvailable.some((m) => m.year === year && m.month === month);
-    if (!has) {
-      const latest = monthsAvailable[0];
-      setYear(latest.year);
-      setMonth(latest.month);
+    if (didSnapMonth || loading) return;
+    const latest = latestMonthWithSemanasBancos(records);
+    if (latest) {
+      const hasElapsed = monthsWithSemanas.some(
+        (m) => m.year === year && m.month === month
+      );
+      if (!hasElapsed) {
+        setYear(latest.year);
+        setMonth(latest.month);
+      }
     }
     setDidSnapMonth(true);
-  }, [monthsAvailable, year, month, didSnapMonth]);
+  }, [
+    records,
+    monthsWithSemanas,
+    year,
+    month,
+    didSnapMonth,
+    loading,
+  ]);
 
   const saldos = useMemo(() => buildSaldosAlDia(records), [records]);
   const weeks = useMemo(

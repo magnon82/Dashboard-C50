@@ -18,6 +18,7 @@ import {
   availableEstadoMonths,
   filterEstadoMovimientos,
   findPdfForMovimiento,
+  isPlausibleEstadoYear,
   listPdfComprobantes,
   SOURCE_PRESUPUESTO_INGRESO,
   type EstadoMovimiento,
@@ -107,7 +108,7 @@ function FacturaRefLink({
   const pdfHref = factura ? facturaPdfHref(factura) : null;
 
   if (!xmlHref && !pdfHref) {
-    // Folio en CXP/estado pero sin CFDI indexado (PDF/XML)
+    // Folio en CXP/estado pero sin CFDI ni acuse/comprobante indexado
     return (
       <span className="text-slate-500" title="Referencia sin XML/PDF indexado">
         {label}
@@ -131,8 +132,7 @@ function FacturaRefLink({
         {xmlHref ? (
           <a
             href={xmlHref}
-            target="_blank"
-            rel="noreferrer"
+            download
             title="Descargar XML"
             className="underline-offset-2 hover:underline"
             style={{ color: SUITE.orangeDeep }}
@@ -149,14 +149,17 @@ function FacturaRefLink({
         {pdfHref ? (
           <a
             href={pdfHref}
-            target="_blank"
-            rel="noreferrer"
-            title="Descargar PDF"
+            download
+            title={
+              xmlHref
+                ? 'Descargar PDF'
+                : 'Acuse / comprobante PDF (sin CFDI XML)'
+            }
             className="underline-offset-2 hover:underline"
             style={{ color: SUITE.orangeDeep }}
             onClick={(e) => e.stopPropagation()}
           >
-            PDF
+            {xmlHref ? 'PDF' : 'Acuse PDF'}
           </a>
         ) : null}
       </div>
@@ -205,20 +208,28 @@ export function EstadosCuenta({
   const [query, setQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  /** Avoid re-applying last-month-with-data after the user changes Mes. */
+  const [monthDefaultApplied, setMonthDefaultApplied] = useState(false);
   const [pending, startTransition] = useTransition();
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draftObs, setDraftObs] = useState<Record<string, string>>({});
 
   const estadoMonths = useMemo(
-    () => availableEstadoMonths(records),
-    [records]
+    () =>
+      availableEstadoMonths(records, {
+        incomeOnly: isIngresos,
+        expensesOnly: !isIngresos,
+      }),
+    [records, isIngresos]
   );
 
   const yearsAvailable = useMemo(() => {
-    const ys = new Set(estadoMonths.map((m) => m.year));
-    ys.add(presupuestoYear);
-    ys.add(browseYear);
+    const ys = new Set(
+      estadoMonths.map((m) => m.year).filter((y) => isPlausibleEstadoYear(y))
+    );
+    if (isPlausibleEstadoYear(presupuestoYear)) ys.add(presupuestoYear);
+    if (isPlausibleEstadoYear(browseYear)) ys.add(browseYear);
     ys.add(new Date().getFullYear());
     return Array.from(ys).sort((a, b) => b - a);
   }, [estadoMonths, presupuestoYear, browseYear]);
@@ -230,6 +241,40 @@ export function EstadosCuenta({
         .map((m) => m.month)
     );
   }, [estadoMonths, browseYear]);
+
+  // On first load: jump to the latest month that actually has data for this mode.
+  useEffect(() => {
+    if (monthDefaultApplied) return;
+    if (loading) return;
+    if (!records.length) {
+      setMonthDefaultApplied(true);
+      return;
+    }
+    if (!estadoMonths.length) {
+      setMonthDefaultApplied(true);
+      return;
+    }
+    const currentHasData =
+      isPlausibleEstadoYear(browseYear) &&
+      estadoMonths.some(
+        (m) => m.year === browseYear && m.month === browseMonth
+      );
+    if (!currentHasData) {
+      const latest = estadoMonths[0];
+      setBrowseYear(latest.year);
+      setBrowseMonth(latest.month);
+      setBrowseDay('all');
+      setWeek('all');
+    }
+    setMonthDefaultApplied(true);
+  }, [
+    loading,
+    records.length,
+    estadoMonths,
+    browseYear,
+    browseMonth,
+    monthDefaultApplied,
+  ]);
 
   const weeksAvailable = useMemo(
     () => availableEfectivoWeeks(records, browseYear, browseMonth),

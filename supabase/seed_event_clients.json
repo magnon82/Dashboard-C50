@@ -1,0 +1,944 @@
+[
+  {
+    "company": "FRANZ HAIMER MEXICO",
+    "contact": "ERIKA VAZQUEZ",
+    "email": "erika.vazquez@haimer.mx.com",
+    "phone": "4422430950"
+  },
+  {
+    "company": "VECTOR ITC GROUP",
+    "contact": "ABIGAIL MARTINEZ",
+    "email": "samartinez@vectoritcgroup.com",
+    "phone": "5515074259"
+  },
+  {
+    "company": "DANA DE MEXICO",
+    "contact": "LEONARDO VALERIANO",
+    "email": "leonardomedina@dana.com",
+    "phone": "4422117238"
+  },
+  {
+    "company": "ARJESSIGER",
+    "contact": "KATTY SANCHEZ",
+    "email": "recepcion.corporativo@arjessiger.com",
+    "phone": "5553910665"
+  },
+  {
+    "company": "JA DEL RIO",
+    "contact": "DIANA VALENCIA",
+    "email": "diana.valencia@jadelrio.com",
+    "phone": "5547360480"
+  },
+  {
+    "company": "ROQUETTE",
+    "contact": "PATRICIA LUGO",
+    "email": "patricia.lugo@roquette.com",
+    "phone": "4421438610"
+  },
+  {
+    "company": "CONSTRUPLAN",
+    "contact": "ALEJANDRA LARA",
+    "email": "laura.lara@construplan.com.mx",
+    "phone": "4423431964"
+  },
+  {
+    "company": "JUCA MEXICO",
+    "contact": "RUBI SANDOVAL",
+    "email": "rubi.sandoval@jucamexico.com",
+    "phone": "4422872649"
+  },
+  {
+    "company": "T & A",
+    "contact": "RUBI OSORIO",
+    "email": "rubi.osorio@tya.com.mx",
+    "phone": "4424139770"
+  },
+  {
+    "company": "D & A TECHNOLOGIES",
+    "contact": "MINNETH RIVERA",
+    "email": "",
+    "phone": "4425599537"
+  },
+  {
+    "company": "ALIANZA FRANCESA",
+    "contact": "MURIELLE BERTHELOT",
+    "email": "",
+    "phone": "4421289149"
+  },
+  {
+    "company": "LIVE MEETING",
+    "contact": "FERNANDA VAZQUEZ",
+    "email": "mvazquez@corad.mx",
+    "phone": "5535229600"
+  },
+  {
+    "company": "KONTES MEXICO",
+    "contact": "COATLICUE RUELAS",
+    "email": "coatlicue.ruelas@dwk-lifesciences.com",
+    "phone": "4422907456"
+  },
+  {
+    "company": "EDICOM",
+    "contact": "FERNANDA ALTAMIRANO",
+    "email": "fernandaeventdecor@gmail.com",
+    "phone": "5522707656"
+  },
+  {
+    "company": "E & N",
+    "contact": "NADIA CASTAÑEDA",
+    "email": "ensp@organizamostufiesta.com.mx",
+    "phone": "4424674155"
+  },
+  {
+    "company": "MAPEI MEXICO",
+    "contact": "LUZ VILLASEÑOR",
+    "email": "luvillaseñor@mapei.com",
+    "phone": "4423773709"
+  },
+  {
+    "company": "MARKETINERA",
+    "contact": "ILDEFONSO AGUIRRE",
+    "email": "ildefonoso.aguirre@icloud.com",
+    "phone": "5521508283"
+  },
+  {
+    "company": "KUEHNE-NAGEL",
+    "contact": "CARMINA PEREZ",
+    "email": "carmina.perez@kuehne-nagel.com",
+    "phone": "4775183733"
+  },
+  {
+    "company": "ON TEMPO",
+    "contact": "MELANIA HERNANDEZ",
+    "email": "melhernandez@ctsmex.com.mx",
+    "phone": "4421672558"
+  },
+  {
+    "company": "PANALPINA",
+    "contact": "ANTONIO PEREZ",
+    "email": "anotnio.perez@panalpina.com",
+    "phone": ""
+  },
+  {
+    "company": "ADVANCE REAL STATE",
+    "contact": "CLAUDIA LANZ",
+    "email": "claudia.lanz@advance-realstate.com",
+    "phone": "4424277200"
+  },
+  {
+    "company": "BITZER MEXICO",
+    "contact": "CECILIA TREVIÑO",
+    "email": "ctrevino@bitzermexico.com",
+    "phone": "8114742695"
+  },
+  {
+    "company": "PARKER QUERETARO",
+    "contact": "MONICA BUSTAMANTE",
+    "email": "monica.bustamantemartinez@parker.com",
+    "phone": "4422460030"
+  },
+  {
+    "company": "FEDERAL MOGUL",
+    "contact": "IVONNE MENA",
+    "email": "ivonne.mena@federalmogul.com",
+    "phone": "4422997109"
+  },
+  {
+    "company": "OJIVA CONSULTORES",
+    "contact": "ALEJANDRA AGUIRRE",
+    "email": "",
+    "phone": "4424240660"
+  },
+  {
+    "company": "SEGUROS ARGOS",
+    "contact": "JAIME TRILLO",
+    "email": "jtrillo@segurosargos.com",
+    "phone": "4421935136"
+  },
+  {
+    "company": "SKY GUARDIAN",
+    "contact": "IGNACIO AVIÑA",
+    "email": "",
+    "phone": "4424036247"
+  },
+  {
+    "company": "BOMBARDIER",
+    "contact": "OMAR GUADALUPE HDEZ",
+    "email": "",
+    "phone": "4421017500"
+  },
+  {
+    "company": "SANFER",
+    "contact": "JORGE ROJAS",
+    "email": "jorge.rojas@sanfer.com.mx",
+    "phone": "4424719397"
+  },
+  {
+    "company": "SANATORIO ALCOCER",
+    "contact": "MARU ALCOCER",
+    "email": "",
+    "phone": "4422120149"
+  },
+  {
+    "company": "BCD MEETINGS & EVENTS",
+    "contact": "LUZ SORIANO",
+    "email": "luz.soriano@bcdme.com",
+    "phone": ""
+  },
+  {
+    "company": "WURTH MEXICO",
+    "contact": "GABRIELA PEREZ",
+    "email": "",
+    "phone": "7774040977"
+  },
+  {
+    "company": "CANCUN ALL TOURS",
+    "contact": "LORENA SUBILLAGA",
+    "email": "",
+    "phone": "9988481483"
+  },
+  {
+    "company": "NEUMATRONICS",
+    "contact": "VANESSA CARRILLO",
+    "email": "vcarrillo@neumatronics.com",
+    "phone": "4421959480"
+  },
+  {
+    "company": "AGENCIA LEGAL RG",
+    "contact": "SUSANA HERRERA",
+    "email": "administrativa@agencialegalrg.mx",
+    "phone": ""
+  },
+  {
+    "company": "HELEN PARKHURST",
+    "contact": "MARCELA HERNANDEZ",
+    "email": "",
+    "phone": "4422600233"
+  },
+  {
+    "company": "VALIANT DE MEXICO",
+    "contact": "LAURA BARROSO",
+    "email": "laura.barroso@valiantmachine.com",
+    "phone": "4421956534"
+  },
+  {
+    "company": "ROHKEA KUKKO",
+    "contact": "ADRIAN GARCIA",
+    "email": "",
+    "phone": "5543758010"
+  },
+  {
+    "company": "DANIEL ARIAS",
+    "contact": "INGRAM MEXICO",
+    "email": "",
+    "phone": "5574831353"
+  },
+  {
+    "company": "RASCH",
+    "contact": "ELVIRA SANCHEZ",
+    "email": "",
+    "phone": "4422281765"
+  },
+  {
+    "company": "DAHER",
+    "contact": "MELISSA RAMIREZ",
+    "email": "",
+    "phone": "4621230600"
+  },
+  {
+    "company": "VASS",
+    "contact": "JESSICA RODRIGUEZ",
+    "email": "irma.rodriguez@vass.com",
+    "phone": "4421428559"
+  },
+  {
+    "company": "TIERRA Y ARMONIA",
+    "contact": "MARIANA ALVAREZ",
+    "email": "",
+    "phone": "3314896697"
+  },
+  {
+    "company": "AGENCIA TRAQS",
+    "contact": "ALEJANDRO CAMARGO",
+    "email": "acamargo@traqs.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "BLUE POINT MANAGEMENT",
+    "contact": "DANIELA RIVERO",
+    "email": "",
+    "phone": "5567246675"
+  },
+  {
+    "company": "ERREKA",
+    "contact": "ESTELA GUZMAN",
+    "email": "",
+    "phone": "4271225242"
+  },
+  {
+    "company": "NUTRIX",
+    "contact": "ALEJANDRA CHAVEZ",
+    "email": "",
+    "phone": "4428078768"
+  },
+  {
+    "company": "NUTEC",
+    "contact": "PAOLA FLORES",
+    "email": "",
+    "phone": "4423057379"
+  },
+  {
+    "company": "RESONANCIA CREATIVA",
+    "contact": "MIRIAM CARBAJAL",
+    "email": "",
+    "phone": "4421083542"
+  },
+  {
+    "company": "WIZELINE",
+    "contact": "FERNANDA GUERRERO",
+    "email": "maria.guerrero@wizeline.com",
+    "phone": ""
+  },
+  {
+    "company": "TRIBUNAL SUPERIOR DE JUSTICIA",
+    "contact": "ENRIQUE TREJO",
+    "email": "",
+    "phone": "4421281415"
+  },
+  {
+    "company": "PIOVAN",
+    "contact": "VICTOR MENDOZA",
+    "email": "",
+    "phone": "4423117686"
+  },
+  {
+    "company": "BYVO MARKETING",
+    "contact": "GABY BENET",
+    "email": "gbenet@byvomarketing.com",
+    "phone": ""
+  },
+  {
+    "company": "TOTAL PLAY",
+    "contact": "GERARDO CERECERES",
+    "email": "gcereceres@totalplay.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "BANCOMER",
+    "contact": "ALEXIS DOMINGUEZ",
+    "email": "",
+    "phone": "4777103938"
+  },
+  {
+    "company": "GENERAL ELECTRIC",
+    "contact": "ALEJANDRA HARO",
+    "email": "ale.haro@ge.com",
+    "phone": "5514543300"
+  },
+  {
+    "company": "TUV NORD",
+    "contact": "PAMELA DELGADILLO",
+    "email": "",
+    "phone": "4421995135"
+  },
+  {
+    "company": "PROFESIONALES EN CONVENCIONES",
+    "contact": "MONTSERRAT ROMERO",
+    "email": "",
+    "phone": "5590003400"
+  },
+  {
+    "company": "BANORTE",
+    "contact": "LAURA LOPEZ",
+    "email": "laura.lopez@banorte.com",
+    "phone": ""
+  },
+  {
+    "company": "FRACSA ALLOYS",
+    "contact": "RAFAEL FERNANDEZ",
+    "email": "",
+    "phone": "4421538200"
+  },
+  {
+    "company": "PREMEX BAJIO",
+    "contact": "ANGELES SANCHEZ",
+    "email": "angy.premex@gmail.com",
+    "phone": "4422467211"
+  },
+  {
+    "company": "GUCCI",
+    "contact": "ALEJANDRO PAULIN",
+    "email": "alejandro.paulin@mx.gucci.com",
+    "phone": ""
+  },
+  {
+    "company": "ORIGEN EVENTOS",
+    "contact": "LUVY VELAZQUEZ",
+    "email": "luvy.velazquez@gmail.com",
+    "phone": "4422319578"
+  },
+  {
+    "company": "AB STEEL",
+    "contact": "JOE VALDOVINOS",
+    "email": "joevaldovinos@gmail.com",
+    "phone": "4423844444"
+  },
+  {
+    "company": "DRUGMEX",
+    "contact": "CECI SORIA",
+    "email": "",
+    "phone": "4422612905"
+  },
+  {
+    "company": "SOC ASESORES",
+    "contact": "PATRICIA ROMERO",
+    "email": "",
+    "phone": "4422483579"
+  },
+  {
+    "company": "PODER JUDICIAL DEL ESTADO",
+    "contact": "ERIKA DURAN",
+    "email": "",
+    "phone": "4421713476"
+  },
+  {
+    "company": "MABE",
+    "contact": "JESSICA GARCIA",
+    "email": "jessica-karen@mabe.com.mx",
+    "phone": "4421390390"
+  },
+  {
+    "company": "ANDREA",
+    "contact": "GUILLERMO MARCHAND",
+    "email": "",
+    "phone": "4421923700"
+  },
+  {
+    "company": "RAMSA SERVICIOS Y AUTOMATIZACION",
+    "contact": "GLORIA MEJIA",
+    "email": "recursoshumanos.ramsa@gmail.com",
+    "phone": "4424038468"
+  },
+  {
+    "company": "AVOLO",
+    "contact": "ALMA MORALES",
+    "email": "alma.morales@avolo.mx",
+    "phone": "4422533284"
+  },
+  {
+    "company": "MONTES ROBLES Y ASOCIADOS",
+    "contact": "MA.CARMEN ORTEGA",
+    "email": "asistente@montesrobles.com",
+    "phone": "4422152837"
+  },
+  {
+    "company": "HOSPITAL DE LA SANTA CRUZ",
+    "contact": "GINA CUEVAS",
+    "email": "compras@hospitalsantacruz.com.mx",
+    "phone": "4422136511"
+  },
+  {
+    "company": "INABATA",
+    "contact": "MARINA CRUZ",
+    "email": "",
+    "phone": "4422291637"
+  },
+  {
+    "company": "KALIBRIX",
+    "contact": "MARIO RAMIREZ",
+    "email": "mramirez@kalibrix.com.mx",
+    "phone": "4422952616"
+  },
+  {
+    "company": "KENWORTH",
+    "contact": "JARETH RODRIGUEZ",
+    "email": "jrgomez@kenworthbajio.com.mx",
+    "phone": "4423332650"
+  },
+  {
+    "company": "COLLIERS",
+    "contact": "DANIELA ABUNDIS",
+    "email": "",
+    "phone": "4427045732"
+  },
+  {
+    "company": "MLW EVENTOS",
+    "contact": "PABLO CUBILLAS",
+    "email": "pablo@mlweventos.com",
+    "phone": ""
+  },
+  {
+    "company": "MAVINCO",
+    "contact": "TANIA ZAMORANO",
+    "email": "administracion@mavinco.mx",
+    "phone": ""
+  },
+  {
+    "company": "AUREA 360",
+    "contact": "ERIK CRUZ ROBLES",
+    "email": "a.cruz@aurea360.com",
+    "phone": "2223624980"
+  },
+  {
+    "company": "AN GLOBAL",
+    "contact": "SBEIDY AGUILAR",
+    "email": "sbeidy.aguilar@anglobal.com",
+    "phone": ""
+  },
+  {
+    "company": "ROBERT BOSCH",
+    "contact": "VERONICA LANDA",
+    "email": "veronica.landa@mx.bosch.com",
+    "phone": ""
+  },
+  {
+    "company": "LAMUDI",
+    "contact": "ADY LEON",
+    "email": "ady.leon@lamudi.com.mx",
+    "phone": "5513040321"
+  },
+  {
+    "company": "FAURECIA",
+    "contact": "ANA VELAZQUEZ",
+    "email": "ana.velazquez-extra@faurecia.com",
+    "phone": ""
+  },
+  {
+    "company": "GRUPO TRAVEO",
+    "contact": "PAMELA MARTINEZ",
+    "email": "mmartinez@grupotraveo.com",
+    "phone": ""
+  },
+  {
+    "company": "SAMES KREMLIN",
+    "contact": "FRANCISCO JIMENEZ",
+    "email": "",
+    "phone": "4421612595"
+  },
+  {
+    "company": "MEXCELLENCE",
+    "contact": "DELIA GARCIA",
+    "email": "asistours@mexcellence.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "BEPENSA",
+    "contact": "EVER SANTILLAN",
+    "email": "",
+    "phone": "4423649218"
+  },
+  {
+    "company": "NATURE SWEET",
+    "contact": "NATALIA PEÑA",
+    "email": "npena@naturesweet.com",
+    "phone": ""
+  },
+  {
+    "company": "OPTIBELT",
+    "contact": "ADRIANA HERNANDEZ",
+    "email": "",
+    "phone": "4422103741"
+  },
+  {
+    "company": "OUTCOM",
+    "contact": "DANIELA VELAZQUEZ",
+    "email": "",
+    "phone": "2299838460"
+  },
+  {
+    "company": "DCG DELIVERY CENTER",
+    "contact": "ERENDIRA ALCANTARA",
+    "email": "ereenabad@gmail.com",
+    "phone": ""
+  },
+  {
+    "company": "TOYOBO",
+    "contact": "KAEL JAIN MORENO",
+    "email": "",
+    "phone": "4424236316"
+  },
+  {
+    "company": "SECOMEX",
+    "contact": "MONICA MURVA",
+    "email": "",
+    "phone": "4423949534"
+  },
+  {
+    "company": "AEROMEXICO",
+    "contact": "DANIELA VELAZQUEZ",
+    "email": "",
+    "phone": "4423229993"
+  },
+  {
+    "company": "SMART COMUNICACIÓN",
+    "contact": "SAURI REBOLLO",
+    "email": "sauri.rebollo@smartcomunicacion.com",
+    "phone": "4773715458"
+  },
+  {
+    "company": "HELUKABEL",
+    "contact": "YAZMIN GUERRERO",
+    "email": "yazmin.guerrero@helukabel.m",
+    "phone": "4422096401"
+  },
+  {
+    "company": "VISUAL CENTER",
+    "contact": "LOURDES PAULIN",
+    "email": "lulupaulin@hotmail.com",
+    "phone": ""
+  },
+  {
+    "company": "ACCELERIUM",
+    "contact": "DANIEL SEVILLA",
+    "email": "daniel.sevilla@accelerium.com",
+    "phone": ""
+  },
+  {
+    "company": "IND. ENVASADORA DE QRO",
+    "contact": "JANETH NIEVES",
+    "email": "",
+    "phone": "4422118200"
+  },
+  {
+    "company": "DISMA",
+    "contact": "LORENA MORENO",
+    "email": "",
+    "phone": "4772337011"
+  },
+  {
+    "company": "HOSP.INFANTIL TELETON",
+    "contact": "LILIANA RUIZ",
+    "email": "lruiz@hospitalteleton.org.mx",
+    "phone": ""
+  },
+  {
+    "company": "NESTLE",
+    "contact": "MONICA AGUILAR",
+    "email": "monica.aguilar@mx.nestle.com",
+    "phone": ""
+  },
+  {
+    "company": "EATON",
+    "contact": "KARLA CRUZ",
+    "email": "karlacruz@esaton.com",
+    "phone": ""
+  },
+  {
+    "company": "GRANOTEC",
+    "contact": "JORGE BENITEZ",
+    "email": "jbenitez@granotec.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "E CONSULTORES",
+    "contact": "OSCAR LLACA",
+    "email": "oscar@personaeconsultores.com",
+    "phone": "4423219211"
+  },
+  {
+    "company": "KOCHOVERSEAS",
+    "contact": "VERENIS HERNANDEZ",
+    "email": "verenis.hernandez@kochtravel.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "TRUEMED",
+    "contact": "NADIA DIAZ",
+    "email": "gerente.ventas@truemed.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "BROUNIE",
+    "contact": "DANAE CASTELLANOS",
+    "email": "danae@brounie.com",
+    "phone": ""
+  },
+  {
+    "company": "CAPA 4",
+    "contact": "ANDRES RODRIGUEZ",
+    "email": "alrodriguez@capa4.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "TURISMO Y CONVENCIONES",
+    "contact": "BELEN CRUZ",
+    "email": "",
+    "phone": "5548846960"
+  },
+  {
+    "company": "GNP",
+    "contact": "MARIANA BURELO",
+    "email": "mariana.burelo@gnp.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "LOGISTICA INTL ALOW",
+    "contact": "FLOR MENDOZA",
+    "email": "",
+    "phone": "4422209078"
+  },
+  {
+    "company": "ARG COMERCIAL",
+    "contact": "ADRIANA FRIAS",
+    "email": "",
+    "phone": "4424751298"
+  },
+  {
+    "company": "COMPUCAD",
+    "contact": "ALISMA LOPEZ",
+    "email": "alisma.lopez@compucad.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "KUMON",
+    "contact": "MIGUEL ANGEL FLORES",
+    "email": "maflores@kumon.com.mx",
+    "phone": ""
+  },
+  {
+    "company": "PCM INNOVATION",
+    "contact": "SOFIA PEREZ",
+    "email": "sperez@collectron-int.com",
+    "phone": ""
+  },
+  {
+    "company": "LOGISTICA LABORAL",
+    "contact": "GLORIA RAMIREZ",
+    "email": "gloria.ramirez@logisticalaboral.com.mx",
+    "phone": "55536536183"
+  },
+  {
+    "company": "SHAPE CORP",
+    "contact": "ANGELICA GUERRERO",
+    "email": "",
+    "phone": "4421014700"
+  },
+  {
+    "company": "TRW",
+    "contact": "FAUSTO OROZCO",
+    "email": "",
+    "phone": "44221108511"
+  },
+  {
+    "company": "TAKASAGO",
+    "contact": "ROSALINDA VELAZQUEZ",
+    "email": "",
+    "phone": "4422171054"
+  },
+  {
+    "company": "AMIQRO",
+    "contact": "PAULINA REYES",
+    "email": "asistente@amiqro.com",
+    "phone": ""
+  },
+  {
+    "company": "HORTIGEN",
+    "contact": "SHIRLY CAMPOMANES",
+    "email": "shirly.campomanes@hortigen.mx",
+    "phone": ""
+  },
+  {
+    "company": "AXIOMA PROYECTOS",
+    "contact": "KARLA ADAME",
+    "email": "",
+    "phone": "8186762525"
+  },
+  {
+    "company": "DURRMEX",
+    "contact": "MAURICIO CRUZ",
+    "email": "",
+    "phone": "4421925700"
+  },
+  {
+    "company": "KRONOS",
+    "contact": "YARELI MANCILLA",
+    "email": "yareli.mancilla@virage.mx",
+    "phone": "5514732299"
+  },
+  {
+    "company": "PLAYTRIP",
+    "contact": "CARLOS ANDRADE",
+    "email": "",
+    "phone": "4423538983"
+  },
+  {
+    "company": "EXPERTOS EN SISTEMAS",
+    "contact": "ALUZ MATIAS",
+    "email": "aluz.matias@expertos-ti.com",
+    "phone": ""
+  },
+  {
+    "company": "IMPORTADORA COMERCIAL QMEXIKO",
+    "contact": "KAREN CHAIRIS",
+    "email": "",
+    "phone": "4426683042"
+  },
+  {
+    "company": "GRUPO GOLMEX",
+    "contact": "ARIZBETH",
+    "email": "",
+    "phone": "4492229047"
+  },
+  {
+    "company": "ADD AVIATION",
+    "contact": "LORENA RODRIGUEZ",
+    "email": "",
+    "phone": "7111512606"
+  },
+  {
+    "company": "NOTARIA 16",
+    "contact": "VERONICA SANCHEZ",
+    "email": "veronica.sesqueda@n16.mx",
+    "phone": "4422155015"
+  },
+  {
+    "company": "VIP COMPUTACION",
+    "contact": "AR ARANGO",
+    "email": "arizbeth@vipcomputacion.com.mx",
+    "phone": "4424180079"
+  },
+  {
+    "company": "PSL GROUP",
+    "contact": "VALENTINA SEGOVIA",
+    "email": "valentina.segovia@pslgroup.com",
+    "phone": ""
+  },
+  {
+    "company": "PROMEGI  S.A.DE C.V.",
+    "contact": "MONICA LOPEZ",
+    "email": "monica.lopez@promegi.com",
+    "phone": "4424021105"
+  },
+  {
+    "company": "GENIUS ACADEMY",
+    "contact": "REBECA GARNICA",
+    "email": "rebeca.garnica@geniuspic.com",
+    "phone": "4424712504"
+  },
+  {
+    "company": "MABE",
+    "contact": "FERNANDA SANCHEZ",
+    "email": "",
+    "phone": "5519862150"
+  },
+  {
+    "company": "QMEXIKO",
+    "contact": "ANA GUILLEN",
+    "email": "",
+    "phone": "4426683042"
+  },
+  {
+    "company": "UPS",
+    "contact": "KARLA IBARRA",
+    "email": "",
+    "phone": "4421401884"
+  },
+  {
+    "company": "SCANIA MEXICO",
+    "contact": "DIANA CORDOBA",
+    "email": "",
+    "phone": "4424719051"
+  },
+  {
+    "company": "KIEWET",
+    "contact": "AILIN ZAMORA",
+    "email": "",
+    "phone": "5579035507"
+  },
+  {
+    "company": "SABORCHEPINA",
+    "contact": "RAUL CARMONA",
+    "email": "",
+    "phone": "7331258581"
+  },
+  {
+    "company": "BBVA",
+    "contact": "MARTHA ALVARD",
+    "email": "",
+    "phone": "7713972766"
+  },
+  {
+    "company": "COESIA MEXICO",
+    "contact": "ADRIANA ARELLANO",
+    "email": "",
+    "phone": "5585251630"
+  },
+  {
+    "company": "TEO & HAPMAN",
+    "contact": "OMAR ALEJANDRI",
+    "email": "",
+    "phone": "4423386316"
+  },
+  {
+    "company": "NATURA",
+    "contact": "SILVIA ACOSTA",
+    "email": "silviaacostaf@gmail.com",
+    "phone": "8443611198"
+  },
+  {
+    "company": "GRUPO GADI",
+    "contact": "SANDRA ROMERO",
+    "email": "",
+    "phone": "4424796810"
+  },
+  {
+    "company": "TELESITED",
+    "contact": "",
+    "email": "",
+    "phone": "4423591753"
+  },
+  {
+    "company": "REDBOXMEX",
+    "contact": "ZIMRI ROMAN",
+    "email": "",
+    "phone": "4426687202"
+  },
+  {
+    "company": "MABE COMPONENTES",
+    "contact": "JAZMIN BRAN",
+    "email": "",
+    "phone": "4111184492"
+  },
+  {
+    "company": "NEARGYK",
+    "contact": "EDGAR VALENCIA",
+    "email": "",
+    "phone": "5537470512"
+  },
+  {
+    "company": "DM PRODUCCIONES",
+    "contact": "SARAI CUELLAR",
+    "email": "",
+    "phone": "5556964392"
+  },
+  {
+    "company": "IML LABORATORIO",
+    "contact": "MIREYA AVENDAÑO",
+    "email": "",
+    "phone": "4421542718"
+  },
+  {
+    "company": "COLEGIO AMSTERDAM",
+    "contact": "JOSE LUIS REYES",
+    "email": "",
+    "phone": "4424489857"
+  },
+  {
+    "company": "NODDO",
+    "contact": "BRENDA CHAVEZ",
+    "email": "",
+    "phone": "4425922961"
+  },
+  {
+    "company": "GNP",
+    "contact": "ALE SANCHEZ",
+    "email": "",
+    "phone": "4421522200"
+  },
+  {
+    "company": "MARS",
+    "contact": "XIMENA GONZALEZ",
+    "email": "",
+    "phone": "4426687343"
+  }
+]

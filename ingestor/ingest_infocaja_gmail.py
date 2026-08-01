@@ -161,7 +161,9 @@ def main() -> None:
         seen_dates.add(parsed["date"])
 
         venta = parsed["fields"]["Venta Total"]
-        print(f"OK {parsed['date']}: Venta Total=${venta:,.2f}")
+        personas = parsed["fields"].get("Personas")
+        personas_txt = f", Personas={int(personas)}" if personas else ""
+        print(f"OK {parsed['date']}: Venta Total=${venta:,.2f}{personas_txt}")
 
         if args.dry_run:
             ok += 1

@@ -15,6 +15,7 @@ import {
   findComprobanteForFacturaLike,
   SOURCE_FACTURA_CFDI,
 } from '@/app/lib/facturas';
+import { listPdfComprobantes } from '@/app/lib/estados-cuenta';
 import { getServiceSupabase } from '@/app/lib/users';
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
 
@@ -60,18 +61,44 @@ function isUnderAnyRoot(filePath: string, roots: string[]): boolean {
   return roots.some((r) => isUnderRoot(filePath, r));
 }
 
-async function loadRecords(sources: string[]): Promise<FinancialRecord[]> {
+async function loadRecords(
+  sources: string[],
+  opts: { year?: number; month?: number; day?: number } = {}
+): Promise<FinancialRecord[]> {
   const sb = getServiceSupabase();
   const all: FinancialRecord[] = [];
   let from = 0;
   const pageSize = 1000;
+  const { year, month, day } = opts;
+
+  let dateFrom: string | undefined;
+  let dateTo: string | undefined;
+  if (year && month && day) {
+    const mm = String(month).padStart(2, '0');
+    const dd = String(day).padStart(2, '0');
+    dateFrom = `${year}-${mm}-${dd}`;
+    const next = new Date(Date.UTC(year, month - 1, day + 1));
+    dateTo = next.toISOString().slice(0, 10);
+  } else if (year && month) {
+    const mm = String(month).padStart(2, '0');
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    dateFrom = `${year}-${mm}-01`;
+    dateTo = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+  } else if (year) {
+    dateFrom = `${year}-01-01`;
+    dateTo = `${year + 1}-01-01`;
+  }
+
   while (true) {
-    const { data, error } = await sb
+    let q = sb
       .from('financial_records')
       .select('id,date,type,category,amount,description,source_file')
       .in('source_file', sources)
-      .order('date', { ascending: false })
-      .range(from, from + pageSize - 1);
+      .order('date', { ascending: false });
+    if (dateFrom) q = q.gte('date', dateFrom);
+    if (dateTo) q = q.lt('date', dateTo);
+    const { data, error } = await q.range(from, from + pageSize - 1);
     if (error) throw new Error(error.message);
     if (!data?.length) break;
     all.push(...(data as FinancialRecord[]));
@@ -81,7 +108,11 @@ async function loadRecords(sources: string[]): Promise<FinancialRecord[]> {
   return all;
 }
 
-async function streamFile(filePath: string, roots: string | string[]) {
+async function streamFile(
+  filePath: string,
+  roots: string | string[],
+  opts?: { asAttachment?: boolean }
+) {
   const rootList = Array.isArray(roots) ? roots : [roots];
   if (!isUnderAnyRoot(filePath, rootList)) {
     return NextResponse.json(
@@ -103,10 +134,15 @@ async function streamFile(filePath: string, roots: string | string[]) {
     }
     const stream = createReadStream(filePath);
     const webStream = Readable.toWeb(stream) as ReadableStream;
+    const basename = path.basename(filePath);
+    const disposition = opts?.asAttachment ? 'attachment' : 'inline';
+    // RFC 5987 filename* keeps accents (e.g. PEÑA); filename= is ASCII fallback.
+    const asciiName = basename.replace(/[^\x20-\x7E]/g, '_');
+    const dispositionHeader = `${disposition}; filename="${asciiName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(basename)}`;
     return new NextResponse(webStream, {
       headers: {
         'Content-Type': isPdf ? 'application/pdf' : 'application/xml',
-        'Content-Disposition': `inline; filename="${encodeURIComponent(path.basename(filePath))}"`,
+        'Content-Disposition': dispositionHeader,
         'Cache-Control': 'private, max-age=120',
       },
     });
@@ -127,7 +163,7 @@ function parseDesc(raw: unknown): Record<string, unknown> {
   }
 }
 
-/** GET /api/facturas — lista facturas + faltantes; ?open=path | ?id=uuid sirve PDF/XML */
+/** GET /api/facturas — lista facturas + faltantes; ?open=path | ?id=uuid sirve PDF/XML; ?download=1 fuerza attachment */
 export async function GET(request: Request) {
   const auth = await requireSession();
   if (auth instanceof NextResponse) return auth;
@@ -137,14 +173,18 @@ export async function GET(request: Request) {
   const openComprobante = url.searchParams.get('openComprobante') || '';
   const recordId = url.searchParams.get('id') || '';
   const format = (url.searchParams.get('format') || '').toLowerCase();
+  const asAttachment =
+    url.searchParams.get('download') === '1' ||
+    url.searchParams.get('download') === 'true';
 
   if (openPath) {
     const decoded = decodeURIComponent(openPath);
-    return streamFile(decoded, allowedRoots());
+    return streamFile(decoded, allowedRoots(), { asAttachment });
   }
   if (openComprobante) {
     const decoded = decodeURIComponent(openComprobante);
-    return streamFile(decoded, COMPROBANTES_ROOT);
+    // Comprobante "Abrir" stays inline unless ?download=1 is requested.
+    return streamFile(decoded, COMPROBANTES_ROOT, { asAttachment });
   }
   if (recordId) {
     try {
@@ -175,7 +215,7 @@ export async function GET(request: Request) {
           { status: 404 }
         );
       }
-      return streamFile(chosen, allowedRoots());
+      return streamFile(chosen, allowedRoots(), { asAttachment });
     } catch (e) {
       return NextResponse.json(
         { error: e instanceof Error ? e.message : 'Error al abrir factura' },
@@ -191,15 +231,20 @@ export async function GET(request: Request) {
   const view = url.searchParams.get('view') || 'all'; // all | faltantes
 
   try {
-    const records = await loadRecords([
-      SOURCE_FACTURA_CFDI,
-      'cxp',
-      'presupuesto_sem_detalle',
-      'flujo_efectivo_mov',
-      'estado_mifel',
-      'estado_bbva',
-      'estado_pdf_index',
-    ]);
+    // Scope by year/month at DB so we don't pull ~9k+ rows then hang on
+    // per-row PDF index rebuilds (was making /api/facturas appear empty).
+    const records = await loadRecords(
+      [
+        SOURCE_FACTURA_CFDI,
+        'cxp',
+        'presupuesto_sem_detalle',
+        'flujo_efectivo_mov',
+        'estado_mifel',
+        'estado_bbva',
+        'estado_pdf_index',
+      ],
+      { year, month, day }
+    );
 
     let facturas = listFacturas(records);
     if (year) {
@@ -249,6 +294,7 @@ export async function GET(request: Request) {
         })
       : faltantesRaw;
 
+    const pdfs = listPdfComprobantes(records);
     const withComprobante = facturas.map((f) => {
       const comp = findComprobanteForFacturaLike(
         {
@@ -256,7 +302,8 @@ export async function GET(request: Request) {
           date: f.date,
           vendor: f.emisor_nombre,
         },
-        records
+        records,
+        pdfs
       );
       return {
         ...f,
@@ -273,7 +320,8 @@ export async function GET(request: Request) {
           vendor: row.razonSocial || row.descripcion,
           week: row.week,
         },
-        records
+        records,
+        pdfs
       );
       return {
         ...row,

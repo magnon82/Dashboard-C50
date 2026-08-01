@@ -487,23 +487,11 @@ export function filterEstadoMovimientos(
     }
     if (opts.year || opts.month) {
       // presupuesto_ingreso: SEM lunes puede caer fuera del mes civil;
-      // year/month del payload son los del Excel de presupuesto.
-      const rawY =
-        m.raw.year != null
-          ? Number(m.raw.year)
-          : null;
-      const rawM =
-        m.raw.month != null
-          ? Number(m.raw.month)
-          : null;
-      if (rawY != null && !Number.isNaN(rawY) && rawM != null && !Number.isNaN(rawM)) {
-        if (opts.year && rawY !== opts.year) continue;
-        if (opts.month && rawM !== opts.month) continue;
-      } else {
-        const [y, mo] = m.date.split('-').map(Number);
-        if (opts.year && y !== opts.year) continue;
-        if (opts.month && mo !== opts.month) continue;
-      }
+      // year/month del payload son los del Excel de presupuesto (si son plausibles).
+      const ym = yearMonthFromMovimiento(m);
+      if (!ym) continue;
+      if (opts.year && ym.year !== opts.year) continue;
+      if (opts.month && ym.month !== opts.month) continue;
     }
     if (day !== 'all') {
       const d = Number(String(m.date || '').slice(8, 10));
@@ -701,24 +689,71 @@ export function compareEstadoVsPresupuesto(
   return out;
 }
 
+/** Floor for presupuesto / flujo years present in the suite. */
+export const MIN_ESTADO_YEAR = 2020;
+
+/** Allow current calendar year + 1 (enero corte); reject ingest bugs like week 325 → 2029. */
+export function maxEstadoYear(now = new Date()): number {
+  return now.getFullYear() + 1;
+}
+
+export function isPlausibleEstadoYear(
+  year: number,
+  now = new Date()
+): boolean {
+  return (
+    Number.isFinite(year) &&
+    Number.isInteger(year) &&
+    year >= MIN_ESTADO_YEAR &&
+    year <= maxEstadoYear(now)
+  );
+}
+
+function isPlausibleEstadoMonth(month: number): boolean {
+  return (
+    Number.isFinite(month) &&
+    Number.isInteger(month) &&
+    month >= 1 &&
+    month <= 12
+  );
+}
+
+/**
+ * Budget Excel may store year/month that differ from the SEM lunes date.
+ * Prefer those when plausible; otherwise fall back to the movement date.
+ * Drops absurd payload years (e.g. annual-week misparse → 2029).
+ */
+export function yearMonthFromMovimiento(
+  m: EstadoMovimiento,
+  now = new Date()
+): { year: number; month: number } | null {
+  const rawY = m.raw.year != null ? Number(m.raw.year) : NaN;
+  const rawM = m.raw.month != null ? Number(m.raw.month) : NaN;
+  if (isPlausibleEstadoYear(rawY, now) && isPlausibleEstadoMonth(rawM)) {
+    return { year: rawY, month: rawM };
+  }
+  const [ys, ms] = String(m.date || '').split('-');
+  const y = Number(ys);
+  const mo = Number(ms);
+  if (isPlausibleEstadoYear(y, now) && isPlausibleEstadoMonth(mo)) {
+    return { year: y, month: mo };
+  }
+  return null;
+}
+
 export function availableEstadoMonths(
-  records: FinancialRecord[]
+  records: FinancialRecord[],
+  opts: { incomeOnly?: boolean; expensesOnly?: boolean } = {}
 ): Array<{ year: number; month: number }> {
   const set = new Set<string>();
   for (const r of records) {
     const m = parseEstadoMovimiento(r);
     if (!m) continue;
-    const rawY =
-      m.raw.year != null ? Number(m.raw.year) : null;
-    const rawM =
-      m.raw.month != null ? Number(m.raw.month) : null;
-    if (rawY != null && !Number.isNaN(rawY) && rawM != null && !Number.isNaN(rawM)) {
-      set.add(`${rawY}-${String(rawM).padStart(2, '0')}`);
-      continue;
-    }
-    if (!m.date) continue;
-    const [y, mo] = m.date.split('-');
-    if (y && mo) set.add(`${y}-${mo}`);
+    if (opts.expensesOnly && !(m.cargo && m.cargo > 0)) continue;
+    if (opts.incomeOnly && !(m.abono && m.abono > 0)) continue;
+    const ym = yearMonthFromMovimiento(m);
+    if (!ym) continue;
+    set.add(`${ym.year}-${String(ym.month).padStart(2, '0')}`);
   }
   return Array.from(set)
     .map((k) => {
@@ -745,16 +780,8 @@ export function availableEfectivoWeeks(
     }
     const m = parseEstadoMovimiento(r);
     if (!m?.week) continue;
-    const rawY =
-      m.raw.year != null ? Number(m.raw.year) : null;
-    const rawM =
-      m.raw.month != null ? Number(m.raw.month) : null;
-    if (rawY != null && !Number.isNaN(rawY) && rawM != null && !Number.isNaN(rawM)) {
-      if (rawY === year && rawM === month) set.add(m.week);
-      continue;
-    }
-    const [y, mo] = m.date.split('-').map(Number);
-    if (y === year && mo === month) set.add(m.week);
+    const ym = yearMonthFromMovimiento(m);
+    if (ym && ym.year === year && ym.month === month) set.add(m.week);
   }
   return Array.from(set).sort((a, b) => a - b);
 }

@@ -266,9 +266,11 @@ export function findComprobanteForFacturaLike(
     week?: number | null;
     bank?: string | null;
   },
-  records: FinancialRecord[]
+  records: FinancialRecord[],
+  /** Pass a precomputed list to avoid O(n) rebuild per row (API list path). */
+  pdfsPrecomputed?: PdfComprobanteHit[]
 ): PdfComprobanteHit | null {
-  const pdfs = listPdfComprobantes(records);
+  const pdfs = pdfsPrecomputed ?? listPdfComprobantes(records);
   if (!pdfs.length || !opts.amount) return null;
   const [y, mo] = opts.date.split('-').map(Number);
   const vendorQ = (opts.vendor || '').toLowerCase().trim();
@@ -321,6 +323,23 @@ function folioDigits(v: string | null | undefined): string {
   const d = normFolio(v).replace(/\D/g, '');
   if (!d) return '';
   return d.replace(/^0+/, '') || '0';
+}
+
+/**
+ * CXP often truncates SAT "Número de operación" (26171020658 vs 261710206658).
+ * True when equal, one contains the other (≥8 digits), or single-digit insert/delete.
+ */
+function folioDigitsNearlyEqual(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length < 8 || b.length < 8) return false;
+  if (a.includes(b) || b.includes(a)) return true;
+  const [longer, shorter] = a.length >= b.length ? [a, b] : [b, a];
+  if (longer.length - shorter.length !== 1) return false;
+  for (let i = 0; i < longer.length; i++) {
+    if (longer.slice(0, i) + longer.slice(i + 1) === shorter) return true;
+  }
+  return false;
 }
 
 /**
@@ -479,11 +498,15 @@ export function findFacturaForMovimiento(
 
       // Partial / trailing digits: prefer unique; else amount (+ vendor) disambiguate.
       // Allow short folios (≥3) when vendor/RFC also matches (MR & AB "235").
+      // SAT operación: CXP may drop a digit (26171020658 ↔ 261710206658).
       if (digQ && digQ.length >= 3) {
         const partial = facturas.filter((f) => {
           const keys = facturaFolioKeys(f);
           return keys.some(
-            (k) => k === digQ || (/^\d+$/.test(k) && k.endsWith(digQ))
+            (k) =>
+              k === digQ ||
+              (/^\d+$/.test(k) &&
+                (k.endsWith(digQ) || folioDigitsNearlyEqual(k, digQ)))
           );
         });
         if (partial.length === 1) return partial[0];
@@ -525,21 +548,26 @@ export function findFacturaForMovimiento(
 
   let best: FacturaItem | null = null;
   let bestScore = 0;
+  const govMov = isGobiernoGasto(mov.razonSocial, mov.descripcion, mov.folio);
+  const effectiveDayTol = govMov ? Math.max(dayTol, 14) : dayTol;
   for (const f of facturas) {
     // Fallback: monto ±1 peso (o 2%), fecha ±dayTol, RFC o nombre proveedor
     if (!amountClose(amount, f.amount, 0.02, 1)) continue;
     const days = daysBetween(mov.date, f.date);
-    if (days > dayTol) continue;
-    let score = 1 - days / (dayTol + 1);
+    if (days > effectiveDayTol) continue;
+    let score = 1 - days / (effectiveDayTol + 1);
     const rfcHit =
       Boolean(rfc) &&
       Boolean(f.emisor_rfc) &&
       rfc === f.emisor_rfc!.toUpperCase();
     const vendorHit = vendorLooseMatch(vendor, f.emisor_nombre);
+    const govHit =
+      govMov && isGobiernoGasto(f.emisor_nombre, f.filename, f.subject);
     if (rfcHit) score += 2;
     if (vendorHit) score += 1;
+    if (govHit) score += 1;
     // Require RFC or vendor signal for amount/date fallback (avoid false positives)
-    if (!rfcHit && !vendorHit) continue;
+    if (!rfcHit && !vendorHit && !govHit) continue;
     if (score > bestScore) {
       bestScore = score;
       best = f;
@@ -548,19 +576,19 @@ export function findFacturaForMovimiento(
   return best;
 }
 
-/** URL de descarga de un archivo de factura vía `?open=`. */
-export function facturaOpenHref(path: string): string {
-  return `/api/facturas?open=${encodeURIComponent(path)}`;
+/** URL de descarga de un archivo de factura vía `?open=` + `download=1`. */
+export function facturaOpenHref(filePath: string): string {
+  return `/api/facturas?open=${encodeURIComponent(filePath)}&download=1`;
 }
 
 /** URL de descarga PDF (preferido) o XML vía API existente. */
 export function facturaDownloadHref(f: FacturaItem): string | null {
-  const path = f.pdf_path || f.xml_path;
-  if (path) {
-    return facturaOpenHref(path);
+  const filePath = f.pdf_path || f.xml_path;
+  if (filePath) {
+    return facturaOpenHref(filePath);
   }
   if (f.id) {
-    return `/api/facturas?id=${encodeURIComponent(f.id)}`;
+    return `/api/facturas?id=${encodeURIComponent(f.id)}&download=1`;
   }
   return null;
 }

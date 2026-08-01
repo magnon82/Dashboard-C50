@@ -72,7 +72,7 @@ export const ALL_SOURCE_FILES: string[] = SOURCE_FILE_GROUPS.flatMap((g) => g.so
  * --skip-facturas) y sync-saldos.yml (cada 5 min), más ingestors manuales / Admin.
  */
 export const SOURCE_FILE_UPDATE: Record<string, string> = {
-  infocaja: 'Diario ~5:00 AM CDMX (Actions)',
+  infocaja: 'Diario ~5:17 AM CDMX (Actions)',
   corte_caja: 'Diario ~5:00 AM CDMX (Actions)',
   eventos: 'Manual (ingest_eventos.py)',
   ventas_semana: 'Manual (ingest_ventas_semana.py)',

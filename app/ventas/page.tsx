@@ -31,12 +31,14 @@ import {
   buildWeekToDateSales,
   buildPaymentMix,
   buildCorteCancelacionesDescuentos,
+  availableCorteCancelacionesMonths,
+  latestMonthWithCorteCancelaciones,
   weekRangeLabel,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
 
 function money(v: number) {
-  return `$${v.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
+  return `$${v.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const theme = getTheme('suite');
@@ -60,9 +62,10 @@ export default function Dashboard() {
     'todos'
   );
   const [corteCollapsed, setCorteCollapsed] = useState(true);
-  const [corteMonth, setCorteMonth] = useState(new Date().getMonth() + 1);
+  const [corteYear, setCorteYear] = useState(() => new Date().getFullYear());
+  const [corteMonth, setCorteMonth] = useState(() => new Date().getMonth() + 1);
+  const [didSnapCorteMonth, setDidSnapCorteMonth] = useState(false);
   const [corteOpenId, setCorteOpenId] = useState<string | null>(null);
-  const CORTE_YEAR = new Date().getFullYear();
   const [detalleYear, setDetalleYear] = useState(2026);
   const [detalleWeekFrom, setDetalleWeekFrom] = useState<number | null>(null);
   const [detalleWeekTo, setDetalleWeekTo] = useState<number | null>(null);
@@ -269,25 +272,48 @@ export default function Dashboard() {
     [records, year, month]
   );
 
-  /** Cancelaciones/descuentos: mes del año en curso (default mes actual) */
-  const corteMesActual = useMemo(
-    () => buildCorteCancelacionesDescuentos(records, CORTE_YEAR, corteMonth),
-    [records, corteMonth]
+  /** Cancelaciones/descuentos: default = último mes con datos (no el calendario vacío). */
+  const corteMesesDisponibles = useMemo(
+    () => availableCorteCancelacionesMonths(records),
+    [records]
   );
 
   const corteMesesConDatos = useMemo(() => {
-    const set = new Set<number>();
-    for (const r of records) {
-      if (r.source_file !== 'corte_caja') continue;
-      if (r.category !== 'Corte Cancelacion' && r.category !== 'Corte Descuento') continue;
-      const p = parseIsoDate(r.date);
-      if (!p || p.y !== CORTE_YEAR) continue;
-      set.add(p.m);
-    }
-    return set;
-  }, [records]);
+    return new Set(
+      corteMesesDisponibles.filter((m) => m.year === corteYear).map((m) => m.month)
+    );
+  }, [corteMesesDisponibles, corteYear]);
 
-  const corteMesLabel = `${MESES[corteMonth - 1]} ${CORTE_YEAR}`;
+  // Solo al cargar: si el mes actual no tiene corte, saltar al último con datos.
+  useEffect(() => {
+    if (didSnapCorteMonth || loading) return;
+    const latest = latestMonthWithCorteCancelaciones(records);
+    if (latest) {
+      const currentHasData = corteMesesDisponibles.some(
+        (m) => m.year === corteYear && m.month === corteMonth
+      );
+      if (!currentHasData) {
+        setCorteYear(latest.year);
+        setCorteMonth(latest.month);
+        setCorteOpenId(null);
+      }
+    }
+    setDidSnapCorteMonth(true);
+  }, [
+    records,
+    corteMesesDisponibles,
+    corteYear,
+    corteMonth,
+    didSnapCorteMonth,
+    loading,
+  ]);
+
+  const corteMesActual = useMemo(
+    () => buildCorteCancelacionesDescuentos(records, corteYear, corteMonth),
+    [records, corteYear, corteMonth]
+  );
+
+  const corteMesLabel = `${MESES[corteMonth - 1]} ${corteYear}`;
 
   const corteItemsFiltrados = useMemo(() => {
     const items = corteMesActual.days.flatMap((d) => d.items);
@@ -441,7 +467,7 @@ export default function Dashboard() {
               {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
             </Metric>
             <Text className="mt-1 text-sm text-slate-500">
-              {formatShort(weekToDate.mondayKey)} – {formatShort(weekToDate.asOf)}
+              {formatShort(weekToDate.mondayKey)} – {formatShort(weekToDate.sundayKey)}
               {' · '}
               {weekToDate.days.filter((d) => d.total > 0).length} día
               {weekToDate.days.filter((d) => d.total > 0).length !== 1 ? 's' : ''} con venta
@@ -454,15 +480,16 @@ export default function Dashboard() {
               <table className="min-w-full text-sm">
                 <thead>
                   <tr
-                    className="text-center text-xs uppercase tracking-wide text-white"
+                    className="text-xs uppercase tracking-wide text-white"
                     style={{ backgroundColor: theme.tableHead }}
                   >
-                    <th className="px-4 py-2.5">Día</th>
-                    <th className="px-4 py-2.5">Fecha</th>
-                    <th className="px-4 py-2.5">Venta</th>
-                    <th className="px-4 py-2.5">Venta {weekToDate.prevYear}</th>
-                    <th className="px-4 py-2.5">Var. %</th>
-                    <th className="px-4 py-2.5">Desc. / Canc.</th>
+                    <th className="px-4 py-2.5 text-left">Día</th>
+                    <th className="px-4 py-2.5 text-left">Fecha</th>
+                    <th className="px-4 py-2.5 text-right">Venta</th>
+                    <th className="px-4 py-2.5 text-right">Cheque promedio</th>
+                    <th className="px-4 py-2.5 text-right">Venta {weekToDate.prevYear}</th>
+                    <th className="px-4 py-2.5 text-right">Var. %</th>
+                    <th className="px-4 py-2.5 text-right">Desc. / Canc.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -480,6 +507,14 @@ export default function Dashboard() {
                         style={{ color: d.total > 0 ? theme.tableTotal : '#94a3b8' }}
                       >
                         {d.total > 0 ? money(d.total) : '—'}
+                      </td>
+                      <td
+                        className="px-4 py-2 text-right font-medium"
+                        style={{
+                          color: d.chequePromedio != null ? theme.tableTotal : '#94a3b8',
+                        }}
+                      >
+                        {d.chequePromedio != null ? money(d.chequePromedio) : '—'}
                       </td>
                       <td className="px-4 py-2 text-right font-medium text-slate-600">
                         {(d.prevTotal ?? 0) > 0 ? money(d.prevTotal!) : '—'}
@@ -513,6 +548,11 @@ export default function Dashboard() {
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {weekToDate.chequePromedio != null
+                        ? money(weekToDate.chequePromedio)
+                        : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       {weekToDate.prevTotal > 0 ? money(weekToDate.prevTotal) : '—'}

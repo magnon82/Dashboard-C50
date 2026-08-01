@@ -65,24 +65,34 @@ Fuente: `source_file=presupuesto_ingreso` (una fila por componente con monto > 0
 Tras editar el Excel, vuelve a correr `ingest_presupuesto.py` para ese mes.
 Para refrescar etiquetas de efectivo: `python ingest_saldos_flujo.py --year 2026`.
 
-## CLI local — Infocaja (Gmail → efectivo / tarjetas)
+## CLI local — Infocaja (Gmail → efectivo / tarjetas / comensales)
 
 Mismo OAuth (`credentials.json` + `token.json`). Cada correo «Fin de Día»
 guarda `Venta Total` + `Infocaja Efectivo` + `Infocaja Bancarias` (+ propina)
-en `source_file=infocaja`.
++ `Infocaja Personas` (comensales) en `source_file=infocaja`.
+
+**Fuente de verdad:** Gmail → Supabase (diario vía Actions). El Sheet histórico
+[REPORTE CHEQUE PROMEDIO](https://docs.google.com/spreadsheets/d/15w9-oXEjg_GvIz_p4ADDo3Aj5exB0o85dh50ItYsLNQ)
+(promedios mensuales / meseros) es referencia manual; **no** se escribe desde el sync.
+Los mismos campos (Venta, Personas → cheque promedio) salen del correo Infocaja.
 
 La gráfica **Efectivo/Tarjetas** en `/ventas` solo usa esas categorías Infocaja
 (no el Acumulado `ventas_semana`, que sí alimenta WI/Eventos en 2021–2025).
+**Cheque promedio** (UI, no se guarda en BD) = `Venta Total` ÷ `Infocaja Personas`
+(Venta Total Infocaja ya va sin propina).
 
 ```bash
-# Sync diario (default: últimos 90 días)
+# Sync diario (default: últimos 90 días) — re-upsert incluye Personas
 python ingest_infocaja_gmail.py
 python sync_gmail_diario.py --newer-than 7
 
-# Backfill histórico (Gmail tiene reportes ~2022+ con efectivo/bancarias)
+# Backfill histórico (Gmail tiene reportes ~2022+ con efectivo/bancarias/personas)
 python ingest_infocaja_gmail.py --after 2023/01/01
 python ingest_infocaja_gmail.py --after 2022/01/01   # opcional, años previos
 ```
+
+Actions: `.github/workflows/sync-gmail.yml` → `sync_gmail_diario.py --newer-than 7 --skip-facturas`
+(~5:17 / 6:47 AM CDMX). Requiere los 4 secrets de la tabla arriba.
 
 Sin el backfill, años como 2023 muestran WI/Eventos (Acumulado) pero
 «Sin datos de efectivo/tarjetas».

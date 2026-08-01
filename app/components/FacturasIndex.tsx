@@ -52,7 +52,7 @@ function money(v: number) {
 }
 
 function openFactura(filePath: string) {
-  return `/api/facturas?open=${encodeURIComponent(filePath)}`;
+  return `/api/facturas?open=${encodeURIComponent(filePath)}&download=1`;
 }
 
 function openComprobante(filePath: string) {
@@ -244,6 +244,10 @@ export function FacturasIndex() {
           <p className="px-4 py-8 text-center text-sm text-slate-500">
             Cargando facturas…
           </p>
+        ) : loading && loadedOnce ? (
+          <p className="px-4 py-8 text-center text-sm text-slate-500">
+            Actualizando…
+          </p>
         ) : tab === 'facturas' ? (
           items.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-slate-500">
@@ -301,8 +305,7 @@ export function FacturasIndex() {
                             className="text-xs font-semibold underline-offset-2 hover:underline"
                             style={{ color: SUITE.orangeDeep }}
                             href={openFactura(it.pdf_path)}
-                            target="_blank"
-                            rel="noreferrer"
+                            download
                           >
                             PDF
                           </a>
@@ -312,8 +315,7 @@ export function FacturasIndex() {
                             className="text-xs font-semibold underline-offset-2 hover:underline"
                             style={{ color: SUITE.navy }}
                             href={openFactura(it.xml_path)}
-                            target="_blank"
-                            rel="noreferrer"
+                            download
                           >
                             XML
                           </a>

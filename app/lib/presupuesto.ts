@@ -1112,11 +1112,31 @@ export function buildResumenBancosSemanal(
   return weeks.sort((a, b) => a.week - b.week);
 }
 
+/** Reject ingest bugs (e.g. week→year misparse → 2029). */
+function isPlausiblePresupuestoYear(year: number, now = new Date()): boolean {
+  return (
+    Number.isFinite(year) &&
+    Number.isInteger(year) &&
+    year >= 2020 &&
+    year <= now.getFullYear() + 1
+  );
+}
+
+function isPlausiblePresupuestoMonth(month: number): boolean {
+  return (
+    Number.isFinite(month) &&
+    Number.isInteger(month) &&
+    month >= 1 &&
+    month <= 12
+  );
+}
+
 export function availablePresupuestoMonths(records: FinancialRecord[]): Array<{
   year: number;
   month: number;
 }> {
   const set = new Set<string>();
+  const now = new Date();
   for (const r of records) {
     if (
       r.source_file !== 'presupuesto_rubro' &&
@@ -1127,6 +1147,9 @@ export function availablePresupuestoMonths(records: FinancialRecord[]): Array<{
     }
     const p = parseIsoDate(r.date);
     if (!p) continue;
+    if (!isPlausiblePresupuestoYear(p.y, now) || !isPlausiblePresupuestoMonth(p.m)) {
+      continue;
+    }
     set.add(`${p.y}-${p.m}`);
   }
   return Array.from(set)
@@ -1135,4 +1158,46 @@ export function availablePresupuestoMonths(records: FinancialRecord[]): Array<{
       return { year: y, month: m };
     })
     .sort((a, b) => b.year - a.year || b.month - a.month);
+}
+
+/**
+ * Meses con al menos una semana de bancos ya transcurrida (cierre martes).
+ * Agosto sin SEM 1 lista no entra → el default cae en julio.
+ */
+export function availableSemanasBancosMonths(
+  records: FinancialRecord[],
+  todayIso?: string
+): Array<{ year: number; month: number }> {
+  const today = todayIso || toIsoLocal(new Date());
+  const now = new Date();
+  const set = new Set<string>();
+
+  for (const r of records) {
+    if (r.source_file !== 'presupuesto_semana') continue;
+    const p = parseIsoDate(r.date);
+    if (!p) continue;
+    if (!isPlausiblePresupuestoYear(p.y, now) || !isPlausiblePresupuestoMonth(p.m)) {
+      continue;
+    }
+    const data = parseJson<{ week?: number }>(r.description);
+    if (!data || data.week == null || Number(data.week) < 1) continue;
+    if (!presupuestoWeekFullyElapsed(p.y, p.m, Number(data.week), today)) continue;
+    set.add(`${p.y}-${p.m}`);
+  }
+
+  return Array.from(set)
+    .map((k) => {
+      const [y, m] = k.split('-').map(Number);
+      return { year: y, month: m };
+    })
+    .sort((a, b) => b.year - a.year || b.month - a.month);
+}
+
+/** Último mes con semanas de bancos transcurridas (o null si no hay). */
+export function latestMonthWithSemanasBancos(
+  records: FinancialRecord[],
+  todayIso?: string
+): { year: number; month: number } | null {
+  const months = availableSemanasBancosMonths(records, todayIso);
+  return months[0] ?? null;
 }

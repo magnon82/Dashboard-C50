@@ -11,6 +11,7 @@ import {
 } from '@/app/lib/auth';
 import { SOURCE_ESTADO_PDF_INDEX } from '@/app/lib/estados-cuenta';
 import { getServiceSupabase } from '@/app/lib/users';
+import { weekMondayIso } from '@/app/lib/ventas-semana';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,6 +36,12 @@ const MONTHS: Record<string, number> = {
 
 const PDF_NAME_RE =
   /^(mifel|bbva)[-_](.+?)[-_]?\$?([\d.,]+)\.pdf$/i;
+
+/** Explicit calendar date in path/filename (ISO, compact, or DMY). */
+const EXPLICIT_ISO_RE = /(?<!\d)(20\d{2})-(\d{2})-(\d{2})(?!\d)/;
+const EXPLICIT_COMPACT_RE = /(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/;
+const EXPLICIT_DMY_RE =
+  /(?<!\d)(\d{1,2})[\/\-.](\d{1,2})[\/\-.](20\d{2})(?!\d)/;
 
 /** IMSS / impuestos / instituciones de gobierno (filenames + búsqueda). */
 const GOV_CONCEPTO_RE =
@@ -88,7 +95,89 @@ export type ComprobanteItem = {
   concepto: string;
   kind: 'comprobante' | 'estado';
   source: 'index' | 'scan';
+  /** File mtime (ms since epoch) when known — best recency signal. */
+  mtimeMs: number | null;
 };
+
+function isValidYmd(y: number, m: number, d: number): boolean {
+  if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(y, m - 1, d);
+  return (
+    dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
+  );
+}
+
+/** Best calendar date from path/filename (explicit day > SemN Monday > folder month). */
+function dateFromPathAndName(
+  fullPath: string,
+  filename: string,
+  yearHint: number,
+  folderMonth: number | null,
+  week: number | null
+): { date: string; year: number; month: number | null } {
+  const hay = `${fullPath} ${filename}`;
+  const iso = EXPLICIT_ISO_RE.exec(hay);
+  if (iso) {
+    const y = Number(iso[1]);
+    const m = Number(iso[2]);
+    const d = Number(iso[3]);
+    if (isValidYmd(y, m, d)) {
+      return {
+        date: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+        year: y,
+        month: m,
+      };
+    }
+  }
+  const dmy = EXPLICIT_DMY_RE.exec(hay);
+  if (dmy) {
+    const d = Number(dmy[1]);
+    const m = Number(dmy[2]);
+    const y = Number(dmy[3]);
+    if (isValidYmd(y, m, d)) {
+      return {
+        date: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+        year: y,
+        month: m,
+      };
+    }
+  }
+  const compact = EXPLICIT_COMPACT_RE.exec(hay);
+  if (compact) {
+    const y = Number(compact[1]);
+    const m = Number(compact[2]);
+    const d = Number(compact[3]);
+    if (isValidYmd(y, m, d)) {
+      return {
+        date: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+        year: y,
+        month: m,
+      };
+    }
+  }
+  if (week != null && week >= 1 && week <= 53 && yearHint >= 2000) {
+    const monday = weekMondayIso(yearHint, week);
+    const [y, m] = monday.split('-').map(Number);
+    return { date: monday, year: y || yearHint, month: m || folderMonth };
+  }
+  const month = folderMonth;
+  return {
+    date: `${yearHint}-${String(month || 1).padStart(2, '0')}-01`,
+    year: yearHint,
+    month,
+  };
+}
+
+/** Newest → oldest: mtime, then calendar date, then filename. */
+export function sortComprobantesByRecency(items: ComprobanteItem[]): void {
+  items.sort((a, b) => {
+    const ma = a.mtimeMs ?? 0;
+    const mb = b.mtimeMs ?? 0;
+    if (ma !== mb) return mb - ma;
+    if (a.date !== b.date) return b.date.localeCompare(a.date);
+    return a.filename.localeCompare(b.filename, 'es');
+  });
+}
 
 async function requireSession(): Promise<SessionUser | NextResponse> {
   const jar = await cookies();
@@ -135,7 +224,8 @@ function parseMonthFolder(name: string): { month: number | null; year: number | 
 
 function parsePdfName(
   fullPath: string,
-  yearHint: number
+  yearHint: number,
+  mtimeMs: number | null = null
 ): ComprobanteItem | null {
   const filename = path.basename(fullPath);
   const parent = path.basename(path.dirname(fullPath));
@@ -151,12 +241,20 @@ function parsePdfName(
       isGobiernoText(filename) ||
       filename.toLowerCase().endsWith('.pdf')
     ) {
-      const month = folderMonth;
       const fallbackBody = filename.replace(/\.pdf$/i, '');
       const amtM = fallbackBody.match(/\$?\s*([\d.,]+)\s*$/);
       const amount = amtM
         ? Number(String(amtM[1] || '0').replace(/,/g, '')) || 0
         : 0;
+      const weekM = fallbackBody.match(/Sem\s*(\d+)/i);
+      const week = weekM ? Number(weekM[1]) : null;
+      const resolved = dateFromPathAndName(
+        fullPath,
+        filename,
+        year,
+        folderMonth,
+        week
+      );
       return {
         filename,
         path: fullPath,
@@ -167,15 +265,16 @@ function parsePdfName(
             ? 'MIFEL'
             : '',
         amount,
-        date: `${year}-${String(month || 1).padStart(2, '0')}-01`,
-        year,
-        month,
-        week: null,
+        date: resolved.date,
+        year: resolved.year,
+        month: resolved.month,
+        week,
         vendor: '',
         body: fallbackBody,
         concepto: conceptoFromBody(fallbackBody),
         kind,
         source: 'scan',
+        mtimeMs,
       };
     }
     return null;
@@ -185,23 +284,31 @@ function parsePdfName(
   const body = String(m[2] || '');
   const amount = Number(String(m[3] || '0').replace(/,/g, '')) || 0;
   const weekM = body.match(/Sem\s*(\d+)/i);
+  const week = weekM ? Number(weekM[1]) : null;
   const vendor = body.split('-')[0]?.trim() || '';
-  const month = folderMonth;
+  const resolved = dateFromPathAndName(
+    fullPath,
+    filename,
+    year,
+    folderMonth,
+    week
+  );
   return {
     filename,
     path: fullPath,
     rel_path: fullPath,
     bank,
     amount,
-    date: `${year}-${String(month || 1).padStart(2, '0')}-01`,
-    year,
-    month,
-    week: weekM ? Number(weekM[1]) : null,
+    date: resolved.date,
+    year: resolved.year,
+    month: resolved.month,
+    week,
     vendor,
     body,
     concepto: conceptoFromBody(body),
     kind,
     source: 'scan',
+    mtimeMs,
   };
 }
 
@@ -230,7 +337,14 @@ async function walkPdfs(
       if (ent.isDirectory()) {
         await walk(full, yearHint);
       } else if (ent.isFile() && ent.name.toLowerCase().endsWith('.pdf')) {
-        const item = parsePdfName(full, yearHint);
+        let mtimeMs: number | null = null;
+        try {
+          const st = await stat(full);
+          mtimeMs = st.mtimeMs;
+        } catch {
+          mtimeMs = null;
+        }
+        const item = parsePdfName(full, yearHint, mtimeMs);
         if (item) out.push(item);
       }
     }
@@ -261,10 +375,34 @@ async function loadFromIndex(): Promise<ComprobanteItem[]> {
       const filename = String(d.filename || '');
       const rel = String(d.rel_path || '');
       if (!filename && !rel) continue;
-      const date = String(row.date || '').slice(0, 10);
-      const [y, m] = date.split('-').map(Number);
       const body = String(d.body || '');
       const storedConcepto = String(d.concepto || '').trim();
+      const week = d.week != null ? Number(d.week) : null;
+      const rowDate = String(row.date || '').slice(0, 10);
+      const [rowY, rowM] = rowDate.split('-').map(Number);
+      const yearHint = rowY || Number(d.year) || 0;
+      const folderMonth =
+        d.month != null && Number(d.month) >= 1
+          ? Number(d.month)
+          : rowM || null;
+      const resolved = dateFromPathAndName(
+        rel || filename,
+        filename || path.basename(rel),
+        yearHint || new Date().getFullYear(),
+        folderMonth,
+        week
+      );
+      // Prefer path/Sem-resolved day over bare month-start index date.
+      const useResolved =
+        resolved.date.slice(8, 10) !== '01' ||
+        !rowDate ||
+        rowDate.slice(8, 10) === '01';
+      const date = useResolved ? resolved.date : rowDate;
+      const mtimeRaw = d.mtime_ms ?? d.mtimeMs;
+      const mtimeMs =
+        mtimeRaw != null && Number.isFinite(Number(mtimeRaw))
+          ? Number(mtimeRaw)
+          : null;
       all.push({
         filename: filename || path.basename(rel),
         path: rel,
@@ -272,14 +410,15 @@ async function loadFromIndex(): Promise<ComprobanteItem[]> {
         bank: String(d.bank || ''),
         amount: Number(d.amount ?? row.amount) || 0,
         date,
-        year: y || 0,
-        month: m || null,
-        week: d.week != null ? Number(d.week) : null,
+        year: resolved.year || rowY || 0,
+        month: resolved.month ?? folderMonth,
+        week,
         vendor: String(d.vendor || ''),
         body,
         concepto: storedConcepto || conceptoFromBody(body),
         kind: inferKind(filename || rel),
         source: 'index',
+        mtimeMs,
       });
     }
     if (data.length < pageSize) break;
@@ -385,44 +524,60 @@ export async function GET(request: Request) {
   const q = url.searchParams.get('q') || '';
   const kind = url.searchParams.get('kind') || 'all';
   const forceScan = url.searchParams.get('scan') === '1';
+  const preferIndex = url.searchParams.get('index') === '1';
   const yearsParam = url.searchParams.get('years');
   const years = yearsParam
     ? yearsParam
         .split(',')
         .map((x) => Number(x.trim()))
         .filter((n) => n >= 2000)
-    : null;
+    : year
+      ? [year]
+      : null;
 
   try {
+    const rootExists = existsSync(root);
     let items: ComprobanteItem[] = [];
     let source: 'index' | 'scan' | 'index+scan' = 'index';
 
-    if (!forceScan) {
+    // Local disk is complete (~hundreds/year). A sparse Supabase index was
+    // preferred before and capped the UI at a handful of month-start rows.
+    if (preferIndex && !forceScan) {
       try {
         items = await loadFromIndex();
       } catch {
         items = [];
       }
-    }
-
-    if (forceScan || items.length === 0) {
-      const scanned = await walkPdfs(root, years);
-      if (items.length === 0) {
-        items = scanned;
-        source = 'scan';
-      } else if (forceScan) {
-        items = scanned;
+      source = 'index';
+      if (!items.length && rootExists) {
+        items = await walkPdfs(root, years);
         source = 'scan';
       }
+    } else if (forceScan || rootExists) {
+      const scanned = await walkPdfs(root, years);
+      if (scanned.length) {
+        items = scanned;
+        source = 'scan';
+      } else {
+        try {
+          items = await loadFromIndex();
+          source = 'index';
+        } catch {
+          items = [];
+        }
+      }
+    } else {
+      try {
+        items = await loadFromIndex();
+      } catch {
+        items = [];
+      }
+      source = 'index';
     }
 
     const filtered = filterItems(items, { year, month, day, bank, q, kind });
-    filtered.sort((a, b) => {
-      if (a.date !== b.date) return b.date.localeCompare(a.date);
-      return a.filename.localeCompare(b.filename, 'es');
-    });
+    sortComprobantesByRecency(filtered);
 
-    const rootExists = existsSync(root);
     return NextResponse.json({
       items: filtered,
       count: filtered.length,

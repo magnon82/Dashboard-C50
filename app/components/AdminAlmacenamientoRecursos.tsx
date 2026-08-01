@@ -560,12 +560,6 @@ export function AdminAlmacenamientoRecursos() {
     >
       <div className="flex flex-wrap items-start justify-between gap-3 px-5 pb-3 pt-5">
         <div className="min-w-0 flex-1">
-          <p
-            className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em]"
-            style={{ color: theme.muted }}
-          >
-            Inventario
-          </p>
           <h2 className="text-lg font-bold" style={{ color: theme.title }}>
             Inventario de datos
           </h2>

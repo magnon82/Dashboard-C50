@@ -1,0 +1,32 @@
+---
+description: Reglas comerciales del módulo operativo Eventos (/eventos)
+globs: app/eventos/**/*,app/api/eventos/**/*,app/components/eventos/**/*,app/lib/eventos*.ts,supabase/eventos*.sql
+alwaysApply: false
+---
+
+# Eventos operativos — Dashboard C50
+
+Este módulo es **operación comercial** (`/eventos`: CRM, cotizador, OS…).  
+**No** es el analytics WI/Eventos de Ventas (`ingest_eventos.py`, `financial_records.source_file='eventos'`, pie en `/ventas`). No modificar ese contrato.
+
+## Reglas comerciales (locked)
+
+- **Cotización:** `total = subtotal + servicio 15%` (`EVENTOS_SERVICIO_PCT`). Paquetes parejas ya incluyen propina en PDF → permitir desactivar servicio para no duplicar.
+- **Hold:** 72 horas hábiles; **admin puede extender**. **Sin hold** si faltan **&lt;15 días** al evento.
+- **Barra libre:** solo junto con alimentos (menú 3 tiempos u otro menú de comida).
+- **Grupos:** menú 3 tiempos desde **10 pax**.
+- **Desayunos pack:** ≥50 pax = **$30,000** (paquete fijo).
+- **CRM multi-usuario** con `owner_username`; coexistir con Excel/Sheets (no borrar fuentes Drive).
+- **GCal compartido:** Fase 2 (stub UI “próximo”); no inventar sync completa sin pedido.
+
+## Datos / Drive
+
+Fuentes en `I:\Mi unidad\Eventos\` (menús PDF, controles, OS, lista clientes Excel). Seed: `supabase/eventos_module.sql` + `supabase/seed_event_clients.json`. Precios con `price_verified=false` requieren verificación operativa.
+
+Timeline CRM (más reciente → antiguo): `python ingestor/build_event_client_activity.py` → `supabase/seed_event_client_activity.json`. Lee OS PDF locales + Sheets API (Seguimiento / Anticipos C50). Los atajos `.gsheet` en disco no son legibles. No escribe `financial_records` (eso sigue en `ingest_eventos.py` / Ventas).
+
+Lista UI de OS: `GET /api/eventos/os` escanea `Ordenes de servicio` (o `EVENTOS_OS_PATH`); fallback al seed de actividad si Drive no está montado. Orden: **fecha del evento desc** (nombre / anticipos / seed); sin fecha → mtime al final. `?open=` sirve PDF bajo esa raíz.
+
+## Auth
+
+APIs usan cookie de sesión del suite + **service role** Supabase. RLS on, sin policies anon (igual que otras tablas del suite).
