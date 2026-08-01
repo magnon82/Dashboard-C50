@@ -29,6 +29,8 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+/** OCR multipass puede tardar en CPU local */
+export const maxDuration = 60;
 
 const ALLOWED_MIME = new Set([
   'image/jpeg',
