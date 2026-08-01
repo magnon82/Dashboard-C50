@@ -69,7 +69,7 @@ export const ALL_SOURCE_FILES: string[] = SOURCE_FILE_GROUPS.flatMap((g) => g.so
 /**
  * Frecuencia de actualización por source_file (texto UI en español).
  * Basado en .github/workflows/sync-gmail.yml (cron 0 11 * * * ≈ 5:00 AM CDMX,
- * --skip-facturas) y sync-saldos.yml (*/5), más ingestors manuales / Admin.
+ * --skip-facturas) y sync-saldos.yml (cada 5 min), más ingestors manuales / Admin.
  */
 export const SOURCE_FILE_UPDATE: Record<string, string> = {
   infocaja: 'Diario ~5:00 AM CDMX (Actions)',
