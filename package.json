@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ingest:estados": "cd ingestor && python ingest_estados_cuenta.py",
+    "ingest:estados:dry": "cd ingestor && python ingest_estados_cuenta.py --dry-run"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

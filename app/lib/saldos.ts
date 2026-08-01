@@ -1,11 +1,21 @@
 import { parseIsoDate, type FinancialRecord } from '@/app/lib/ventas-semana';
 
+/** Saldos Mifel/BBVA desde Excel (ingestor presupuesto). */
+export const SOURCE_SALDOS_PRESUPUESTO = 'presupuesto_saldos';
+/** Override manual desde /admin (gana sobre presupuesto_saldos). */
+export const SOURCE_SALDOS_BANCOS_MANUAL = 'saldos_bancos_manual';
+
+export const CAT_SALDO_MIFEL = 'Saldo Mifel';
+export const CAT_SALDO_BBVA = 'Saldo BBVA';
+
 export interface SaldosAlDiaData {
   efectivo: number | null;
   efectivoFecha: string | null;
   mifel: number;
   bbva: number;
   bancos: number;
+  bancosFecha: string | null;
+  bancosFuente: 'manual' | 'presupuesto' | null;
   totalDisponible: number;
   cxpTotal: number | null;
   cxpProgramado: number | null;
@@ -14,6 +24,31 @@ export interface SaldosAlDiaData {
 
 function moneyAmount(v: unknown): number {
   return Number(v || 0);
+}
+
+function pickBancosFromSource(
+  records: FinancialRecord[],
+  source: string,
+  byDay: boolean
+): { mifel: number; bbva: number; fecha: string } | null {
+  const rows = records
+    .filter((r) => r.source_file === source)
+    .map((r) => ({ ...r, parsed: parseIsoDate(r.date) }))
+    .filter((r) => r.parsed)
+    .sort((a, b) => (a.parsed!.key < b.parsed!.key ? -1 : 1));
+
+  if (!rows.length) return null;
+
+  const ultima = rows[rows.length - 1].parsed!;
+  const pool = byDay
+    ? rows.filter((r) => r.parsed!.key === ultima.key)
+    : rows.filter((r) => r.parsed!.y === ultima.y && r.parsed!.m === ultima.m);
+
+  return {
+    mifel: moneyAmount(pool.find((r) => r.category === CAT_SALDO_MIFEL)?.amount),
+    bbva: moneyAmount(pool.find((r) => r.category === CAT_SALDO_BBVA)?.amount),
+    fecha: `${ultima.y}-${String(ultima.m).padStart(2, '0')}-${String(ultima.d).padStart(2, '0')}`,
+  };
 }
 
 export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
@@ -30,23 +65,13 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
     ? poolEfectivo.reduce((best, cur) => (cur.parsed!.key > best.parsed!.key ? cur : best))
     : null;
 
-  const saldosBancos = records
-    .filter((r) => r.source_file === 'presupuesto_saldos')
-    .map((r) => ({ ...r, parsed: parseIsoDate(r.date) }))
-    .filter((r) => r.parsed)
-    .sort((a, b) => (a.parsed!.key < b.parsed!.key ? -1 : 1));
+  // Manual override wins over Excel presupuesto_saldos
+  const bancosManual = pickBancosFromSource(records, SOURCE_SALDOS_BANCOS_MANUAL, true);
+  const bancosPresupuesto = pickBancosFromSource(records, SOURCE_SALDOS_PRESUPUESTO, false);
+  const bancosPick = bancosManual ?? bancosPresupuesto;
 
-  let mifel = 0;
-  let bbva = 0;
-  if (saldosBancos.length) {
-    const ultimaFecha = saldosBancos[saldosBancos.length - 1].parsed!;
-    const delMes = saldosBancos.filter(
-      (r) => r.parsed!.y === ultimaFecha.y && r.parsed!.m === ultimaFecha.m
-    );
-    mifel = moneyAmount(delMes.find((r) => r.category === 'Saldo Mifel')?.amount);
-    bbva = moneyAmount(delMes.find((r) => r.category === 'Saldo BBVA')?.amount);
-  }
-
+  const mifel = bancosPick?.mifel ?? 0;
+  const bbva = bancosPick?.bbva ?? 0;
   const bancos = mifel + bbva;
   const efectivo = saldoEfectivoHoy ? moneyAmount(saldoEfectivoHoy.amount) : null;
 
@@ -84,6 +109,8 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
     mifel,
     bbva,
     bancos,
+    bancosFecha: bancosPick?.fecha ?? null,
+    bancosFuente: bancosManual ? 'manual' : bancosPresupuesto ? 'presupuesto' : null,
     totalDisponible: (efectivo ?? 0) + bancos,
     cxpTotal,
     cxpProgramado,

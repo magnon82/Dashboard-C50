@@ -28,70 +28,69 @@ SEM_NAMES = [f"SEM {i}" for i in range(1, N_WEEKS + 1)]
 # kind: parent_cocina | child_cocina | parent_barra | child_barra |
 #       parent_servicios | child_servicios | top
 ROWS: list[tuple[str, str]] = [
-    ("INSUMOS DE COCINA", "parent_cocina"),
-    ("Frutas y Verduras", "child_cocina"),
-    ("Proteinas", "child_cocina"),
+    ("Insumos de cocina", "parent_cocina"),
+    ("Frutas y verduras", "child_cocina"),
+    ("Proteínas", "child_cocina"),
     ("Abarrotes", "child_cocina"),
-    ("Lacteos", "child_cocina"),
-    ("Panes, tortillas, Postres", "child_cocina"),
+    ("Lácteos", "child_cocina"),
+    ("Panes, tortillas, postres", "child_cocina"),
     ("Agua", "child_cocina"),
-    ("CARBON", "child_cocina"),
-    ("INSUMOS DE BARRA", "parent_barra"),
+    ("Carbón", "child_cocina"),
+    ("Insumos de barra", "parent_barra"),
     ("Destilados y vinos", "child_barra"),
     ("Cervezas", "child_barra"),
     ("Abarrotes", "child_barra"),
     ("Café", "child_barra"),
     ("Refrescos, aguas y hielo", "child_barra"),
     ("Frutas y verduras", "child_barra"),
-    ("SERVICIOS", "parent_servicios"),
-    ("LAVANDERIA", "child_servicios"),
+    ("Servicios", "parent_servicios"),
+    ("Lavandería", "child_servicios"),
     ("Agua", "child_servicios"),
     ("Gas", "child_servicios"),
     ("Luz", "child_servicios"),
     ("Teléfono", "child_servicios"),
-    ("CONTADOR", "child_servicios"),
-    ("DISEÑO Y PUBLICIDAD", "child_servicios"),
+    ("Contador", "child_servicios"),
+    ("Diseño y publicidad", "child_servicios"),
     ("Alarma", "child_servicios"),
-    ("AUDITORIAS", "child_servicios"),
-    ("GAS CALENTADORES", "child_servicios"),
-    ("MATERIAS PRIMAS", "child_servicios"),
-    ("COMIDA PERSONAL", "top"),
-    ("RENTA", "top"),
-    ("MANTENIMIENTO", "top"),
-    ("EQUIPO", "top"),
-    ("CRISTALERIA", "top"),
-    ("PAPELERIA", "top"),
-    ("LIMPIEZA Y BAÑOS", "top"),
-    ("GASOLINA Y TAXIS", "top"),
-    ("OTROS", "top"),
-    ("LICENCIAS Y AFILIACIONES", "top"),
-    ("COMISIONES BANCARIAS", "top"),
-    ("FINIQUITOS Y RECLUTAMIENTO", "top"),
-    ("NÓMINA", "top"),
+    ("Auditorías", "child_servicios"),
+    ("Gas calentadores", "child_servicios"),
+    ("Materias primas", "child_servicios"),
+    ("Comida personal", "top"),
+    ("Renta", "top"),
+    ("Mantenimiento", "top"),
+    ("Cristalería y Equipo", "top"),
+    ("Papelería", "top"),
+    ("Limpieza y baños", "top"),
+    ("Gasolina y taxis", "top"),
+    ("Otros", "top"),
+    ("Licencias y afiliaciones", "top"),
+    ("Comisiones bancarias", "top"),
+    ("Finiquitos y reclutamiento", "top"),
+    ("Nómina", "top"),
     ("IMSS", "top"),
-    ("IMPUESTOS", "top"),
+    ("Impuestos", "top"),
 ]
 
 # July template presupuesto amounts for utilities / typical fixed lines
 JULY_TEMPLATE_AMOUNTS = {
-    "COMIDA PERSONAL": 5000.0,
-    "MANTENIMIENTO": 5000.0,
-    "PAPELERIA": 1500.0,
-    "LIMPIEZA Y BAÑOS": 9600.0,
-    "GASOLINA Y TAXIS": 2480.0,
-    "OTROS": 1500.0,
-    "COMISIONES BANCARIAS": 3000.0,
-    # SERVICIOS kids (from July top-level J)
-    "Agua|SERVICIOS": 2000.0,
-    "Gas|SERVICIOS": 1500.0,
-    "Luz|SERVICIOS": 9800.0,
-    "Teléfono|SERVICIOS": 1248.0,
-    "CONTADOR|SERVICIOS": 6245.0,
-    "DISEÑO Y PUBLICIDAD|SERVICIOS": 5000.0,
-    "Alarma|SERVICIOS": 610.0,
-    "AUDITORIAS|SERVICIOS": 0.0,
-    "GAS CALENTADORES|SERVICIOS": 500.0,
-    "MATERIAS PRIMAS|SERVICIOS": 4800.0,
+    "Comida personal": 5000.0,
+    "Mantenimiento": 5000.0,
+    "Papelería": 1500.0,
+    "Limpieza y baños": 9600.0,
+    "Gasolina y taxis": 2480.0,
+    "Otros": 1500.0,
+    "Comisiones bancarias": 3000.0,
+    # Servicios kids (from July top-level J)
+    "Agua|Servicios": 2000.0,
+    "Gas|Servicios": 1500.0,
+    "Luz|Servicios": 9800.0,
+    "Teléfono|Servicios": 1248.0,
+    "Contador|Servicios": 6245.0,
+    "Diseño y publicidad|Servicios": 5000.0,
+    "Alarma|Servicios": 610.0,
+    "Auditorías|Servicios": 0.0,
+    "Gas calentadores|Servicios": 500.0,
+    "Materias primas|Servicios": 4800.0,
 }
 
 FILLS = {
@@ -117,20 +116,19 @@ FILLS = {
 }
 
 TOP_FILL_OVERRIDE = {
-    "RENTA": "renta",
-    "NÓMINA": "nomina",
+    "Renta": "renta",
+    "Nómina": "nomina",
     "IMSS": "imss",
-    "IMPUESTOS": "imss",
-    "LICENCIAS Y AFILIACIONES": "licencias",
-    "GASOLINA Y TAXIS": "gasolina",
-    "EQUIPO": "equipo",
-    "CRISTALERIA": "equipo",
-    "PAPELERIA": "papeleria",
-    "MANTENIMIENTO": "mantenimiento",
-    "LIMPIEZA Y BAÑOS": "limpieza",
-    "OTROS": "otros",
-    "FINIQUITOS Y RECLUTAMIENTO": "finiquitos",
-    "COMISIONES BANCARIAS": "finiquitos",
+    "Impuestos": "imss",
+    "Licencias y afiliaciones": "licencias",
+    "Gasolina y taxis": "gasolina",
+    "Cristalería y Equipo": "equipo",
+    "Papelería": "papeleria",
+    "Mantenimiento": "mantenimiento",
+    "Limpieza y baños": "limpieza",
+    "Otros": "otros",
+    "Finiquitos y reclutamiento": "finiquitos",
+    "Comisiones bancarias": "finiquitos",
 }
 
 FONT_NAME = "Century Gothic"
@@ -201,33 +199,31 @@ def presupuesto_value(name: str, kind: str, row: int, rows: dict) -> object | No
                 end = r
         return f"=SUM(J{start}:J{end})"
 
-    if kind == "child_cocina" and name == "CARBON":
+    if kind == "child_cocina" and name == "Carbón":
         return 1500 * N_WEEKS
     if kind in ("child_cocina", "child_barra"):
-        return None  # only parent % (CARBON handled above)
+        return None  # only parent % (Carbón handled above)
 
     if kind == "child_servicios":
-        if name == "LAVANDERIA":
+        if name == "Lavandería":
             return 2400 * N_WEEKS
-        key = f"{name}|SERVICIOS"
+        key = f"{name}|Servicios"
         return JULY_TEMPLATE_AMOUNTS.get(key, 0.0)
 
     # top-level formulas / defaults
-    if name == "RENTA":
+    if name == "Renta":
         return 44330
-    if name == "CRISTALERIA":
-        return 500
-    if name == "EQUIPO":
-        return 5000
-    if name == "LICENCIAS Y AFILIACIONES":
+    if name == "Cristalería y Equipo":
+        return 5500
+    if name == "Licencias y afiliaciones":
         return 3500
-    if name == "FINIQUITOS Y RECLUTAMIENTO":
+    if name == "Finiquitos y reclutamiento":
         return 0
-    if name == "NÓMINA":
+    if name == "Nómina":
         return "=$B$49*25%"
     if name == "IMSS":
         return 16765.12
-    if name == "IMPUESTOS":
+    if name == "Impuestos":
         return 6000
     return JULY_TEMPLATE_AMOUNTS.get(name, 0.0)
 
@@ -236,7 +232,7 @@ def has_ijk(name: str, kind: str) -> bool:
     """Whether row gets % / presupuesto / real columns on TOTAL."""
     if kind in ("parent_cocina", "parent_barra", "parent_servicios", "top"):
         return True
-    if kind == "child_cocina" and name == "CARBON":
+    if kind == "child_cocina" and name == "Carbón":
         return True  # J only — handled specially
     if kind == "child_servicios":
         return True  # J (+ optional I/K); we set J and skip I/K to avoid double-count
@@ -400,7 +396,7 @@ def write_total_sheet(ws, rows: dict):
             "top",
         )
         show_j_only = (kind == "child_servicios") or (
-            kind == "child_cocina" and name == "CARBON"
+            kind == "child_cocina" and name == "Carbón"
         )
 
         if show_full_ijk:
@@ -533,8 +529,8 @@ def validate(path: Path) -> list[str]:
     for r, (name, _k) in rows.items():
         if ws.cell(r, 1).value != name:
             notes.append(f"A{r}={ws.cell(r,1).value!r} expected {name!r}")
-    # spot-check formulas
-    for coord in ["B1", "B2", "B10", "B17", "J2", "J41", "K47", "B49"]:
+    # spot-check formulas (NÓMINA J-col after merge Equipo+Cristalería)
+    for coord in ["B1", "B2", "B10", "B17", "J2", "J40", "K47", "B49"]:
         v = ws[coord].value
         if v is None:
             notes.append(f"{coord} empty")

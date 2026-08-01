@@ -68,6 +68,7 @@ export default function Dashboard() {
   const [detalleYear, setDetalleYear] = useState(2026);
   const [detalleWeekFrom, setDetalleWeekFrom] = useState<number | null>(null);
   const [detalleWeekTo, setDetalleWeekTo] = useState<number | null>(null);
+  const [detalleCollapsed, setDetalleCollapsed] = useState(true);
   const [weekFrom, setWeekFrom] = useState<number | null>(null);
   const [weekTo, setWeekTo] = useState<number | null>(null);
 
@@ -440,15 +441,15 @@ export default function Dashboard() {
               <table className="min-w-full text-sm">
                 <thead>
                   <tr
-                    className="text-left text-xs uppercase tracking-wide text-white"
+                    className="text-center text-xs uppercase tracking-wide text-white"
                     style={{ backgroundColor: theme.tableHead }}
                   >
                     <th className="px-4 py-2.5">Día</th>
                     <th className="px-4 py-2.5">Fecha</th>
-                    <th className="px-4 py-2.5 text-right">Venta</th>
-                    <th className="px-4 py-2.5 text-right">Venta {weekToDate.prevYear}</th>
-                    <th className="px-4 py-2.5 text-right">Var. %</th>
-                    <th className="px-4 py-2.5 text-right">Desc. / Canc.</th>
+                    <th className="px-4 py-2.5">Venta</th>
+                    <th className="px-4 py-2.5">Venta {weekToDate.prevYear}</th>
+                    <th className="px-4 py-2.5">Var. %</th>
+                    <th className="px-4 py-2.5">Desc. / Canc.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -621,13 +622,13 @@ export default function Dashboard() {
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr
-                        className="text-left text-xs uppercase tracking-wide text-white"
+                        className="text-center text-xs uppercase tracking-wide text-white"
                         style={{ backgroundColor: theme.tableHead }}
                       >
                         <th className="px-4 py-3">Fecha</th>
                         <th className="px-4 py-3">Tipo</th>
                         <th className="px-4 py-3">Detalle</th>
-                        <th className="px-4 py-3 text-right">Monto</th>
+                        <th className="px-4 py-3">Monto</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -781,18 +782,18 @@ export default function Dashboard() {
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr
-                      className="text-left text-xs uppercase tracking-wide text-white"
+                      className="text-center text-xs uppercase tracking-wide text-white"
                       style={{ backgroundColor: theme.tableHead }}
                     >
                       <th className="sticky left-0 px-4 py-3" style={{ backgroundColor: theme.tableHead }}>
                         Año
                       </th>
                       {MESES.map((m) => (
-                        <th key={m} className="px-3 py-3 text-right whitespace-nowrap">
+                        <th key={m} className="px-3 py-3 whitespace-nowrap">
                           {m.slice(0, 3)}
                         </th>
                       ))}
-                      <th className="px-4 py-3 text-right">Prom. anual</th>
+                      <th className="px-4 py-3">Prom. anual</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -862,151 +863,182 @@ export default function Dashboard() {
           <PaymentMixPie mix={paymentMix} periodoLabel={mixPeriodoLabel} />
         </Card>
 
-        {/* Detalle semanal — antes del comparativo */}
+        {/* Detalle semanal — antes del comparativo (colapsado por defecto) */}
         <Card className={`mb-8 ${cardClass}`} style={cardStyle}>
-          <div className="mb-4 flex flex-col gap-3">
-            <SectionHeader title="Detalle semanal" className="mb-0">
-              <label className={filterControlClass}>
-                <span className="text-slate-500">Año</span>
-                <select
-                  className={filterSelectClass}
-                  value={detalleYear}
-                  onChange={(e) => {
-                    setDetalleYear(Number(e.target.value));
-                    setDetalleWeekFrom(null);
-                    setDetalleWeekTo(null);
-                  }}
-                >
-                  {COMPARE_YEARS.map((y) => (
-                    <option key={y} value={y}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </SectionHeader>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className={`${filterControlClass} min-w-[220px] flex-1`}>
-                <span className="shrink-0 text-slate-500">Desde</span>
-                <select
-                  className={`${filterSelectClass} w-full`}
-                  value={detalleWeekFrom ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value === '' ? null : Number(e.target.value);
-                    setDetalleWeekFrom(v);
-                    if (v != null && detalleWeekTo != null && v > detalleWeekTo) {
-                      setDetalleWeekTo(v);
-                    }
-                  }}
-                >
-                  <option value="">Inicio</option>
-                  {detalleWeekOptions.map((o) => (
-                    <option key={o.week} value={o.week}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className={`${filterControlClass} min-w-[220px] flex-1`}>
-                <span className="shrink-0 text-slate-500">Hasta</span>
-                <select
-                  className={`${filterSelectClass} w-full`}
-                  value={detalleWeekTo ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value === '' ? null : Number(e.target.value);
-                    setDetalleWeekTo(v);
-                    if (v != null && detalleWeekFrom != null && v < detalleWeekFrom) {
-                      setDetalleWeekFrom(v);
-                    }
-                  }}
-                >
-                  <option value="">Fin</option>
-                  {detalleWeekOptions.map((o) => (
-                    <option key={o.week} value={o.week}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {(detalleWeekFrom != null || detalleWeekTo != null) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDetalleWeekFrom(null);
-                    setDetalleWeekTo(null);
-                  }}
-                  className="inline-flex h-9 items-center rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                >
-                  Limpiar rango
-                </button>
-              )}
-            </div>
-          </div>
-          {weekRowsDisplay.length === 0 ? (
-            <p className="py-8 text-center text-slate-400">Sin semanas en el periodo.</p>
+          <SectionHeader title="Detalle semanal" className="mb-0">
+            <button
+              type="button"
+              aria-expanded={!detalleCollapsed}
+              aria-controls="detalle-semanal-panel"
+              onClick={() => setDetalleCollapsed((v) => !v)}
+              className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 hover:bg-white"
+            >
+              {detalleCollapsed ? 'Mostrar' : 'Ocultar'}
+            </button>
+          </SectionHeader>
+          {detalleCollapsed ? (
+            <p className="mt-3 text-sm" style={{ color: theme.muted }}>
+              Tabla por semana · Eventos, Venta WI y total
+              {detalleWeekOptions.length > 0
+                ? ` · ${detalleWeekOptions.length} semanas en ${detalleYear}`
+                : ''}{' '}
+              (colapsado). Pulsa Mostrar para ver el desglose.
+            </p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr
-                    className="text-left text-xs uppercase tracking-wide text-white"
-                    style={{ backgroundColor: theme.tableHead }}
+            <div id="detalle-semanal-panel" className="mt-4 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className={filterControlClass}>
+                  <span className="text-slate-500">Año</span>
+                  <select
+                    className={filterSelectClass}
+                    value={detalleYear}
+                    onChange={(e) => {
+                      setDetalleYear(Number(e.target.value));
+                      setDetalleWeekFrom(null);
+                      setDetalleWeekTo(null);
+                    }}
                   >
-                    <th className="px-4 py-3">Mes</th>
-                    <th className="px-4 py-3">Semana</th>
-                    <th className="px-4 py-3">Rango (lun – dom)</th>
-                    <th className="px-4 py-3 text-right">Eventos</th>
-                    <th className="px-4 py-3 text-right">Venta WI</th>
-                    <th className="px-4 py-3 text-right">TOTAL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {weekRowsDisplay.map((w, i) => (
-                    <tr key={w.week} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                      <td className="px-4 py-2.5 text-slate-700">{w.mes}</td>
-                      <td className="px-4 py-2.5 font-semibold" style={{ color: theme.tableWeek }}>
-                        S{w.week}
-                      </td>
-                      <td className="px-4 py-2.5 text-slate-600">{w.label}</td>
-                      <td className="px-4 py-2.5 text-right text-slate-600">
-                        {w.eventos > 0 ? money(w.eventos) : '—'}
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-medium text-slate-700">
-                        {money(w.ventaWi)}
-                      </td>
-                      <td
-                        className="px-4 py-2.5 text-right font-semibold"
-                        style={{ color: theme.tableTotal }}
+                    {COMPARE_YEARS.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={`${filterControlClass} min-w-[220px] flex-1`}>
+                  <span className="shrink-0 text-slate-500">Desde</span>
+                  <select
+                    className={`${filterSelectClass} w-full`}
+                    value={detalleWeekFrom ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value === '' ? null : Number(e.target.value);
+                      setDetalleWeekFrom(v);
+                      if (v != null && detalleWeekTo != null && v > detalleWeekTo) {
+                        setDetalleWeekTo(v);
+                      }
+                    }}
+                  >
+                    <option value="">Inicio</option>
+                    {detalleWeekOptions.map((o) => (
+                      <option key={o.week} value={o.week}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={`${filterControlClass} min-w-[220px] flex-1`}>
+                  <span className="shrink-0 text-slate-500">Hasta</span>
+                  <select
+                    className={`${filterSelectClass} w-full`}
+                    value={detalleWeekTo ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value === '' ? null : Number(e.target.value);
+                      setDetalleWeekTo(v);
+                      if (v != null && detalleWeekFrom != null && v < detalleWeekFrom) {
+                        setDetalleWeekFrom(v);
+                      }
+                    }}
+                  >
+                    <option value="">Fin</option>
+                    {detalleWeekOptions.map((o) => (
+                      <option key={o.week} value={o.week}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {(detalleWeekFrom != null || detalleWeekTo != null) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetalleWeekFrom(null);
+                      setDetalleWeekTo(null);
+                    }}
+                    className="inline-flex h-9 items-center rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    Limpiar rango
+                  </button>
+                )}
+              </div>
+              {weekRowsDisplay.length === 0 ? (
+                <p className="py-8 text-center text-slate-400">Sin semanas en el periodo.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr
+                        className="text-center text-xs uppercase tracking-wide text-white"
+                        style={{ backgroundColor: theme.tableHead }}
                       >
-                        {money(w.total)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="font-bold text-white" style={{ backgroundColor: theme.tableFoot }}>
-                    <td className="px-4 py-3" colSpan={3}>
-                      Total {detalleYear}
-                      {detalleWeekFrom != null || detalleWeekTo != null
-                        ? ` · S${detalleWeekFrom ?? '…'}–S${detalleWeekTo ?? '…'}`
-                        : ''}
-                    </td>
-                    <td className="px-4 py-3 text-right">{money(totalesDetalle.eventos)}</td>
-                    <td className="px-4 py-3 text-right">{money(totalesDetalle.ventaWi)}</td>
-                    <td className="px-4 py-3 text-right">{money(totalesDetalle.total)}</td>
-                  </tr>
-                  <tr className="bg-slate-100 text-slate-600">
-                    <td className="px-4 py-2.5 font-semibold" colSpan={5}>
-                      Promedio semanal ({weekRowsDisplay.length} semanas)
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-semibold">
-                      {weeklyAverage(weekRowsDisplay) > 0
-                        ? money(weeklyAverage(weekRowsDisplay))
-                        : '—'}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+                        <th className="px-4 py-3">Mes</th>
+                        <th className="px-4 py-3">Semana</th>
+                        <th className="px-4 py-3">Rango (lun – dom)</th>
+                        <th className="px-4 py-3">Eventos</th>
+                        <th className="px-4 py-3">Venta WI</th>
+                        <th className="px-4 py-3">TOTAL</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {weekRowsDisplay.map((w, i) => (
+                        <tr key={w.week} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                          <td className="px-4 py-2.5 text-slate-700">{w.mes}</td>
+                          <td
+                            className="px-4 py-2.5 font-semibold"
+                            style={{ color: theme.tableWeek }}
+                          >
+                            S{w.week}
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-600">{w.label}</td>
+                          <td className="px-4 py-2.5 text-right text-slate-600">
+                            {w.eventos > 0 ? money(w.eventos) : '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-medium text-slate-700">
+                            {money(w.ventaWi)}
+                          </td>
+                          <td
+                            className="px-4 py-2.5 text-right font-semibold"
+                            style={{ color: theme.tableTotal }}
+                          >
+                            {money(w.total)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr
+                        className="font-bold text-white"
+                        style={{ backgroundColor: theme.tableFoot }}
+                      >
+                        <td className="px-4 py-3" colSpan={3}>
+                          Total {detalleYear}
+                          {detalleWeekFrom != null || detalleWeekTo != null
+                            ? ` · S${detalleWeekFrom ?? '…'}–S${detalleWeekTo ?? '…'}`
+                            : ''}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {money(totalesDetalle.eventos)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {money(totalesDetalle.ventaWi)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {money(totalesDetalle.total)}
+                        </td>
+                      </tr>
+                      <tr className="bg-slate-100 text-slate-600">
+                        <td className="px-4 py-2.5 font-semibold" colSpan={5}>
+                          Promedio semanal ({weekRowsDisplay.length} semanas)
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-semibold">
+                          {weeklyAverage(weekRowsDisplay) > 0
+                            ? money(weeklyAverage(weekRowsDisplay))
+                            : '—'}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </Card>

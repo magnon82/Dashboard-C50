@@ -184,6 +184,7 @@ export async function createUser(input: {
 export async function updateUser(
   id: string,
   patch: {
+    username?: string;
     displayName?: string | null;
     passwordHash?: string;
     password?: string;
@@ -205,6 +206,21 @@ export async function updateUser(
   const current = recordToUser(row);
   if (!current) throw new Error('Usuario corrupto');
 
+  let username = current.username;
+  if (patch.username !== undefined) {
+    const next = patch.username.trim().toLowerCase();
+    if (!next || next.length < 2) {
+      throw new Error('Usuario inválido');
+    }
+    if (next !== current.username) {
+      const taken = await findUserByUsername(next);
+      if (taken && taken.id !== id) {
+        throw new Error('Ese usuario ya existe');
+      }
+      username = next;
+    }
+  }
+
   const role = patch.role ?? current.role;
   const modules =
     role === 'admin'
@@ -223,7 +239,7 @@ export async function updateUser(
       : current.password || undefined;
 
   const payload: UserPayload = {
-    username: current.username,
+    username,
     display_name:
       patch.displayName !== undefined
         ? patch.displayName?.trim() || null
@@ -246,4 +262,37 @@ export async function updateUser(
   const user = recordToUser(data);
   if (!user) throw new Error('No se pudo actualizar');
   return user;
+}
+
+export async function findUserById(id: string): Promise<DashboardUserRow | null> {
+  const sb = getServiceSupabase();
+  const { data: row, error } = await sb
+    .from('financial_records')
+    .select('id,date,description,source_file,category')
+    .eq('id', id)
+    .eq('source_file', AUTH_SOURCE_FILE)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!row) return null;
+  return recordToUser(row);
+}
+
+/** Elimina permanentemente la fila dashboard_auth en financial_records. */
+export async function deleteUser(id: string): Promise<void> {
+  const sb = getServiceSupabase();
+  const { data: row, error: findErr } = await sb
+    .from('financial_records')
+    .select('id,source_file')
+    .eq('id', id)
+    .eq('source_file', AUTH_SOURCE_FILE)
+    .maybeSingle();
+  if (findErr) throw new Error(findErr.message);
+  if (!row) throw new Error('Usuario no encontrado');
+
+  const { error } = await sb
+    .from('financial_records')
+    .delete()
+    .eq('id', id)
+    .eq('source_file', AUTH_SOURCE_FILE);
+  if (error) throw new Error(error.message);
 }

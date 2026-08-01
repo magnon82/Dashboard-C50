@@ -4,13 +4,19 @@ Ingestor CXP (Google Sheet) → financial_records.
 Sheet: C X P PROVEEDORES CLUSTER 2026
 Pestañas: CXP PROVEEDORES, CXP SERVICIOS (Aportaciones se omite)
 
-Registra pagos reales (CANTIDAD PAGADA) como expense source_file=cxp.
+Registra pagos reales (PAGADO / CANTIDAD PAGADA) como expense source_file=cxp.
+
+En pestañas con columna «RETORNOS DE EFECTIVO» (razón social), el campo
+útil para etiquetar/agrupar es CONCEPTO (NÓMINA, QUINCENAS, LUZ…);
+la razón social queda como detalle secundario.
+
 También guarda saldos resumen MIFEL/BBVA/Efectivo del encabezado (source_file=cxp_saldos).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 from datetime import date, datetime
@@ -124,9 +130,26 @@ def parse_date_mx(value) -> date | None:
 
 def is_header_row(row: list) -> bool:
     joined = " ".join(str(c).strip().lower() for c in row if c)
-    return all(marker in joined for marker in ("fecha", "concepto")) and (
-        "cantidad" in joined or "pagar" in joined or "pagada" in joined
+    has_money_hdr = any(
+        m in joined
+        for m in ("cantidad", "pagar", "pagada", "pagado", "total", "saldo")
     )
+    return all(marker in joined for marker in ("fecha", "concepto")) and has_money_hdr
+
+
+def parse_semana(value) -> int | None:
+    """Lee SEMANA O MES (entero 1–53 típico)."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        n = int(value)
+        return n if 1 <= n <= 53 else None
+    s = str(value).strip().replace(",", ".")
+    try:
+        n = int(float(s))
+    except ValueError:
+        return None
+    return n if 1 <= n <= 53 else None
 
 
 def looks_like_data_row(row: list) -> bool:
@@ -187,8 +210,12 @@ def extract_payments(values: list[list], sheet_title: str) -> list[dict]:
         if not fecha:
             continue
 
-        proveedor = str(cells[2] or "").strip()
+        # Col C = razón social / «RETORNOS DE EFECTIVO» (encabezado de servicio).
+        # Col D = CONCEPTO (etiqueta principal: NÓMINA, QUINCENAS, LUZ…).
+        razon_social = str(cells[2] or "").strip()
         concepto = str(cells[3] or "").strip()
+        semana = parse_semana(cells[4] if len(cells) > 4 else None)
+        iva = parse_money_mx(cells[5] if len(cells) > 5 else None)
         forma = str(cells[9] or "").strip()
         factura = str(cells[1] or "").strip()
 
@@ -196,9 +223,10 @@ def extract_payments(values: list[list], sheet_title: str) -> list[dict]:
         if pagada is None:
             continue  # solo movimientos pagados
 
-        if not proveedor and not concepto:
+        if not concepto and not razon_social:
             continue
 
+        label = concepto or razon_social
         bank_hint = "Transferencia"
         forma_u = forma.upper()
         if "MIFEL" in forma_u:
@@ -210,17 +238,31 @@ def extract_payments(values: list[list], sheet_title: str) -> list[dict]:
         elif "TRANSFERENCIA" in forma_u:
             bank_hint = "Transferencia"
 
-        desc = " · ".join(
-            p for p in (proveedor, concepto, f"Fac {factura}" if factura else "", forma, sheet_title) if p
-        )
+        # Concepto primero; razón social solo como detalle.
+        payload = {
+            "canal": "CXP",
+            "fecha": fecha.isoformat(),
+            "concepto": concepto or None,
+            "descripcion": label,
+            "razon_social": razon_social or None,
+            "factura": factura or None,
+            "forma_pago": forma or None,
+            "bank_hint": bank_hint,
+            "iva": iva,
+            "week": semana,
+            "week_annual": semana,
+            "sheet": sheet_title,
+            "cargo": pagada,
+            "abono": None,
+        }
 
         records.append(
             {
                 "date": fecha.isoformat(),
                 "type": "expense",
-                "category": f"CXP: {concepto or proveedor}"[:120],
+                "category": f"CXP: {label}"[:120],
                 "amount": pagada,
-                "description": desc[:240],
+                "description": json.dumps(payload, ensure_ascii=False),
                 "source_file": SOURCE_FILE,
             }
         )

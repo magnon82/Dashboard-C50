@@ -6,6 +6,8 @@ source_file:
   - presupuesto_saldos   — saldo ACTUAL Mifel / BBVA del mes
   - presupuesto_rubro    — presupuesto vs real por rubro (+ canales, padre)
   - presupuesto_semana   — componentes del roll-forward bancario semanal
+  - presupuesto_sem_detalle — gasto por SEM × rubro × canal (+ nota de concepto)
+  - presupuesto_ingreso  — ingresos bancarios semanales Mifel/BBVA (TOTAL, llenado manual)
 """
 
 from __future__ import annotations
@@ -29,6 +31,8 @@ SOURCE_FILE = "presupuesto_mensual"
 SOURCE_SALDOS = "presupuesto_saldos"
 SOURCE_RUBRO = "presupuesto_rubro"
 SOURCE_SEMANA = "presupuesto_semana"
+SOURCE_DETALLE = "presupuesto_sem_detalle"
+SOURCE_INGRESO = "presupuesto_ingreso"
 # Admin overrides live in the app (source_file=presupuesto_ajuste); not wiped here.
 
 DEFAULT_YEAR_FOLDER = Path(
@@ -63,7 +67,17 @@ MONTHS = {
     "DICIEMBRE": 12,
 }
 
-PARENT_CATEGORIES = {"INSUMOS DE COCINA", "INSUMOS DE BARRA", "SERVICIOS"}
+PARENT_COCINA = "Insumos de cocina"
+PARENT_BARRA = "Insumos de barra"
+PARENT_SERVICIOS = "Servicios"
+
+# Keys (norm / upper) → display names for stored parent fields
+PARENT_DISPLAY = {
+    "INSUMOS DE COCINA": PARENT_COCINA,
+    "INSUMOS DE BARRA": PARENT_BARRA,
+    "SERVICIOS": PARENT_SERVICIOS,
+}
+PARENT_CATEGORIES = set(PARENT_DISPLAY.keys())
 
 COCINA_CHILDREN = {
     "FRUTAS Y VERDURAS",
@@ -121,7 +135,26 @@ STREAMS = (
     (6, 7, "BBVA"),
 )
 
-ALL_SOURCES = (SOURCE_FILE, SOURCE_SALDOS, SOURCE_RUBRO, SOURCE_SEMANA)
+ALL_SOURCES = (
+    SOURCE_FILE,
+    SOURCE_SALDOS,
+    SOURCE_RUBRO,
+    SOURCE_SEMANA,
+    SOURCE_DETALLE,
+    SOURCE_INGRESO,
+)
+
+
+def first_monday_on_or_after(year: int, month: int, day: int) -> date:
+    d = date(year, month, day)
+    while d.weekday() != 0:
+        d += timedelta(days=1)
+    return d
+
+
+def monday_of_month_sem(year: int, month: int, week: int) -> date:
+    """Lunes de SEM n del mes (alineado a presupuesto / flujo efectivo)."""
+    return first_monday_on_or_after(year, month, 1) + timedelta(days=(week - 1) * 7)
 
 
 def parse_month_year(filename: str) -> tuple[int, int] | None:
@@ -165,7 +198,74 @@ SERVICIOS_CHILDREN_KEYS = {norm_rubro_key(n) for n in SERVICIOS_CHILDREN}
 
 
 def rubro_merge_key(rubro: str, parent: str | None) -> str:
-    return f"{parent or ''}::{norm_rubro_key(rubro)}"
+    p = norm_rubro_key(parent) if parent else ""
+    return f"{p}::{norm_rubro_key(rubro)}"
+
+
+def parent_section_key(name: str | None) -> str:
+    """Normalized key for parent section comparisons."""
+    if not name:
+        return ""
+    return norm_rubro_key(name)
+
+
+def parent_display(name_or_key: str) -> str:
+    key = norm_rubro_key(name_or_key)
+    return PARENT_DISPLAY.get(key, name_or_key)
+
+
+# Legacy Excel rubros → single catalog line (matches app/lib/presupuesto.ts)
+RUBRO_CRISTALERIA_Y_EQUIPO = "Cristalería y Equipo"
+_LEGACY_CRISTALERIA_EQUIPO = {"EQUIPO", "CRISTALERIA", "CRISTALERIA Y EQUIPO"}
+
+# Display names keyed by norm_rubro_key (accents stripped, upper)
+RUBRO_DISPLAY_BY_KEY = {
+    "INSUMOS DE COCINA": PARENT_COCINA,
+    "INSUMOS DE BARRA": PARENT_BARRA,
+    "SERVICIOS": PARENT_SERVICIOS,
+    "FRUTAS Y VERDURAS": "Frutas y verduras",
+    "PROTEINAS": "Proteínas",
+    "ABARROTES": "Abarrotes",
+    "LACTEOS": "Lácteos",
+    "PANES TORTILLAS POSTRES": "Panes, tortillas, postres",
+    "AGUA": "Agua",
+    "CARBON": "Carbón",
+    "DESTILADOS Y VINOS": "Destilados y vinos",
+    "CERVEZAS": "Cervezas",
+    "CAFE": "Café",
+    "REFRESCOS AGUAS Y HIELO": "Refrescos, aguas y hielo",
+    "LAVANDERIA": "Lavandería",
+    "GAS": "Gas",
+    "LUZ": "Luz",
+    "TELEFONO": "Teléfono",
+    "CONTADOR": "Contador",
+    "DISENO Y PUBLICIDAD": "Diseño y publicidad",
+    "ALARMA": "Alarma",
+    "AUDITORIAS": "Auditorías",
+    "GAS CALENTADORES": "Gas calentadores",
+    "MATERIAS PRIMAS": "Materias primas",
+    "COMIDA PERSONAL": "Comida personal",
+    "RENTA": "Renta",
+    "MANTENIMIENTO": "Mantenimiento",
+    "CRISTALERIA Y EQUIPO": RUBRO_CRISTALERIA_Y_EQUIPO,
+    "PAPELERIA": "Papelería",
+    "LIMPIEZA Y BANOS": "Limpieza y baños",
+    "GASOLINA Y TAXIS": "Gasolina y taxis",
+    "OTROS": "Otros",
+    "LICENCIAS Y AFILIACIONES": "Licencias y afiliaciones",
+    "COMISIONES BANCARIAS": "Comisiones bancarias",
+    "FINIQUITOS Y RECLUTAMIENTO": "Finiquitos y reclutamiento",
+    "NOMINA": "Nómina",
+    "IMSS": "IMSS",
+    "IMPUESTOS": "Impuestos",
+}
+
+
+def canonicalize_rubro_name(rubro: str) -> str:
+    key = norm_rubro_key(rubro)
+    if key in _LEGACY_CRISTALERIA_EQUIPO:
+        return RUBRO_CRISTALERIA_Y_EQUIPO
+    return RUBRO_DISPLAY_BY_KEY.get(key, rubro)
 
 
 def months_in_recent_window(days: int, today: date | None = None) -> set[tuple[int, int]]:
@@ -234,33 +334,35 @@ def extract_saldos_from_total(rows: list, year: int, month: int, month_label: st
 
 
 def detect_parent(rubro: str, row_idx: int, last_parent: str | None) -> tuple[str | None, str | None]:
-    """Returns (parent_for_this_row, new_last_parent)."""
-    upper = rubro.upper()
+    """Returns (parent_for_this_row, new_last_parent). Parents are display names."""
     key = norm_rubro_key(rubro)
-    if upper in PARENT_CATEGORIES:
-        return None, upper
-    if last_parent == "INSUMOS DE COCINA":
+    upper = rubro.upper()
+    last_key = parent_section_key(last_parent)
+
+    if key in PARENT_DISPLAY:
+        return None, PARENT_DISPLAY[key]
+    if last_key == "INSUMOS DE COCINA":
         if upper in COCINA_CHILDREN or upper.startswith("PANES") or key == "CARBON":
             return last_parent, last_parent
-        if upper in PARENT_CATEGORIES:
-            return None, upper
+        if key in PARENT_DISPLAY:
+            return None, PARENT_DISPLAY[key]
         # left cocina block when we hit a top-level non-child
         if upper not in BARRA_CHILDREN:
             return None, None
-    if last_parent == "INSUMOS DE BARRA":
+    if last_key == "INSUMOS DE BARRA":
         if upper in BARRA_CHILDREN or upper in {"CAFE", "CAFÉ"}:
             return last_parent, last_parent
         return None, None
-    if last_parent == "SERVICIOS":
+    if last_key == "SERVICIOS":
         if upper in SERVICIOS_CHILDREN or key in SERVICIOS_CHILDREN_KEYS:
             return last_parent, last_parent
         return None, None
     # Flat Excel names remapped by frontend; optional ingest hints:
     if key == "CARBON":
-        return "INSUMOS DE COCINA", last_parent
+        return PARENT_COCINA, last_parent
     if key in SERVICIOS_CHILDREN_KEYS and key != "AGUA":
         # Agua is ambiguous (cocina vs servicios); leave flat for frontend remap
-        return "SERVICIOS", last_parent
+        return PARENT_SERVICIOS, last_parent
     return None, last_parent
 
 
@@ -308,50 +410,54 @@ def extract_rubros(
         e_name = norm_cat(str(name_e)) if name_e else ""
         e_upper = e_name.upper()
         e_key = norm_rubro_key(e_name) if e_name else ""
-        if e_upper in PARENT_CATEGORIES:
-            last_parent = e_upper
-            if e_upper == "INSUMOS DE BARRA":
+        last_key = parent_section_key(last_parent)
+        if e_key in PARENT_DISPLAY:
+            last_parent = PARENT_DISPLAY[e_key]
+            if e_key == "INSUMOS DE BARRA":
                 seen_barra_parent = True
             parent = None
             is_parent = True
-            rubro = e_name
-        elif last_parent == "INSUMOS DE COCINA" and (
+            rubro = PARENT_DISPLAY[e_key]
+        elif last_key == "INSUMOS DE COCINA" and (
             e_upper in COCINA_CHILDREN
             or e_upper.startswith("PANES")
             or e_key == "CARBON"
         ):
-            parent = "INSUMOS DE COCINA"
+            parent = PARENT_COCINA
             is_parent = False
             rubro = e_name or rubro
-        elif last_parent == "INSUMOS DE BARRA" and (
+        elif last_key == "INSUMOS DE BARRA" and (
             e_upper in BARRA_CHILDREN or e_upper in {"CAFE", "CAFÉ"} or upper in BARRA_CHILDREN
         ):
-            parent = "INSUMOS DE BARRA"
+            parent = PARENT_BARRA
             is_parent = False
             # Prefer efectivo name when present for barra children
             rubro = e_name or rubro
-        elif last_parent == "SERVICIOS" and (
+        elif last_key == "SERVICIOS" and (
             e_upper in SERVICIOS_CHILDREN or e_key in SERVICIOS_CHILDREN_KEYS
         ):
-            parent = "SERVICIOS"
+            parent = PARENT_SERVICIOS
             is_parent = False
             rubro = e_name or rubro
         else:
             if e_upper and e_upper not in COCINA_CHILDREN and e_upper not in BARRA_CHILDREN:
-                if last_parent == "INSUMOS DE COCINA" and e_upper != "INSUMOS DE BARRA":
+                if last_key == "INSUMOS DE COCINA" and e_key != "INSUMOS DE BARRA":
                     # still in cocina until barra parent or other major section
-                    if e_upper.startswith("INSUMOS"):
-                        last_parent = e_upper if e_upper in PARENT_CATEGORIES else None
+                    if e_upper.startswith("INSUMOS") or e_key.startswith("INSUMOS"):
+                        last_parent = PARENT_DISPLAY.get(e_key)
                     elif money_or_0(cells[9]) or money_or_0(cells[10]) or name_e:
-                        # top-level rubro (COMIDA PERSONAL, etc.)
+                        # top-level rubro (Comida personal, etc.)
                         last_parent = None
             parent = None
-            is_parent = upper in PARENT_CATEGORIES
+            is_parent = e_key in PARENT_DISPLAY or upper in PARENT_CATEGORIES
             if is_parent:
-                last_parent = upper
+                last_parent = PARENT_DISPLAY.get(e_key) or PARENT_DISPLAY.get(
+                    norm_rubro_key(rubro), rubro
+                )
+                rubro = last_parent or rubro
             # Flat remaps (frontend catalog is source of truth for display)
             elif e_key == "CARBON" or norm_rubro_key(rubro) == "CARBON":
-                parent = "INSUMOS DE COCINA"
+                parent = PARENT_COCINA
                 is_parent = False
             elif norm_rubro_key(rubro) in {
                 "LAVANDERIA",
@@ -361,7 +467,7 @@ def extract_rubros(
                 "GAS CALENTADORES",
                 "MATERIAS PRIMAS",
             }:
-                parent = "SERVICIOS"
+                parent = PARENT_SERVICIOS
                 is_parent = False
 
         efectivo = money_or_0(cells[1]) if name_e else money_or_0(cells[1]) if cells[1] else 0.0
@@ -435,8 +541,13 @@ def extract_rubros(
                 )
 
     # Merge Excel split rows (same rubro across Efectivo/Mifel/BBVA) → 1 row
+    # Also fold legacy EQUIPO + CRISTALERIA into Cristalería y Equipo
     merged: dict[str, dict] = {}
     for p in rubro_rows:
+        p = dict(p)
+        p["rubro"] = canonicalize_rubro_name(str(p["rubro"]))
+        if p.get("parent"):
+            p["parent"] = parent_display(str(p["parent"]))
         key = rubro_merge_key(p["rubro"], p["parent"])
         if key not in merged:
             merged[key] = dict(p)
@@ -493,6 +604,24 @@ def is_entre_cuentas_note(note) -> bool:
     return "ENTRE CUENTA" in key
 
 
+def clean_sem_note(note) -> str | None:
+    """Normalize free-text concept note from SEM cols C/F/I; None if empty."""
+    if note is None:
+        return None
+    text = re.sub(r"\s+", " ", str(note).strip())
+    if not text:
+        return None
+    return text
+
+
+# SEM channel layout: label_col, amount_col, note_col, canal name
+SEM_CHANNEL_STREAMS = (
+    (0, 1, 2, "Efectivo"),
+    (3, 4, 5, "Mifel"),
+    (6, 7, 8, "BBVA"),
+)
+
+
 def extract_entre_cuentas_otros(wb) -> dict[str, float]:
     """
     Scan SEM sheets for OTROS rows noted as transferencias 'Entre cuentas'
@@ -514,6 +643,110 @@ def extract_entre_cuentas_otros(wb) -> dict[str, float]:
             if norm_rubro_key(str(cells[6] or "")) == "OTROS" and is_entre_cuentas_note(cells[8]):
                 totals["bbva"] += money_or_0(cells[7])
     return totals
+
+
+def extract_sem_detalle(wb, year: int, month: int) -> list[dict]:
+    """
+    Per-week rubro × canal lines from SEM sheets, including free-text notes
+    (cols C/F/I) used as concepts in the Real drill-down (e.g. huerta, galacticos).
+
+    Skips parent section headers, footer labels, zero/empty noise, and OTROS
+    'Entre cuentas' transfers (already excluded from OTROS real).
+    """
+    month_date = f"{year:04d}-{month:02d}-01"
+    records: list[dict] = []
+
+    for n in range(1, 6):
+        sheet_name = f"SEM {n}"
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        last_parent: str | None = None
+
+        for row_idx, row in enumerate(
+            ws.iter_rows(max_row=120, max_col=10, values_only=True)
+        ):
+            if row_idx == 0:
+                continue
+            cells = list(row) + [None] * 10
+
+            # Track parent sections from Efectivo column order (same as TOTAL)
+            e_raw = cells[0]
+            if e_raw:
+                e_name = norm_cat(str(e_raw))
+                e_key = norm_rubro_key(e_name)
+                if e_key in PARENT_DISPLAY:
+                    last_parent = PARENT_DISPLAY[e_key]
+                elif e_key in SKIP_NAMES or e_name.upper() in SKIP_NAMES:
+                    pass
+                else:
+                    parent_hint, last_parent = detect_parent(
+                        e_name, row_idx, last_parent
+                    )
+                    # detect_parent returns parent for this row; keep last_parent
+                    _ = parent_hint
+
+            for label_col, amount_col, note_col, canal in SEM_CHANNEL_STREAMS:
+                raw_label = cells[label_col]
+                if not raw_label:
+                    continue
+                rubro_raw = norm_cat(str(raw_label))
+                key = norm_rubro_key(rubro_raw)
+                upper = rubro_raw.upper()
+                if upper in SKIP_NAMES or key in SKIP_NAMES:
+                    continue
+                if key in PARENT_DISPLAY:
+                    continue
+
+                amount = money_or_0(cells[amount_col])
+                note = clean_sem_note(cells[note_col])
+                if amount == 0 and not note:
+                    continue
+
+                # Exclude OTROS entre-cuentas (not part of Real)
+                if key == "OTROS" and is_entre_cuentas_note(note):
+                    continue
+
+                parent, _ = detect_parent(rubro_raw, row_idx, last_parent)
+                # Prefer section last_parent for known children when detect returns None
+                if parent is None and last_parent:
+                    last_key = parent_section_key(last_parent)
+                    if last_key == "INSUMOS DE COCINA" and (
+                        upper in COCINA_CHILDREN
+                        or upper.startswith("PANES")
+                        or key == "CARBON"
+                    ):
+                        parent = PARENT_COCINA
+                    elif last_key == "INSUMOS DE BARRA" and (
+                        upper in BARRA_CHILDREN or upper in {"CAFE", "CAFÉ"}
+                    ):
+                        parent = PARENT_BARRA
+                    elif last_key == "SERVICIOS" and (
+                        upper in SERVICIOS_CHILDREN or key in SERVICIOS_CHILDREN_KEYS
+                    ):
+                        parent = PARENT_SERVICIOS
+
+                rubro = canonicalize_rubro_name(rubro_raw)
+                payload = {
+                    "week": n,
+                    "rubro": rubro,
+                    "parent": parent,
+                    "canal": canal,
+                    "amount": amount,
+                    "note": note,
+                }
+                records.append(
+                    {
+                        "date": month_date,
+                        "type": "expense",
+                        "category": f"SEM {n} · {rubro}",
+                        "amount": amount,
+                        "description": json.dumps(payload, ensure_ascii=False),
+                        "source_file": SOURCE_DETALLE,
+                    }
+                )
+
+    return records
 
 
 def apply_entre_cuentas_correction(
@@ -557,16 +790,22 @@ def apply_entre_cuentas_correction(
         r["description"] = json.dumps(payload, ensure_ascii=False)
         r["amount"] = payload["real"]
         print(
-            f"OTROS − entre cuentas: efe={sub_e} mifel={sub_m} bbva={sub_b} "
-            f"→ real={payload['real']}"
+            f"OTROS - entre cuentas: efe={sub_e} mifel={sub_m} bbva={sub_b} "
+            f"-> real={payload['real']}"
         )
 
 
-def extract_week_bank_components(wb, year: int, month: int) -> list[dict]:
-    """Build per-week bank roll-forward components from SEM sheets + TOTAL right panel."""
+def extract_week_bank_components(
+    wb, year: int, month: int
+) -> tuple[list[dict], list[dict]]:
+    """Build per-week bank roll-forward + per-bank ingreso rows from SEM + TOTAL panel.
+
+    Bank ingresos are weekly aggregates typed manually on TOTAL (ventas M+N +
+    anticipos entradas). SEM sheets have no income line items — only pagos/gastos.
+    """
     month_date = f"{year:04d}-{month:02d}-01"
     if "TOTAL" not in wb.sheetnames:
-        return []
+        return [], []
 
     total_rows = [
         list(r) + [None] * 20
@@ -640,21 +879,19 @@ def extract_week_bank_components(wb, year: int, month: int) -> list[dict]:
 
     weeks = sorted(week_pagos.keys())
     if not weeks:
-        return []
+        return [], []
 
     inicial = mifel_inicial + bbva_inicial
     records: list[dict] = []
+    ingreso_records: list[dict] = []
     for w in weeks:
         mp = week_pagos.get(w, {"pagos_mifel": 0.0, "pagos_bbva": 0.0})
         mv = mifel_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
         bv = bbva_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
+        ingresos_mifel = mv["ventas"] + mifel_inv_in.get(w, 0.0)
+        ingresos_bbva = bv["ventas"] + bbva_inv_in.get(w, 0.0)
         # Entradas de anticipos se suman a ingresos (como en la tabla resumen)
-        ingresos = (
-            mv["ventas"]
-            + bv["ventas"]
-            + mifel_inv_in.get(w, 0.0)
-            + bbva_inv_in.get(w, 0.0)
-        )
+        ingresos = ingresos_mifel + ingresos_bbva
         comisiones = mv["comisiones"] + bv["comisiones"]
         inversiones = mifel_inv_out.get(w, 0.0) + bbva_inv_out.get(w, 0.0)
         pagos_mifel = mp["pagos_mifel"]
@@ -668,6 +905,8 @@ def extract_week_bank_components(wb, year: int, month: int) -> list[dict]:
             "week": w,
             "inicial": inicial,
             "ingresos": ingresos,
+            "ingresos_mifel": ingresos_mifel,
+            "ingresos_bbva": ingresos_bbva,
             "pagos_mifel": pagos_mifel,
             "comisiones": comisiones,
             "pagos_bbva": pagos_bbva,
@@ -686,12 +925,48 @@ def extract_week_bank_components(wb, year: int, month: int) -> list[dict]:
                 "source_file": SOURCE_SEMANA,
             }
         )
+
+        # Filas visibles en /finanzas/ingresos (agregado semanal por banco).
+        # date = mes-01 para wipe incremental; fecha display = lunes de la SEM.
+        week_monday = monday_of_month_sem(year, month, w)
+        for bank, amount in (("MIFEL", ingresos_mifel), ("BBVA", ingresos_bbva)):
+            if amount <= 0:
+                continue
+            ingreso_payload = {
+                "bank": bank,
+                "week": w,
+                "year": year,
+                "month": month,
+                "abono": amount,
+                "ventas": mv["ventas"] if bank == "MIFEL" else bv["ventas"],
+                "anticipos_entrada": (
+                    mifel_inv_in.get(w, 0.0)
+                    if bank == "MIFEL"
+                    else bbva_inv_in.get(w, 0.0)
+                ),
+                "fecha": week_monday.isoformat(),
+                "descripcion": f"Ingresos {bank} · SEM {w} (presupuesto)",
+                "source": "presupuesto_excel",
+            }
+            ingreso_records.append(
+                {
+                    "date": month_date,
+                    "type": "income",
+                    "category": f"Ingreso {bank} SEM {w}",
+                    "amount": amount,
+                    "description": json.dumps(ingreso_payload, ensure_ascii=False),
+                    "source_file": SOURCE_INGRESO,
+                }
+            )
+
         inicial = total
 
-    return records
+    return records, ingreso_records
 
 
-def extract_from_workbook(path: Path) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+def extract_from_workbook(
+    path: Path,
+) -> tuple[list[dict], list[dict], list[dict], list[dict], list[dict], list[dict]]:
     parsed = parse_month_year(path.name)
     if not parsed:
         raise ValueError(f"No se pudo inferir mes/año de: {path.name}")
@@ -710,11 +985,12 @@ def extract_from_workbook(path: Path) -> tuple[list[dict], list[dict], list[dict
 
     saldos = extract_saldos_from_total(total_rows, year, month, month_label)
     channel_rows, rubro_rows, _meta = extract_rubros(total_rows, year, month, month_label)
-    week_rows = extract_week_bank_components(wb, year, month)
+    week_rows, ingreso_rows = extract_week_bank_components(wb, year, month)
+    detalle_rows = extract_sem_detalle(wb, year, month)
     entre = extract_entre_cuentas_otros(wb)
     apply_entre_cuentas_correction(channel_rows, rubro_rows, entre)
     wb.close()
-    return channel_rows, saldos, rubro_rows, week_rows
+    return channel_rows, saldos, rubro_rows, week_rows, detalle_rows, ingreso_rows
 
 
 def find_budget_files(folder: Path) -> list[Path]:
@@ -799,26 +1075,40 @@ def main() -> None:
     all_saldos: list[dict] = []
     all_rubros: list[dict] = []
     all_weeks: list[dict] = []
+    all_detalle: list[dict] = []
+    all_ingresos: list[dict] = []
 
     for path in files:
         if not path.exists():
             print(f"SKIP (no existe): {path}")
             continue
         try:
-            channels, saldos, rubros, weeks = extract_from_workbook(path)
+            channels, saldos, rubros, weeks, detalle, ingresos = extract_from_workbook(
+                path
+            )
         except Exception as exc:
             print(f"ERROR {path.name}: {exc}")
             continue
         print(
             f"{path.name}: canales={len(channels)} rubros={len(rubros)} "
-            f"semanas={len(weeks)} saldos={len(saldos)}"
+            f"semanas={len(weeks)} saldos={len(saldos)} detalle={len(detalle)} "
+            f"ingresos_banco={len(ingresos)}"
         )
         all_channel.extend(channels)
         all_saldos.extend(saldos)
         all_rubros.extend(rubros)
         all_weeks.extend(weeks)
+        all_detalle.extend(detalle)
+        all_ingresos.extend(ingresos)
 
-    combined = all_channel + all_saldos + all_rubros + all_weeks
+    combined = (
+        all_channel
+        + all_saldos
+        + all_rubros
+        + all_weeks
+        + all_detalle
+        + all_ingresos
+    )
     print(f"TOTAL registros: {len(combined)}")
 
     if args.dry_run:
@@ -827,6 +1117,22 @@ def main() -> None:
             print("Ejemplo rubro:", all_rubros[0])
         if all_weeks:
             print("Ejemplo semana:", all_weeks[0])
+        if all_ingresos:
+            print("Ejemplo ingreso banco:", all_ingresos[0])
+        if all_detalle:
+            print("Ejemplo detalle:", all_detalle[0])
+            # Show Mantenimiento sample if present
+            mant = [
+                d
+                for d in all_detalle
+                if "MANTENIMIENTO" in norm_rubro_key(
+                    json.loads(d["description"]).get("rubro", "")
+                )
+            ]
+            if mant:
+                print(f"Detalle Mantenimiento ({len(mant)} líneas):")
+                for d in mant[:8]:
+                    print(" ", d["description"])
         # Dedup sanity: count categories per month
         from collections import Counter
 

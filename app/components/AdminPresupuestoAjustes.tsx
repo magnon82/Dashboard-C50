@@ -46,11 +46,11 @@ function rowKey(rubro: string, parent?: string | null) {
 
 function groupOf(b: AdminEditableBudget): 'fijos' | 'semanales' | 'servicios' | 'otros' {
   if (b.weeklyRate != null) return 'semanales';
-  if (b.parent === 'SERVICIOS') return 'servicios';
+  if (b.parent === 'Servicios') return 'servicios';
   if (
     b.defaultPresupuesto != null ||
     b.ventaPct != null ||
-    ['NÓMINA', 'FINIQUITOS Y RECLUTAMIENTO'].includes(b.rubro)
+    ['Nómina', 'Finiquitos y reclutamiento'].includes(b.rubro)
   ) {
     return 'fijos';
   }
@@ -60,7 +60,7 @@ function groupOf(b: AdminEditableBudget): 'fijos' | 'semanales' | 'servicios' | 
 const GROUP_LABEL: Record<ReturnType<typeof groupOf>, string> = {
   fijos: 'Fórmula fija / % venta',
   semanales: 'Rubros semanales (× N semanas SEM)',
-  servicios: 'SERVICIOS (hijos)',
+  servicios: 'Servicios (hijos)',
   otros: 'Otros rubros (Excel)',
 };
 
@@ -349,12 +349,12 @@ export function AdminPresupuestoAjustes() {
                   <div className="overflow-x-auto rounded-xl border border-slate-100">
                     <table className="min-w-full text-sm">
                       <thead>
-                        <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                          <th className="px-3 py-2.5">Rubro</th>
-                          <th className="px-3 py-2.5">Establecido</th>
-                          <th className="px-3 py-2.5">Origen</th>
-                          <th className="px-3 py-2.5">Editar</th>
-                          <th className="px-3 py-2.5">Acciones</th>
+                        <tr className="bg-slate-50 text-center text-xs uppercase tracking-wide text-slate-500">
+                          <th className="px-3 py-2.5 text-center">Rubro</th>
+                          <th className="px-3 py-2.5 text-center">Establecido</th>
+                          <th className="px-3 py-2.5 text-center">Origen</th>
+                          <th className="px-3 py-2.5 text-center">Editar</th>
+                          <th className="px-3 py-2.5 text-center">Acciones</th>
                         </tr>
                       </thead>
                       <tbody>

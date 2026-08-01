@@ -26,20 +26,29 @@ export interface SemanaBancos {
   pagos_mifel: number;
   comisiones: number;
   pagos_bbva: number;
+  /** Ingresos de FLUJO EFECTIVO asignados por Concepto a esta SEM. */
+  efectivo_ingresos: number;
+  /** Egresos de FLUJO EFECTIVO asignados por Concepto a esta SEM. */
+  efectivo_egresos: number;
+  /** efectivo_ingresos − efectivo_egresos */
+  efectivo_neto: number;
   /** Salidas de anticipos/inversiones (col N). Entradas van dentro de ingresos. */
   inversiones: number;
   suma_ingreso: number;
   suma_gasto: number;
+  /** Roll-forward bancario: suma_ingreso − suma_gasto (sin efectivo). */
+  total_bancos: number;
+  /** total_bancos + efectivo_neto */
   total: number;
 }
 
 export const SOURCE_AJUSTE = 'presupuesto_ajuste';
 
-/** Padres colapsables en la UI. */
+/** Padres colapsables en la UI (nombres de display). */
 export const COLLAPSIBLE_PARENTS = [
-  'INSUMOS DE COCINA',
-  'INSUMOS DE BARRA',
-  'SERVICIOS',
+  'Insumos de cocina',
+  'Insumos de barra',
+  'Servicios',
 ] as const;
 
 export type CollapsibleParent = (typeof COLLAPSIBLE_PARENTS)[number];
@@ -47,16 +56,22 @@ export type CollapsibleParent = (typeof COLLAPSIBLE_PARENTS)[number];
 /** Metadatos de rubros editables por el admin (ajustes mensuales). */
 export type AdminEditableBudget = {
   rubro: string;
-  /** Hijo de catálogo (p. ej. SERVICIOS → Agua). */
+  /** Hijo de catálogo (p. ej. Servicios → Agua). */
   parent?: string | null;
   /** Monto fijo de fórmula cuando aplica. */
   defaultPresupuesto?: number;
   /** Tarifa semanal × N semanas SEM del mes (Lavandería / Carbón). */
   weeklyRate?: number;
-  /** Fracción de venta del mes (NÓMINA = 0.25). */
+  /** Fracción de venta del mes (Nómina = 0.25). */
   ventaPct?: number;
   note?: string;
 };
+
+/** Display name for merged Equipo + Cristalería. */
+export const RUBRO_CRISTALERIA_Y_EQUIPO = 'Cristalería y Equipo';
+
+/** Legacy Excel / ingest keys that roll into Cristalería y Equipo. */
+const LEGACY_CRISTALERIA_EQUIPO_KEYS = new Set(['EQUIPO', 'CRISTALERIA']);
 
 /**
  * Rubros cuyo presupuesto el admin puede editar por mes.
@@ -64,62 +79,61 @@ export type AdminEditableBudget = {
  */
 export const ADMIN_EDITABLE_BUDGETS: AdminEditableBudget[] = [
   // Fijos / % venta (orden ~ catálogo)
-  { rubro: 'RENTA', defaultPresupuesto: 44330 },
-  { rubro: 'EQUIPO', defaultPresupuesto: 5000 },
-  { rubro: 'CRISTALERIA', defaultPresupuesto: 500 },
-  { rubro: 'LICENCIAS Y AFILIACIONES', defaultPresupuesto: 3500 },
-  { rubro: 'FINIQUITOS Y RECLUTAMIENTO', defaultPresupuesto: 0 },
+  { rubro: 'Renta', defaultPresupuesto: 44330 },
+  { rubro: RUBRO_CRISTALERIA_Y_EQUIPO, defaultPresupuesto: 5500 },
+  { rubro: 'Licencias y afiliaciones', defaultPresupuesto: 3500 },
+  { rubro: 'Finiquitos y reclutamiento', defaultPresupuesto: 0 },
   {
-    rubro: 'NÓMINA',
+    rubro: 'Nómina',
     ventaPct: 0.25,
     note: '25% de la venta del mes (override opcional)',
   },
   { rubro: 'IMSS', defaultPresupuesto: 16765.12 },
-  { rubro: 'IMPUESTOS', defaultPresupuesto: 6000 },
+  { rubro: 'Impuestos', defaultPresupuesto: 6000 },
   // Semanales (hijos de catálogo)
   {
-    rubro: 'LAVANDERIA',
-    parent: 'SERVICIOS',
+    rubro: 'Lavandería',
+    parent: 'Servicios',
     weeklyRate: 2400,
     note: '$2,400 × N semanas SEM',
   },
   {
-    rubro: 'CARBON',
-    parent: 'INSUMOS DE COCINA',
+    rubro: 'Carbón',
+    parent: 'Insumos de cocina',
     weeklyRate: 1500,
     note: '$1,500 × N semanas SEM',
   },
-  // SERVICIOS hijos
-  { rubro: 'Agua', parent: 'SERVICIOS', note: 'Presupuesto Excel · SERVICIOS' },
-  { rubro: 'Gas', parent: 'SERVICIOS', note: 'Presupuesto Excel · SERVICIOS' },
-  { rubro: 'Luz', parent: 'SERVICIOS', note: 'Presupuesto Excel · SERVICIOS' },
-  { rubro: 'Teléfono', parent: 'SERVICIOS', note: 'Presupuesto Excel · SERVICIOS' },
-  { rubro: 'CONTADOR', parent: 'SERVICIOS', note: 'Presupuesto Excel · SERVICIOS' },
+  // Servicios hijos
+  { rubro: 'Agua', parent: 'Servicios', note: 'Presupuesto Excel · Servicios' },
+  { rubro: 'Gas', parent: 'Servicios', note: 'Presupuesto Excel · Servicios' },
+  { rubro: 'Luz', parent: 'Servicios', note: 'Presupuesto Excel · Servicios' },
+  { rubro: 'Teléfono', parent: 'Servicios', note: 'Presupuesto Excel · Servicios' },
+  { rubro: 'Contador', parent: 'Servicios', note: 'Presupuesto Excel · Servicios' },
   {
-    rubro: 'DISEÑO Y PUBLICIDAD',
-    parent: 'SERVICIOS',
-    note: 'Presupuesto Excel · SERVICIOS',
+    rubro: 'Diseño y publicidad',
+    parent: 'Servicios',
+    note: 'Presupuesto Excel · Servicios',
   },
-  { rubro: 'Alarma', parent: 'SERVICIOS', note: 'Presupuesto Excel · SERVICIOS' },
-  { rubro: 'AUDITORIAS', parent: 'SERVICIOS', note: 'Presupuesto Excel · SERVICIOS' },
+  { rubro: 'Alarma', parent: 'Servicios', note: 'Presupuesto Excel · Servicios' },
+  { rubro: 'Auditorías', parent: 'Servicios', note: 'Presupuesto Excel · Servicios' },
   {
-    rubro: 'GAS CALENTADORES',
-    parent: 'SERVICIOS',
-    note: 'Presupuesto Excel · SERVICIOS',
+    rubro: 'Gas calentadores',
+    parent: 'Servicios',
+    note: 'Presupuesto Excel · Servicios',
   },
   {
-    rubro: 'MATERIAS PRIMAS',
-    parent: 'SERVICIOS',
-    note: 'Presupuesto Excel · SERVICIOS',
+    rubro: 'Materias primas',
+    parent: 'Servicios',
+    note: 'Presupuesto Excel · Servicios',
   },
   // Otros (Excel) — orden ~ catálogo
-  { rubro: 'COMIDA PERSONAL' },
-  { rubro: 'MANTENIMIENTO' },
-  { rubro: 'PAPELERIA' },
-  { rubro: 'LIMPIEZA Y BAÑOS' },
-  { rubro: 'GASOLINA Y TAXIS' },
-  { rubro: 'OTROS' },
-  { rubro: 'COMISIONES BANCARIAS' },
+  { rubro: 'Comida personal' },
+  { rubro: 'Mantenimiento' },
+  { rubro: 'Papelería' },
+  { rubro: 'Limpieza y baños' },
+  { rubro: 'Gasolina y taxis' },
+  { rubro: 'Otros' },
+  { rubro: 'Comisiones bancarias' },
 ];
 
 /** Clave estable para matching admin (incluye padre si aplica). */
@@ -156,48 +170,47 @@ export const RUBRO_CATALOG: Array<{
   parent: string | null;
   isParent: boolean;
 }> = [
-  { rubro: 'INSUMOS DE COCINA', parent: null, isParent: true },
-  { rubro: 'Frutas y Verduras', parent: 'INSUMOS DE COCINA', isParent: false },
-  { rubro: 'Proteinas', parent: 'INSUMOS DE COCINA', isParent: false },
-  { rubro: 'Abarrotes', parent: 'INSUMOS DE COCINA', isParent: false },
-  { rubro: 'Lacteos', parent: 'INSUMOS DE COCINA', isParent: false },
-  { rubro: 'Panes, tortillas, Postres', parent: 'INSUMOS DE COCINA', isParent: false },
-  { rubro: 'Agua', parent: 'INSUMOS DE COCINA', isParent: false },
-  { rubro: 'CARBON', parent: 'INSUMOS DE COCINA', isParent: false },
-  { rubro: 'INSUMOS DE BARRA', parent: null, isParent: true },
-  { rubro: 'Destilados y vinos', parent: 'INSUMOS DE BARRA', isParent: false },
-  { rubro: 'Cervezas', parent: 'INSUMOS DE BARRA', isParent: false },
-  { rubro: 'Abarrotes', parent: 'INSUMOS DE BARRA', isParent: false },
-  { rubro: 'Café', parent: 'INSUMOS DE BARRA', isParent: false },
-  { rubro: 'Refrescos, aguas y hielo', parent: 'INSUMOS DE BARRA', isParent: false },
-  { rubro: 'Frutas y verduras', parent: 'INSUMOS DE BARRA', isParent: false },
-  { rubro: 'SERVICIOS', parent: null, isParent: true },
-  { rubro: 'LAVANDERIA', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'Agua', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'Gas', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'Luz', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'Teléfono', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'CONTADOR', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'DISEÑO Y PUBLICIDAD', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'Alarma', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'AUDITORIAS', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'GAS CALENTADORES', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'MATERIAS PRIMAS', parent: 'SERVICIOS', isParent: false },
-  { rubro: 'COMIDA PERSONAL', parent: null, isParent: false },
-  { rubro: 'RENTA', parent: null, isParent: false },
-  { rubro: 'MANTENIMIENTO', parent: null, isParent: false },
-  { rubro: 'EQUIPO', parent: null, isParent: false },
-  { rubro: 'CRISTALERIA', parent: null, isParent: false },
-  { rubro: 'PAPELERIA', parent: null, isParent: false },
-  { rubro: 'LIMPIEZA Y BAÑOS', parent: null, isParent: false },
-  { rubro: 'GASOLINA Y TAXIS', parent: null, isParent: false },
-  { rubro: 'OTROS', parent: null, isParent: false },
-  { rubro: 'LICENCIAS Y AFILIACIONES', parent: null, isParent: false },
-  { rubro: 'COMISIONES BANCARIAS', parent: null, isParent: false },
-  { rubro: 'FINIQUITOS Y RECLUTAMIENTO', parent: null, isParent: false },
-  { rubro: 'NÓMINA', parent: null, isParent: false },
+  { rubro: 'Insumos de cocina', parent: null, isParent: true },
+  { rubro: 'Frutas y verduras', parent: 'Insumos de cocina', isParent: false },
+  { rubro: 'Proteínas', parent: 'Insumos de cocina', isParent: false },
+  { rubro: 'Abarrotes', parent: 'Insumos de cocina', isParent: false },
+  { rubro: 'Lácteos', parent: 'Insumos de cocina', isParent: false },
+  { rubro: 'Panes, tortillas, postres', parent: 'Insumos de cocina', isParent: false },
+  { rubro: 'Agua', parent: 'Insumos de cocina', isParent: false },
+  { rubro: 'Carbón', parent: 'Insumos de cocina', isParent: false },
+  { rubro: 'Insumos de barra', parent: null, isParent: true },
+  { rubro: 'Destilados y vinos', parent: 'Insumos de barra', isParent: false },
+  { rubro: 'Cervezas', parent: 'Insumos de barra', isParent: false },
+  { rubro: 'Abarrotes', parent: 'Insumos de barra', isParent: false },
+  { rubro: 'Café', parent: 'Insumos de barra', isParent: false },
+  { rubro: 'Refrescos, aguas y hielo', parent: 'Insumos de barra', isParent: false },
+  { rubro: 'Frutas y verduras', parent: 'Insumos de barra', isParent: false },
+  { rubro: 'Servicios', parent: null, isParent: true },
+  { rubro: 'Lavandería', parent: 'Servicios', isParent: false },
+  { rubro: 'Agua', parent: 'Servicios', isParent: false },
+  { rubro: 'Gas', parent: 'Servicios', isParent: false },
+  { rubro: 'Luz', parent: 'Servicios', isParent: false },
+  { rubro: 'Teléfono', parent: 'Servicios', isParent: false },
+  { rubro: 'Contador', parent: 'Servicios', isParent: false },
+  { rubro: 'Diseño y publicidad', parent: 'Servicios', isParent: false },
+  { rubro: 'Alarma', parent: 'Servicios', isParent: false },
+  { rubro: 'Auditorías', parent: 'Servicios', isParent: false },
+  { rubro: 'Gas calentadores', parent: 'Servicios', isParent: false },
+  { rubro: 'Materias primas', parent: 'Servicios', isParent: false },
+  { rubro: 'Comida personal', parent: null, isParent: false },
+  { rubro: 'Renta', parent: null, isParent: false },
+  { rubro: 'Mantenimiento', parent: null, isParent: false },
+  { rubro: RUBRO_CRISTALERIA_Y_EQUIPO, parent: null, isParent: false },
+  { rubro: 'Papelería', parent: null, isParent: false },
+  { rubro: 'Limpieza y baños', parent: null, isParent: false },
+  { rubro: 'Gasolina y taxis', parent: null, isParent: false },
+  { rubro: 'Otros', parent: null, isParent: false },
+  { rubro: 'Licencias y afiliaciones', parent: null, isParent: false },
+  { rubro: 'Comisiones bancarias', parent: null, isParent: false },
+  { rubro: 'Finiquitos y reclutamiento', parent: null, isParent: false },
+  { rubro: 'Nómina', parent: null, isParent: false },
   { rubro: 'IMSS', parent: null, isParent: false },
-  { rubro: 'IMPUESTOS', parent: null, isParent: false },
+  { rubro: 'Impuestos', parent: null, isParent: false },
 ];
 
 function parseJson<T>(raw: string | object | null | undefined): T | null {
@@ -221,7 +234,18 @@ export function normRubroKey(name: string): string {
 }
 
 function catalogKey(rubro: string, parent: string | null): string {
-  return `${parent || ''}::${normRubroKey(rubro)}`;
+  const p = parent ? normRubroKey(parent) : '';
+  return `${p}::${normRubroKey(rubro)}`;
+}
+
+function sameParent(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return normRubroKey(a) === normRubroKey(b);
+}
+
+function isParentKey(name: string | null | undefined, key: string): boolean {
+  return Boolean(name && normRubroKey(name) === key);
 }
 
 type Accum = {
@@ -269,7 +293,7 @@ export function countPresupuestoWeeks(
 function findRow(rows: RubroRow[], rubro: string, parent: string | null = null): RubroRow | undefined {
   const key = normRubroKey(rubro);
   return rows.find(
-    (r) => normRubroKey(r.rubro) === key && (r.parent || null) === parent
+    (r) => normRubroKey(r.rubro) === key && sameParent(r.parent, parent)
   );
 }
 
@@ -291,9 +315,10 @@ export function formulaPresupuestoFor(
 
   const key = normRubroKey(rubro);
   if (key === 'RENTA') return 44330;
-  if (key === 'CRISTALERIA') return 500;
+  if (key === 'CRISTALERIA Y EQUIPO' || LEGACY_CRISTALERIA_EQUIPO_KEYS.has(key)) {
+    return 5500;
+  }
   if (key === 'IMSS') return 16765.12;
-  if (key === 'EQUIPO') return 5000;
   if (key === 'IMPUESTOS') return 6000;
   if (key === 'LICENCIAS Y AFILIACIONES') return 3500;
   if (key === 'LAVANDERIA') return 2400 * n;
@@ -316,17 +341,16 @@ function applyBudgetOverrides(
     if (row) row.presupuesto = value;
   };
 
-  setPresu('RENTA', 44330);
-  setPresu('CRISTALERIA', 500);
+  setPresu('Renta', 44330);
+  setPresu(RUBRO_CRISTALERIA_Y_EQUIPO, 5500);
   setPresu('IMSS', 16765.12);
-  setPresu('EQUIPO', 5000);
-  setPresu('IMPUESTOS', 6000);
-  setPresu('LICENCIAS Y AFILIACIONES', 3500);
-  setPresu('LAVANDERIA', 2400 * n, 'SERVICIOS');
-  setPresu('CARBON', 1500 * n, 'INSUMOS DE COCINA');
-  setPresu('FINIQUITOS Y RECLUTAMIENTO', 0);
+  setPresu('Impuestos', 6000);
+  setPresu('Licencias y afiliaciones', 3500);
+  setPresu('Lavandería', 2400 * n, 'Servicios');
+  setPresu('Carbón', 1500 * n, 'Insumos de cocina');
+  setPresu('Finiquitos y reclutamiento', 0);
 
-  const nomina = findRow(rows, 'NÓMINA');
+  const nomina = findRow(rows, 'Nómina');
   if (nomina) {
     nomina.presupuesto = meta.venta > 0 ? meta.venta * 0.25 : 0;
   }
@@ -359,9 +383,11 @@ function rollupParents(
   parentBasePresu?: Map<string, number>
 ): void {
   for (const parentName of parentNames) {
-    const parent = rows.find((r) => r.isParent && r.rubro === parentName);
+    const parent = rows.find(
+      (r) => r.isParent && normRubroKey(r.rubro) === normRubroKey(parentName)
+    );
     if (!parent) continue;
-    const kids = rows.filter((r) => r.parent === parentName);
+    const kids = rows.filter((r) => sameParent(r.parent, parent.rubro));
     const sumE = kids.reduce((s, k) => s + k.efectivo, 0);
     const sumM = kids.reduce((s, k) => s + k.mifel, 0);
     const sumB = kids.reduce((s, k) => s + k.bbva, 0);
@@ -373,13 +399,14 @@ function rollupParents(
       parent.bbva = sumB;
     }
     if (sumR) parent.real = sumR;
-    // SERVICIOS: presupuesto = suma de hijos.
+    // Servicios: presupuesto = suma de hijos.
     // Cocina/barra: Excel suele vivir en el padre; sumar presupuestos de hijos
-    // (p. ej. CARBON) sin reemplazar la base del padre.
-    if (parentName === 'SERVICIOS') {
+    // (p. ej. Carbón) sin reemplazar la base del padre.
+    if (isParentKey(parentName, 'SERVICIOS')) {
       if (sumP) parent.presupuesto = sumP;
     } else {
-      const base = parentBasePresu?.get(parentName) ?? parent.presupuesto;
+      const base =
+        parentBasePresu?.get(normRubroKey(parent.rubro)) ?? parent.presupuesto;
       parent.presupuesto = base + sumP;
     }
   }
@@ -475,6 +502,9 @@ export function buildPresupuestoRubros(
     'NOMINA ADMINISTRATIVA Y BONOS',
     'NOMINA',
   ]);
+  const PARENT_COCINA = 'Insumos de cocina';
+  const PARENT_BARRA = 'Insumos de barra';
+  const PARENT_SERVICIOS = 'Servicios';
 
   for (const row of raw) {
     const upper = normRubroKey(row.rubro);
@@ -483,44 +513,59 @@ export function buildPresupuestoRubros(
       section = 'INSUMOS DE COCINA';
       row.isParent = true;
       row.parent = null;
+      row.rubro = PARENT_COCINA;
     } else if (upper === 'INSUMOS DE BARRA') {
       section = 'INSUMOS DE BARRA';
       row.isParent = true;
       row.parent = null;
+      row.rubro = PARENT_BARRA;
     } else if (upper === 'SERVICIOS') {
       section = 'SERVICIOS';
       row.isParent = true;
       row.parent = null;
-    } else if (row.parent === 'INSUMOS DE COCINA') {
+      row.rubro = PARENT_SERVICIOS;
+    } else if (isParentKey(row.parent, 'INSUMOS DE COCINA')) {
       row.isParent = false;
+      row.parent = PARENT_COCINA;
       section = 'INSUMOS DE COCINA';
-    } else if (row.parent === 'INSUMOS DE BARRA') {
+    } else if (isParentKey(row.parent, 'INSUMOS DE BARRA')) {
       row.isParent = false;
+      row.parent = PARENT_BARRA;
       section = 'INSUMOS DE BARRA';
-    } else if (row.parent === 'SERVICIOS') {
+    } else if (isParentKey(row.parent, 'SERVICIOS')) {
       row.isParent = false;
+      row.parent = PARENT_SERVICIOS;
       section = 'SERVICIOS';
     } else if (section === 'INSUMOS DE COCINA' && cocinaKids.has(upper)) {
-      row.parent = 'INSUMOS DE COCINA';
+      row.parent = PARENT_COCINA;
       row.isParent = false;
     } else if (section === 'INSUMOS DE BARRA' && barraKids.has(upper)) {
-      row.parent = 'INSUMOS DE BARRA';
+      row.parent = PARENT_BARRA;
       row.isParent = false;
     } else if (upper === 'CARBON') {
-      // Excel suele emitir CARBON top-level → hijo de cocina
-      row.parent = 'INSUMOS DE COCINA';
+      // Excel suele emitir Carbón top-level → hijo de cocina
+      row.parent = PARENT_COCINA;
       row.isParent = false;
       section = null;
     } else if (section === 'SERVICIOS' && serviciosKids.has(upper)) {
-      row.parent = 'SERVICIOS';
+      row.parent = PARENT_SERVICIOS;
       row.isParent = false;
     } else if (serviciosKids.has(upper) && !row.parent) {
-      // Top-level Agua/Gas/…/LAVANDERIA/CONTADOR/… → hijos de SERVICIOS
-      row.parent = 'SERVICIOS';
+      // Top-level Agua/Gas/…/Lavandería/Contador/… → hijos de Servicios
+      row.parent = PARENT_SERVICIOS;
       row.isParent = false;
       section = null;
     } else if (nominaKeys.has(upper)) {
-      row.rubro = 'NÓMINA';
+      row.rubro = 'Nómina';
+      row.parent = null;
+      row.isParent = false;
+      section = null;
+    } else if (
+      LEGACY_CRISTALERIA_EQUIPO_KEYS.has(upper) ||
+      upper === 'CRISTALERIA Y EQUIPO'
+    ) {
+      // Equipo + Cristalería (legacy Excel) → un solo rubro
+      row.rubro = RUBRO_CRISTALERIA_Y_EQUIPO;
       row.parent = null;
       row.isParent = false;
       section = null;
@@ -552,7 +597,25 @@ export function buildPresupuestoRubros(
       acc = byNameOnly.get(normRubroKey(entry.rubro));
     }
     if (!acc && normRubroKey(entry.rubro) === 'NOMINA') {
-      acc = byKey.get(catalogKey('NÓMINA', null));
+      acc = byKey.get(catalogKey('Nómina', null));
+    }
+    if (!acc && normRubroKey(entry.rubro) === 'CRISTALERIA Y EQUIPO') {
+      // Sum legacy EQUIPO + CRISTALERIA if still stored under old keys
+      let merged = emptyAccum();
+      let found = false;
+      for (const alias of [
+        RUBRO_CRISTALERIA_Y_EQUIPO,
+        'EQUIPO',
+        'CRISTALERIA',
+      ]) {
+        const a =
+          byKey.get(catalogKey(alias, null)) || byNameOnly.get(normRubroKey(alias));
+        if (a) {
+          merged = addAccum(merged, a);
+          found = true;
+        }
+      }
+      if (found) acc = merged;
     }
 
     const a = acc || emptyAccum();
@@ -578,17 +641,13 @@ export function buildPresupuestoRubros(
   // Base Excel del padre (cocina/barra) antes de sumar presupuestos de hijos
   const parentBasePresu = new Map<string, number>();
   for (const r of rows) {
-    if (r.isParent && r.rubro !== 'SERVICIOS') {
-      parentBasePresu.set(r.rubro, r.presupuesto);
+    if (r.isParent && !isParentKey(r.rubro, 'SERVICIOS')) {
+      parentBasePresu.set(normRubroKey(r.rubro), r.presupuesto);
     }
   }
 
-  // SERVICIOS: sumar presupuestos Excel de los hijos (antes de overrides de top-level)
-  rollupParents(
-    rows,
-    ['INSUMOS DE COCINA', 'INSUMOS DE BARRA', 'SERVICIOS'],
-    parentBasePresu
-  );
+  // Servicios: sumar presupuestos Excel de los hijos (antes de overrides de top-level)
+  rollupParents(rows, [...COLLAPSIBLE_PARENTS], parentBasePresu);
 
   const weekCount = countPresupuestoWeeks(records, year, month);
 
@@ -608,19 +667,309 @@ export function buildPresupuestoRubros(
       data?.presupuesto != null ? Number(data.presupuesto) : Number(r.amount || 0);
     if (!Number.isFinite(amount)) continue;
     const parent = data?.parent ?? null;
-    adminOverrides.set(adminBudgetKey(rubroName, parent), amount);
+    const overrideKey = adminBudgetKey(rubroName, parent);
+    // Legacy Equipo / Cristalería overrides → Cristalería y Equipo
+    const rubroKey = normRubroKey(rubroName);
+    if (!parent && LEGACY_CRISTALERIA_EQUIPO_KEYS.has(rubroKey)) {
+      const mergedKey = adminBudgetKey(RUBRO_CRISTALERIA_Y_EQUIPO, null);
+      const prev = adminOverrides.get(mergedKey);
+      adminOverrides.set(
+        mergedKey,
+        prev != null ? prev + amount : amount
+      );
+    } else {
+      adminOverrides.set(overrideKey, amount);
+    }
   }
 
   applyBudgetOverrides(rows, meta, weekCount, adminOverrides);
 
-  // Tras overrides, recalcular padres (SERVICIOS suma; cocina/barra = base + hijos)
-  rollupParents(
-    rows,
-    ['INSUMOS DE COCINA', 'INSUMOS DE BARRA', 'SERVICIOS'],
-    parentBasePresu
-  );
+  // Tras overrides, recalcular padres (Servicios suma; cocina/barra = base + hijos)
+  rollupParents(rows, [...COLLAPSIBLE_PARENTS], parentBasePresu);
 
   return { rows, meta, weekCount };
+}
+
+export const SOURCE_SEM_DETALLE = 'presupuesto_sem_detalle';
+
+export interface RubroDesgloseLine {
+  canal: string;
+  amount: number;
+  /** Concepto libre del Excel SEM (cols C/F/I), si existe. */
+  note: string | null;
+  /** Descripción de movimiento bancario/flujo (fallback). */
+  description?: string | null;
+}
+
+export interface RubroDesgloseWeek {
+  week: number;
+  total: number;
+  lines: RubroDesgloseLine[];
+}
+
+export type RubroDesgloseSource = 'sem_detalle' | 'estados' | 'none';
+
+export interface RubroDesglose {
+  rubro: string;
+  parent: string | null;
+  isParent: boolean;
+  real: number;
+  weeks: RubroDesgloseWeek[];
+  totalDetalle: number;
+  source: RubroDesgloseSource;
+  /** Aviso en español sobre límites de la fuente. */
+  dataNote: string | null;
+}
+
+type SemDetallePayload = {
+  week?: number;
+  rubro?: string;
+  parent?: string | null;
+  canal?: string;
+  amount?: number;
+  note?: string | null;
+};
+
+function matchesRubroTarget(
+  lineRubro: string,
+  lineParent: string | null | undefined,
+  target: RubroRow,
+  childNames?: Set<string>
+): boolean {
+  const lineKey = normRubroKey(lineRubro);
+  if (target.isParent && childNames) {
+    return childNames.has(lineKey);
+  }
+  if (lineKey !== normRubroKey(target.rubro)) return false;
+  if (target.parent && lineParent) {
+    return sameParent(lineParent, target.parent);
+  }
+  // Detalle sin padre o rubro top-level: match por nombre
+  if (target.parent && !lineParent) {
+    // Ambiguous children (Agua): accept only if catalog parent matches expected
+    return true;
+  }
+  return true;
+}
+
+function semOfMonthForIsoDate(
+  iso: string,
+  year: number,
+  month: number
+): number | null {
+  const p = parseIsoDate(iso);
+  if (!p) return null;
+  const monday1 = firstMondayOnOrAfter(year, month, 1);
+  const day = new Date(p.y, p.m - 1, p.d, 12, 0, 0);
+  const dow = day.getDay();
+  const mon = new Date(day);
+  mon.setDate(mon.getDate() - (dow === 0 ? 6 : dow - 1));
+  const diffDays = Math.round(
+    (mon.getTime() - monday1.getTime()) / 86400000
+  );
+  const idx = Math.floor(diffDays / 7) + 1;
+  if (idx < 1 || idx > 6) return null;
+  // Allow dates in adjacent month that fall in this month's SEM weeks
+  return idx;
+}
+
+function groupDesgloseWeeks(
+  lines: Array<RubroDesgloseLine & { week: number }>
+): RubroDesgloseWeek[] {
+  const byWeek = new Map<number, RubroDesgloseLine[]>();
+  for (const line of lines) {
+    const list = byWeek.get(line.week) || [];
+    list.push({
+      canal: line.canal,
+      amount: line.amount,
+      note: line.note,
+      description: line.description,
+    });
+    byWeek.set(line.week, list);
+  }
+  return Array.from(byWeek.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([week, weekLines]) => ({
+      week,
+      total: weekLines.reduce((s, l) => s + l.amount, 0),
+      lines: weekLines.sort((a, b) => b.amount - a.amount),
+    }));
+}
+
+/**
+ * Desglose semanal del Real de un rubro.
+ * Preferencia: notas/montos SEM del presupuesto (`presupuesto_sem_detalle`).
+ * Fallback: movimientos de estado Mifel/BBVA / efectivo / CXP ya matcheados al rubro.
+ */
+export function buildRubroDesglose(
+  records: FinancialRecord[],
+  year: number,
+  month: number,
+  target: RubroRow
+): RubroDesglose {
+  const childNames =
+    target.isParent
+      ? new Set(
+          RUBRO_CATALOG.filter(
+            (e) => e.parent && sameParent(e.parent, target.rubro)
+          ).map((e) => normRubroKey(e.rubro))
+        )
+      : undefined;
+
+  const semLines: Array<RubroDesgloseLine & { week: number }> = [];
+  for (const r of records) {
+    if (r.source_file !== SOURCE_SEM_DETALLE) continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== year || p.m !== month) continue;
+    const data = parseJson<SemDetallePayload>(r.description);
+    if (!data || data.week == null) continue;
+    const rubro = String(data.rubro || r.category || '');
+    if (!matchesRubroTarget(rubro, data.parent, target, childNames)) continue;
+    const amount = Number(data.amount ?? r.amount ?? 0);
+    if (!amount && !data.note) continue;
+    semLines.push({
+      week: Number(data.week),
+      canal: String(data.canal || '—'),
+      amount,
+      note: data.note ? String(data.note).trim() || null : null,
+    });
+  }
+
+  if (semLines.length > 0) {
+    const weeks = groupDesgloseWeeks(semLines);
+    const totalDetalle = weeks.reduce((s, w) => s + w.total, 0);
+    const hasNotes = semLines.some((l) => l.note);
+    return {
+      rubro: target.rubro,
+      parent: target.parent,
+      isParent: target.isParent,
+      real: target.real,
+      weeks,
+      totalDetalle,
+      source: 'sem_detalle',
+      dataNote: hasNotes
+        ? 'Conceptos tomados de las notas de las hojas SEM del presupuesto Excel.'
+        : 'Montos por semana desde hojas SEM del presupuesto. Sin notas de concepto en el Excel para este rubro.',
+    };
+  }
+
+  // Fallback: movimientos bancarios / efectivo / CXP matcheados al rubro
+  const estadoSources = new Set([
+    'estado_mifel',
+    'estado_bbva',
+    'flujo_efectivo_mov',
+    'cxp',
+  ]);
+  const fallbackLines: Array<RubroDesgloseLine & { week: number }> = [];
+  for (const r of records) {
+    if (!r.source_file || !estadoSources.has(r.source_file)) continue;
+    const data = parseJson<{
+      matched_rubro?: string | null;
+      matched_parent?: string | null;
+      descripcion?: string;
+      concepto?: string;
+      cargo?: number | null;
+      egreso?: number | null;
+      week?: number | null;
+      bank?: string;
+      canal?: string;
+      fecha?: string;
+    }>(r.description);
+    if (!data?.matched_rubro) continue;
+    if (
+      !matchesRubroTarget(
+        data.matched_rubro,
+        data.matched_parent,
+        target,
+        childNames
+      )
+    ) {
+      continue;
+    }
+    const amount = Math.abs(
+      Number(data.cargo ?? data.egreso ?? r.amount ?? 0)
+    );
+    if (!amount) continue;
+    const week =
+      data.week != null && Number(data.week) >= 1
+        ? Number(data.week)
+        : semOfMonthForIsoDate(data.fecha || r.date, year, month);
+    if (week == null) continue;
+    // Filter to selected month when using fecha
+    const dp = parseIsoDate(data.fecha || r.date);
+    if (dp && (dp.y !== year || dp.m !== month)) {
+      // week already scoped; allow if week maps into month
+      if (data.week == null) continue;
+    }
+    const canal =
+      data.canal ||
+      data.bank ||
+      (r.source_file === 'flujo_efectivo_mov'
+        ? 'Efectivo'
+        : r.source_file === 'cxp'
+          ? 'CXP'
+          : '—');
+    fallbackLines.push({
+      week,
+      canal: String(canal),
+      amount,
+      note: null,
+      description: String(data.descripcion || data.concepto || '').trim() || null,
+    });
+  }
+
+  if (fallbackLines.length > 0) {
+    const weeks = groupDesgloseWeeks(fallbackLines);
+    const totalDetalle = weeks.reduce((s, w) => s + w.total, 0);
+    return {
+      rubro: target.rubro,
+      parent: target.parent,
+      isParent: target.isParent,
+      real: target.real,
+      weeks,
+      totalDetalle,
+      source: 'estados',
+      dataNote:
+        'Sin detalle SEM del presupuesto ingerido. Se muestran movimientos de bancos/efectivo/CXP ya asignados a este rubro (semana estimada por fecha). Los conceptos tipo «huerta» / «galacticos» viven en notas SEM del Excel — vuelve a ingerir el presupuesto.',
+    };
+  }
+
+  return {
+    rubro: target.rubro,
+    parent: target.parent,
+    isParent: target.isParent,
+    real: target.real,
+    weeks: [],
+    totalDetalle: 0,
+    source: 'none',
+    dataNote:
+      target.real > 0
+        ? 'No hay desglose semanal disponible. El Real viene del TOTAL del Excel; hace falta ingerir `presupuesto_sem_detalle` (notas SEM) o movimientos matcheados al rubro.'
+        : 'Sin gasto real ni desglose para este rubro en el mes.',
+  };
+}
+
+/**
+ * Set of catalog keys (`parent::rubro`) that have at least one SEM detalle
+ * line in the month — used to hint clickable Real cells.
+ */
+export function rubrosWithSemDetalle(
+  records: FinancialRecord[],
+  year: number,
+  month: number
+): Set<string> {
+  const keys = new Set<string>();
+  for (const r of records) {
+    if (r.source_file !== SOURCE_SEM_DETALLE) continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== year || p.m !== month) continue;
+    const data = parseJson<SemDetallePayload>(r.description);
+    if (!data?.rubro) continue;
+    keys.add(catalogKey(String(data.rubro), data.parent ?? null));
+    // Also name-only for top-level matching
+    keys.add(catalogKey(String(data.rubro), null));
+  }
+  return keys;
 }
 
 function firstMondayOnOrAfter(year: number, month: number, day: number): Date {
@@ -643,7 +992,7 @@ function presupuestoWeekCloseTuesday(year: number, month: number, week: number):
 }
 
 /** Meses cerrados: todas las semanas. Mes actual: solo tras martes de cierre. */
-function presupuestoWeekFullyElapsed(
+export function presupuestoWeekFullyElapsed(
   year: number,
   month: number,
   week: number,
@@ -662,6 +1011,13 @@ function presupuestoWeekFullyElapsed(
   return todayDate > closeTue;
 }
 
+type EfectivoSemanaPayload = {
+  week?: number;
+  efectivo_ingresos?: number;
+  efectivo_egresos?: number;
+  efectivo_neto?: number;
+};
+
 export function buildResumenBancosSemanal(
   records: FinancialRecord[],
   year: number,
@@ -669,6 +1025,31 @@ export function buildResumenBancosSemanal(
   todayIso?: string
 ): SemanaBancos[] {
   const today = todayIso || toIsoLocal(new Date());
+
+  // Efectivo semanal (FLUJO EFECTIVO · semana desde Concepto)
+  const efectivoByWeek = new Map<
+    number,
+    { ingresos: number; egresos: number; neto: number }
+  >();
+  for (const r of records) {
+    if (r.source_file !== 'flujo_efectivo_semana') continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== year || p.m !== month) continue;
+    const data = parseJson<EfectivoSemanaPayload>(r.description);
+    if (!data || data.week == null || Number(data.week) < 1) continue;
+    const w = Number(data.week);
+    const ingresos = Number(data.efectivo_ingresos || 0);
+    const egresos = Number(data.efectivo_egresos || 0);
+    const neto =
+      data.efectivo_neto != null ? Number(data.efectivo_neto) : ingresos - egresos;
+    const prev = efectivoByWeek.get(w) || { ingresos: 0, egresos: 0, neto: 0 };
+    efectivoByWeek.set(w, {
+      ingresos: prev.ingresos + ingresos,
+      egresos: prev.egresos + egresos,
+      neto: prev.neto + neto,
+    });
+  }
+
   const weeks: SemanaBancos[] = [];
   for (const r of records) {
     if (r.source_file !== 'presupuesto_semana') continue;
@@ -691,17 +1072,41 @@ export function buildResumenBancosSemanal(
       raw.inversiones_salida != null
         ? Number(raw.inversiones_salida)
         : Number(raw.inversiones || 0);
+    const w = Number(data.week);
+    const efe = efectivoByWeek.get(w);
+    // Preferir fuente flujo_efectivo_semana; si no hay, usar campos embebidos (si existieran)
+    const efectivo_ingresos = efe
+      ? efe.ingresos
+      : Number(raw.efectivo_ingresos || 0);
+    const efectivo_egresos = efe
+      ? efe.egresos
+      : Number(raw.efectivo_egresos || 0);
+    const efectivo_neto = efe
+      ? efe.neto
+      : raw.efectivo_neto != null
+        ? Number(raw.efectivo_neto)
+        : efectivo_ingresos - efectivo_egresos;
+    const suma_ingreso = Number(data.suma_ingreso || 0);
+    const suma_gasto = Number(data.suma_gasto || 0);
+    const total_bancos =
+      data.total != null
+        ? Number(data.total)
+        : suma_ingreso - suma_gasto;
     weeks.push({
-      week: Number(data.week),
+      week: w,
       inicial: Number(data.inicial || 0),
       ingresos: ingresosBase + entradaExtra,
       pagos_mifel: Number(data.pagos_mifel || 0),
       comisiones: Number(data.comisiones || 0),
       pagos_bbva: Number(data.pagos_bbva || 0),
+      efectivo_ingresos,
+      efectivo_egresos,
+      efectivo_neto,
       inversiones,
-      suma_ingreso: Number(data.suma_ingreso || 0),
-      suma_gasto: Number(data.suma_gasto || 0),
-      total: Number(data.total || 0),
+      suma_ingreso,
+      suma_gasto,
+      total_bancos,
+      total: total_bancos + efectivo_neto,
     });
   }
   return weeks.sort((a, b) => a.week - b.week);

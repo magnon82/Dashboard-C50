@@ -10,20 +10,66 @@ function money(v: number) {
   return `$${v.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
 }
 
-const ROWS: Array<{
-  key: keyof SemanaBancos;
-  label: string;
-  tone?: 'muted' | 'invest' | 'total' | 'sub' | 'inicial';
-}> = [
-  { key: 'inicial', label: 'Saldo Inicial', tone: 'inicial' },
-  { key: 'ingresos', label: 'ingresos' },
-  { key: 'pagos_mifel', label: 'pagos mifel' },
-  { key: 'comisiones', label: 'comisiones' },
-  { key: 'pagos_bbva', label: 'pagos bbva' },
-  { key: 'inversiones', label: 'inversiones', tone: 'invest' },
-  { key: 'suma_ingreso', label: 'suma ingreso', tone: 'sub' },
-  { key: 'suma_gasto', label: 'suma gastos', tone: 'sub' },
-  { key: 'total', label: 'total', tone: 'total' },
+type RowTone =
+  | 'muted'
+  | 'invest'
+  | 'total'
+  | 'sub'
+  | 'inicial'
+  | 'efectivo'
+  | 'bancos'
+  | 'section';
+
+type RowDef =
+  | {
+      type: 'section';
+      id: string;
+      label: string;
+      tone: 'section';
+    }
+  | {
+      type: 'data';
+      key: keyof SemanaBancos;
+      label: string;
+      tone?: RowTone;
+    };
+
+const ROWS: RowDef[] = [
+  { type: 'section', id: 'sec-bancos', label: 'Saldo en bancos', tone: 'section' },
+  { type: 'data', key: 'inicial', label: 'Saldo Inicial', tone: 'inicial' },
+  { type: 'data', key: 'ingresos', label: 'ingresos' },
+  { type: 'data', key: 'pagos_mifel', label: 'pagos mifel' },
+  { type: 'data', key: 'comisiones', label: 'Comisiones TPV' },
+  { type: 'data', key: 'pagos_bbva', label: 'pagos bbva' },
+  { type: 'data', key: 'inversiones', label: 'inversiones', tone: 'invest' },
+  { type: 'data', key: 'suma_ingreso', label: 'suma ingreso', tone: 'sub' },
+  { type: 'data', key: 'suma_gasto', label: 'suma gastos', tone: 'sub' },
+  { type: 'data', key: 'total_bancos', label: 'Total bancos', tone: 'bancos' },
+  { type: 'section', id: 'sec-efectivo', label: 'Efectivo', tone: 'section' },
+  {
+    type: 'data',
+    key: 'efectivo_ingresos',
+    label: 'Efectivo ingresos',
+    tone: 'efectivo',
+  },
+  {
+    type: 'data',
+    key: 'efectivo_egresos',
+    label: 'Efectivo egresos',
+    tone: 'efectivo',
+  },
+  {
+    type: 'data',
+    key: 'efectivo_neto',
+    label: 'Efectivo neto',
+    tone: 'efectivo',
+  },
+  {
+    type: 'data',
+    key: 'total',
+    label: 'Total (bancos + efectivo neto)',
+    tone: 'total',
+  },
 ];
 
 interface Props {
@@ -40,9 +86,11 @@ export function ResumenBancosSemanal({ weeks, loading, filters }: Props) {
           className="text-xs font-bold uppercase tracking-[0.16em]"
           style={{ color: theme.muted }}
         >
-          Resumen semanal · bancos
+          Resumen semanal de movimientos
         </p>
-        {filters ? <div className="flex flex-wrap items-center gap-2">{filters}</div> : null}
+        {filters ? (
+          <div className="flex flex-wrap items-center gap-2">{filters}</div>
+        ) : null}
       </div>
 
       {loading ? (
@@ -61,74 +109,107 @@ export function ResumenBancosSemanal({ weeks, loading, filters }: Props) {
           <table className="min-w-full text-sm">
             <thead>
               <tr
-                className="text-left text-xs uppercase tracking-wide text-white"
+                className="text-center text-xs uppercase tracking-wide text-white"
                 style={{ backgroundColor: theme.tableHead }}
               >
-                <th className="px-4 py-3">Semana</th>
+                <th className="px-4 py-3 text-center">Semana</th>
                 {weeks.map((w) => (
-                  <th key={w.week} className="px-3 py-3 text-right">
+                  <th key={w.week} className="px-3 py-3 text-center">
                     {w.week}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {ROWS.map((row) => (
-                <tr
-                  key={row.key}
-                  className="border-t border-slate-100"
-                  style={{
-                    backgroundColor:
-                      row.tone === 'inicial'
-                        ? '#E8EEF7'
-                        : row.tone === 'invest'
-                          ? SUITE.orangeSoft
-                          : row.tone === 'total'
-                            ? '#DCFCE7'
-                            : row.tone === 'sub'
-                              ? '#F8FAFC'
-                              : undefined,
-                  }}
-                >
-                  <td
-                    className={`px-4 py-2.5 ${
-                      row.tone === 'inicial' ||
-                      row.tone === 'total' ||
-                      row.tone === 'sub'
-                        ? 'font-bold'
-                        : 'capitalize'
-                    }`}
+              {ROWS.map((row) => {
+                if (row.type === 'section') {
+                  return (
+                    <tr
+                      key={row.id}
+                      style={{ backgroundColor: '#F1F5F9' }}
+                    >
+                      <td
+                        colSpan={1 + weeks.length}
+                        className="px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em]"
+                        style={{ color: theme.muted }}
+                      >
+                        {row.label}
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return (
+                  <tr
+                    key={row.key}
+                    className="border-t border-slate-100"
                     style={{
-                      color:
-                        row.tone === 'inicial' ? SUITE.navy : theme.title,
+                      backgroundColor:
+                        row.tone === 'inicial'
+                          ? '#E8EEF7'
+                          : row.tone === 'invest'
+                            ? SUITE.orangeSoft
+                            : row.tone === 'efectivo'
+                              ? '#F0FDFA'
+                              : row.tone === 'bancos'
+                                ? '#DBEAFE'
+                                : row.tone === 'total'
+                                  ? '#DCFCE7'
+                                  : row.tone === 'sub'
+                                    ? '#F8FAFC'
+                                    : undefined,
                     }}
                   >
-                    {row.label}
-                  </td>
-                  {weeks.map((w) => (
                     <td
-                      key={w.week}
-                      className={`px-3 py-2.5 text-right tabular-nums ${
+                      className={`px-4 py-2.5 ${
                         row.tone === 'inicial' ||
                         row.tone === 'total' ||
-                        row.tone === 'sub'
+                        row.tone === 'sub' ||
+                        row.tone === 'efectivo' ||
+                        row.tone === 'bancos'
                           ? 'font-bold'
                           : ''
                       }`}
                       style={{
                         color:
-                          row.tone === 'inicial'
+                          row.tone === 'inicial' || row.tone === 'bancos'
                             ? SUITE.navy
-                            : row.tone === 'invest'
-                              ? SUITE.orangeDeep
+                            : row.tone === 'efectivo'
+                              ? '#0F766E'
                               : theme.title,
                       }}
                     >
-                      {money(Number(w[row.key] || 0))}
+                      {row.label}
                     </td>
-                  ))}
-                </tr>
-              ))}
+                    {weeks.map((w) => (
+                      <td
+                        key={w.week}
+                        className={`px-3 py-2.5 text-right tabular-nums ${
+                          row.tone === 'inicial' ||
+                          row.tone === 'total' ||
+                          row.tone === 'sub' ||
+                          row.tone === 'efectivo' ||
+                          row.tone === 'bancos'
+                            ? 'font-bold'
+                            : ''
+                        }`}
+                        style={{
+                          color:
+                            row.tone === 'inicial' || row.tone === 'bancos'
+                              ? SUITE.navy
+                              : row.tone === 'invest'
+                                ? SUITE.orangeDeep
+                                : row.tone === 'efectivo'
+                                  ? '#0F766E'
+                                  : theme.title,
+                        }}
+                      >
+                        {money(Number(w[row.key] || 0))}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

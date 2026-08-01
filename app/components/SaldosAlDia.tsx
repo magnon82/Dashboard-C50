@@ -60,6 +60,12 @@ export function SaldosAlDia({ data, loading }: Props) {
               {data.bancos > 0 ? (
                 <>
                   Mifel {money(data.mifel)} + BBVA {money(data.bbva)}
+                  {data.bancosFecha ? (
+                    <span className="mt-0.5 block">
+                      Al {formatShort(data.bancosFecha)}
+                      {data.bancosFuente === 'manual' ? ' · manual' : ''}
+                    </span>
+                  ) : null}
                 </>
               ) : (
                 'Sin datos'

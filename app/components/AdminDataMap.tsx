@@ -67,21 +67,69 @@ type Region = {
   icon: IconKind;
 };
 
-const VIEW_W = 1480;
-const VIEW_H = 820;
-const EDGE_R = 14;
+const VIEW_W = 1500;
+const VIEW_H = 860;
+const EDGE_R = 12;
 const LINE = '#A8B0BD';
 const LINE_ACCENT = SUITE.orangeDeep;
-const PILL = '#7A8494';
+const PILL = '#6B7585';
 const PILL_ACCENT = SUITE.orangeDeep;
 
+/** Simple Icons (v13) path data + brand hex — viewBox 0 0 24 24 */
+const SI = {
+  gmail: {
+    color: '#EA4335',
+    path: 'M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z',
+  },
+  drive: {
+    color: '#4285F4',
+    path: 'M12.01 1.485c-2.082 0-3.754.02-3.743.047.01.02 1.708 3.001 3.774 6.62l3.76 6.574h3.76c2.081 0 3.753-.02 3.742-.047-.005-.02-1.708-3.001-3.775-6.62l-3.76-6.574zm-4.76 1.73a789.828 789.861 0 0 0-3.63 6.319L0 15.868l1.89 3.298 1.885 3.297 3.62-6.335 3.618-6.33-1.88-3.287C8.1 4.704 7.255 3.22 7.25 3.214zm2.259 12.653-.203.348c-.114.198-.96 1.672-1.88 3.287a423.93 423.948 0 0 1-1.698 2.97c-.01.026 3.24.042 7.222.042h7.244l1.796-3.157c.992-1.734 1.85-3.23 1.906-3.323l.104-.167h-7.249z',
+  },
+  sheets: {
+    color: '#34A853',
+    path: 'M11.318 12.545H7.91v-1.909h3.41v1.91zM14.728 0v6h6l-6-6zm1.363 10.636h-3.41v1.91h3.41v-1.91zm0 3.273h-3.41v1.91h3.41v-1.91zM20.727 6.5v15.864c0 .904-.732 1.636-1.636 1.636H4.909a1.636 1.636 0 0 1-1.636-1.636V1.636C3.273.732 4.005 0 4.909 0h9.318v6.5h6.5zm-3.273 2.773H6.545v7.909h10.91v-7.91zm-6.136 4.636H7.91v1.91h3.41v-1.91z',
+  },
+  github: {
+    color: '#181717',
+    path: 'M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12',
+  },
+  supabase: {
+    color: '#3FCF8E',
+    path: 'M11.9 1.036c-.015-.986-1.26-1.41-1.874-.637L.764 12.05C-.33 13.427.65 15.455 2.409 15.455h9.579l.113 7.51c.014.985 1.259 1.408 1.873.636l9.262-11.653c1.093-1.375.113-3.403-1.645-3.403h-9.642z',
+  },
+  vercel: {
+    color: '#000000',
+    path: 'M24 22.525H0l12-21.05 12 21.05z',
+  },
+  nextjs: {
+    color: '#000000',
+    path: 'M18.665 21.978C16.758 23.255 14.465 24 12 24 5.377 24 0 18.623 0 12S5.377 0 12 0s12 5.377 12 12c0 3.583-1.574 6.801-4.067 9.001L9.219 7.2H7.2v9.596h1.615V9.251l9.85 12.727Zm-3.332-8.533 1.6 2.061V7.2h-1.6v6.245Z',
+  },
+  eventos: {
+    color: '#4285F4',
+    path: 'M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632zm-7.207 6.25v-.065c.272-.144.5-.349.687-.617s.279-.595.279-.982c0-.379-.099-.72-.3-1.025a2.05 2.05 0 0 0-.832-.714 2.703 2.703 0 0 0-1.197-.257c-.6 0-1.094.156-1.481.467-.386.311-.65.671-.793 1.078l1.085.452c.086-.249.224-.461.413-.633.189-.172.445-.257.767-.257.33 0 .602.088.816.264a.86.86 0 0 1 .322.703c0 .33-.12.589-.36.778-.24.19-.535.284-.886.284h-.567v1.085h.633c.407 0 .748.109 1.02.327.272.218.407.499.407.843 0 .336-.129.614-.387.832s-.565.327-.924.327c-.351 0-.651-.103-.897-.311-.248-.208-.422-.502-.521-.881l-1.096.452c.178.616.505 1.082.977 1.401.472.319.984.478 1.538.477a2.84 2.84 0 0 0 1.293-.291c.382-.193.684-.458.902-.794.218-.336.327-.72.327-1.149 0-.429-.115-.797-.344-1.105a2.067 2.067 0 0 0-.881-.689zm2.093-1.931l.602.913L15 10.045v5.744h1.187V8.446h-.827l-2.158 1.557zM22.105 0h-3.289v5.184H24V1.895A1.894 1.894 0 0 0 22.105 0zm-3.289 23.5l4.684-4.684h-4.684V23.5zM0 22.105C0 23.152.848 24 1.895 24h3.289v-5.184H0v3.289z',
+  },
+  google: {
+    color: '#4285F4',
+    path: 'M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z',
+  },
+  windows: {
+    color: '#0078D4',
+    path: 'M0,0H11.377V11.372H0ZM12.623,0H24V11.372H12.623ZM0,12.623H11.377V24H0Zm12.623,0H24V24H12.623',
+  },
+  python: {
+    color: '#3776AB',
+    path: 'M14.25.18l.9.2.73.26.59.3.45.32.34.34.25.34.16.33.1.3.04.26.02.2-.01.13V8.5l-.05.63-.13.55-.21.46-.26.38-.3.31-.33.25-.35.19-.35.14-.33.1-.3.07-.26.04-.21.02H8.77l-.69.05-.59.14-.5.22-.41.27-.33.32-.27.35-.2.36-.15.37-.1.35-.07.32-.04.27-.02.21v3.06H3.17l-.21-.03-.28-.07-.32-.12-.35-.18-.36-.26-.36-.36-.35-.46-.32-.59-.28-.73-.21-.88-.14-1.05-.05-1.23.06-1.22.16-1.04.24-.87.32-.71.36-.57.4-.44.42-.33.42-.24.4-.16.36-.1.32-.05.24-.01h.16l.06.01h8.16v-.83H6.18l-.01-2.75-.02-.37.05-.34.11-.31.17-.28.25-.26.31-.23.38-.2.44-.18.51-.15.58-.12.64-.1.71-.06.77-.04.84-.02 1.27.05zm-6.3 1.98l-.23.33-.08.41.08.41.23.34.33.22.41.09.41-.09.33-.22.23-.34.08-.41-.08-.41-.23-.33-.33-.22-.41-.09-.41.09zm13.09 3.95l.28.06.32.12.35.18.36.27.36.35.35.47.32.59.28.73.21.88.14 1.04.05 1.23-.06 1.23-.16 1.04-.24.86-.32.71-.36.57-.4.45-.42.33-.42.24-.4.16-.36.09-.32.05-.24.02-.16-.01h-8.22v.82h5.84l.01 2.76.02.36-.05.34-.11.31-.17.29-.25.25-.31.24-.38.2-.44.17-.51.15-.58.13-.64.09-.71.07-.77.04-.84.01-1.27-.04-1.07-.14-.9-.2-.73-.25-.59-.3-.45-.33-.34-.34-.25-.34-.16-.33-.1-.3-.04-.25-.02-.2.01-.13v-5.34l.05-.64.13-.54.21-.46.26-.38.3-.32.33-.24.35-.2.35-.14.33-.1.3-.06.26-.04.21-.02.13-.01h5.84l.69-.05.59-.14.5-.21.41-.28.33-.32.27-.35.2-.36.15-.36.1-.35.07-.32.04-.28.02-.21V6.07h2.09l.14.01zm-6.47 14.25l-.23.33-.08.41.08.41.23.33.33.23.41.08.41-.08.33-.23.23-.33.08-.41-.08-.41-.23-.33-.33-.23-.41-.08-.41.08z',
+  },
+} as const;
+
 const REGIONS: Region[] = [
-  { id: 'google', label: 'Google', sub: 'fuentes externas', x: 36, y: 48, w: 220, h: 700, icon: 'google' },
-  { id: 'github', label: 'GitHub Actions', sub: 'orquestación cloud', x: 320, y: 48, w: 250, h: 400, icon: 'github' },
-  { id: 'local', label: 'PC local', sub: 'manual / opcional', x: 320, y: 480, w: 250, h: 268, icon: 'pc' },
-  { id: 'supabase', label: 'Supabase', sub: 'hub · persistencia', x: 650, y: 160, w: 260, h: 460, icon: 'supabase' },
-  { id: 'vercel', label: 'Vercel', sub: 'dashboard-c50.vercel.app', x: 980, y: 48, w: 230, h: 700, icon: 'vercel' },
-  { id: 'browser', label: 'Navegador', sub: 'módulos del suite', x: 1260, y: 48, w: 190, h: 700, icon: 'browser' },
+  { id: 'google', label: 'Google', sub: 'fuentes externas', x: 40, y: 40, w: 228, h: 740, icon: 'google' },
+  { id: 'github', label: 'GitHub Actions', sub: 'orquestación cloud', x: 316, y: 40, w: 260, h: 392, icon: 'github' },
+  { id: 'local', label: 'PC local', sub: 'manual / opcional', x: 316, y: 456, w: 260, h: 324, icon: 'pc' },
+  { id: 'supabase', label: 'Supabase', sub: 'hub · persistencia', x: 640, y: 140, w: 280, h: 500, icon: 'supabase' },
+  { id: 'vercel', label: 'Vercel', sub: 'dashboard-c50.vercel.app', x: 980, y: 40, w: 244, h: 740, icon: 'vercel' },
+  { id: 'browser', label: 'Navegador', sub: 'módulos del suite', x: 1276, y: 40, w: 192, h: 740, icon: 'browser' },
 ];
 
 const NODES: MapNode[] = [
@@ -89,8 +137,8 @@ const NODES: MapNode[] = [
     id: 'gmail',
     label: 'Gmail',
     sub: 'Infocaja + CORTE',
-    x: 68,
-    y: 110,
+    x: 76,
+    y: 100,
     w: 156,
     h: 108,
     kind: 'system',
@@ -103,24 +151,34 @@ const NODES: MapNode[] = [
   {
     id: 'drive',
     label: 'Drive',
-    sub: 'Presupuesto + Flujo',
-    x: 68,
-    y: 260,
+    sub: 'Presupuesto + Flujo + Estados',
+    x: 76,
+    y: 248,
     w: 156,
     h: 108,
     kind: 'system',
     icon: 'drive',
     stack: true,
-    sources: ['presupuesto_*', 'flujo_efectivo_saldo'],
-    files: ['ingest_presupuesto.py', 'ingest_saldos_flujo.py'],
-    detail: 'PRESUPUESTO MENSUAL y FLUJO EFECTIVO CARRANZA 50.xlsx en Drive.',
+    sources: [
+      'presupuesto_*',
+      'flujo_efectivo_saldo',
+      'flujo_efectivo_semana',
+      'flujo_efectivo_mov',
+      'estado_mifel',
+      'estado_bbva',
+      'estado_pdf_index',
+      'estado_cuenta_pdf_index',
+    ],
+    files: ['ingest_presupuesto.py', 'ingest_saldos_flujo.py', 'ingest_estados_cuenta.py'],
+    detail:
+      'PRESUPUESTO, FLUJO EFECTIVO, estados MIFEL/BBVA, COMPROBANTES BANCARIOS (pagos) y Administración\\Bancos (estados PDF).',
   },
   {
     id: 'sheets',
     label: 'Sheets',
     sub: 'CXP proveedores',
-    x: 68,
-    y: 410,
+    x: 76,
+    y: 396,
     w: 156,
     h: 108,
     kind: 'system',
@@ -134,8 +192,8 @@ const NODES: MapNode[] = [
     id: 'eventos',
     label: 'Eventos',
     sub: 'legacy / puntual',
-    x: 68,
-    y: 560,
+    x: 76,
+    y: 544,
     w: 156,
     h: 108,
     kind: 'system',
@@ -150,8 +208,8 @@ const NODES: MapNode[] = [
     label: 'sync-gmail.yml',
     sub: '~5:00 AM CDMX',
     x: 348,
-    y: 110,
-    w: 194,
+    y: 100,
+    w: 196,
     h: 72,
     kind: 'runner',
     icon: 'github',
@@ -163,21 +221,22 @@ const NODES: MapNode[] = [
     label: 'sync-saldos.yml',
     sub: 'cada 5 min',
     x: 348,
-    y: 220,
-    w: 194,
+    y: 210,
+    w: 196,
     h: 72,
     kind: 'runner',
     icon: 'github',
     files: ['.github/workflows/sync-saldos.yml', 'sync_saldos_al_dia.py'],
-    detail: 'GitHub Actions cada 5 min: efectivo (Drive) + CXP (Sheets) → Supabase.',
+    detail:
+      'GitHub Actions cada 5 min: efectivo saldo + semanas + movimientos línea por Concepto (Drive) + CXP (Sheets) → Supabase.',
   },
   {
     id: 'ingestor-cloud',
     label: 'ingestor/',
     sub: 'Python · OAuth',
     x: 348,
-    y: 330,
-    w: 194,
+    y: 320,
+    w: 196,
     h: 72,
     kind: 'runner',
     icon: 'python',
@@ -185,26 +244,41 @@ const NODES: MapNode[] = [
     detail: 'Scripts Python en el runner ubuntu-latest con secrets del repo.',
   },
   {
+    id: 'ingest-estados',
+    label: 'ingest_estados',
+    sub: 'carga manual PC',
+    x: 348,
+    y: 500,
+    w: 196,
+    h: 72,
+    kind: 'runner',
+    icon: 'python',
+    sources: ['estado_mifel', 'estado_bbva', 'estado_pdf_index', 'estado_cuenta_pdf_index'],
+    files: ['ingest_estados_cuenta.py'],
+    detail:
+      'Estados Excel MIFEL/BBVA; índice PDFs pagos (COMPROBANTES BANCARIOS → estado_pdf_index); índice PDFs estados (Administración\\Bancos → estado_cuenta_pdf_index).',
+  },
+  {
     id: 'ingest-prep',
     label: 'ingest_presupuesto',
     sub: 'carga manual',
     x: 348,
-    y: 530,
-    w: 194,
+    y: 592,
+    w: 196,
     h: 72,
     kind: 'runner',
     icon: 'python',
-    sources: ['presupuesto_mensual', 'presupuesto_saldos', 'presupuesto_rubro', 'presupuesto_semana'],
+    sources: ['presupuesto_mensual', 'presupuesto_saldos', 'presupuesto_rubro', 'presupuesto_semana', 'presupuesto_sem_detalle', 'presupuesto_ingreso'],
     files: ['ingest_presupuesto.py'],
-    detail: 'Lee Excel de presupuesto (Drive/local) y escribe rubros, saldos y semanas.',
+    detail: 'Lee Excel de presupuesto (Drive/local): rubros, saldos, semanas, detalle SEM y ingresos bancarios semanales Mifel/BBVA (TOTAL, llenado manual → presupuesto_ingreso).',
   },
   {
     id: 'win-tasks',
     label: 'Tareas Windows',
     sub: 'deshabilitadas',
     x: 348,
-    y: 640,
-    w: 194,
+    y: 684,
+    w: 196,
     h: 64,
     kind: 'system',
     icon: 'windows',
@@ -216,9 +290,9 @@ const NODES: MapNode[] = [
     label: 'financial_records',
     sub: 'tabla · source_file',
     x: 680,
-    y: 250,
+    y: 230,
     w: 200,
-    h: 130,
+    h: 136,
     kind: 'db',
     icon: 'db',
     stack: true,
@@ -227,12 +301,19 @@ const NODES: MapNode[] = [
       'corte_caja',
       'eventos',
       'flujo_efectivo_saldo',
+      'flujo_efectivo_semana',
+      'flujo_efectivo_mov',
       'cxp_por_pagar',
       'presupuesto_mensual',
       'presupuesto_saldos',
+      'saldos_bancos_manual',
       'presupuesto_rubro',
       'presupuesto_semana',
+      'presupuesto_sem_detalle',
+      'presupuesto_ingreso',
       'presupuesto_ajuste',
+      'estado_mifel',
+      'estado_bbva',
       'dashboard_auth',
     ],
     detail: 'Almacén central. Cada fila lleva source_file para filtrar por dashboard.',
@@ -242,9 +323,9 @@ const NODES: MapNode[] = [
     label: 'Auth service role',
     sub: 'escritura / admin',
     x: 700,
-    y: 450,
+    y: 430,
     w: 160,
-    h: 100,
+    h: 108,
     kind: 'db',
     icon: 'supabase',
     stack: true,
@@ -255,9 +336,9 @@ const NODES: MapNode[] = [
     id: 'api-fr',
     label: 'API records',
     sub: 'GET /api/…',
-    x: 1010,
-    y: 120,
-    w: 170,
+    x: 1016,
+    y: 110,
+    w: 172,
     h: 100,
     kind: 'system',
     icon: 'api',
@@ -269,9 +350,9 @@ const NODES: MapNode[] = [
     id: 'api-ajustes',
     label: 'API ajustes',
     sub: 'PUT / DELETE',
-    x: 1010,
-    y: 280,
-    w: 170,
+    x: 1016,
+    y: 270,
+    w: 172,
     h: 100,
     kind: 'system',
     icon: 'api',
@@ -284,9 +365,9 @@ const NODES: MapNode[] = [
     id: 'api-users',
     label: 'API users',
     sub: 'dashboard_auth',
-    x: 1010,
-    y: 440,
-    w: 170,
+    x: 1016,
+    y: 430,
+    w: 172,
     h: 100,
     kind: 'system',
     icon: 'api',
@@ -299,9 +380,9 @@ const NODES: MapNode[] = [
     id: 'next',
     label: 'Next.js',
     sub: 'App Router',
-    x: 1010,
-    y: 600,
-    w: 170,
+    x: 1016,
+    y: 590,
+    w: 172,
     h: 100,
     kind: 'system',
     icon: 'nextjs',
@@ -313,9 +394,9 @@ const NODES: MapNode[] = [
     id: 'hub',
     label: 'Hub',
     sub: '/',
-    x: 1290,
-    y: 120,
-    w: 130,
+    x: 1306,
+    y: 110,
+    w: 132,
     h: 100,
     kind: 'ui',
     icon: 'hub',
@@ -327,9 +408,9 @@ const NODES: MapNode[] = [
     id: 'ventas',
     label: 'Ventas',
     sub: '/ventas',
-    x: 1290,
-    y: 270,
-    w: 130,
+    x: 1306,
+    y: 260,
+    w: 132,
     h: 100,
     kind: 'ui',
     icon: 'ventas',
@@ -342,9 +423,9 @@ const NODES: MapNode[] = [
     id: 'finanzas',
     label: 'Finanzas',
     sub: '/finanzas',
-    x: 1290,
-    y: 420,
-    w: 130,
+    x: 1306,
+    y: 410,
+    w: 132,
     h: 100,
     kind: 'ui',
     icon: 'finanzas',
@@ -352,35 +433,61 @@ const NODES: MapNode[] = [
     sources: [
       'presupuesto_mensual',
       'presupuesto_saldos',
+      'saldos_bancos_manual',
       'presupuesto_rubro',
       'presupuesto_semana',
+      'presupuesto_sem_detalle',
+      'presupuesto_ingreso',
       'presupuesto_ajuste',
       'flujo_efectivo_saldo',
+      'flujo_efectivo_semana',
+      'flujo_efectivo_mov',
       'cxp_por_pagar',
+      'estado_mifel',
+      'estado_bbva',
+      'estado_pdf_index',
+      'estado_cuenta_pdf_index',
     ],
-    files: ['app/finanzas/page.tsx', 'app/lib/presupuesto.ts', 'app/lib/saldos.ts'],
-    detail: 'Saldos al día, resumen semanal bancos, presupuesto vs real por rubro.',
+    files: [
+      'app/finanzas/page.tsx',
+      'app/finanzas/gastos/page.tsx',
+      'app/finanzas/comprobantes/page.tsx',
+      'app/finanzas/estados-cuenta/page.tsx',
+      'app/lib/presupuesto.ts',
+      'app/lib/saldos.ts',
+      'app/lib/estados-cuenta.ts',
+      'app/components/EstadosCuenta.tsx',
+      'app/components/ComprobantesIndex.tsx',
+      'app/components/EstadosCuentaPdfIndex.tsx',
+      'app/components/ResumenBancosSemanal.tsx',
+    ],
+    detail:
+      'Saldos al día, resumen semanal bancos + efectivo, presupuesto vs real, consultas de comprobantes / estados de cuenta / gastos.',
   },
   {
     id: 'admin',
     label: 'Admin',
     sub: '/admin',
-    x: 1290,
-    y: 570,
-    w: 130,
+    x: 1306,
+    y: 560,
+    w: 132,
     h: 100,
     kind: 'ui',
     icon: 'admin',
     stack: true,
-    sources: ['presupuesto_ajuste', 'dashboard_auth'],
-    files: ['app/admin/page.tsx', 'AdminPresupuestoAjustes.tsx'],
-    detail: 'Usuarios, ajustes de presupuesto y este mapa de orígenes.',
+    sources: ['presupuesto_ajuste', 'saldos_bancos_manual', 'dashboard_auth'],
+    files: [
+      'app/admin/page.tsx',
+      'AdminPresupuestoAjustes.tsx',
+      'AdminSaldosBancos.tsx',
+      'app/api/admin/saldos-bancos/route.ts',
+    ],
+    detail: 'Usuarios, saldos bancarios manuales, ajustes de presupuesto y este mapa de orígenes.',
   },
 ];
 
 /**
- * Simplified topology: fewer crossings, dedicated corridors between columns.
- * Corridor X: Google→runners ~292 | runners→SB ~600 | SB→Vercel ~940 | Vercel→UI ~1235
+ * Corredores L→R: Google→runners ~292 | runners→SB ~608 | SB→Vercel ~948 | Vercel→UI ~1250
  */
 const EDGES: MapEdge[] = [
   {
@@ -389,10 +496,10 @@ const EDGES: MapEdge[] = [
     to: 'wf-gmail',
     label: 'Gmail API',
     via: [
-      [292, 164],
-      [292, 146],
+      [294, 154],
+      [294, 136],
     ],
-    labelAt: [292, 155],
+    labelAt: [294, 145],
   },
   {
     id: 'e-drive-wf',
@@ -400,10 +507,10 @@ const EDGES: MapEdge[] = [
     to: 'wf-saldos',
     label: 'Drive API',
     via: [
-      [292, 300],
-      [292, 256],
+      [294, 288],
+      [294, 246],
     ],
-    labelAt: [292, 278],
+    labelAt: [294, 267],
   },
   {
     id: 'e-sheets-wf',
@@ -411,11 +518,22 @@ const EDGES: MapEdge[] = [
     to: 'wf-saldos',
     label: 'Sheets API',
     via: [
-      [280, 464],
-      [280, 270],
-      [348, 270],
+      [278, 450],
+      [278, 260],
+      [348, 260],
     ],
-    labelAt: [280, 370],
+    labelAt: [278, 355],
+  },
+  {
+    id: 'e-drive-estados',
+    from: 'drive',
+    to: 'ingest-estados',
+    label: 'estados xlsx',
+    via: [
+      [262, 318],
+      [262, 536],
+    ],
+    labelAt: [262, 420],
   },
   {
     id: 'e-drive-prep',
@@ -423,10 +541,10 @@ const EDGES: MapEdge[] = [
     to: 'ingest-prep',
     label: 'Excel',
     via: [
-      [268, 330],
-      [268, 566],
+      [250, 330],
+      [250, 628],
     ],
-    labelAt: [268, 450],
+    labelAt: [250, 520],
   },
   {
     id: 'e-ing-fr',
@@ -434,10 +552,22 @@ const EDGES: MapEdge[] = [
     to: 'fr',
     label: 'upsert',
     via: [
-      [610, 366],
-      [610, 300],
+      [612, 356],
+      [612, 280],
     ],
-    labelAt: [610, 333],
+    labelAt: [612, 318],
+    accent: true,
+  },
+  {
+    id: 'e-estados-fr',
+    from: 'ingest-estados',
+    to: 'fr',
+    label: 'estado_*',
+    via: [
+      [600, 536],
+      [600, 320],
+    ],
+    labelAt: [600, 430],
     accent: true,
   },
   {
@@ -446,10 +576,10 @@ const EDGES: MapEdge[] = [
     to: 'fr',
     label: 'presupuesto_*',
     via: [
-      [590, 566],
-      [590, 380],
+      [588, 628],
+      [588, 360],
     ],
-    labelAt: [590, 480],
+    labelAt: [588, 500],
     accent: true,
   },
   {
@@ -459,12 +589,12 @@ const EDGES: MapEdge[] = [
     label: 'ingest_eventos',
     dashed: true,
     via: [
-      [250, 614],
-      [250, 740],
-      [780, 740],
-      [780, 380],
+      [240, 598],
+      [240, 790],
+      [780, 790],
+      [780, 366],
     ],
-    labelAt: [515, 740],
+    labelAt: [510, 790],
   },
   {
     id: 'e-fr-api',
@@ -472,10 +602,10 @@ const EDGES: MapEdge[] = [
     to: 'api-fr',
     label: 'SELECT',
     via: [
-      [945, 290],
-      [945, 170],
+      [950, 278],
+      [950, 160],
     ],
-    labelAt: [945, 230],
+    labelAt: [950, 220],
   },
   {
     id: 'e-api-aj-fr',
@@ -483,10 +613,10 @@ const EDGES: MapEdge[] = [
     to: 'fr',
     label: 'PUT ajuste',
     via: [
-      [945, 330],
-      [880, 330],
+      [950, 320],
+      [880, 320],
     ],
-    labelAt: [912, 330],
+    labelAt: [915, 320],
     accent: true,
   },
   {
@@ -495,18 +625,18 @@ const EDGES: MapEdge[] = [
     to: 'fr',
     label: 'dashboard_auth',
     via: [
-      [960, 490],
-      [960, 390],
-      [880, 390],
+      [962, 480],
+      [962, 380],
+      [880, 380],
     ],
-    labelAt: [960, 440],
+    labelAt: [962, 430],
   },
   {
     id: 'e-api-hub',
     from: 'api-fr',
     to: 'hub',
     label: 'sesión',
-    labelAt: [1235, 150],
+    labelAt: [1250, 140],
   },
   {
     id: 'e-api-ventas',
@@ -514,10 +644,10 @@ const EDGES: MapEdge[] = [
     to: 'ventas',
     label: 'GET',
     via: [
-      [1215, 180],
-      [1215, 320],
+      [1240, 170],
+      [1240, 310],
     ],
-    labelAt: [1215, 250],
+    labelAt: [1240, 240],
   },
   {
     id: 'e-api-fin',
@@ -525,10 +655,10 @@ const EDGES: MapEdge[] = [
     to: 'finanzas',
     label: 'GET sources',
     via: [
-      [1238, 185],
-      [1238, 470],
+      [1256, 175],
+      [1256, 460],
     ],
-    labelAt: [1238, 360],
+    labelAt: [1256, 340],
   },
   {
     id: 'e-admin-aj',
@@ -536,11 +666,11 @@ const EDGES: MapEdge[] = [
     to: 'api-ajustes',
     label: 'ajustes',
     via: [
-      [1260, 620],
-      [1260, 330],
-      [1180, 330],
+      [1270, 610],
+      [1270, 320],
+      [1188, 320],
     ],
-    labelAt: [1260, 475],
+    labelAt: [1270, 465],
     accent: true,
   },
   {
@@ -549,11 +679,11 @@ const EDGES: MapEdge[] = [
     to: 'api-users',
     label: 'usuarios',
     via: [
-      [1275, 640],
-      [1275, 490],
-      [1180, 490],
+      [1286, 630],
+      [1286, 480],
+      [1188, 480],
     ],
-    labelAt: [1275, 565],
+    labelAt: [1286, 555],
     accent: true,
   },
 ];
@@ -645,169 +775,22 @@ function pillWidth(label: string): number {
 
 function BrandIcon({ kind, x, y, size = 14 }: { kind: IconKind; x: number; y: number; size?: number }) {
   const s = size;
+  const brand = SI[kind as keyof typeof SI];
+  if (brand) {
+    return (
+      <g transform={`translate(${x},${y}) scale(${s / 24})`}>
+        <path d={brand.path} fill={brand.color} />
+      </g>
+    );
+  }
+
   switch (kind) {
-    case 'gmail':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <rect width={s} height={s} rx={s * 0.18} fill="#fff" stroke="#E8EAED" strokeWidth={0.8} />
-          <path
-            d={`M ${s * 0.18} ${s * 0.28} L ${s * 0.5} ${s * 0.52} L ${s * 0.82} ${s * 0.28}`}
-            fill="none"
-            stroke="#EA4335"
-            strokeWidth={s * 0.1}
-            strokeLinejoin="round"
-          />
-          <path
-            d={`M ${s * 0.18} ${s * 0.28} V ${s * 0.72} H ${s * 0.82} V ${s * 0.28}`}
-            fill="none"
-            stroke="#4285F4"
-            strokeWidth={s * 0.08}
-          />
-          <path d={`M ${s * 0.18} ${s * 0.28} L ${s * 0.5} ${s * 0.52}`} stroke="#34A853" strokeWidth={s * 0.08} />
-          <path d={`M ${s * 0.82} ${s * 0.28} L ${s * 0.5} ${s * 0.52}`} stroke="#FBBC05" strokeWidth={s * 0.08} />
-        </g>
-      );
-    case 'drive':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <path d={`M ${s * 0.5} ${s * 0.08} L ${s * 0.88} ${s * 0.74} H ${s * 0.12} Z`} fill="#4285F4" opacity={0.9} />
-          <path d={`M ${s * 0.5} ${s * 0.08} L ${s * 0.12} ${s * 0.74} L ${s * 0.5} ${s * 0.74} Z`} fill="#0F9D58" />
-          <path d={`M ${s * 0.5} ${s * 0.08} L ${s * 0.88} ${s * 0.74} L ${s * 0.5} ${s * 0.74} Z`} fill="#F4B400" />
-          <path d={`M ${s * 0.22} ${s * 0.74} H ${s * 0.78} L ${s * 0.5} ${s * 0.42} Z`} fill="#4285F4" />
-        </g>
-      );
-    case 'sheets':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <rect width={s} height={s} rx={s * 0.14} fill="#0F9D58" />
-          <rect x={s * 0.22} y={s * 0.2} width={s * 0.56} height={s * 0.6} rx={1} fill="#fff" />
-          <path
-            d={`M ${s * 0.22} ${s * 0.4} H ${s * 0.78} M ${s * 0.22} ${s * 0.55} H ${s * 0.78} M ${s * 0.5} ${s * 0.2} V ${s * 0.8}`}
-            stroke="#0F9D58"
-            strokeWidth={s * 0.07}
-          />
-        </g>
-      );
-    case 'eventos':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <rect width={s} height={s} rx={s * 0.14} fill="#1A73E8" />
-          <rect x={s * 0.2} y={s * 0.28} width={s * 0.6} height={s * 0.52} rx={1.5} fill="#fff" />
-          <rect x={s * 0.2} y={s * 0.18} width={s * 0.6} height={s * 0.14} fill="#174EA6" />
-          <circle cx={s * 0.35} cy={s * 0.48} r={s * 0.06} fill="#1A73E8" />
-          <circle cx={s * 0.5} cy={s * 0.48} r={s * 0.06} fill="#1A73E8" />
-          <circle cx={s * 0.65} cy={s * 0.48} r={s * 0.06} fill="#1A73E8" />
-          <circle cx={s * 0.35} cy={s * 0.64} r={s * 0.06} fill="#1A73E8" />
-          <circle cx={s * 0.5} cy={s * 0.64} r={s * 0.06} fill="#1A73E8" />
-        </g>
-      );
-    case 'github':
-      return (
-        <g transform={`translate(${x},${y}) scale(${s / 16})`}>
-          <circle cx={8} cy={8} r={8} fill="#24292F" />
-          <path
-            fill="#fff"
-            d="M8 3.2c-2.65 0-4.8 2.15-4.8 4.8 0 2.12 1.38 3.92 3.28 4.55.24.04.33-.1.33-.23v-.9c-1.34.29-1.62-.57-1.62-.57-.22-.55-.53-.7-.53-.7-.44-.3.03-.29.03-.29.48.03.73.5.73.5.43.73 1.12.52 1.4.4.04-.31.17-.52.3-.64-1.07-.12-2.2-.53-2.2-2.38 0-.52.19-.95.5-1.29-.05-.12-.22-.62.05-1.28 0 0 .4-.13 1.32.49.38-.1.79-.16 1.2-.16s.82.06 1.2.16c.91-.62 1.31-.49 1.31-.49.27.66.1 1.16.05 1.28.31.34.5.77.5 1.29 0 1.85-1.13 2.26-2.21 2.38.17.15.33.44.33.88v1.31c0 .13.09.27.33.23A4.8 4.8 0 0012.8 8c0-2.65-2.15-4.8-4.8-4.8z"
-          />
-        </g>
-      );
-    case 'supabase':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <path
-            d={`M ${s * 0.72} ${s * 0.08}
-              C ${s * 0.78} ${s * 0.08} ${s * 0.82} ${s * 0.15} ${s * 0.78} ${s * 0.2}
-              L ${s * 0.3} ${s * 0.88}
-              C ${s * 0.25} ${s * 0.96} ${s * 0.12} ${s * 0.92} ${s * 0.14} ${s * 0.82}
-              L ${s * 0.28} ${s * 0.42} H ${s * 0.62}
-              C ${s * 0.7} ${s * 0.42} ${s * 0.74} ${s * 0.32} ${s * 0.68} ${s * 0.26}
-              L ${s * 0.72} ${s * 0.08} Z`}
-            fill="#3ECF8E"
-          />
-          <path
-            d={`M ${s * 0.62} ${s * 0.42} H ${s * 0.28} L ${s * 0.36} ${s * 0.08}
-              C ${s * 0.38} ${s * 0.02} ${s * 0.48} ${s * 0.02} ${s * 0.5} ${s * 0.08}
-              L ${s * 0.68} ${s * 0.26}
-              C ${s * 0.74} ${s * 0.32} ${s * 0.7} ${s * 0.42} ${s * 0.62} ${s * 0.42} Z`}
-            fill="#3ECF8E"
-            opacity={0.55}
-          />
-        </g>
-      );
-    case 'vercel':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <path d={`M ${s * 0.5} ${s * 0.12} L ${s * 0.9} ${s * 0.88} H ${s * 0.1} Z`} fill="#000" />
-        </g>
-      );
-    case 'nextjs':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <circle cx={s / 2} cy={s / 2} r={s / 2} fill="#000" />
-          <path
-            d={`M ${s * 0.32} ${s * 0.28} V ${s * 0.72} H ${s * 0.42} V ${s * 0.48}
-              L ${s * 0.68} ${s * 0.72} H ${s * 0.8} L ${s * 0.48} ${s * 0.4}
-              V ${s * 0.28} Z`}
-            fill="#fff"
-          />
-        </g>
-      );
-    case 'google':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <circle cx={s * 0.5} cy={s * 0.5} r={s * 0.42} fill="#fff" stroke="#E8EAED" strokeWidth={0.8} />
-          <path d={`M ${s * 0.72} ${s * 0.5} H ${s * 0.5} V ${s * 0.38} H ${s * 0.78}`} fill="none" stroke="#4285F4" strokeWidth={s * 0.1} />
-          <path d={`M ${s * 0.5} ${s * 0.72} A ${s * 0.22} ${s * 0.22} 0 1 1 ${s * 0.68} ${s * 0.36}`} fill="none" stroke="#EA4335" strokeWidth={s * 0.1} />
-          <path d={`M ${s * 0.32} ${s * 0.62} A ${s * 0.22} ${s * 0.22} 0 0 1 ${s * 0.5} ${s * 0.28}`} fill="none" stroke="#FBBC05" strokeWidth={s * 0.1} />
-          <path d={`M ${s * 0.32} ${s * 0.38} A ${s * 0.22} ${s * 0.22} 0 0 0 ${s * 0.5} ${s * 0.72}`} fill="none" stroke="#34A853" strokeWidth={s * 0.1} />
-        </g>
-      );
     case 'pc':
       return (
         <g transform={`translate(${x},${y})`}>
           <rect x={s * 0.12} y={s * 0.18} width={s * 0.76} height={s * 0.52} rx={2} fill="none" stroke={SUITE.navy} strokeWidth={1.4} />
           <rect x={s * 0.2} y={s * 0.26} width={s * 0.6} height={s * 0.34} fill="#D6E0EF" />
           <path d={`M ${s * 0.28} ${s * 0.78} H ${s * 0.72} M ${s * 0.5} ${s * 0.7} V ${s * 0.78}`} stroke={SUITE.navy} strokeWidth={1.4} />
-        </g>
-      );
-    case 'windows':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <path d={`M ${s * 0.14} ${s * 0.22} H ${s * 0.46} V ${s * 0.48} H ${s * 0.14} Z`} fill="#0078D4" />
-          <path d={`M ${s * 0.52} ${s * 0.22} H ${s * 0.86} V ${s * 0.48} H ${s * 0.52} Z`} fill="#00A4EF" />
-          <path d={`M ${s * 0.14} ${s * 0.54} H ${s * 0.46} V ${s * 0.8} H ${s * 0.14} Z`} fill="#FFB900" />
-          <path d={`M ${s * 0.52} ${s * 0.54} H ${s * 0.86} V ${s * 0.8} H ${s * 0.52} Z`} fill="#7FBA00" />
-        </g>
-      );
-    case 'python':
-      return (
-        <g transform={`translate(${x},${y})`}>
-          <path
-            d={`M ${s * 0.5} ${s * 0.1}
-              C ${s * 0.28} ${s * 0.1} ${s * 0.28} ${s * 0.28} ${s * 0.28} ${s * 0.28}
-              V ${s * 0.42} H ${s * 0.58} V ${s * 0.46} H ${s * 0.22}
-              C ${s * 0.1} ${s * 0.46} ${s * 0.1} ${s * 0.62} ${s * 0.22} ${s * 0.62}
-              H ${s * 0.34} V ${s * 0.52} H ${s * 0.72}
-              C ${s * 0.86} ${s * 0.52} ${s * 0.86} ${s * 0.36} ${s * 0.72} ${s * 0.36}
-              H ${s * 0.5} V ${s * 0.28}
-              C ${s * 0.5} ${s * 0.18} ${s * 0.62} ${s * 0.18} ${s * 0.72} ${s * 0.18}
-              H ${s * 0.78} V ${s * 0.1} Z`}
-            fill="#3776AB"
-          />
-          <circle cx={s * 0.4} cy={s * 0.22} r={Math.max(1.2, s * 0.06)} fill="#FFD43B" />
-          <path
-            d={`M ${s * 0.5} ${s * 0.9}
-              C ${s * 0.72} ${s * 0.9} ${s * 0.72} ${s * 0.72} ${s * 0.72} ${s * 0.72}
-              V ${s * 0.58} H ${s * 0.42} V ${s * 0.54} H ${s * 0.78}
-              C ${s * 0.9} ${s * 0.54} ${s * 0.9} ${s * 0.38} ${s * 0.78} ${s * 0.38}
-              H ${s * 0.66} V ${s * 0.48} H ${s * 0.28}
-              C ${s * 0.14} ${s * 0.48} ${s * 0.14} ${s * 0.64} ${s * 0.28} ${s * 0.64}
-              H ${s * 0.5} V ${s * 0.72}
-              C ${s * 0.5} ${s * 0.82} ${s * 0.38} ${s * 0.82} ${s * 0.28} ${s * 0.82}
-              H ${s * 0.22} V ${s * 0.9} Z`}
-            fill="#FFD43B"
-          />
-          <circle cx={s * 0.6} cy={s * 0.78} r={Math.max(1.2, s * 0.06)} fill="#3776AB" />
         </g>
       );
     case 'browser':
@@ -839,7 +822,7 @@ function BrandIcon({ kind, x, y, size = 14 }: { kind: IconKind; x: number; y: nu
       return (
         <g transform={`translate(${x},${y})`}>
           <rect x={s * 0.08} y={s * 0.18} width={s * 0.84} height={s * 0.64} rx={3} fill="#0B1220" />
-          <path d={`M ${s * 0.28} ${s * 0.4} L ${s * 0.4} ${s * 0.5} L ${s * 0.28} ${s * 0.6}`} fill="none" stroke="#3ECF8E" strokeWidth={1.4} />
+          <path d={`M ${s * 0.28} ${s * 0.4} L ${s * 0.4} ${s * 0.5} L ${s * 0.28} ${s * 0.6}`} fill="none" stroke="#3FCF8E" strokeWidth={1.4} />
           <path d={`M ${s * 0.48} ${s * 0.6} H ${s * 0.72}`} stroke="#fff" strokeWidth={1.4} />
         </g>
       );
@@ -1046,6 +1029,7 @@ function EdgeLabel({
 }
 
 export function AdminDataMap() {
+  const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>('fr');
   const byId = useMemo(() => new Map(NODES.map((n) => [n.id, n])), []);
   const selected = selectedId ? byId.get(selectedId) : undefined;
@@ -1055,20 +1039,31 @@ export function AdminDataMap() {
       className="mb-8 overflow-hidden rounded-[20px] bg-white"
       style={{ boxShadow: SUITE.shadow }}
     >
-      <div className="border-b border-slate-100 px-5 pb-3 pt-5">
-        <p
-          className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em]"
-          style={{ color: theme.muted }}
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 pb-3 pt-5">
+        <div>
+          <p
+            className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em]"
+            style={{ color: theme.muted }}
+          >
+            Mapa de orígenes de datos
+          </p>
+          <p className="text-sm" style={{ color: theme.muted }}>
+            Topología de plataformas, scripts y APIs: Google → GitHub Actions / PC → Supabase →
+            Vercel → módulos. Haz clic en un nodo para ver{' '}
+            <code className="text-xs">source_file</code> y archivos clave.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="rounded-lg px-4 py-2 text-sm font-semibold text-white"
+          style={{ backgroundColor: SUITE.navy }}
         >
-          Mapa de orígenes de datos
-        </p>
-        <p className="text-sm" style={{ color: theme.muted }}>
-          Topología de plataformas, scripts y APIs: Google → GitHub Actions / PC → Supabase →
-          Vercel → módulos. Haz clic en un nodo para ver{' '}
-          <code className="text-xs">source_file</code> y archivos clave.
-        </p>
+          {open ? 'Ocultar' : 'Mostrar'}
+        </button>
       </div>
 
+      {open && (
       <div className="relative">
         <div
           className="overflow-x-auto overflow-y-hidden"
@@ -1125,9 +1120,9 @@ export function AdminDataMap() {
                   width={r.w}
                   height={r.h}
                   rx={22}
-                  fill={r.id === 'supabase' ? 'rgba(62,207,142,0.06)' : 'rgba(255,255,255,0.72)'}
-                  stroke={r.id === 'supabase' ? '#9DD9BE' : '#D5DCE8'}
-                  strokeWidth={r.id === 'supabase' ? 1.6 : 1}
+                  fill={r.id === 'supabase' ? 'rgba(63,207,142,0.08)' : 'rgba(255,255,255,0.75)'}
+                  stroke={r.id === 'supabase' ? '#8FD4B0' : '#D5DCE8'}
+                  strokeWidth={r.id === 'supabase' ? 1.8 : 1}
                 />
                 <BrandIcon kind={r.icon} x={r.x + 18} y={r.y + 16} size={18} />
                 <text
@@ -1190,11 +1185,11 @@ export function AdminDataMap() {
             ))}
 
             <g>
-              <rect x={36} y={770} width={520} height={32} rx={16} fill="#FFFFFF" stroke="#D5DCE8" />
-              <circle cx={56} cy={786} r={4} fill={LINE} />
+              <rect x={40} y={812} width={540} height={32} rx={16} fill="#FFFFFF" stroke="#D5DCE8" />
+              <circle cx={60} cy={828} r={4} fill={LINE} />
               <text
-                x={68}
-                y={790}
+                x={72}
+                y={832}
                 fill={SUITE.muted}
                 fontSize={11}
                 style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
@@ -1281,6 +1276,7 @@ export function AdminDataMap() {
           )}
         </div>
       </div>
+      )}
     </section>
   );
 }

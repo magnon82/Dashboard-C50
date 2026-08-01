@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { SuiteShell } from '@/app/components/SuiteShell';
 import { AdminDataMap } from '@/app/components/AdminDataMap';
 import { AdminPresupuestoAjustes } from '@/app/components/AdminPresupuestoAjustes';
+import { AdminSaldosBancos } from '@/app/components/AdminSaldosBancos';
 import { APP_MODULES } from '@/app/lib/modules';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
@@ -90,8 +91,12 @@ export default function AdminPage() {
   const [editPassword, setEditPassword] = useState('');
   const [editHadPassword, setEditHadPassword] = useState(false);
   const [editModules, setEditModules] = useState<string[]>([]);
+  const [editUsername, setEditUsername] = useState('');
   const [editDisplayName, setEditDisplayName] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
@@ -142,10 +147,13 @@ export default function AdminPage() {
   }
 
   function openEdit(u: AdminUser) {
+    setDeleteTarget(null);
+    setDeleteConfirm('');
     setEditingId(u.id);
     const current = u.password?.trim() || '';
     setEditPassword(current);
     setEditHadPassword(Boolean(current));
+    setEditUsername(u.username);
     setEditDisplayName(u.displayName || '');
     setEditModules((u.modules || []).filter((m) => m !== '*'));
     setOkMsg('');
@@ -167,6 +175,7 @@ export default function AdminPage() {
     try {
       const editing = users.find((u) => u.id === editingId);
       const body: Record<string, unknown> = {
+        username: editUsername.trim().toLowerCase(),
         displayName: editDisplayName,
       };
       if (editing?.role !== 'admin') {
@@ -185,7 +194,7 @@ export default function AdminPage() {
         setError(json.error || 'No se pudo guardar');
         return;
       }
-      setOkMsg('Usuario actualizado (contraseña y/o permisos)');
+      setOkMsg('Usuario actualizado');
       setEditingId(null);
       await load();
     } catch {
@@ -210,6 +219,50 @@ export default function AdminPage() {
     await load();
   }
 
+  function openDelete(u: AdminUser) {
+    if (u.role === 'admin') return;
+    setEditingId(null);
+    setDeleteTarget(u);
+    setDeleteConfirm('');
+    setError('');
+    setOkMsg('');
+  }
+
+  function closeDelete() {
+    setDeleteTarget(null);
+    setDeleteConfirm('');
+  }
+
+  async function confirmDelete(e: FormEvent) {
+    e.preventDefault();
+    if (!deleteTarget) return;
+    if (deleteConfirm.trim().toLowerCase() !== deleteTarget.username.toLowerCase()) {
+      setError('Escribe el nombre de usuario exacto para confirmar');
+      return;
+    }
+    setDeleting(true);
+    setError('');
+    setOkMsg('');
+    try {
+      const res = await fetch(`/api/admin/users/${deleteTarget.id}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || 'No se pudo eliminar');
+        return;
+      }
+      setOkMsg(`Usuario ${deleteTarget.username} eliminado permanentemente`);
+      if (editingId === deleteTarget.id) setEditingId(null);
+      closeDelete();
+      await load();
+    } catch {
+      setError('Error de red al eliminar');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function toggleModule(id: string) {
     setForm((f) => {
       const has = f.modules.includes(id);
@@ -225,12 +278,15 @@ export default function AdminPage() {
   return (
     <SuiteShell
       title="Administración"
-      subtitle="Mapa de datos, cuentas de solo lectura y ajustes de presupuesto."
+      subtitle="Mapa de datos, saldos bancarios, cuentas de solo lectura y ajustes de presupuesto."
     >
-      {/* 1. Mapa de orígenes */}
+      {/* 1. Mapa de orígenes (colapsado por defecto) */}
       <AdminDataMap />
 
-      {/* 2. Administración de usuarios */}
+      {/* 2. Saldos bancarios manuales */}
+      <AdminSaldosBancos />
+
+      {/* 3. Administración de usuarios */}
       <section className="mb-8">
         <div className="mb-4">
           <h2 className="text-lg font-bold" style={{ color: theme.title }}>
@@ -336,12 +392,12 @@ export default function AdminPage() {
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
-                    <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                      <th className="py-2 pr-3">Usuario</th>
-                      <th className="py-2 pr-3">Rol</th>
-                      <th className="py-2 pr-3">Módulos</th>
-                      <th className="py-2 pr-3">Estado</th>
-                      <th className="py-2">Acciones</th>
+                    <tr className="text-center text-xs uppercase tracking-wide text-slate-500">
+                      <th className="py-2 pr-3 text-center">Usuario</th>
+                      <th className="py-2 pr-3 text-center">Rol</th>
+                      <th className="py-2 pr-3 text-center">Módulos</th>
+                      <th className="py-2 pr-3 text-center">Estado</th>
+                      <th className="py-2 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -392,6 +448,15 @@ export default function AdminPage() {
                             >
                               {u.active ? 'Desactivar' : 'Activar'}
                             </button>
+                            {u.role !== 'admin' && (
+                              <button
+                                type="button"
+                                onClick={() => openDelete(u)}
+                                className="text-sm font-semibold text-rose-700 hover:underline"
+                              >
+                                Eliminar
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -399,6 +464,57 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
+            )}
+
+            {deleteTarget && (
+              <form
+                onSubmit={confirmDelete}
+                className="mt-6 rounded-lg border border-rose-200 bg-rose-50/70 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-bold text-slate-900">
+                      Eliminar permanentemente · {deleteTarget.username}
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Esta acción no se puede deshacer. Escribe{' '}
+                      <strong className="font-semibold text-slate-800">
+                        {deleteTarget.username}
+                      </strong>{' '}
+                      para confirmar.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeDelete}
+                    className="text-sm font-semibold text-slate-500 hover:underline"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                <label className="mt-3 block text-sm font-semibold text-slate-700">
+                  Confirmar usuario
+                  <input
+                    required
+                    value={deleteConfirm}
+                    onChange={(e) => setDeleteConfirm(e.target.value)}
+                    autoComplete="off"
+                    className="mt-1 w-full rounded-lg border border-rose-300 bg-white px-3 py-2 outline-none focus:border-rose-500"
+                    placeholder={deleteTarget.username}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={
+                    deleting ||
+                    deleteConfirm.trim().toLowerCase() !==
+                      deleteTarget.username.toLowerCase()
+                  }
+                  className="mt-4 rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {deleting ? 'Eliminando…' : 'Eliminar permanentemente'}
+                </button>
+              </form>
             )}
 
             {editingUser && (
@@ -412,7 +528,7 @@ export default function AdminPage() {
                       Editar · {editingUser.username}
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Cambia contraseña y/o módulos de solo lectura
+                      Cambia usuario, nombre, contraseña y/o módulos
                     </p>
                   </div>
                   <button
@@ -423,6 +539,22 @@ export default function AdminPage() {
                     Cerrar
                   </button>
                 </div>
+
+                <label className="mt-3 block text-sm font-semibold text-slate-700">
+                  Usuario
+                  <input
+                    required
+                    value={editUsername}
+                    onChange={(e) => setEditUsername(e.target.value)}
+                    disabled={editingUser.role === 'admin'}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
+                  />
+                  {editingUser.role === 'admin' && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      El usuario bootstrap (admin) no se puede renombrar.
+                    </p>
+                  )}
+                </label>
 
                 <label className="mt-3 block text-sm font-semibold text-slate-700">
                   Nombre
@@ -488,7 +620,7 @@ export default function AdminPage() {
         </div>
       </section>
 
-      {/* 3. Ajustes de presupuesto (colapsado por defecto) */}
+      {/* 4. Ajustes de presupuesto (colapsado por defecto) */}
       <AdminPresupuestoAjustes />
     </SuiteShell>
   );

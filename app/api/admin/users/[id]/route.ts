@@ -1,10 +1,22 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { SESSION_COOKIE, verifySessionToken, canAccessAdmin, type SessionUser } from '@/app/lib/auth';
+import {
+  SESSION_COOKIE,
+  verifySessionToken,
+  canAccessAdmin,
+  getDashboardUser,
+  type SessionUser,
+} from '@/app/lib/auth';
 import { hashPassword } from '@/app/lib/password';
-import { findUserByUsername, updateUser, type UserRole } from '@/app/lib/users';
+import {
+  deleteUser,
+  findUserById,
+  findUserByUsername,
+  updateUser,
+  type UserRole,
+  toPublicUser,
+} from '@/app/lib/users';
 import { APP_MODULES } from '@/app/lib/modules';
-import { toPublicUser } from '@/app/lib/users';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +43,7 @@ export async function PATCH(
 
   const { id } = await context.params;
   let body: {
+    username?: string;
     displayName?: string;
     password?: string;
     role?: UserRole;
@@ -45,6 +58,12 @@ export async function PATCH(
 
   if (body.password && body.password.length < 4) {
     return NextResponse.json({ error: 'Contraseña muy corta' }, { status: 400 });
+  }
+
+  const username =
+    body.username !== undefined ? body.username.trim().toLowerCase() : undefined;
+  if (username !== undefined && username.length < 2) {
+    return NextResponse.json({ error: 'Usuario inválido' }, { status: 400 });
   }
 
   if (typeof body.active === 'boolean' && body.active === false) {
@@ -68,6 +87,20 @@ export async function PATCH(
     }
   }
 
+  // No permitir renombrar al admin bootstrap fuera de DASHBOARD_USER
+  if (username !== undefined) {
+    const self = await findUserByUsername(auth.username);
+    if (self?.id === id && username !== auth.username.trim().toLowerCase()) {
+      return NextResponse.json(
+        {
+          error:
+            'No puedes cambiar el usuario del administrador bootstrap (DASHBOARD_USER)',
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   const modules =
     body.modules !== undefined
       ? body.modules.filter((m) => MODULE_IDS.has(m as (typeof APP_MODULES)[number]['id']))
@@ -75,6 +108,7 @@ export async function PATCH(
 
   try {
     const user = await updateUser(id, {
+      username,
       displayName: body.displayName,
       passwordHash: body.password ? hashPassword(body.password) : undefined,
       password: body.password || undefined,
@@ -96,9 +130,61 @@ export async function PATCH(
       },
     });
   } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al actualizar';
+    const status = msg.includes('ya existe')
+      ? 409
+      : msg.includes('inválido')
+        ? 400
+        : 500;
+    return NextResponse.json({ error: msg }, { status });
+  }
+}
+
+/** Alias: el cliente admin usa PATCH; PUT acepta los mismos campos. */
+export async function PUT(
+  request: Request,
+  context: { params: Promise<{ id: string }> }
+) {
+  return PATCH(request, context);
+}
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireAdmin();
+  if (auth instanceof NextResponse) return auth;
+
+  const { id } = await context.params;
+  const target = await findUserById(id);
+  if (!target) {
+    return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
+  }
+
+  const bootstrap = getDashboardUser();
+  if (target.username.trim().toLowerCase() === bootstrap) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'Error al actualizar' },
-      { status: 500 }
+      {
+        error:
+          'No se puede eliminar al administrador bootstrap (DASHBOARD_USER)',
+      },
+      { status: 400 }
     );
+  }
+
+  if (auth.username.trim().toLowerCase() === target.username.trim().toLowerCase()) {
+    return NextResponse.json(
+      { error: 'No puedes eliminar tu propio usuario' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    await deleteUser(id);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al eliminar';
+    const status = msg.includes('no encontrado') ? 404 : 500;
+    return NextResponse.json({ error: msg }, { status });
   }
 }
