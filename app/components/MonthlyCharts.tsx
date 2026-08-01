@@ -20,6 +20,10 @@ function formatMoney(v: number, decimals = 0) {
   })}`;
 }
 
+function formatCount(v: number) {
+  return Math.round(v).toLocaleString('es-MX');
+}
+
 const MES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 interface MonthlyBarChartProps {
@@ -165,10 +169,16 @@ function MonthlyAvgTooltip({
   active,
   payload,
   label,
+  subtitle,
+  valueDecimals,
+  valueKind,
 }: {
   active?: boolean;
   payload?: TooltipPayloadItem[];
   label?: string;
+  subtitle: string;
+  valueDecimals: number;
+  valueKind: 'money' | 'count';
 }) {
   if (!active || !payload?.length) return null;
 
@@ -185,6 +195,7 @@ function MonthlyAvgTooltip({
         {items.map((p) => {
           const y = Number(p.name);
           const c = colorForYear(y);
+          const n = Number(p.value);
           return (
             <div key={p.name} className="flex items-center justify-between gap-6 text-sm">
               <span className="flex items-center gap-2">
@@ -197,21 +208,41 @@ function MonthlyAvgTooltip({
                 </span>
               </span>
               <span className="font-bold tabular-nums text-slate-800">
-                {formatMoney(Number(p.value), 2)}
+                {valueKind === 'count'
+                  ? formatCount(n)
+                  : formatMoney(n, valueDecimals)}
               </span>
             </div>
           );
         })}
       </div>
       <p className="mt-2 border-t border-slate-100 pt-1.5 text-xs text-slate-500">
-        Promedio venta semanal del mes
+        {subtitle}
       </p>
     </div>
   );
 }
 
-/** Líneas con puntos — estilo Acumulado ventas x semana */
-export function MonthlyComparisonChart({ rows, years }: MonthlyComparisonChartProps) {
+interface MonthlyLineChartProps extends MonthlyComparisonChartProps {
+  /** Texto del pie del tooltip */
+  subtitle?: string;
+  /** Decimales en eje Y y tooltip (cheque promedio usa 2) */
+  valueDecimals?: number;
+  /** Dominio Y desde 0 (típico para dinero) */
+  yFromZero?: boolean;
+  /** money = $; count = enteros (personas) */
+  valueKind?: 'money' | 'count';
+}
+
+/** Líneas con puntos — estilo Acumulado ventas x semana / cheque promedio */
+export function MonthlyComparisonChart({
+  rows,
+  years,
+  subtitle = 'Promedio venta semanal del mes',
+  valueDecimals = 2,
+  yFromZero = false,
+  valueKind = 'money',
+}: MonthlyLineChartProps) {
   const chartRows = rows.map((row) => {
     const short = MES_CORTO[(Number(row.monthIdx) || 1) - 1] ?? String(row.mes).slice(0, 3);
     return { ...row, mesCorto: short };
@@ -221,14 +252,28 @@ export function MonthlyComparisonChart({ rows, years }: MonthlyComparisonChartPr
     <div className="h-80 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartRows} margin={{ top: 12, right: 16, left: 4, bottom: 8 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <CartesianGrid strokeDasharray="2 4" stroke="#e2e8f0" />
           <XAxis dataKey="mesCorto" tick={{ fontSize: 11, fill: '#64748b' }} />
           <YAxis
             tick={{ fontSize: 11, fill: '#64748b' }}
-            tickFormatter={(v) => formatMoney(Number(v))}
+            tickFormatter={(v) =>
+              valueKind === 'count'
+                ? formatCount(Number(v))
+                : formatMoney(Number(v), 0)
+            }
             width={80}
+            domain={yFromZero ? [0, 'auto'] : ['auto', 'auto']}
+            allowDecimals={valueKind !== 'count'}
           />
-          <Tooltip content={<MonthlyAvgTooltip />} />
+          <Tooltip
+            content={
+              <MonthlyAvgTooltip
+                subtitle={subtitle}
+                valueDecimals={valueDecimals}
+                valueKind={valueKind}
+              />
+            }
+          />
           {years.map((y) => (
             <Line
               key={y}

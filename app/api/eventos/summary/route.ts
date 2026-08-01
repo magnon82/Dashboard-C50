@@ -28,7 +28,9 @@ export async function GET() {
 
     const [clients, leads, quotes, bookings, activity] = await Promise.all([
       sb.from('event_clients').select('id', { count: 'exact', head: true }),
-      sb.from('event_leads').select('id, stage, event_date, estimated_amount'),
+      sb.from('event_leads').select(
+        'id, title, celebration, company, stage, event_date, pax, estimated_amount'
+      ),
       sb.from('event_quotes').select('id, status, total, event_date'),
       sb
         .from('event_bookings')

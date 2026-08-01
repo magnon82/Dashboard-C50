@@ -1,0 +1,41 @@
+---
+description: Cortes TPV — foto diaria 3 terminales (local MVP)
+globs: app/ventas/corte-tpv/**/*,app/api/tpv-cortes/**/*,app/components/tpv/**/*,app/lib/tpv-*.ts,supabase/tpv_cortes.sql
+alwaysApply: false
+---
+
+# Cortes TPV (foto celular)
+
+**Local only** hasta que el usuario pida publicar. No commit/push/deploy de este MVP sin pedido explícito.
+
+## Regla de negocio
+
+Cobrado en terminales → desglose propina → **neto a banco** → vs presupuesto semanal bancario (`presupuesto_ingreso` tipo ventas MIFEL/BBVA).
+
+Hay **3 terminales**. Cada día, cada una queda:
+1. Foto que pasa calidad (resolución + nitidez), o
+2. Marcado explícito **«No se utilizó la terminal N»**
+
+Día incompleto hasta que las 3 estén contabilizadas.
+
+## Fuentes
+
+- Fotos: Supabase Storage `tpv-cortes` + tabla `tpv_corte_uploads` (`supabase/tpv_cortes.sql`)
+- Montos MVP: **manuales** (OCR stub `ocr_status=skipped`)
+- Cross-check opcional: Infocaja `Infocaja Bancarias` / `Infocaja Propina`
+- No confundir con `corte_caja` (cancelaciones/descuentos Infocaja)
+
+## UI
+
+Entrada: botón Master Panel (`/admin`) «Cortes TPV · tomar fotos» → `/ventas/corte-tpv`.
+No poner el acceso en `/ventas` ni en reportes-socios.
+Página: captura móvil + revisar + verificación vs semana.
+Cuando el día está completo (3/3), mostrar éxito («Proceso concluido correctamente»), no empujar «Volver a Ventas».
+Guía de fotos in-app: `/ventas/corte-tpv/guia` · ejemplos en `public/ventas/tpv-guia/` (propina + totalización).
+Auth: módulo `ventas` o admin (viewers con ventas pueden subir; mesero/PIN después).
+
+## Setup SQL (one-shot)
+
+Ejecutar `supabase/tpv_cortes.sql` en Supabase → SQL Editor (tabla `tpv_corte_uploads` + bucket privado `tpv-cortes`).
+Fotos no son bloqueantes: la ruta funciona con día vacío tras el SQL.
+Sin `DATABASE_URL` local no se puede aplicar DDL desde el repo; pegar el archivo en el SQL Editor.

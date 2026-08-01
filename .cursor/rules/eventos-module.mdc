@@ -15,17 +15,28 @@ Este módulo es **operación comercial** (`/eventos`: CRM, cotizador, OS…).
 - **Hold:** 72 horas hábiles; **admin puede extender**. **Sin hold** si faltan **&lt;15 días** al evento.
 - **Barra libre:** solo junto con alimentos (menú 3 tiempos u otro menú de comida).
 - **Grupos:** menú 3 tiempos desde **10 pax**.
+- **Menú 3 tiempos:** precio según **plato fuerte** (a elegir). Entrada y postre opcionales en cotizador (`choice_groups` / `options` en línea). Cotización presentable: `/eventos/cotizacion/preview` (borrador) o `/eventos/cotizacion/[id]`.
 - **Desayunos pack:** ≥50 pax = **$30,000** (paquete fijo).
 - **CRM multi-usuario** con `owner_username`; coexistir con Excel/Sheets (no borrar fuentes Drive).
-- **GCal compartido:** Fase 2 (stub UI “próximo”); no inventar sync completa sin pedido.
+- **GCal compartido:** Fase 2 (OAuth / sync). UI Calendario ya muestra **próximos locales** (hoy CDMX+): activity seed + OS + CRM leads. No inventar sync completa sin pedido.
 
 ## Datos / Drive
 
-Fuentes en `I:\Mi unidad\Eventos\` (menús PDF, controles, OS, lista clientes Excel). Seed: `supabase/eventos_module.sql` + `supabase/seed_event_clients.json`. Precios con `price_verified=false` requieren verificación operativa.
+Fuentes en `I:\Mi unidad\Eventos\` (menús PDF, controles, OS, lista clientes Excel). Seed: `supabase/eventos_module.sql` + `supabase/seed_event_clients.json` + `supabase/seed_event_menus.json` (fallback local del cotizador si faltan tablas). Precios con `price_verified=false` requieren verificación operativa.
 
-Timeline CRM (más reciente → antiguo): `python ingestor/build_event_client_activity.py` → `supabase/seed_event_client_activity.json`. Lee OS PDF locales + Sheets API (Seguimiento / Anticipos C50). Los atajos `.gsheet` en disco no son legibles. No escribe `financial_records` (eso sigue en `ingest_eventos.py` / Ventas).
+**Menús del cotizador (fuente de verdad):** solo `I:\Mi unidad\Eventos\Menús\Menús eventos vigentes` → `supabase/seed_event_menus.json` + seed SQL en `eventos_module.sql`. Catálogos desde PDF vigentes: Menú 3 tiempos 2025, Menú desayunos 2025, Menú parejas ES/EN, Barra libre eventos 2025 (nacional / internacional / refrescos). Plus práctico: «Bebidas a la carta» (ítems frecuentes en OS; `price_verified=false`; no hay carta PDF en vigentes). **No** usar `Menús eventos viejos`, NUEVOS PRECIOS, canapés, taquizas, botanas pre-bodas ni placeholders `menu_c50_bebidas` en el dropdown. Tras cambiar el seed, re-ejecutar el bloque de menús de `eventos_module.sql` en Supabase; el fallback JSON se usa si `event_menus` no existe / está vacía. Reiniciar el server Next si el seed JSON quedó cacheado en memoria.
 
-Lista UI de OS: `GET /api/eventos/os` escanea `Ordenes de servicio` (o `EVENTOS_OS_PATH`); fallback al seed de actividad si Drive no está montado. Orden: **fecha del evento desc** (nombre / anticipos / seed); sin fecha → mtime al final. `?open=` sirve PDF bajo esa raíz.
+**Clientes CRM (Excel → seed):** `python scripts/import_event_clients_from_excel.py` lee `I:\Mi unidad\Eventos\lista de clientes Carranza 50.xlsx` (o `EVENTOS_CLIENTS_EXCEL` / `--excel`) → regenera `supabase/seed_event_clients.json`. Con `--seed` también inserta faltantes en Supabase; si no: `POST /api/eventos/clients/seed` o `python scripts/seed_event_clients.py`. Dedup por empresa+email/tel/contacto (permite 2 contactos de la misma empresa). Upsert: no borra existentes.
+
+**Leads desde Seguimiento:** helper compartido `ingestor/eventos_seguimiento.py`. `python scripts/seed_event_leads_from_seguimiento.py` (OAuth Sheets) → `supabase/seed_event_leads_seguimiento.json` + upsert `event_leads` (`source='sheets'`). Alternativa API: `POST /api/eventos/leads/seed-seguimiento` (lee el JSON; requiere permiso de edición). Match cliente por email/tel/nombre; dedupe lead por cliente|tel|email + `event_date`. Status Sheet: Cotizado→cotizado, Cerrado→ganado, Declinado→perdido; resto → nuevo. Monto cotizado del Sheet va a `notes` (no a `estimated_amount`, que es por persona). Columna `source`: patch `supabase/eventos_leads_source.sql` si la tabla ya existía.
+
+Timeline CRM (más reciente → antiguo): `python ingestor/build_event_client_activity.py` → `supabase/seed_event_client_activity.json`. Lee OS PDF locales + Sheets API (Seguimiento / Anticipos C50) vía el mismo helper. Los atajos `.gsheet` en disco no son legibles. No escribe `financial_records` (eso sigue en `ingest_eventos.py` / Ventas).
+
+Lista UI de OS: `GET /api/eventos/os` escanea `Ordenes de servicio` (o `EVENTOS_OS_PATH`); fallback al seed de actividad si Drive no está montado. Orden API: **fecha del evento desc** (nombre / anticipos / seed); sin fecha → mtime al final. UI: filtros **Próximas** (hoy CDMX+, **asc** = más cercana primero) / Pasadas / Todas + año + búsqueda; 10 + Mostrar más. `?open=` sirve PDF bajo esa raíz.
+
+Calendario local: `GET /api/eventos/calendario` + `EventosCalendario` — hoy CDMX+ desde activity seed (no os_pdf), OS con `event_date`, y `event_leads` si Supabase; dedupe por fecha+cliente; pronto primero. Cards: **Descargar OS** (`os_path` → `/api/eventos/os?open=`) y **Ver cotización** (`quote_id` → `/eventos/cotizacion/[id]`); si faltan → «Sin OS» / «Sin cotización». OS tab = solo PDFs Drive; Anticipos sin PDF salen en Calendario (y en OS Próximas como «Sin OS / pendiente»). Hold GCal stub: `POST /api/eventos/holds` + env `GCAL_CALENDAR_ID` (Fase 2 sync real).
+
+Biblioteca: `GET /api/eventos/biblioteca` lista menús vigentes (`Menús/Menús eventos vigentes`), políticas/manual/contrato, Menú C50 (carta restaurante, no es catálogo del cotizador) y publicidad. Categorías: Menús de alimentos / Bebidas / Políticas y contrato / Manuales / Publicidad; títulos amigables vía catálogo; exclusiones por stem; Abrir; seed si Drive no montado. Políticas (`Politica de eventos 2025`, `Contrato renta terraza`) → modal in-app (`EventosPoliticaModal` + `eventos-politicas-content.ts`) con Abrir original opcional; no forzar descarga Word. Manual de seguimiento = ruta/página aparte si existe. `?open=` solo bajo `Eventos` o `Menú C50`. Ya no escanea `Bodas y prebodas` ni `Menús eventos viejos`.
 
 ## Auth
 

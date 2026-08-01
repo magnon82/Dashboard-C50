@@ -17,10 +17,34 @@ type SeedRow = {
   phone?: string;
 };
 
+function normalizePhone(v: string | null | undefined): string {
+  if (!v) return '';
+  let digits = String(v).replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('52')) digits = digits.slice(2);
+  return digits;
+}
+
+function clientIdentity(
+  company: string,
+  contact?: string | null,
+  email?: string | null,
+  phone?: string | null
+): string {
+  const c = (company || '').trim().toLowerCase();
+  const e = (email || '').trim().toLowerCase();
+  const p = normalizePhone(phone);
+  const n = (contact || '').trim().toLowerCase();
+  if (e) return `${c}|e:${e}`;
+  if (p) return `${c}|p:${p}`;
+  if (n) return `${c}|n:${n}`;
+  return `${c}|solo`;
+}
+
 /**
  * Importa clientes desde supabase/seed_event_clients.json
- * (exportados de lista de clientes Carranza 50.xlsx).
- * Idempotente por company_name (case-insensitive).
+ * (regenerar con scripts/import_event_clients_from_excel.py desde
+ * lista de clientes Carranza 50.xlsx).
+ * Idempotente por company + email/phone/contacto.
  */
 export async function POST() {
   const auth = await requireEventosSession();
@@ -39,23 +63,34 @@ export async function POST() {
     const sb = getServiceSupabase();
     const { data: existing, error: exErr } = await sb
       .from('event_clients')
-      .select('company_name');
+      .select('company_name, contact_name, email, phone');
     if (exErr) {
       return NextResponse.json({ error: exErr.message }, { status: 500 });
     }
 
     const have = new Set(
-      (existing || []).map((c) => String(c.company_name || '').trim().toLowerCase())
+      (existing || []).map((c) =>
+        clientIdentity(
+          String(c.company_name || ''),
+          c.contact_name,
+          c.email,
+          c.phone
+        )
+      )
     );
 
     const now = new Date().toISOString();
     const toInsert = rows
-      .filter((r) => r.company && !have.has(r.company.trim().toLowerCase()))
+      .filter((r) => {
+        if (!r.company?.trim()) return false;
+        const id = clientIdentity(r.company, r.contact, r.email, r.phone);
+        return !have.has(id);
+      })
       .map((r) => ({
         company_name: r.company.trim(),
         contact_name: (r.contact || '').trim() || null,
         email: (r.email || '').trim() || null,
-        phone: (r.phone || '').trim() || null,
+        phone: normalizePhone(r.phone) || null,
         source: 'excel_seed',
         owner_username: auth.username,
         created_at: now,

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import { SuiteShell } from '@/app/components/SuiteShell';
 import { AdminAlmacenamientoRecursos } from '@/app/components/AdminAlmacenamientoRecursos';
 import { AdminDataMap } from '@/app/components/AdminDataMap';
@@ -121,6 +121,37 @@ function PasswordField({
       </div>
       {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
     </div>
+  );
+}
+
+function AdminSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="mb-12">
+      <header className="mb-5 flex gap-3">
+        <span
+          className="mt-1 h-10 w-1 shrink-0 rounded-full"
+          style={{ backgroundColor: SUITE.orange }}
+          aria-hidden
+        />
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold tracking-tight" style={{ color: theme.title }}>
+            {title}
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed" style={{ color: theme.muted }}>
+            {description}
+          </p>
+        </div>
+      </header>
+      <div className="space-y-6 [&>*]:!mb-0">{children}</div>
+    </section>
   );
 }
 
@@ -322,37 +353,60 @@ export default function AdminPage() {
   return (
     <SuiteShell
       title="Master Panel"
-      subtitle="Mapa de datos, inventario de recursos, saldos bancarios, cuentas de solo lectura y ajustes de presupuesto."
+      subtitle="Financieros, usuarios, datos e inventario — herramientas de administración del suite."
     >
-      {/* 1. Mapa de orígenes (colapsado por defecto) */}
-      <AdminDataMap />
-
-      {/* 1b. Inventario de datos (colapsado por defecto) */}
-      <AdminAlmacenamientoRecursos />
-
-      {/* 2. Saldos bancarios manuales */}
-      <AdminSaldosBancos />
-
-      {/* 3. Administración de usuarios */}
-      <section className="mb-8">
-        <div className="mb-4">
-          <h2 className="text-lg font-bold" style={{ color: theme.title }}>
-            Administración de usuarios
-          </h2>
-          <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-            Solo tú gestionas cuentas. Los usuarios nuevos tienen{' '}
-            <strong className="font-semibold text-slate-700">solo lectura</strong>{' '}
-            en los módulos que les asignes.
-          </p>
+      {/* 1. Financieros */}
+      <AdminSection
+        title="Financieros"
+        description="Captura diaria de terminales, saldos bancarios y ajustes ligados al presupuesto."
+      >
+        <div
+          className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-slate-100 bg-white p-5"
+          style={{ boxShadow: SUITE.shadow, borderTop: `4px solid ${SUITE.navy}` }}
+        >
+          <div className="min-w-0 flex-1">
+            <p
+              className="text-[11px] font-bold uppercase tracking-[0.14em]"
+              style={{ color: SUITE.navy }}
+            >
+              Captura diaria · celular
+            </p>
+            <h3 className="mt-1 text-lg font-bold" style={{ color: theme.title }}>
+              Cortes TPV
+            </h3>
+            <p className="mt-1 text-sm" style={{ color: theme.muted }}>
+              Aquí se toman las fotos de las terminales 1–3 (o se marca «no se
+              usó») y se verifica vs presupuesto bancario.
+            </p>
+            <p className="mt-1 font-mono text-xs text-slate-400">
+              /ventas/corte-tpv
+            </p>
+          </div>
+          <a
+            href="/ventas/corte-tpv"
+            className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-xl px-5 text-sm font-bold text-white"
+            style={{ backgroundColor: SUITE.navy }}
+          >
+            Cortes TPV · tomar fotos
+          </a>
         </div>
 
+        <AdminSaldosBancos />
+        <AdminPresupuestoAjustes />
+      </AdminSection>
+
+      {/* 2. Usuarios */}
+      <AdminSection
+        title="Usuarios"
+        description="Solo tú gestionas cuentas. Los usuarios nuevos tienen solo lectura en los módulos que les asignes."
+      >
         {error && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
         {okMsg && (
-          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
             {okMsg}
           </div>
         )}
@@ -427,7 +481,7 @@ export default function AdminPage() {
             className="rounded-[24px] border border-slate-100 bg-white p-5 lg:col-span-3"
             style={{ boxShadow: SUITE.shadow }}
           >
-            <h3 className="text-lg font-bold text-slate-900">Usuarios</h3>
+            <h3 className="text-lg font-bold text-slate-900">Cuentas</h3>
             {loading ? (
               <p className="mt-4 text-slate-500">Cargando…</p>
             ) : users.length === 0 ? (
@@ -665,10 +719,16 @@ export default function AdminPage() {
             )}
           </div>
         </div>
-      </section>
+      </AdminSection>
 
-      {/* 4. Ajustes de presupuesto (colapsado por defecto) */}
-      <AdminPresupuestoAjustes />
+      {/* 3. Datos e inventario */}
+      <AdminSection
+        title="Datos e inventario"
+        description="Mapa de orígenes y catálogo de lo que vive en almacenamiento, APIs y bases del suite."
+      >
+        <AdminDataMap />
+        <AdminAlmacenamientoRecursos />
+      </AdminSection>
     </SuiteShell>
   );
 }

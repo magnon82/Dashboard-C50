@@ -22,6 +22,9 @@ const NAV_ICONS: Record<string, string> = {
   finanzas: '＄',
   rrhh: '♟',
   eventos: '◎',
+  'reportes-socios': '▦',
+  cocina: '♨',
+  barra: '◐',
   calidad: '★',
   inventarios: '▣',
   admin: '⚙',
@@ -48,7 +51,7 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
 
   const sidebar = (
     <aside
-      className="flex h-full w-[240px] flex-col rounded-[28px] p-5 text-white shadow-xl"
+      className="flex h-full w-[240px] flex-col overflow-y-auto rounded-[28px] p-5 text-white shadow-xl"
       style={{ backgroundColor: theme.sidebarBg, boxShadow: SUITE.shadow }}
     >
       <div className="mb-8 flex flex-col items-center text-center">
@@ -110,8 +113,10 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
   return (
     <div className="min-h-screen" style={{ backgroundColor: theme.pageBg }}>
       <div className="mx-auto flex min-h-screen max-w-[1600px] gap-5 p-4 md:p-6">
-        {/* Desktop sidebar */}
-        <div className="hidden shrink-0 lg:block">{sidebar}</div>
+        {/* Desktop sidebar — sticky so it stays in view while main content scrolls */}
+        <div className="sticky top-6 hidden h-[calc(100vh-3rem)] shrink-0 self-start lg:block">
+          {sidebar}
+        </div>
 
         {/* Mobile drawer */}
         {open && (

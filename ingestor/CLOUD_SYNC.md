@@ -124,6 +124,22 @@ python ingest_estados_cuenta.py --index-pdfs --pdf-only
 Tras reindexar, la columna **Concepto** sale del nombre del archivo
 (`mifel-NominaMeserosSem28(26)-$4,410.56.pdf` → `Nomina Meseros Sem 28`).
 
+## Cortes TPV (foto celular · local MVP)
+
+UI: `/ventas/corte-tpv` (módulo Ventas). Flujo diario **Terminal 1 / 2 / 3**:
+foto nítida **o** «No se utilizó la terminal N». Día incompleto hasta las 3.
+
+1. En Supabase → SQL Editor, ejecuta `supabase/tpv_cortes.sql`
+   (tabla `tpv_corte_uploads` + bucket Storage `tpv-cortes`).
+2. Reinicia `npm run dev` local. **No** hace falta deploy.
+3. Auth: login del suite con módulo `ventas` (o admin). Cuentas mesero/PIN: después.
+4. Montos: **manuales** día 1 (`total_cobrado`, `propina`, `neto_banco`).
+   `ocr_status=skipped` / `ocr_text` stub para OCR futuro.
+5. Verificación semana: neto TPV vs `presupuesto_ingreso` (Ventas MIFEL/BBVA)
+   + referencia Infocaja Bancarias/Propina.
+
+APIs: `GET/POST /api/tpv-cortes`, `GET/PATCH /api/tpv-cortes/[id]`.
+
 ## Tareas Windows locales
 
 Quedaron **deshabilitadas** (`DashboardC50-SyncSaldosAlDia`, `DashboardC50-SyncGmailDiario`).

@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { homePathForModules } from '@/app/lib/modules';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -26,14 +27,19 @@ export default function LoginForm() {
         body: JSON.stringify({ username, password }),
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         setError(data.error || 'No se pudo iniciar sesión');
         return;
       }
 
-      const from = searchParams.get('from') || '/';
-      router.replace(from);
+      const from = searchParams.get('from');
+      const modules: string[] = data.user?.modules ?? [];
+      // Deep-link `from` wins; otherwise hub or sole module
+      const destination =
+        from && from !== '/' ? from : homePathForModules(modules);
+      router.replace(destination);
       router.refresh();
     } catch {
       setError('Error de conexión. Intenta de nuevo.');

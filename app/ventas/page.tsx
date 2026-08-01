@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useEffect, useMemo, Fragment } from 'react';
-import { Card, Metric, Text } from '@tremor/react';
+import { Card, Text } from '@tremor/react';
 import { WeeklyComparisonChart, colorForYear } from '@/app/components/WeeklyComparisonChart';
-import { MonthlyComparisonChart, MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
-import { PaymentMixPie } from '@/app/components/PaymentMixPie';
-import { WiEventosPie } from '@/app/components/WiEventosPie';
+import { MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
 import { SuiteShell } from '@/app/components/SuiteShell';
+import { VentasResumenCard } from '@/app/components/VentasResumenCard';
+import { SemanaEnCursoTable } from '@/app/components/SemanaEnCursoTable';
+import { DetalleSemanalCard } from '@/app/components/DetalleSemanalCard';
+import { ChequePromedioMensualCard } from '@/app/components/ChequePromedioMensualCard';
+import { PromedioVentaSemanalPorMesCard } from '@/app/components/PromedioVentaSemanalPorMesCard';
 import {
   SectionHeader,
   filterControlClass,
@@ -21,15 +24,11 @@ import {
   buildWeeklySalesByYear,
   buildWeeklyComparisonChart,
   buildMonthlySalesByYear,
-  buildMonthlyWeeklyAverageByYear,
-  buildMonthlyAvgChartRows,
   buildMonthlyTotalChartRows,
-  yearWeeklyAverageFromMonthly,
   monthlyAverageForYear,
   monthlyTotalForYear,
   weeklyAverage,
   buildWeekToDateSales,
-  buildPaymentMix,
   buildCorteCancelacionesDescuentos,
   availableCorteCancelacionesMonths,
   latestMonthWithCorteCancelaciones,
@@ -66,10 +65,6 @@ export default function Dashboard() {
   const [corteMonth, setCorteMonth] = useState(() => new Date().getMonth() + 1);
   const [didSnapCorteMonth, setDidSnapCorteMonth] = useState(false);
   const [corteOpenId, setCorteOpenId] = useState<string | null>(null);
-  const [detalleYear, setDetalleYear] = useState(2026);
-  const [detalleWeekFrom, setDetalleWeekFrom] = useState<number | null>(null);
-  const [detalleWeekTo, setDetalleWeekTo] = useState<number | null>(null);
-  const [detalleCollapsed, setDetalleCollapsed] = useState(true);
   const [weekFrom, setWeekFrom] = useState<number | null>(null);
   const [weekTo, setWeekTo] = useState<number | null>(null);
 
@@ -145,84 +140,6 @@ export default function Dashboard() {
     [records, weeklyByYear]
   );
 
-  const monthlyAvgByYear = useMemo(
-    () => buildMonthlyWeeklyAverageByYear(weeklyByYear, COMPARE_YEARS),
-    [weeklyByYear]
-  );
-
-  const yearWeeks = useMemo(() => {
-    const wm = weeklyByYear.get(year);
-    if (!wm) return [];
-    return Array.from(wm.values())
-      .filter((w) => w.total > 0)
-      .sort((a, b) => a.week - b.week);
-  }, [weeklyByYear, year]);
-
-  const detalleWeeks = useMemo(() => {
-    const wm = weeklyByYear.get(detalleYear);
-    if (!wm) return [];
-    let weeks = Array.from(wm.values())
-      .filter((w) => w.total > 0)
-      .sort((a, b) => a.week - b.week);
-    if (detalleWeekFrom != null) weeks = weeks.filter((w) => w.week >= detalleWeekFrom);
-    if (detalleWeekTo != null) weeks = weeks.filter((w) => w.week <= detalleWeekTo);
-    return weeks;
-  }, [weeklyByYear, detalleYear, detalleWeekFrom, detalleWeekTo]);
-
-  const weekRowsDisplay = detalleWeeks;
-
-  const detalleWeekOptions = useMemo(() => {
-    const wm = weeklyByYear.get(detalleYear);
-    if (!wm) return [];
-    return Array.from(wm.values())
-      .filter((w) => w.total > 0)
-      .sort((a, b) => a.week - b.week)
-      .map((w) => ({
-        week: w.week,
-        label: `S${w.week} · ${w.mes} · ${w.label}`,
-      }));
-  }, [weeklyByYear, detalleYear]);
-
-  /** Totales del detalle semanal (año del filtro de detalle) */
-  const totalesDetalle = useMemo(() => {
-    return weekRowsDisplay.reduce(
-      (acc, w) => ({
-        total: acc.total + w.total,
-        eventos: acc.eventos + w.eventos,
-        ventaWi: acc.ventaWi + w.ventaWi,
-      }),
-      { total: 0, eventos: 0, ventaWi: 0 }
-    );
-  }, [weekRowsDisplay]);
-
-  /** Totales KPI (filtro header año/mes) */
-  const weekRowsKpi = useMemo(() => {
-    let weeks = yearWeeks;
-    if (month !== null) {
-      weeks = weeks.filter((w) => w.mes === MESES[month - 1]);
-    }
-    return weeks;
-  }, [yearWeeks, month]);
-
-  const totalesPeriodo = useMemo(() => {
-    return weekRowsKpi.reduce(
-      (acc, w) => ({
-        total: acc.total + w.total,
-        eventos: acc.eventos + w.eventos,
-        ventaWi: acc.ventaWi + w.ventaWi,
-      }),
-      { total: 0, eventos: 0, ventaWi: 0 }
-    );
-  }, [weekRowsKpi]);
-
-  const ventasAcumuladas = totalesPeriodo.total;
-  const eventosPeriodo = totalesPeriodo.eventos;
-  const ventaWiPeriodo = totalesPeriodo.ventaWi;
-
-  const promedioSemanal = useMemo(() => weeklyAverage(weekRowsKpi), [weekRowsKpi]);
-
-  const semanasTranscurridas = weekRowsKpi.length;
-
   const weeklyComparison = useMemo(
     () => buildWeeklyComparisonChart(weeklyByYear, compareYears, year, weekFrom, weekTo),
     [weeklyByYear, compareYears, year, weekFrom, weekTo]
@@ -252,13 +169,6 @@ export default function Dashboard() {
     [monthlyByYear, compareYears]
   );
 
-  const monthlyAvgChartRows = useMemo(
-    () => buildMonthlyAvgChartRows(monthlyAvgByYear, compareYears),
-    [monthlyAvgByYear, compareYears]
-  );
-
-  const periodoLabel =
-    month === null ? `${year} · acumulado` : `${MESES[month - 1]} ${year}`;
   const hoy = new Date().toLocaleDateString('es-MX', {
     day: 'numeric',
     month: 'long',
@@ -266,11 +176,6 @@ export default function Dashboard() {
   });
 
   const weekToDate = useMemo(() => buildWeekToDateSales(records), [records]);
-
-  const paymentMix = useMemo(
-    () => buildPaymentMix(records, year, month),
-    [records, year, month]
-  );
 
   /** Cancelaciones/descuentos: default = último mes con datos (no el calendario vacío). */
   const corteMesesDisponibles = useMemo(
@@ -354,223 +259,21 @@ export default function Dashboard() {
         {loading && (
           <p className="mb-6 text-center" style={{ color: theme.muted }}>Cargando datos…</p>
         )}
-        <Card
-          className={`mb-8 ${cardClass}`}
-          style={{ ...cardStyle, borderTop: `4px solid ${SUITE.orange}` }}
-        >
+        <VentasResumenCard
+          className="mb-8"
+          records={records}
+          year={year}
+          month={month}
+          onYearChange={setYear}
+          onMonthChange={setMonth}
+          availableYears={availableYears}
+          weeklyDataYears={weeklyDataYears}
+          showPaymentMix
+        />
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
-            <div className="px-2 py-1">
-              <div className="flex min-h-9 flex-wrap items-center justify-between gap-3">
-                <Text
-                  className="text-xs font-bold uppercase tracking-wide"
-                  style={{ color: theme.kpi[0].label }}
-                >
-                  Venta total
-                </Text>
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className={filterControlClass}>
-                    <span className="text-slate-500">Año</span>
-                    <select
-                      className={filterSelectClass}
-                      value={year}
-                      onChange={(e) => setYear(Number(e.target.value))}
-                    >
-                      {availableYears.map((y) => (
-                        <option key={y} value={y}>
-                          {y}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className={filterControlClass}>
-                    <span className="text-slate-500">Mes</span>
-                    <select
-                      className={filterSelectClass}
-                      value={month ?? ''}
-                      onChange={(e) =>
-                        setMonth(e.target.value === '' ? null : Number(e.target.value))
-                      }
-                    >
-                      <option value="">Año (acumulado)</option>
-                      {MESES.map((m, i) => (
-                        <option key={m} value={i + 1}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-              <Metric className="mt-2 text-3xl font-bold text-slate-900 md:text-4xl">
-                {money(ventasAcumuladas)}
-              </Metric>
-              <Text className="mt-3 text-sm text-slate-500">
-                <span className="font-medium text-slate-700">WI</span> {money(ventaWiPeriodo)}
-                <span className="mx-2 text-slate-300">|</span>
-                <span className="font-medium text-slate-700">Eventos</span>{' '}
-                {money(eventosPeriodo)}
-              </Text>
-            </div>
-            <div
-              className="rounded-[20px] px-5 py-4 text-white"
-              style={{ backgroundColor: SUITE.navy }}
-            >
-              <Text className="text-xs font-bold uppercase tracking-wide text-white/70">
-                Promedio semanal
-              </Text>
-              <Metric className="mt-2 text-3xl font-bold text-white md:text-4xl">
-                {promedioSemanal > 0 ? money(promedioSemanal) : '—'}
-              </Metric>
-              <Text className="mt-2 text-sm text-white/55">
-                {semanasTranscurridas} semana{semanasTranscurridas !== 1 ? 's' : ''} transcurridas
-                {month !== null ? ` · ${MESES[month - 1]}` : ''}
-              </Text>
-            </div>
-          </div>
-          <div className="mt-5 grid grid-cols-1 gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2 sm:gap-8">
-            <div>
-              <p
-                className="mb-2 text-[10px] font-bold uppercase tracking-wide"
-                style={{ color: SUITE.navy }}
-              >
-                WI / Eventos
-              </p>
-              <WiEventosPie wi={ventaWiPeriodo} eventos={eventosPeriodo} />
-            </div>
-            <div>
-              <p
-                className="mb-2 text-[10px] font-bold uppercase tracking-wide"
-                style={{ color: SUITE.navy }}
-              >
-                Efectivo / Tarjetas · {periodoLabel}
-              </p>
-              <PaymentMixPie mix={paymentMix} periodoLabel={periodoLabel} />
-            </div>
-          </div>
-        </Card>
+        <SemanaEnCursoTable weekToDate={weekToDate} showDescCanc />
 
-        {/* Ventas de la semana en curso */}
-        <Card
-          className={`mb-8 ${cardClass}`}
-          style={{ ...cardStyle, borderTop: `4px solid ${SUITE.navy}` }}
-        >
-          <div className="mb-4">
-            <Text
-              className="text-xs font-bold uppercase tracking-wide"
-              style={{ color: theme.kpi[2]?.label ?? theme.kpi[0].label }}
-            >
-              Ventas de la semana en curso
-              {weekToDate.weekNumber > 0 ? ` · S${weekToDate.weekNumber}` : ''}
-            </Text>
-            <Metric className="mt-1 text-3xl font-bold text-slate-900 md:text-4xl">
-              {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
-            </Metric>
-            <Text className="mt-1 text-sm text-slate-500">
-              {formatShort(weekToDate.mondayKey)} – {formatShort(weekToDate.sundayKey)}
-              {' · '}
-              {weekToDate.days.filter((d) => d.total > 0).length} día
-              {weekToDate.days.filter((d) => d.total > 0).length !== 1 ? 's' : ''} con venta
-            </Text>
-          </div>
-          {weekToDate.days.length === 0 ? (
-            <p className="py-4 text-center text-slate-400">Sin datos Infocaja esta semana.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr
-                    className="text-xs uppercase tracking-wide text-white"
-                    style={{ backgroundColor: theme.tableHead }}
-                  >
-                    <th className="px-4 py-2.5 text-left">Día</th>
-                    <th className="px-4 py-2.5 text-left">Fecha</th>
-                    <th className="px-4 py-2.5 text-right">Venta</th>
-                    <th className="px-4 py-2.5 text-right">Cheque promedio</th>
-                    <th className="px-4 py-2.5 text-right">Venta {weekToDate.prevYear}</th>
-                    <th className="px-4 py-2.5 text-right">Var. %</th>
-                    <th className="px-4 py-2.5 text-right">Desc. / Canc.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {weekToDate.days.map((d, i) => (
-                    <tr key={d.date} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                      <td className="px-4 py-2 capitalize text-slate-700">{d.weekday}</td>
-                      <td className="px-4 py-2 text-slate-600">
-                        {d.label}
-                        {d.prevLabel ? (
-                          <span className="ml-1 text-xs text-slate-400">· {d.prevLabel}</span>
-                        ) : null}
-                      </td>
-                      <td
-                        className="px-4 py-2 text-right font-semibold"
-                        style={{ color: d.total > 0 ? theme.tableTotal : '#94a3b8' }}
-                      >
-                        {d.total > 0 ? money(d.total) : '—'}
-                      </td>
-                      <td
-                        className="px-4 py-2 text-right font-medium"
-                        style={{
-                          color: d.chequePromedio != null ? theme.tableTotal : '#94a3b8',
-                        }}
-                      >
-                        {d.chequePromedio != null ? money(d.chequePromedio) : '—'}
-                      </td>
-                      <td className="px-4 py-2 text-right font-medium text-slate-600">
-                        {(d.prevTotal ?? 0) > 0 ? money(d.prevTotal!) : '—'}
-                      </td>
-                      <td
-                        className={`px-4 py-2 text-right font-semibold ${
-                          d.changePct == null
-                            ? 'text-slate-400'
-                            : d.changePct >= 0
-                              ? 'text-emerald-700'
-                              : 'text-rose-700'
-                        }`}
-                      >
-                        {d.changePct == null
-                          ? '—'
-                          : `${d.changePct >= 0 ? '▲' : '▼'} ${Math.abs(d.changePct).toFixed(1)}%`}
-                      </td>
-                      <td
-                        className="px-4 py-2 text-right font-medium"
-                        style={{ color: d.cortes > 0 ? '#b45309' : '#94a3b8' }}
-                      >
-                        {d.cortes > 0 ? money(d.cortes) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="font-bold text-white" style={{ backgroundColor: theme.tableFoot }}>
-                    <td className="px-4 py-2.5" colSpan={2}>
-                      Total (lun–hoy)
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {weekToDate.chequePromedio != null
-                        ? money(weekToDate.chequePromedio)
-                        : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {weekToDate.prevTotal > 0 ? money(weekToDate.prevTotal) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {weekToDate.changePct == null
-                        ? '—'
-                        : `${weekToDate.changePct >= 0 ? '▲' : '▼'} ${Math.abs(weekToDate.changePct).toFixed(1)}%`}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {weekToDate.totalCortes > 0 ? money(weekToDate.totalCortes) : '—'}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
-        </Card>
+        <ChequePromedioMensualCard records={records} years={COMPARE_YEARS} />
 
         {/* Cancelaciones y descuentos — mes del año en curso */}
         <Card className={`mb-8 ${cardClass}`} style={cardStyle}>
@@ -779,298 +482,18 @@ export default function Dashboard() {
           )}
         </Card>
 
-        <Card className={`mb-8 ${cardClass}`} style={cardStyle}>
-          <SectionHeader title="Promedio venta semanal por mes">
-            {COMPARE_YEARS.map((y) => {
-              const active = compareYears.includes(y);
-              const c = colorForYear(y);
-              return (
-                <button
-                  key={y}
-                  type="button"
-                  onClick={() => toggleCompareYear(y)}
-                  className={yearChipClass(active)}
-                  style={{
-                    backgroundColor: active ? c : undefined,
-                    color: active ? '#fff' : undefined,
-                    border: active ? `2px solid ${c}` : '2px solid #e2e8f0',
-                  }}
-                >
-                  <span
-                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
-                    style={{ backgroundColor: active ? '#fff' : c }}
-                  />
-                  {y}
-                </button>
-              );
-            })}
-          </SectionHeader>
+        <PromedioVentaSemanalPorMesCard
+          records={records}
+          years={COMPARE_YEARS}
+          weeklyDataYears={weeklyDataYears}
+          loading={loading}
+        />
 
-          {loading ? (
-            <p className="py-16 text-center text-slate-400">Cargando...</p>
-          ) : monthlyAvgChartRows.some((r) =>
-              compareYears.some((y) => r[String(y)] != null && Number(r[String(y)]) > 0)
-            ) ? (
-            <>
-              <div className="mb-4 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                {compareYears.map((y) => (
-                  <div key={y} className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-3 w-3 shrink-0 rounded-full"
-                      style={{ backgroundColor: colorForYear(y) }}
-                    />
-                    <span className="text-sm font-semibold" style={{ color: theme.title }}>
-                      {y}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      prom. anual {money(yearWeeklyAverageFromMonthly(monthlyAvgByYear, y))}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <MonthlyComparisonChart rows={monthlyAvgChartRows} years={compareYears} />
-
-              <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr
-                      className="text-center text-xs uppercase tracking-wide text-white"
-                      style={{ backgroundColor: theme.tableHead }}
-                    >
-                      <th className="sticky left-0 px-4 py-3" style={{ backgroundColor: theme.tableHead }}>
-                        Año
-                      </th>
-                      {MESES.map((m) => (
-                        <th key={m} className="px-3 py-3 whitespace-nowrap">
-                          {m.slice(0, 3)}
-                        </th>
-                      ))}
-                      <th className="px-4 py-3">Prom. anual</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {compareYears.map((y, i) => (
-                      <tr key={y} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                        <td
-                          className="sticky left-0 px-4 py-2.5 font-semibold"
-                          style={{
-                            color: colorForYear(y),
-                            backgroundColor: i % 2 === 0 ? '#fff' : '#f8fafc',
-                          }}
-                        >
-                          <span className="inline-flex items-center gap-2">
-                            <span
-                              className="inline-block h-2.5 w-6 rounded-sm"
-                              style={{ backgroundColor: colorForYear(y) }}
-                            />
-                            {y}
-                          </span>
-                        </td>
-                        {MESES.map((mes, mi) => {
-                          const val = monthlyAvgByYear.get(y)?.get(mi + 1)?.promSemanal ?? 0;
-                          return (
-                            <td
-                              key={mes}
-                              className="px-3 py-2.5 text-right tabular-nums text-slate-700 whitespace-nowrap"
-                            >
-                              {val > 0 ? money(val) : '—'}
-                            </td>
-                          );
-                        })}
-                        <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
-                          {money(yearWeeklyAverageFromMonthly(monthlyAvgByYear, y))}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <p className="py-16 text-center text-slate-400">Sin datos mensuales</p>
-          )}
-        </Card>
-
-        {/* Detalle semanal — antes del comparativo (colapsado por defecto) */}
-        <Card className={`mb-8 ${cardClass}`} style={cardStyle}>
-          <SectionHeader title="Detalle semanal" className="mb-0">
-            <button
-              type="button"
-              aria-expanded={!detalleCollapsed}
-              aria-controls="detalle-semanal-panel"
-              onClick={() => setDetalleCollapsed((v) => !v)}
-              className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 hover:bg-white"
-            >
-              {detalleCollapsed ? 'Mostrar' : 'Ocultar'}
-            </button>
-          </SectionHeader>
-          {detalleCollapsed ? (
-            <p className="mt-3 text-sm" style={{ color: theme.muted }}>
-              Tabla por semana · Eventos, Venta WI y total
-              {detalleWeekOptions.length > 0
-                ? ` · ${detalleWeekOptions.length} semanas en ${detalleYear}`
-                : ''}{' '}
-              (colapsado). Pulsa Mostrar para ver el desglose.
-            </p>
-          ) : (
-            <div id="detalle-semanal-panel" className="mt-4 flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <label className={filterControlClass}>
-                  <span className="text-slate-500">Año</span>
-                  <select
-                    className={filterSelectClass}
-                    value={detalleYear}
-                    onChange={(e) => {
-                      setDetalleYear(Number(e.target.value));
-                      setDetalleWeekFrom(null);
-                      setDetalleWeekTo(null);
-                    }}
-                  >
-                    {COMPARE_YEARS.map((y) => (
-                      <option key={y} value={y}>
-                        {y}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={`${filterControlClass} min-w-[220px] flex-1`}>
-                  <span className="shrink-0 text-slate-500">Desde</span>
-                  <select
-                    className={`${filterSelectClass} w-full`}
-                    value={detalleWeekFrom ?? ''}
-                    onChange={(e) => {
-                      const v = e.target.value === '' ? null : Number(e.target.value);
-                      setDetalleWeekFrom(v);
-                      if (v != null && detalleWeekTo != null && v > detalleWeekTo) {
-                        setDetalleWeekTo(v);
-                      }
-                    }}
-                  >
-                    <option value="">Inicio</option>
-                    {detalleWeekOptions.map((o) => (
-                      <option key={o.week} value={o.week}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={`${filterControlClass} min-w-[220px] flex-1`}>
-                  <span className="shrink-0 text-slate-500">Hasta</span>
-                  <select
-                    className={`${filterSelectClass} w-full`}
-                    value={detalleWeekTo ?? ''}
-                    onChange={(e) => {
-                      const v = e.target.value === '' ? null : Number(e.target.value);
-                      setDetalleWeekTo(v);
-                      if (v != null && detalleWeekFrom != null && v < detalleWeekFrom) {
-                        setDetalleWeekFrom(v);
-                      }
-                    }}
-                  >
-                    <option value="">Fin</option>
-                    {detalleWeekOptions.map((o) => (
-                      <option key={o.week} value={o.week}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {(detalleWeekFrom != null || detalleWeekTo != null) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDetalleWeekFrom(null);
-                      setDetalleWeekTo(null);
-                    }}
-                    className="inline-flex h-9 items-center rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                  >
-                    Limpiar rango
-                  </button>
-                )}
-              </div>
-              {weekRowsDisplay.length === 0 ? (
-                <p className="py-8 text-center text-slate-400">Sin semanas en el periodo.</p>
-              ) : (
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr
-                        className="text-center text-xs uppercase tracking-wide text-white"
-                        style={{ backgroundColor: theme.tableHead }}
-                      >
-                        <th className="px-4 py-3">Mes</th>
-                        <th className="px-4 py-3">Semana</th>
-                        <th className="px-4 py-3">Rango (lun – dom)</th>
-                        <th className="px-4 py-3">Eventos</th>
-                        <th className="px-4 py-3">Venta WI</th>
-                        <th className="px-4 py-3">TOTAL</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {weekRowsDisplay.map((w, i) => (
-                        <tr key={w.week} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                          <td className="px-4 py-2.5 text-slate-700">{w.mes}</td>
-                          <td
-                            className="px-4 py-2.5 font-semibold"
-                            style={{ color: theme.tableWeek }}
-                          >
-                            S{w.week}
-                          </td>
-                          <td className="px-4 py-2.5 text-slate-600">{w.label}</td>
-                          <td className="px-4 py-2.5 text-right text-slate-600">
-                            {w.eventos > 0 ? money(w.eventos) : '—'}
-                          </td>
-                          <td className="px-4 py-2.5 text-right font-medium text-slate-700">
-                            {money(w.ventaWi)}
-                          </td>
-                          <td
-                            className="px-4 py-2.5 text-right font-semibold"
-                            style={{ color: theme.tableTotal }}
-                          >
-                            {money(w.total)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr
-                        className="font-bold text-white"
-                        style={{ backgroundColor: theme.tableFoot }}
-                      >
-                        <td className="px-4 py-3" colSpan={3}>
-                          Total {detalleYear}
-                          {detalleWeekFrom != null || detalleWeekTo != null
-                            ? ` · S${detalleWeekFrom ?? '…'}–S${detalleWeekTo ?? '…'}`
-                            : ''}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {money(totalesDetalle.eventos)}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {money(totalesDetalle.ventaWi)}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {money(totalesDetalle.total)}
-                        </td>
-                      </tr>
-                      <tr className="bg-slate-100 text-slate-600">
-                        <td className="px-4 py-2.5 font-semibold" colSpan={5}>
-                          Promedio semanal ({weekRowsDisplay.length} semanas)
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-semibold">
-                          {weeklyAverage(weekRowsDisplay) > 0
-                            ? money(weeklyAverage(weekRowsDisplay))
-                            : '—'}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-        </Card>
+        <DetalleSemanalCard
+          records={records}
+          years={COMPARE_YEARS}
+          weeklyDataYears={weeklyDataYears}
+        />
 
         <Card className={`mb-8 ${cardClass}`} style={cardStyle}>
           <div className="mb-4 flex flex-col gap-3">

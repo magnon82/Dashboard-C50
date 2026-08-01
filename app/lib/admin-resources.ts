@@ -552,7 +552,11 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           '/api/admin/presupuesto-ajustes',
           '/api/admin/saldos-bancos',
         ],
-        sourceFiles: ['dashboard_auth', 'presupuesto_ajuste', 'saldos_bancos_manual'],
+        sourceFiles: [
+          'dashboard_auth',
+          'presupuesto_ajuste',
+          'saldos_bancos_manual',
+        ],
       },
       {
         id: 'vercel-pages',
@@ -569,6 +573,9 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           { label: '/finanzas/estados-cuenta', kind: 'route' },
           { label: '/finanzas/facturas', kind: 'route' },
           { label: '/rrhh', kind: 'route', note: 'placeholder' },
+          { label: '/reportes-socios', kind: 'route' },
+          { label: '/cocina', kind: 'route', note: 'placeholder' },
+          { label: '/barra', kind: 'route', note: 'placeholder' },
           { label: '/admin', kind: 'route' },
         ],
         routes: [
@@ -581,6 +588,9 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           '/finanzas/estados-cuenta',
           '/finanzas/facturas',
           '/rrhh',
+          '/reportes-socios',
+          '/cocina',
+          '/barra',
           '/admin',
         ],
       },

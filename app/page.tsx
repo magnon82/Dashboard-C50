@@ -1,14 +1,17 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
-import { APP_MODULES } from '@/app/lib/modules';
+import { APP_MODULES, homePathForModules } from '@/app/lib/modules';
 import { canSeeModule, canSeeAdmin, useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
 
 export default function HubPage() {
+  const router = useRouter();
   const { user, loading } = useSession();
   const hoy = new Date().toLocaleDateString('es-MX', {
     day: 'numeric',
@@ -17,6 +20,13 @@ export default function HubPage() {
   });
 
   const visibleModules = APP_MODULES.filter((m) => canSeeModule(user, m.id));
+
+  // Client fallback if middleware did not redirect (e.g. soft nav)
+  useEffect(() => {
+    if (loading || !user) return;
+    const home = homePathForModules(user.modules);
+    if (home !== '/') router.replace(home);
+  }, [loading, user, router]);
 
   return (
     <SuiteShell

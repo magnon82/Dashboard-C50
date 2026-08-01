@@ -10,9 +10,21 @@ import {
   defaultHoldUntil,
   type LeadStage,
 } from '@/app/lib/eventos';
+import {
+  isFollowUpStepId,
+  normalizeFollowUpDone,
+  suggestNextFollowUpAt,
+  type FollowUpStepId,
+} from '@/app/lib/eventos-follow-up';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+function trimOrNull(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s || null;
+}
 
 export async function GET() {
   const auth = await requireEventosSession();
@@ -46,12 +58,17 @@ export async function POST(request: Request) {
 
   let body: {
     title?: string;
+    celebration?: string | null;
+    contact_name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    company?: string | null;
     client_id?: string | null;
     stage?: string;
     event_date?: string | null;
     pax?: number | null;
     estimated_amount?: number | null;
-    notes?: string;
+    notes?: string | null;
     place_hold?: boolean;
   };
   try {
@@ -60,9 +77,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
   }
 
-  const title = (body.title || '').trim();
+  const celebration = trimOrNull(body.celebration);
+  const title =
+    trimOrNull(body.title) || celebration || '';
   if (!title) {
-    return NextResponse.json({ error: 'title es requerido' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Indica qué celebran (o un título del evento).' },
+      { status: 400 }
+    );
   }
 
   const stage = (body.stage || 'nuevo') as LeadStage;
@@ -91,12 +113,17 @@ export async function POST(request: Request) {
       .from('event_leads')
       .insert({
         title,
+        celebration: celebration || title,
+        contact_name: trimOrNull(body.contact_name),
+        phone: trimOrNull(body.phone),
+        email: trimOrNull(body.email),
+        company: trimOrNull(body.company),
         client_id: body.client_id || null,
         stage,
         event_date: body.event_date || null,
         pax: body.pax ?? null,
         estimated_amount: body.estimated_amount ?? null,
-        notes: (body.notes || '').trim() || null,
+        notes: trimOrNull(body.notes),
         owner_username: auth.username,
         hold_until,
         created_at: now,
@@ -127,13 +154,23 @@ export async function PATCH(request: Request) {
     id?: string;
     stage?: string;
     title?: string;
+    celebration?: string | null;
+    contact_name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    company?: string | null;
+    client_id?: string | null;
     event_date?: string | null;
     pax?: number | null;
     estimated_amount?: number | null;
-    notes?: string;
+    notes?: string | null;
     place_hold?: boolean;
     extend_hold?: boolean;
     clear_hold?: boolean;
+    follow_up_done?: string[] | null;
+    next_follow_up_at?: string | null;
+    /** Si true y se manda follow_up_done, recalcula next_follow_up_at (salvo que venga explícito). */
+    auto_next_follow_up?: boolean;
   };
   try {
     body = await request.json();
@@ -155,13 +192,70 @@ export async function PATCH(request: Request) {
     }
     patch.stage = body.stage;
   }
-  if (body.title !== undefined) patch.title = body.title.trim();
+  if (body.celebration !== undefined) {
+    const celebration = trimOrNull(body.celebration);
+    patch.celebration = celebration;
+    // Si no mandan title explícito, alinear título con celebración
+    if (body.title === undefined && celebration) {
+      patch.title = celebration;
+    }
+  }
+  if (body.title !== undefined) {
+    const t = body.title.trim();
+    if (!t) {
+      return NextResponse.json({ error: 'title no puede quedar vacío' }, { status: 400 });
+    }
+    patch.title = t;
+  }
+  if (body.contact_name !== undefined) {
+    patch.contact_name = trimOrNull(body.contact_name);
+  }
+  if (body.phone !== undefined) patch.phone = trimOrNull(body.phone);
+  if (body.email !== undefined) patch.email = trimOrNull(body.email);
+  if (body.company !== undefined) patch.company = trimOrNull(body.company);
+  if (body.client_id !== undefined) patch.client_id = body.client_id || null;
   if (body.event_date !== undefined) patch.event_date = body.event_date;
   if (body.pax !== undefined) patch.pax = body.pax;
   if (body.estimated_amount !== undefined) {
     patch.estimated_amount = body.estimated_amount;
   }
-  if (body.notes !== undefined) patch.notes = body.notes;
+  if (body.notes !== undefined) patch.notes = trimOrNull(body.notes);
+
+  let followUpDonePatch: FollowUpStepId[] | undefined;
+  if (body.follow_up_done !== undefined) {
+    if (body.follow_up_done != null && !Array.isArray(body.follow_up_done)) {
+      return NextResponse.json(
+        { error: 'follow_up_done debe ser un arreglo' },
+        { status: 400 }
+      );
+    }
+    const raw = body.follow_up_done || [];
+    for (const id of raw) {
+      if (!isFollowUpStepId(id)) {
+        return NextResponse.json(
+          { error: `Paso de seguimiento inválido: ${String(id)}` },
+          { status: 400 }
+        );
+      }
+    }
+    followUpDonePatch = normalizeFollowUpDone(raw);
+    patch.follow_up_done = followUpDonePatch;
+  }
+
+  if (body.next_follow_up_at !== undefined) {
+    if (body.next_follow_up_at === null || body.next_follow_up_at === '') {
+      patch.next_follow_up_at = null;
+    } else {
+      const d = new Date(body.next_follow_up_at);
+      if (!Number.isFinite(d.getTime())) {
+        return NextResponse.json(
+          { error: 'next_follow_up_at inválida' },
+          { status: 400 }
+        );
+      }
+      patch.next_follow_up_at = d.toISOString();
+    }
+  }
 
   if (body.clear_hold) {
     patch.hold_until = null;
@@ -207,6 +301,30 @@ export async function PATCH(request: Request) {
               'No se puede poner hold: faltan menos de 15 días para el evento.',
           },
           { status: 400 }
+        );
+      }
+    }
+
+    // Recalcular próxima fecha si el vendedor avanzó el checklist
+    if (
+      followUpDonePatch &&
+      body.next_follow_up_at === undefined &&
+      body.auto_next_follow_up !== false
+    ) {
+      const { data: cur } = await sb
+        .from('event_leads')
+        .select('created_at, stage, client_id')
+        .eq('id', body.id)
+        .maybeSingle();
+      if (cur) {
+        const stage = (patch.stage as LeadStage) || (cur.stage as LeadStage);
+        const clientId =
+          body.client_id !== undefined
+            ? body.client_id || null
+            : (cur.client_id as string | null);
+        patch.next_follow_up_at = suggestNextFollowUpAt(
+          { created_at: cur.created_at, stage, client_id: clientId },
+          followUpDonePatch
         );
       }
     }

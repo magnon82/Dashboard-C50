@@ -4,6 +4,9 @@ export type ModuleId =
   | 'finanzas'
   | 'rrhh'
   | 'eventos'
+  | 'reportes-socios'
+  | 'cocina'
+  | 'barra'
   | 'calidad'
   | 'inventarios';
 
@@ -23,6 +26,14 @@ export const APP_MODULES: AppModule[] = [
     label: 'Ventas',
     short: 'Ventas',
     description: 'Ventas diarias, comparativos, pagos y cancelaciones · Carranza 50',
+    status: 'activo',
+  },
+  {
+    id: 'reportes-socios',
+    href: '/reportes-socios',
+    label: 'Reportes Socios',
+    short: 'Socios',
+    description: 'Tablero de reportes para socios · indicadores y visión consolidada',
     status: 'activo',
   },
   {
@@ -50,6 +61,21 @@ export const APP_MODULES: AppModule[] = [
     status: 'activo',
   },
   {
+    id: 'cocina',    href: '/cocina',
+    label: 'Cocina',
+    short: 'Cocina',
+    description: 'Operación y tablero de cocina · Carranza 50',
+    status: 'activo',
+  },
+  {
+    id: 'barra',
+    href: '/barra',
+    label: 'Barra',
+    short: 'Barra',
+    description: 'Operación y tablero de barra · Carranza 50',
+    status: 'activo',
+  },
+  {
     id: 'calidad',
     href: '/calidad',
     label: 'Calidad',
@@ -66,3 +92,14 @@ export const APP_MODULES: AppModule[] = [
     status: 'próximo',
   },
 ];
+
+/**
+ * Home after login / visiting `/`.
+ * Exactly one shared module → that route; admin (`*`), multiple, or zero → hub `/`.
+ */
+export function homePathForModules(modules: string[]): string {
+  if (modules.includes('*')) return '/';
+  const allowed = APP_MODULES.filter((m) => modules.includes(m.id));
+  if (allowed.length === 1) return allowed[0].href;
+  return '/';
+}

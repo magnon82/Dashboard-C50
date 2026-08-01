@@ -1,4 +1,9 @@
-import { parseIsoDate, toIsoLocal, type FinancialRecord } from '@/app/lib/ventas-semana';
+import {
+  parseIsoDate,
+  todayMexicoIso,
+  toIsoLocal,
+  type FinancialRecord,
+} from '@/app/lib/ventas-semana';
 
 export interface RubroRow {
   rubro: string;
@@ -1200,4 +1205,158 @@ export function latestMonthWithSemanasBancos(
 ): { year: number; month: number } | null {
   const months = availableSemanasBancosMonths(records, todayIso);
   return months[0] ?? null;
+}
+
+/**
+ * Semanas SEM esperadas del mes: lunes desde el 1.er lunes del mes
+ * hasta (sin incluir) el 1.er lunes del mes siguiente.
+ * (Referencia / Finanzas; el Balance Socios usa la regla del día 10.)
+ */
+export function expectedPresupuestoWeekCount(year: number, month: number): number {
+  const monday1 = firstMondayOnOrAfter(year, month, 1);
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextMonday1 = firstMondayOnOrAfter(nextYear, nextMonth, 1);
+  const diffDays = Math.round(
+    (nextMonday1.getTime() - monday1.getTime()) / 86400000
+  );
+  return Math.max(0, Math.round(diffDays / 7));
+}
+
+/** Día del mes siguiente en que el mes M entra al Balance Socios. */
+export const BALANCE_MES_INCORPORA_DIA = 10;
+
+/**
+ * Fecha ISO (YYYY-MM-DD) a partir de la cual el mes M ya puede entrar
+ * al acumulado de Balance Socios: día 10 del mes siguiente.
+ * Ej.: julio 2026 → 2026-08-10.
+ */
+export function balanceMesIncorporaDesdeIso(year: number, month: number): string {
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  return `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(BALANCE_MES_INCORPORA_DIA).padStart(2, '0')}`;
+}
+
+/**
+ * Regla de negocio Balance Socios: el mes M se incorpora a más tardar
+ * el día 10 del mes siguiente (hoy CDMX >= esa fecha).
+ */
+export function isBalanceMesIncorporablePorCalendario(
+  year: number,
+  month: number,
+  todayIso?: string
+): boolean {
+  const today = todayIso || todayMexicoIso();
+  if (!parseIsoDate(today)) return false;
+  return today >= balanceMesIncorporaDesdeIso(year, month);
+}
+
+function hasPresupuestoSemanaMonth(
+  records: FinancialRecord[],
+  year: number,
+  month: number
+): boolean {
+  for (const r of records) {
+    if (r.source_file !== 'presupuesto_semana') continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== year || p.m !== month) continue;
+    const data = parseJson<{ week?: number }>(r.description);
+    if (!data || data.week == null || Number(data.week) < 1) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Mes listo para Balance Socios:
+ * 1) hoy (CDMX) es el día 10 del mes siguiente o después, y
+ * 2) existe al menos un `presupuesto_semana` del mes.
+ * No usa conteo frágil de SEM (Mar/Jun 2026 pedían 5 semanas y el Excel
+ * suele traer 4 → exclusión falsa de meses ya cerrados).
+ */
+export function isPresupuestoMesActualizado(
+  records: FinancialRecord[],
+  year: number,
+  month: number,
+  todayIso?: string
+): boolean {
+  const today = todayIso || todayMexicoIso();
+  if (!isBalanceMesIncorporablePorCalendario(year, month, today)) return false;
+  return hasPresupuestoSemanaMonth(records, year, month);
+}
+
+/** Totales mensuales de ingresos / gastos (misma base que ResumenBancosSemanal). */
+export interface BalanceMensual {
+  year: number;
+  month: number;
+  /** Bancos (ingresos) + efectivo ingresos */
+  ingresos: number;
+  /** Bancos (suma_gasto) + efectivo egresos */
+  gastos: number;
+  /** ingresos − gastos */
+  balance: number;
+}
+
+export type BuildBalanceMensualOptions = {
+  /**
+   * Si true (default en Socios), omite meses aún no incorporables
+   * (antes del día 10 del mes siguiente). Esos meses aportan 0 al acumulado.
+   */
+  onlyMesesActualizados?: boolean;
+};
+
+/**
+ * Balance por mes a partir del resumen semanal de Finanzas
+ * (`presupuesto_semana` + `flujo_efectivo_semana`).
+ * Por defecto solo meses incorporables (regla día 10 del mes siguiente).
+ */
+export function buildBalanceMensualPorAno(
+  records: FinancialRecord[],
+  year: number,
+  todayIso?: string,
+  options: BuildBalanceMensualOptions = { onlyMesesActualizados: true }
+): BalanceMensual[] {
+  const onlyActualizados = options.onlyMesesActualizados !== false;
+  const today = todayIso || todayMexicoIso();
+  const out: BalanceMensual[] = [];
+  for (let month = 1; month <= 12; month++) {
+    if (
+      onlyActualizados &&
+      !isPresupuestoMesActualizado(records, year, month, today)
+    ) {
+      continue;
+    }
+    const weeks = buildResumenBancosSemanal(records, year, month, today);
+    if (weeks.length === 0) continue;
+    let ingresos = 0;
+    let gastos = 0;
+    for (const w of weeks) {
+      ingresos += Number(w.ingresos || 0) + Number(w.efectivo_ingresos || 0);
+      gastos += Number(w.suma_gasto || 0) + Number(w.efectivo_egresos || 0);
+    }
+    if (ingresos === 0 && gastos === 0) continue;
+    out.push({
+      year,
+      month,
+      ingresos,
+      gastos,
+      balance: ingresos - gastos,
+    });
+  }
+  return out;
+}
+
+/** Acumulado de un arreglo de balance mensual (meses ya filtrados). */
+export function sumBalanceMensual(rows: BalanceMensual[]): {
+  ingresos: number;
+  gastos: number;
+  balance: number;
+} {
+  let ingresos = 0;
+  let gastos = 0;
+  for (const r of rows) {
+    ingresos += r.ingresos;
+    gastos += r.gastos;
+  }
+  return { ingresos, gastos, balance: ingresos - gastos };
 }

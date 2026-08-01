@@ -31,6 +31,25 @@ export function parseIsoDate(iso: string): { y: number; m: number; d: number; ke
   return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]), key: `${m[1]}-${m[2]}-${m[3]}` };
 }
 
+/**
+ * Carranza 50 was closed on Sundays before 2026. Treat those Sundays as non-operating
+ * days in Ventas / Reportes Socios comparisons (omit from charts, totals and var % bases).
+ * From 2026 onward Sundays may be open — keep them.
+ */
+export function isSundayClosedYear(year: number): boolean {
+  return year < 2026;
+}
+
+/** True when `date` is a Sunday in a closed-Sunday year (< 2026). */
+export function shouldExcludeSunday(date: string | Date): boolean {
+  if (typeof date === 'string') {
+    const p = parseIsoDate(date);
+    if (!p || !isSundayClosedYear(p.y)) return false;
+    return new Date(p.y, p.m - 1, p.d).getDay() === 0;
+  }
+  return isSundayClosedYear(date.getFullYear()) && date.getDay() === 0;
+}
+
 export function mondayOf(iso: string): Date {
   const p = parseIsoDate(iso)!;
   const d = new Date(p.y, p.m - 1, p.d);
@@ -67,6 +86,16 @@ export function weekMondayIso(year: number, week: number): string {
 
 export function toIsoLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Hoy en America/Mexico_City (YYYY-MM-DD). */
+export function todayMexicoIso(from = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Mexico_City',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(from);
 }
 
 export function formatShort(iso: string): string {
@@ -157,6 +186,8 @@ export function weeklyEventosFromRecords(records: FinancialRecord[], year: numbe
     if (r.source_file !== 'eventos' || r.category !== 'Eventos') continue;
     const p = parseIsoDate(r.date);
     if (!p || p.y !== year) continue;
+    // Domingos <2026: cerrado — no sumar en agregados semanales de comparación
+    if (shouldExcludeSunday(p.key)) continue;
     const week = acumuladoWeekForDate(r.date);
     if (week <= 0) continue;
     map.set(week, (map.get(week) || 0) + Number(r.amount));
@@ -182,6 +213,8 @@ export function weeklyFromInfocaja(
   for (const r of daily) {
     const p = parseIsoDate(r.date);
     if (!p) continue;
+    // Domingos <2026: cerrado — excluir de totales semanales (defensivo; ≥2026 sí cuentan)
+    if (shouldExcludeSunday(p.key)) continue;
     const week = acumuladoWeekForDate(r.date);
     if (week <= 0) continue;
 
@@ -438,6 +471,7 @@ export function buildMonthlySalesByYear(
         if (r.source_file !== 'eventos' || r.category !== 'Eventos') return;
         const p = parseIsoDate(r.date);
         if (!p || p.y !== y) return;
+        if (shouldExcludeSunday(p.key)) return;
         eventosMes.set(p.m, (eventosMes.get(p.m) || 0) + Number(r.amount));
       });
 
@@ -446,6 +480,7 @@ export function buildMonthlySalesByYear(
         if (r.source_file !== 'infocaja' || r.category !== 'Venta Total') return;
         const p = parseIsoDate(r.date);
         if (!p || p.y !== y) return;
+        if (shouldExcludeSunday(p.key)) return;
         infocajaMes.set(p.m, (infocajaMes.get(p.m) || 0) + Number(r.amount));
       });
 
@@ -547,9 +582,241 @@ export interface DaySale {
   /** Mismo día de la semana (lun=0…) del año anterior */
   prevDate?: string;
   prevLabel?: string;
+  /**
+   * Venta del mismo día año anterior.
+   * `undefined` = no comparable (p.ej. domingo cerrado <2026); no graficar ni sumar en totales prev.
+   */
   prevTotal?: number;
+  /** Comensales mismo día de semana del año anterior; undefined si domingo cerrado <2026 */
+  prevComensales?: number;
   /** % vs mismo día año anterior; null si no hay base */
   changePct?: number | null;
+  /** % personas vs mismo día año anterior; null si no hay base */
+  comensalesChangePct?: number | null;
+}
+
+export interface MonthPersonas {
+  year: number;
+  month: number;
+  mes: string;
+  /** Suma Infocaja Personas del mes */
+  personas: number;
+  /** Suma Infocaja Venta Total del mes (para cheque promedio) */
+  ventaTotal: number;
+  /** Σ Venta ÷ Σ Personas; null si personas ≤ 0 */
+  chequePromedio: number | null;
+}
+
+/** Personas / cheque promedio mensuales desde Infocaja (histórico Gmail). */
+export function buildMonthlyPersonasByYear(
+  records: FinancialRecord[],
+  years: number[]
+): Map<number, Map<number, MonthPersonas>> {
+  const result = new Map<number, Map<number, MonthPersonas>>();
+  const yearSet = new Set(years);
+
+  for (const r of records) {
+    if (r.source_file !== 'infocaja') continue;
+    const p = parseIsoDate(r.date);
+    if (!p || !yearSet.has(p.y)) continue;
+    // Domingos <2026: cerrado — no arrastrar ceros al histórico mensual / YoY
+    if (shouldExcludeSunday(p.key)) continue;
+    const amt = Number(r.amount);
+    if (!Number.isFinite(amt)) continue;
+
+    let monthMap = result.get(p.y);
+    if (!monthMap) {
+      monthMap = new Map();
+      result.set(p.y, monthMap);
+    }
+    let cur = monthMap.get(p.m);
+    if (!cur) {
+      cur = {
+        year: p.y,
+        month: p.m,
+        mes: MESES[p.m - 1],
+        personas: 0,
+        ventaTotal: 0,
+        chequePromedio: null,
+      };
+      monthMap.set(p.m, cur);
+    }
+    if (r.category === 'Infocaja Personas') cur.personas += amt;
+    else if (r.category === 'Venta Total') cur.ventaTotal += amt;
+  }
+
+  for (const monthMap of result.values()) {
+    for (const cur of monthMap.values()) {
+      cur.chequePromedio =
+        cur.personas > 0 ? cur.ventaTotal / cur.personas : null;
+    }
+  }
+
+  return result;
+}
+
+/** YTD personas (ene–mesAsOf) para un año; mesAsOf = 1..12. */
+export function personasYtd(
+  monthly: Map<number, Map<number, MonthPersonas>>,
+  year: number,
+  mesAsOf: number
+): { personas: number; ventaTotal: number; chequePromedio: number | null } {
+  const months = monthly.get(year);
+  let personas = 0;
+  let ventaTotal = 0;
+  if (months) {
+    for (let m = 1; m <= mesAsOf; m++) {
+      const row = months.get(m);
+      if (!row) continue;
+      personas += row.personas;
+      ventaTotal += row.ventaTotal;
+    }
+  }
+  return {
+    personas,
+    ventaTotal,
+    chequePromedio: personas > 0 ? ventaTotal / personas : null,
+  };
+}
+
+export type PersonasHistoricoMetric = 'cheque' | 'personas';
+
+export interface PersonasHistoricoCell {
+  personas: number;
+  chequePromedio: number | null;
+}
+
+export interface PersonasHistoricoMonthRow {
+  month: number;
+  mes: string;
+  byYear: Record<number, PersonasHistoricoCell>;
+  /** % personas: years[0] vs years[1] (años seleccionados, desc) */
+  personasChangePct: number | null;
+  /** % cheque promedio: years[0] vs years[1] */
+  chequeChangePct: number | null;
+}
+
+function pctChange(cur: number, prev: number): number | null {
+  if (!(prev > 0)) return null;
+  return ((cur - prev) / prev) * 100;
+}
+
+function chequePctChange(
+  cur: number | null,
+  prev: number | null
+): number | null {
+  if (cur == null || prev == null || !(prev > 0)) return null;
+  return ((cur - prev) / prev) * 100;
+}
+
+/**
+ * Tabla mensual Personas / Cheque promedio para años seleccionados (2021+).
+ * Filas ene–mesAsOf; YTD por año hasta el mismo mes de corte.
+ * Var. % = primer año seleccionado (más reciente) vs el segundo.
+ */
+export function buildPersonasHistorico(
+  monthly: Map<number, Map<number, MonthPersonas>>,
+  years: number[],
+  mesAsOf: number
+): {
+  rows: PersonasHistoricoMonthRow[];
+  ytdByYear: Record<number, PersonasHistoricoCell & { ventaTotal: number }>;
+  ytdPersonasChangePct: number | null;
+  ytdChequeChangePct: number | null;
+  mesAsOf: number;
+  years: number[];
+} {
+  const sorted = [...years].sort((a, b) => b - a);
+  const primary = sorted[0];
+  const compare = sorted[1];
+
+  const rows = MESES.map((mes, i) => {
+    const m = i + 1;
+    if (m > mesAsOf) return null;
+    const byYear: Record<number, PersonasHistoricoCell> = {};
+    let anyData = false;
+    for (const y of sorted) {
+      const cell = monthly.get(y)?.get(m);
+      const personas = cell?.personas ?? 0;
+      const chequePromedio = cell?.chequePromedio ?? null;
+      byYear[y] = { personas, chequePromedio };
+      if (personas > 0 || chequePromedio != null) anyData = true;
+    }
+    if (!anyData) return null;
+
+    const cur = primary != null ? byYear[primary] : undefined;
+    const prev = compare != null ? byYear[compare] : undefined;
+
+    return {
+      month: m,
+      mes,
+      byYear,
+      personasChangePct:
+        cur && prev ? pctChange(cur.personas, prev.personas) : null,
+      chequeChangePct:
+        cur && prev
+          ? chequePctChange(cur.chequePromedio, prev.chequePromedio)
+          : null,
+    };
+  }).filter((r): r is PersonasHistoricoMonthRow => r != null);
+
+  const ytdByYear: Record<number, PersonasHistoricoCell & { ventaTotal: number }> =
+    {};
+  for (const y of sorted) {
+    const ytd = personasYtd(monthly, y, mesAsOf);
+    ytdByYear[y] = {
+      personas: ytd.personas,
+      ventaTotal: ytd.ventaTotal,
+      chequePromedio: ytd.chequePromedio,
+    };
+  }
+
+  const ytdCur = primary != null ? ytdByYear[primary] : undefined;
+  const ytdPrev = compare != null ? ytdByYear[compare] : undefined;
+
+  return {
+    rows,
+    ytdByYear,
+    ytdPersonasChangePct:
+      ytdCur && ytdPrev ? pctChange(ytdCur.personas, ytdPrev.personas) : null,
+    ytdChequeChangePct:
+      ytdCur && ytdPrev
+        ? chequePctChange(ytdCur.chequePromedio, ytdPrev.chequePromedio)
+        : null,
+    mesAsOf,
+    years: sorted,
+  };
+}
+
+/** Filas Ene–Dic para gráfica de cheque promedio (Venta Total ÷ Personas). */
+export function buildChequePromedioChartRows(
+  monthly: Map<number, Map<number, MonthPersonas>>,
+  years: number[]
+): Record<string, string | number | null>[] {
+  return buildPersonasMetricChartRows(monthly, years, 'cheque');
+}
+
+/** Filas Ene–Dic para gráfica de cheque promedio o personas. */
+export function buildPersonasMetricChartRows(
+  monthly: Map<number, Map<number, MonthPersonas>>,
+  years: number[],
+  metric: PersonasHistoricoMetric
+): Record<string, string | number | null>[] {
+  return MESES.map((mes, i) => {
+    const monthIdx = i + 1;
+    const row: Record<string, string | number | null> = { mes, monthIdx };
+    for (const y of years) {
+      const cell = monthly.get(y)?.get(monthIdx);
+      if (metric === 'cheque') {
+        const val = cell?.chequePromedio ?? null;
+        row[String(y)] = val != null && val > 0 ? Number(val.toFixed(2)) : null;
+      } else {
+        const val = cell?.personas ?? 0;
+        row[String(y)] = val > 0 ? val : null;
+      }
+    }
+    return row;
+  });
 }
 
 /** Viernes de la semana (lun–vie) a partir del lunes ISO */
@@ -570,11 +837,20 @@ export function weekRangeLabel(year: number, week: number): string {
  *  Días futuros del semana: fila presente, venta "—" (0), comparación año anterior si hay dato.
  *  Totales agregados = lun–hoy (no incluyen días futuros).
  *  Compara día a día vs misma semana del año anterior (solo ventas diarias; no prorratea Acumulado).
+ *  Domingos <2026 (cerrado): omitidos en totales/var % y prevTotal=undefined (no graficar $0);
+ *  domingos ≥2026 se conservan.
  *  Cheque promedio = Venta Total (sin propina) ÷ Infocaja Personas. */
 export function buildWeekToDateSales(
   records: FinancialRecord[],
   todayIso?: string,
-  _weeklyByYear?: Map<number, Map<number, WeekSale>>
+  opts?: {
+    /**
+     * Año de la columna principal / comparación (Año filter).
+     * Misma semana ISO en curso: si es el año actual → WTD hasta hoy;
+     * si es un año pasado → esa misma nº de semana completa (contexto del periodo).
+     */
+    year?: number;
+  }
 ): {
   days: DaySale[];
   total: number;
@@ -590,18 +866,40 @@ export function buildWeekToDateSales(
   year: number;
   prevYear: number;
   prevTotal: number;
+  /** Suma personas días comparables del año anterior */
+  prevTotalComensales: number;
   prevMondayKey: string;
   prevAsOfKey: string;
   changePct: number | null;
+  /** % personas vs año anterior (días comparables); null si no hay base */
+  comensalesChangePct: number | null;
 } {
-  const today = todayIso || toIsoLocal(new Date());
+  const today = todayIso || todayMexicoIso();
   const todayParsed = parseIsoDate(today)!;
-  const mon = mondayOf(today);
-  const mondayKey = toIsoLocal(mon);
-  const sundayKey = sundayOfWeek(mondayKey);
+  const currentYear = todayParsed.y;
   const weekNumber = acumuladoWeekForDate(today);
-  const year = todayParsed.y;
+  // Año futuro o omitido → año en curso (semana actual WTD)
+  const year =
+    opts?.year != null && opts.year >= 2021 && opts.year <= currentYear
+      ? opts.year
+      : currentYear;
   const prevYear = year - 1;
+
+  let mondayKey: string;
+  let asOf: string;
+  if (year === currentYear) {
+    mondayKey = toIsoLocal(mondayOf(today));
+    asOf = today;
+  } else {
+    // Misma nº de semana del año filtrado (semana completa)
+    mondayKey =
+      weekNumber > 0
+        ? weekMondayIso(year, weekNumber)
+        : toIsoLocal(mondayOf(`${year}-01-01`));
+    asOf = sundayOfWeek(mondayKey);
+  }
+  const mon = mondayOf(mondayKey);
+  const sundayKey = sundayOfWeek(mondayKey);
 
   const byDate = new Map<string, number>();
   const comensalesByDate = new Map<string, number>();
@@ -609,7 +907,7 @@ export function buildWeekToDateSales(
     if (r.source_file !== 'infocaja') continue;
     const p = parseIsoDate(r.date);
     if (!p) continue;
-    if (p.key < mondayKey || p.key > today) continue;
+    if (p.key < mondayKey || p.key > asOf) continue;
     const amt = Number(r.amount);
     if (r.category === 'Venta Total') {
       byDate.set(p.key, (byDate.get(p.key) || 0) + amt);
@@ -624,17 +922,26 @@ export function buildWeekToDateSales(
     if (r.category !== 'Corte Cancelacion' && r.category !== 'Corte Descuento') continue;
     const p = parseIsoDate(r.date);
     if (!p) continue;
-    if (p.key < mondayKey || p.key > today) continue;
+    if (p.key < mondayKey || p.key > asOf) continue;
     cortesByDate.set(p.key, (cortesByDate.get(p.key) || 0) + Number(r.amount));
   }
 
-  // Ventas diarias Infocaja del año anterior (toda la semana comparable)
+  // Ventas + personas diarias Infocaja del año anterior (semana comparable)
   const prevByDate = new Map<string, number>();
+  const prevComensalesByDate = new Map<string, number>();
   for (const r of records) {
-    if (r.source_file !== 'infocaja' || r.category !== 'Venta Total') continue;
+    if (r.source_file !== 'infocaja') continue;
     const p = parseIsoDate(r.date);
     if (!p || p.y !== prevYear) continue;
-    prevByDate.set(p.key, (prevByDate.get(p.key) || 0) + Number(r.amount));
+    const amt = Number(r.amount);
+    if (r.category === 'Venta Total') {
+      prevByDate.set(p.key, (prevByDate.get(p.key) || 0) + amt);
+    } else if (r.category === 'Infocaja Personas') {
+      prevComensalesByDate.set(
+        p.key,
+        (prevComensalesByDate.get(p.key) || 0) + amt
+      );
+    }
   }
 
   const prevMondayKey = weekNumber > 0 ? weekMondayIso(prevYear, weekNumber) : '';
@@ -646,19 +953,25 @@ export function buildWeekToDateSales(
   let totalComensales = 0;
   let sinPropinaConComensales = 0;
   let prevTotal = 0;
+  let prevTotalComensales = 0;
+  /** Personas del año en curso solo en días comparables (para var. % semana) */
+  let comparableComensales = 0;
   let prevAsOfKey = '';
 
   for (let i = 0; i < 7; i++) {
     const d = new Date(mon);
     d.setDate(d.getDate() + i);
     const key = toIsoLocal(d);
-    const isFuture = key > today;
-    const amt = isFuture ? 0 : byDate.get(key) || 0;
-    const cortes = isFuture ? 0 : cortesByDate.get(key) || 0;
-    const comensales = isFuture ? 0 : comensalesByDate.get(key) || 0;
+    const isFuture = key > asOf;
+    const closedSunday = shouldExcludeSunday(key);
+    const amt = isFuture || closedSunday ? 0 : byDate.get(key) || 0;
+    const cortes = isFuture || closedSunday ? 0 : cortesByDate.get(key) || 0;
+    const comensales =
+      isFuture || closedSunday ? 0 : comensalesByDate.get(key) || 0;
     // Venta Total Infocaja ya es sin propina (propina va en Infocaja Propina)
-    const chequePromedio = !isFuture && comensales > 0 ? amt / comensales : null;
-    if (!isFuture) {
+    const chequePromedio =
+      !isFuture && !closedSunday && comensales > 0 ? amt / comensales : null;
+    if (!isFuture && !closedSunday) {
       total += amt;
       totalCortes += cortes;
       if (comensales > 0) {
@@ -668,20 +981,37 @@ export function buildWeekToDateSales(
     }
 
     let prevDate = '';
-    let prevDayTotal = 0;
+    let prevDayTotal: number | undefined;
+    let prevDayComensales: number | undefined;
     let dayChange: number | null = null;
+    let dayComensalesChange: number | null = null;
     if (prevMon) {
       const pd = new Date(prevMon);
       pd.setDate(pd.getDate() + i);
       prevDate = toIsoLocal(pd);
-      prevDayTotal = prevByDate.get(prevDate) || 0;
-      // Solo comparar días ya transcurridos (antes de hoy), o hoy si ya hay venta
-      const comparable = !isFuture && (key < today || amt > 0);
-      if (comparable) {
-        prevAsOfKey = prevDate;
-        prevTotal += prevDayTotal;
-        if (prevDayTotal > 0) {
-          dayChange = ((amt - prevDayTotal) / prevDayTotal) * 100;
+      const prevClosedSunday = shouldExcludeSunday(prevDate);
+      if (prevClosedSunday) {
+        // Domingo año anterior <2026: omitir (no $0) en tabla, gráfica y totales prev / var %
+        prevDayTotal = undefined;
+        prevDayComensales = undefined;
+      } else {
+        prevDayTotal = prevByDate.get(prevDate) || 0;
+        prevDayComensales = prevComensalesByDate.get(prevDate) || 0;
+        // Solo comparar días ya transcurridos (antes de asOf), o asOf si ya hay venta
+        const comparable =
+          !isFuture && !closedSunday && (key < asOf || amt > 0);
+        if (comparable) {
+          prevAsOfKey = prevDate;
+          prevTotal += prevDayTotal;
+          prevTotalComensales += prevDayComensales;
+          comparableComensales += comensales;
+          if (prevDayTotal > 0) {
+            dayChange = ((amt - prevDayTotal) / prevDayTotal) * 100;
+          }
+          if (prevDayComensales > 0) {
+            dayComensalesChange =
+              ((comensales - prevDayComensales) / prevDayComensales) * 100;
+          }
         }
       }
     }
@@ -697,13 +1027,21 @@ export function buildWeekToDateSales(
       prevDate,
       prevLabel: prevDate ? formatShort(prevDate) : undefined,
       prevTotal: prevDayTotal,
+      prevComensales: prevDayComensales,
       changePct: dayChange,
+      comensalesChangePct: dayComensalesChange,
     });
   }
 
   let changePct: number | null = null;
   if (prevTotal > 0) {
     changePct = ((total - prevTotal) / prevTotal) * 100;
+  }
+
+  let comensalesChangePct: number | null = null;
+  if (prevTotalComensales > 0) {
+    comensalesChangePct =
+      ((comparableComensales - prevTotalComensales) / prevTotalComensales) * 100;
   }
 
   const weekChequePromedio =
@@ -717,14 +1055,16 @@ export function buildWeekToDateSales(
     chequePromedio: weekChequePromedio,
     mondayKey,
     sundayKey,
-    asOf: today,
+    asOf,
     weekNumber,
     year,
     prevYear,
     prevTotal,
+    prevTotalComensales,
     prevMondayKey,
     prevAsOfKey,
     changePct,
+    comensalesChangePct,
   };
 }
 

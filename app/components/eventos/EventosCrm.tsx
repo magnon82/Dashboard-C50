@@ -4,6 +4,7 @@ import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react';
 import { SuiteCard } from '@/app/components/SuiteShell';
 import { filterControlClass, filterSelectClass } from '@/app/components/SectionHeader';
 import {
+  EVENTOS_MIN_PAX_GRUPOS,
   LEAD_STAGE_LABELS,
   LEAD_STAGES,
   formatMxn,
@@ -11,6 +12,12 @@ import {
   type EventLead,
   type LeadStage,
 } from '@/app/lib/eventos';
+import { EventosPaxCounter } from '@/app/components/eventos/EventosPaxCounter';
+import {
+  EventosFollowUpAlertsStrip,
+  EventosLeadAlertBadge,
+  EventosLeadFollowUpChecklist,
+} from '@/app/components/eventos/EventosFollowUpPanel';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import { useSession } from '@/app/lib/useSession';
 
@@ -65,6 +72,8 @@ export function EventosCrm({
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  /** Lead con checklist de seguimiento abierto en el pipeline. */
+  const [followUpOpen, setFollowUpOpen] = useState<string | null>(null);
   const [hist, setHist] = useState<ActivityHistRow[]>([]);
   const [histMeta, setHistMeta] = useState<{
     generated_at?: string;
@@ -81,12 +90,15 @@ export function EventosCrm({
     phone: '',
   });
   const [leadForm, setLeadForm] = useState({
-    title: '',
-    client_id: '',
-    stage: 'nuevo' as LeadStage,
+    contact_name: '',
+    phone: '',
+    email: '',
+    company: '',
+    celebration: '',
     event_date: '',
-    pax: '',
+    pax: EVENTOS_MIN_PAX_GRUPOS,
     estimated_amount: '',
+    notes: '',
     place_hold: false,
   });
 
@@ -203,18 +215,23 @@ export function EventosCrm({
     setErr('');
     setMsg('');
     try {
+      const celebration = leadForm.celebration.trim();
       const res = await fetch('/api/eventos/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: leadForm.title,
-          client_id: leadForm.client_id || null,
-          stage: leadForm.stage,
+          celebration,
+          title: celebration,
+          contact_name: leadForm.contact_name.trim() || null,
+          phone: leadForm.phone.trim() || null,
+          email: leadForm.email.trim() || null,
+          company: leadForm.company.trim() || null,
           event_date: leadForm.event_date || null,
-          pax: leadForm.pax ? Number(leadForm.pax) : null,
+          pax: leadForm.pax,
           estimated_amount: leadForm.estimated_amount
             ? Number(leadForm.estimated_amount)
             : null,
+          notes: leadForm.notes.trim() || null,
           place_hold: leadForm.place_hold,
         }),
       });
@@ -223,14 +240,39 @@ export function EventosCrm({
         setErr(json.error || 'No se pudo crear lead');
         return;
       }
-      setMsg('Lead creado');
+      let holdNote = '';
+      if (leadForm.place_hold && json.lead?.id) {
+        try {
+          const holdRes = await fetch('/api/eventos/holds', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: celebration,
+              event_date: leadForm.event_date || null,
+              client: leadForm.company.trim() || null,
+              lead_id: json.lead.id,
+              hold_until: json.lead.hold_until || null,
+              notes: leadForm.notes.trim() || null,
+            }),
+          });
+          const holdJson = await holdRes.json();
+          if (holdJson.message) holdNote = ` · ${holdJson.message}`;
+        } catch {
+          holdNote =
+            ' · Hold local ok; sync GCal no disponible (revisa GCAL_CALENDAR_ID).';
+        }
+      }
+      setMsg(`Lead creado${holdNote}`);
       setLeadForm({
-        title: '',
-        client_id: '',
-        stage: 'nuevo',
+        contact_name: '',
+        phone: '',
+        email: '',
+        company: '',
+        celebration: '',
         event_date: '',
-        pax: '',
+        pax: EVENTOS_MIN_PAX_GRUPOS,
         estimated_amount: '',
+        notes: '',
         place_hold: false,
       });
       await onRefresh();
@@ -259,6 +301,33 @@ export function EventosCrm({
       await onRefresh();
     } catch {
       setErr('Error de red al actualizar lead');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function patchLeadFollowUp(body: {
+    id: string;
+    follow_up_done?: string[];
+    next_follow_up_at?: string | null;
+  }) {
+    if (!canEdit) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const res = await fetch('/api/eventos/leads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(json.error || 'No se pudo actualizar seguimiento');
+        return;
+      }
+      await onRefresh();
+    } catch {
+      setErr('Error de red al actualizar seguimiento');
     } finally {
       setBusy(false);
     }
@@ -360,14 +429,19 @@ export function EventosCrm({
           </p>
           <p className="mt-1 text-sm text-slate-600">
             Ejecuta <code className="text-xs">supabase/eventos_module.sql</code>{' '}
-            en el SQL Editor. Después usa «Importar Excel seed» para cargar
-            clientes desde la lista Excel.
+            en el SQL Editor (crea CRM + catálogo + cotizaciones). Después usa
+            «Importar Excel seed» para cargar clientes desde la lista Excel.
           </p>
         </SuiteCard>
       )}
 
       {view === 'pipeline' ? (
         <>
+          <EventosFollowUpAlertsStrip
+            leads={leads}
+            onFocusLead={(id) => setFollowUpOpen(id)}
+          />
+
           {canEdit && (
             <SuiteCard>
               <h3 className="text-base font-bold" style={{ color: theme.title }}>
@@ -375,63 +449,125 @@ export function EventosCrm({
               </h3>
               <form
                 onSubmit={createLead}
-                className="mt-3 grid gap-3 md:grid-cols-3 lg:grid-cols-6"
+                className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
               >
-                <input
-                  required
-                  placeholder="Título del evento"
-                  value={leadForm.title}
-                  onChange={(e) =>
-                    setLeadForm((f) => ({ ...f, title: e.target.value }))
-                  }
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm md:col-span-2"
-                />
-                <select
-                  value={leadForm.client_id}
-                  onChange={(e) =>
-                    setLeadForm((f) => ({ ...f, client_id: e.target.value }))
-                  }
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="">Sin cliente</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.company_name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="date"
-                  value={leadForm.event_date}
-                  onChange={(e) =>
-                    setLeadForm((f) => ({ ...f, event_date: e.target.value }))
-                  }
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                />
-                <input
-                  type="number"
-                  min={1}
-                  placeholder="Pax"
-                  value={leadForm.pax}
-                  onChange={(e) =>
-                    setLeadForm((f) => ({ ...f, pax: e.target.value }))
-                  }
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  placeholder="Monto est."
-                  value={leadForm.estimated_amount}
-                  onChange={(e) =>
-                    setLeadForm((f) => ({
-                      ...f,
-                      estimated_amount: e.target.value,
-                    }))
-                  }
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                />
+                <label className="block text-xs font-medium text-slate-600">
+                  Nombre de contacto
+                  <input
+                    required
+                    placeholder="Nombre de contacto"
+                    value={leadForm.contact_name}
+                    onChange={(e) =>
+                      setLeadForm((f) => ({
+                        ...f,
+                        contact_name: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Teléfono
+                  <input
+                    type="tel"
+                    placeholder="Teléfono"
+                    value={leadForm.phone}
+                    onChange={(e) =>
+                      setLeadForm((f) => ({ ...f, phone: e.target.value }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Correo
+                  <input
+                    type="email"
+                    placeholder="Correo"
+                    value={leadForm.email}
+                    onChange={(e) =>
+                      setLeadForm((f) => ({ ...f, email: e.target.value }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Empresa (si aplica)
+                  <input
+                    placeholder="Empresa"
+                    value={leadForm.company}
+                    onChange={(e) =>
+                      setLeadForm((f) => ({ ...f, company: e.target.value }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Fecha del evento
+                  <input
+                    type="date"
+                    value={leadForm.event_date}
+                    onChange={(e) =>
+                      setLeadForm((f) => ({
+                        ...f,
+                        event_date: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Número de personas (pax)
+                  <EventosPaxCounter
+                    value={leadForm.pax}
+                    onChange={(pax) => setLeadForm((f) => ({ ...f, pax }))}
+                    disabled={busy}
+                    size="sm"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Presupuesto por persona
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="MXN"
+                    value={leadForm.estimated_amount}
+                    onChange={(e) =>
+                      setLeadForm((f) => ({
+                        ...f,
+                        estimated_amount: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600 sm:col-span-2 lg:col-span-2">
+                  ¿Qué celebran?
+                  <input
+                    required
+                    placeholder="Boda, XV años, corporativo…"
+                    value={leadForm.celebration}
+                    onChange={(e) =>
+                      setLeadForm((f) => ({
+                        ...f,
+                        celebration: e.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600 sm:col-span-2 lg:col-span-3">
+                  Notas (requisiciones del cliente)
+                  <textarea
+                    rows={2}
+                    placeholder="Menú especial, horarios, setup, restricciones…"
+                    value={leadForm.notes}
+                    onChange={(e) =>
+                      setLeadForm((f) => ({ ...f, notes: e.target.value }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
@@ -448,7 +584,7 @@ export function EventosCrm({
                 <button
                   type="submit"
                   disabled={busy}
-                  className="rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-60 md:col-span-2"
+                  className="rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-60 sm:col-span-2 lg:col-span-2"
                   style={{ backgroundColor: SUITE.navy }}
                 >
                   Agregar lead
@@ -480,22 +616,42 @@ export function EventosCrm({
                     ) : column.length === 0 ? (
                       <p className="text-xs text-slate-400">Vacío</p>
                     ) : (
-                      column.map((lead) => (
+                      column.map((lead) => {
+                        const headline =
+                          lead.celebration || lead.title || 'Lead';
+                        const company =
+                          lead.company ||
+                          lead.client?.company_name ||
+                          null;
+                        return (
                         <div
                           key={lead.id}
                           className="rounded-xl border border-slate-100 bg-slate-50 p-3"
                         >
                           <p className="text-sm font-semibold text-slate-800">
-                            {lead.title}
+                            {headline}
                           </p>
+                          {(lead.contact_name || lead.phone || lead.email) && (
+                            <p className="mt-0.5 text-xs text-slate-600">
+                              {[lead.contact_name, lead.phone, lead.email]
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </p>
+                          )}
                           <p className="mt-0.5 text-xs text-slate-500">
-                            {lead.client?.company_name || 'Sin cliente'}
+                            {company || 'Sin empresa'}
                             {lead.event_date ? ` · ${lead.event_date}` : ''}
                             {lead.pax ? ` · ${lead.pax} pax` : ''}
                           </p>
                           {lead.estimated_amount != null && (
                             <p className="mt-1 text-xs font-semibold text-slate-700">
+                              Presupuesto por persona ·{' '}
                               {formatMxn(Number(lead.estimated_amount))}
+                            </p>
+                          )}
+                          {lead.notes && (
+                            <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">
+                              {lead.notes}
                             </p>
                           )}
                           {lead.hold_until && (
@@ -504,6 +660,7 @@ export function EventosCrm({
                               {new Date(lead.hold_until).toLocaleString('es-MX')}
                             </p>
                           )}
+                          <EventosLeadAlertBadge lead={lead} />
                           {canEdit && (
                             <select
                               className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
@@ -519,8 +676,21 @@ export function EventosCrm({
                               ))}
                             </select>
                           )}
+                          <EventosLeadFollowUpChecklist
+                            lead={lead}
+                            canEdit={canEdit}
+                            busy={busy}
+                            open={followUpOpen === lead.id}
+                            onToggleOpen={() =>
+                              setFollowUpOpen((cur) =>
+                                cur === lead.id ? null : lead.id
+                              )
+                            }
+                            onPatch={patchLeadFollowUp}
+                          />
                         </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>

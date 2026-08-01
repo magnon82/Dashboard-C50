@@ -1,12 +1,16 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { SESSION_COOKIE, canAccessModule, canAccessAdmin, verifySessionToken } from '@/app/lib/auth';
+import { homePathForModules } from '@/app/lib/modules';
 
 const MODULE_PREFIXES = [
   '/ventas',
   '/finanzas',
   '/rrhh',
   '/eventos',
+  '/reportes-socios',
+  '/cocina',
+  '/barra',
   '/calidad',
   '/inventarios',
 ] as const;
@@ -17,8 +21,10 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith('/login') || pathname.startsWith('/api/auth')) {
     if (pathname.startsWith('/login')) {
       const token = request.cookies.get(SESSION_COOKIE)?.value;
-      if (token && (await verifySessionToken(token))) {
-        return NextResponse.redirect(new URL('/', request.url));
+      const session = token ? await verifySessionToken(token) : null;
+      if (session) {
+        const home = homePathForModules(session.modules);
+        return NextResponse.redirect(new URL(home, request.url));
       }
     }
     return NextResponse.next();
@@ -33,6 +39,14 @@ export async function middleware(request: NextRequest) {
       loginUrl.searchParams.set('from', pathname);
     }
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Single-module users skip the hub
+  if (pathname === '/') {
+    const home = homePathForModules(session.modules);
+    if (home !== '/') {
+      return NextResponse.redirect(new URL(home, request.url));
+    }
   }
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
@@ -51,7 +65,8 @@ export async function middleware(request: NextRequest) {
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
       const moduleId = prefix.slice(1);
       if (!canAccessModule(session, moduleId)) {
-        return NextResponse.redirect(new URL('/', request.url));
+        const home = homePathForModules(session.modules);
+        return NextResponse.redirect(new URL(home, request.url));
       }
       break;
     }
