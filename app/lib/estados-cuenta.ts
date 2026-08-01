@@ -282,7 +282,7 @@ function parseEfectivoMovimiento(r: FinancialRecord): EstadoMovimiento | null {
       bank: 'EFECTIVO',
       canal: 'EFECTIVO',
       tipo: ingresoTipo || d.tipo || null,
-      concepto: d.concepto || d.descripcion || null,
+      concepto: d.concepto || d.descripcion || undefined,
     },
   };
 }
