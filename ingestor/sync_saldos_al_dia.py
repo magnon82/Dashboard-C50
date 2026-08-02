@@ -3,7 +3,7 @@ Sincroniza fuentes de "Saldos al día" → Supabase:
   1) Saldo efectivo (FLUJO EFECTIVO CARRANZA 50.xlsx)
   2) Cuentas por pagar (Google Sheet CXP)
 
-Pensado para correr cada 5 minutos (Programador de tareas).
+Pensado para Actions cada hora (sync-saldos.yml · :07 CDMX) o Programador local.
 Bancos (Mifel/BBVA) salen del presupuesto mensual y no se refrescan aquí.
 """
 

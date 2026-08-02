@@ -1,25 +1,25 @@
-name: Sync Saldos al día
+name: Sync RH Drive
 
 # CDMX sin DST desde 2022 (UTC-6 year-round).
-# Cada 1 hora a :07 CDMX. Mismo minuto en UTC (offset de hora fijo): cron "7 * * * *".
-#   Ej.: 07:07 CDMX = 13:07 UTC · 00:07 CDMX = 06:07 UTC.
-# Efectivo (flujo Drive) + CXP (Sheets) → Supabase
-# Dashboard: Finanzas · Saldos al día
+# Diario 12:00 PM CDMX = 18:00 UTC.
+# Soft-check: inventario hr_* en Supabase + actualiza hr_drive_sync_state.
+# Full Drive→DB (File Stream / carpetas nuevas) sigue siendo opcional en PC admin
+# o vía POST /api/hr/sync con sesión RH. Ver ingestor/CLOUD_SYNC.md § RH.
 
 on:
   schedule:
-    # Cada hora a :07 CDMX (= minuto 7 de cada hora UTC)
-    - cron: "7 * * * *"
+    # Diario 12:00 PM CDMX (= 18:00 UTC)
+    - cron: "0 18 * * *"
   workflow_dispatch:
 
 concurrency:
-  group: sync-saldos-al-dia
+  group: sync-hr-drive
   cancel-in-progress: true
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: ingestor
@@ -39,8 +39,6 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
-          GOOGLE_OAUTH_TOKEN_JSON: ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}
         run: |
           missing=0
           check() {
@@ -55,16 +53,13 @@ jobs:
           }
           check NEXT_PUBLIC_SUPABASE_URL "$NEXT_PUBLIC_SUPABASE_URL"
           check SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
-          check GOOGLE_OAUTH_CLIENT_JSON "$GOOGLE_OAUTH_CLIENT_JSON"
-          check GOOGLE_OAUTH_TOKEN_JSON "$GOOGLE_OAUTH_TOKEN_JSON"
           exit $missing
 
-      - name: Sync efectivo + CXP
+      - name: Soft-sync RH inventory → hr_drive_sync_state
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
-          GOOGLE_OAUTH_TOKEN_JSON: ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}
           CI: "true"
-        run: python sync_saldos_al_dia.py
+          PYTHONUTF8: "1"
+        run: python sync_hr_drive_cloud.py

@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { homePathForModules } from '@/app/lib/modules';
+import { PRODUCT_NAME, PRODUCT_ORG, PRODUCT_TAGLINE } from '@/app/lib/product';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -65,10 +66,10 @@ export default function LoginForm() {
             C50
           </div>
           <p className="text-xs font-semibold uppercase tracking-widest text-white/70">
-            Cluster Culinario · Carranza 50
+            {PRODUCT_ORG}
           </p>
-          <h1 className="mt-2 text-2xl font-bold">Centro de dashboards</h1>
-          <p className="mt-1 text-sm text-white/65">Acceso restringido</p>
+          <h1 className="mt-2 text-2xl font-bold">{PRODUCT_NAME}</h1>
+          <p className="mt-1 text-sm text-white/65">{PRODUCT_TAGLINE}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 px-8 py-8">

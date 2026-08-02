@@ -18,6 +18,8 @@ export type DetectedSourceFile = {
   rowCount: number;
   /** Última fecha de negocio (columna date), ISO yyyy-mm-dd si hay. */
   lastDate: string | null;
+  /** Última ingestión (max created_at), ISO timestamptz si hay. */
+  lastIngestedAt: string | null;
 };
 
 /** Estado de fusión documentado ↔ detectado (UI Inventario). */
@@ -61,6 +63,8 @@ export type DataInventoryResult = {
     driveAvailable: boolean;
     driveMessage: string | null;
   };
+  /** Última act. por área (mismo payload que /api/admin/last-updates). */
+  areaLastUpdates?: import('@/app/lib/admin-last-updates').AreaLastUpdate[];
 };
 
 /** Formato legible: "345 MB" / "1.2 GB". */

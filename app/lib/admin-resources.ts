@@ -69,34 +69,37 @@ export const ALL_SOURCE_FILES: string[] = SOURCE_FILE_GROUPS.flatMap((g) => g.so
 
 /**
  * Frecuencia de actualización por source_file (texto UI en español).
- * Basado en .github/workflows/sync-gmail.yml (cron 0 11 * * * ≈ 5:00 AM CDMX,
- * --skip-facturas) y sync-saldos.yml (cada 5 min), más ingestors manuales / Admin.
+ * Basado en sync-gmail.yml (lun–sáb 4:00 AM CDMX / domingo 8:00 PM; CFDI best-effort),
+ * sync-saldos.yml (cada hora :07), sync-hr-drive.yml (diario 12:00 PM CDMX),
+ * más ingestors manuales / Admin.
  */
 export const SOURCE_FILE_UPDATE: Record<string, string> = {
-  infocaja: 'Diario ~5:17 AM CDMX (Actions)',
-  corte_caja: 'Diario ~5:00 AM CDMX (Actions)',
-  eventos: 'Manual (ingest_eventos.py)',
-  ventas_semana: 'Manual (ingest_ventas_semana.py)',
-  flujo_efectivo_saldo: 'Cada ~5 min (Actions)',
-  flujo_efectivo_semana: 'Cada ~5 min (Actions)',
-  flujo_efectivo_mov: 'Cada ~5 min (Actions)',
-  presupuesto_mensual: 'Manual (ingest_presupuesto.py)',
-  presupuesto_saldos: 'Manual (ingest_presupuesto.py)',
-  presupuesto_rubro: 'Manual (ingest_presupuesto.py)',
-  presupuesto_semana: 'Manual (ingest_presupuesto.py)',
-  presupuesto_sem_detalle: 'Manual (ingest_presupuesto.py)',
-  presupuesto_ingreso: 'Manual (ingest_presupuesto.py)',
-  presupuesto_ajuste: 'Solo admin (manual)',
-  estado_mifel: 'Manual / al reindexar',
-  estado_bbva: 'Manual / al reindexar',
-  estado_pdf_index: 'Manual / al reindexar',
-  estado_cuenta_pdf_index: 'Manual / al reindexar',
-  saldos_bancos_manual: 'Solo admin (manual)',
-  cxp_por_pagar: 'Cada ~5 min (Actions · Sheets)',
-  cxp: 'Manual (ingest_cxp.py)',
-  cxp_saldos: 'Manual (ingest_cxp.py)',
-  factura_cfdi: 'Manual local · CI omite (--skip-facturas)',
-  dashboard_auth: 'Solo admin (manual)',
+  infocaja:
+    'Función: venta diaria + efectivo/tarjetas/personas. Lun–sáb 4:00 AM · Dom 8:00 PM CDMX (Actions)',
+  corte_caja:
+    'Función: cancelaciones/descuentos/cortesías. Lun–sáb 4:00 AM · Dom 8:00 PM CDMX (Actions)',
+  eventos: 'Función: WI vs Eventos histórico. Manual (ingest_eventos.py)',
+  ventas_semana: 'Función: acumulado semanal Excel. Manual (ingest_ventas_semana.py)',
+  flujo_efectivo_saldo: 'Función: saldo de caja chica. Cada hora (Actions)',
+  flujo_efectivo_semana: 'Función: presupuesto efectivo por semana. Cada hora (Actions)',
+  flujo_efectivo_mov: 'Función: movimientos de flujo. Cada hora (Actions)',
+  presupuesto_mensual: 'Función: marco mensual. Manual (ingest_presupuesto.py)',
+  presupuesto_saldos: 'Función: saldos presupuesto. Manual (ingest_presupuesto.py)',
+  presupuesto_rubro: 'Función: gastos por rubro. Manual (ingest_presupuesto.py)',
+  presupuesto_semana: 'Función: control semanal. Manual (ingest_presupuesto.py)',
+  presupuesto_sem_detalle: 'Función: detalle SEM. Manual (ingest_presupuesto.py)',
+  presupuesto_ingreso: 'Función: ingresos Mifel/BBVA tipados. Manual (ingest_presupuesto.py)',
+  presupuesto_ajuste: 'Función: ajustes admin. Solo /admin (manual)',
+  estado_mifel: 'Función: estado de cuenta Mifel. Manual / al reindexar',
+  estado_bbva: 'Función: estado de cuenta BBVA. Manual / al reindexar',
+  estado_pdf_index: 'Función: índice PDFs pagos. Manual / al reindexar',
+  estado_cuenta_pdf_index: 'Función: índice PDFs estados. Manual / al reindexar',
+  saldos_bancos_manual: 'Función: saldos bancarios capturados. Solo /admin (manual)',
+  cxp_por_pagar: 'Función: saldo a la fecha proveedores. Cada hora (Actions · Sheets)',
+  cxp: 'Función: líneas pagadas/retornos. Manual (ingest_cxp.py)',
+  cxp_saldos: 'Función: encabezados CxP. Manual (ingest_cxp.py)',
+  factura_cfdi: 'Función: índice CFDI → ERP (financial_records). Lun–sáb 4:00 AM · Dom 8:00 PM CDMX (Actions · best-effort)',
+  dashboard_auth: 'Función: usuarios Suite + capabilities. Solo /admin (manual)',
 };
 
 /** Tipo de chip / ítem copiable en el inventario. */
@@ -125,7 +128,7 @@ export type ResourceBranch = {
   /** Rol en una línea (tarjeta / accordion). */
   role: string;
   note?: string;
-  /** Resumen de frecuencia para el grupo (p.ej. "Cada ~5 min"). */
+  /** Resumen de frecuencia para el grupo (p.ej. "Cada hora"). */
   updateFrequency?: string;
   leaves?: ResourceLeaf[];
   /** Scripts relacionados (chips). */
@@ -152,9 +155,9 @@ const SOURCE_GROUP_META: Record<
   { role: string; updateFrequency: string; scripts?: string[]; routes?: string[] }
 > = {
   ventas: {
-    role: 'Tickets y cortes de venta diarios / semanales.',
+    role: 'Función: alimentar /ventas (diario Infocaja/CORTE) y series WI/Eventos.',
     updateFrequency:
-      'Mixto · Infocaja/CORTE diario ~5:00 AM; eventos y ventas_semana manual',
+      'Cloud: lun–sáb 4:00 AM · dom 8:00 PM CDMX · CFDI ERP; eventos/ventas_semana manual (TODO automate)',
     scripts: [
       'ingest_infocaja_gmail.py',
       'ingest_corte_gmail.py',
@@ -164,37 +167,38 @@ const SOURCE_GROUP_META: Record<
     routes: ['/ventas', '/finanzas'],
   },
   flujo: {
-    role: 'Saldos y movimientos de flujo de efectivo.',
-    updateFrequency: 'Cada ~5 min (Actions · sync-saldos.yml)',
+    role: 'Función: Saldos al día (caja chica / movimientos de efectivo).',
+    updateFrequency: 'Cada hora (Actions · sync-saldos.yml)',
     scripts: ['ingest_saldos_flujo.py', 'sync_saldos_al_dia.py'],
     routes: ['/finanzas', '/finanzas/ingresos'],
   },
+  // TODO(automate): presupuesto / ventas_semana / estados de cuenta — manual hasta Actions dedicados.
   presupuesto: {
-    role: 'Presupuesto mensual, rubros, semanas y ajustes.',
-    updateFrequency: 'Manual (ingest_presupuesto.py) · ajustes solo admin',
+    role: 'Función: control presupuestal e ingresos tipados Mifel/BBVA.',
+    updateFrequency: 'Manual (ingest_presupuesto.py) · TODO automate · ajustes solo admin',
     scripts: ['ingest_presupuesto.py'],
     routes: ['/finanzas', '/finanzas/gastos', '/admin'],
   },
   bancos: {
-    role: 'Estados MIFEL/BBVA, índices PDF y saldos manuales.',
-    updateFrequency: 'Manual / al reindexar · saldos_bancos_manual solo admin',
+    role: 'Función: conciliación bancaria e índices de comprobantes.',
+    updateFrequency: 'Manual / al reindexar · TODO automate · saldos_bancos_manual solo admin',
     scripts: ['ingest_estados_cuenta.py'],
     routes: ['/finanzas/estados-cuenta', '/finanzas/comprobantes', '/admin'],
   },
   cxp: {
-    role: 'Proveedores por pagar y saldos CxP.',
-    updateFrequency: 'Mixto · cxp_por_pagar cada ~5 min; cxp/cxp_saldos manual',
+    role: 'Función: cuentas por pagar (saldo vivo + historial de pagos).',
+    updateFrequency: 'Mixto · cxp_por_pagar cada hora; cxp/cxp_saldos manual',
     scripts: ['ingest_cxp_por_pagar.py', 'ingest_cxp.py', 'sync_saldos_al_dia.py'],
     routes: ['/finanzas/gastos'],
   },
   facturas: {
-    role: 'CFDI recibidos por correo (XML/PDF).',
-    updateFrequency: 'Manual local · Actions omite (--skip-facturas)',
+    role: 'Función: expediente fiscal CFDI recibido por correo.',
+    updateFrequency: 'Cloud: mismo sync-gmail (CFDI → financial_records · best-effort)',
     scripts: ['ingest_facturas_gmail.py'],
     routes: ['/finanzas/facturas'],
   },
   auth: {
-    role: 'Usuarios y permisos del suite.',
+    role: 'Función: acceso Suite, módulos y capabilities (p.ej. staff.corte).',
     updateFrequency: 'Solo admin (manual)',
     routes: ['/admin'],
   },
@@ -247,24 +251,28 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: 'Recursos Humanos (hr_*)',
         role: 'Plantilla, nómina, horarios, vacaciones, biblioteca y resguardos. No usa source_file.',
         note: 'Migración: supabase/hr_module.sql (+ hr_resguardo.sql / hr_leave_request_form.sql si aplica)',
-        updateFrequency: 'Operativo en Suite · import local Descargas + captura RH en /rrhh',
+        updateFrequency: 'Suite + soft-sync Actions diario 12:00 PM CDMX',
         leaves: HR_TABLES.map((t) => ({
           label: t,
           kind: 'file' as const,
           note:
             t === 'hr_employees'
-              ? 'Plantilla vigente · suite_username · drive_folder_path (índice expedientes)'
+              ? 'Función: plantilla, suite_username, expedientes, alta/baja'
               : t === 'hr_payroll_periods' || t === 'hr_payroll_lines'
-                ? 'Nómina borrador → cerrado → pagado'
+                ? 'Función: nómina (borrador al publicar horario → cerrado → pagado)'
                 : t === 'hr_schedule_weeks' || t === 'hr_schedule_shifts'
-                  ? 'Horarios borrador → publicado (propuesta diferida)'
-                  : t === 'hr_doc_links'
-                    ? 'Biblioteca · seed / defaults'
-                    : t === 'hr_resguardo_requests'
-                      ? 'Resguardos (/rrhh → Plantilla)'
-                      : t === 'hr_drive_sync_state'
-                        ? 'Última sync Drive→DB por tipo · hr_drive_sync.sql'
-                        : undefined,
+                  ? 'Función: turnos (nueva semana copia previa; → publicado)'
+                  : t === 'hr_leave_balances' || t === 'hr_leave_requests'
+                    ? 'Función: saldos y solicitudes de vacaciones'
+                    : t === 'hr_doc_links'
+                      ? 'Función: catálogo biblioteca RH'
+                      : t === 'hr_resguardo_requests'
+                        ? 'Función: resguardos de equipo'
+                        : t === 'hr_drive_sync_state'
+                          ? 'Función: estado última sync Drive→DB'
+                          : t === 'hr_availability'
+                            ? 'Función: disponibilidad para propuestas'
+                            : undefined,
           copyValue: t,
           updateFrequency: 'Solo Suite (/rrhh · /api/hr/*)',
         })),
@@ -322,13 +330,13 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         role: 'Flujo de efectivo, bancos y ventas semanales.',
         note: 'I:\\Mi unidad\\Administración',
         updateFrequency:
-          'Mixto · flujo cada ~5 min; Bancos PDF e índice manual; ventas_semana manual',
+          'Mixto · flujo cada hora (Actions); Bancos PDF / ventas_semana manual (TODO automate)',
         leaves: [
           {
             label: 'FLUJO EFECTIVO CARRANZA 50.xlsx',
             kind: 'file',
-            note: 'flujo_efectivo_saldo / semana / mov',
-            updateFrequency: 'Cada ~5 min (Actions)',
+            note: 'Función: Saldos al día (caja chica) · flujo_efectivo_saldo / semana / mov',
+            updateFrequency: 'Cada hora (Actions · sync-saldos.yml)',
           },
           {
             label: 'Bancos\\…\\Estados de cuenta',
@@ -382,7 +390,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: 'Facturas CFDI',
         role: 'Adjuntos XML/PDF guardados por ingest local.',
         note: 'I:\\Mi unidad\\FACTURAS CFDI',
-        updateFrequency: 'Manual local · Actions omite (--skip-facturas)',
+        updateFrequency: 'Cloud: mismo sync-gmail (CFDI → financial_records · best-effort)',
         scripts: ['ingest_facturas_gmail.py'],
         sourceFiles: ['factura_cfdi'],
         routes: ['/finanzas/facturas'],
@@ -403,14 +411,14 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         role: 'Módulo /rrhh: datos operativos en Supabase; File Stream/Drive API solo para refrescar o abrir binarios. GET/POST /api/hr/sync.',
         note: 'I:\\Mi unidad\\RH',
         updateFrequency:
-          'Frecuencia por tipo — pendiente definir (ver /api/hr/sync contentTypes). Vercel no necesita File Stream.',
+          'Diario 12:00 PM CDMX (Actions · sync-hr-drive.yml soft-sync). Vercel no necesita File Stream.',
         leaves: [
           {
             label: 'Nóminas',
             kind: 'path',
             note: 'Persistido: hr_payroll_* · plantilla = nómina ∪ horarios',
             copyValue: 'I:\\Mi unidad\\RH\\Nóminas',
-            updateFrequency: 'Pendiente usuario · Import /rrhh → Nómina',
+            updateFrequency: 'Diario 12:00 PM CDMX (Actions) · Import /rrhh → Nómina',
           },
           {
             label: 'Nóminas · Drive folder ID',
@@ -423,28 +431,28 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             kind: 'path',
             note: 'Persistido: hr_schedule_* · import Descargas',
             copyValue: 'I:\\Mi unidad\\RH\\Horarios',
-            updateFrequency: 'Pendiente usuario · Import /rrhh → Horarios',
+            updateFrequency: 'Diario 12:00 PM CDMX (Actions) · Import /rrhh → Horarios',
           },
           {
             label: 'Expedientes personal C50',
             kind: 'path',
             note: 'Índice en hr_employees.drive_folder_path · fallback sin File Stream',
             copyValue: 'I:\\Mi unidad\\RH\\Expedientes personal C50',
-            updateFrequency: 'Pendiente usuario · en alta/baja',
+            updateFrequency: 'Diario 12:00 PM CDMX (Actions) · alta/baja Suite',
           },
           {
             label: 'Documentación vigente',
             kind: 'path',
             note: 'Metadatos hr_doc_links · Abrir local = File Stream',
             copyValue: 'I:\\Mi unidad\\RH\\Documentación vigente 2023',
-            updateFrequency: 'Pendiente usuario · raro',
+            updateFrequency: 'Diario 12:00 PM CDMX (Actions soft-sync)',
           },
           {
             label: 'Cultura Organizacional',
             kind: 'path',
             note: 'Textos en app/lib/hr-cultura.ts (+ hr_doc_links)',
             copyValue: 'I:\\Mi unidad\\RH\\Cultura Organizacional',
-            updateFrequency: 'Pendiente usuario · muy raro / deploy',
+            updateFrequency: 'Muy raro / deploy · soft-sync no pisa textos',
           },
           {
             label: 'Perfiles por posición',
@@ -463,7 +471,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             kind: 'file',
             note: 'Enrich → hr_employees (HR_BASE_DATOS_XLSX)',
             copyValue: 'I:\\Mi unidad\\RH\\BASE DATOS PERSONAL C50.xlsx',
-            updateFrequency: 'Pendiente usuario',
+            updateFrequency: 'Diario 12:00 PM CDMX (Actions soft-sync)',
           },
           {
             label: 'Estado sync RH',
@@ -515,13 +523,13 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: 'Google Sheets · CxP',
         role: 'Hoja de proveedores Cluster (sync Actions + local).',
         note: 'C X P PROVEEDORES CLUSTER…',
-        updateFrequency: 'Mixto · cxp_por_pagar cada ~5 min; cxp/cxp_saldos manual',
+        updateFrequency: 'Mixto · cxp_por_pagar cada hora; cxp/cxp_saldos manual',
         leaves: [
           {
             label: 'cxp_por_pagar',
             kind: 'source_file',
-            note: 'Actions cada 5 min',
-            updateFrequency: 'Cada ~5 min (Actions)',
+            note: 'Función: saldo a la fecha proveedores · Actions',
+            updateFrequency: 'Cada hora (Actions · sync-saldos.yml)',
           },
           {
             label: 'cxp + cxp_saldos',
@@ -545,8 +553,9 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
       {
         id: 'gmail-infocaja',
         label: 'Infocaja Fin de Día',
-        role: 'Correo diario de caja → source_file=infocaja.',
-        updateFrequency: 'Diario ~5:00 AM CDMX (Actions · sync-gmail.yml)',
+        role: 'Función: venta diaria + efectivo/tarjetas/personas → source_file=infocaja (/ventas).',
+        updateFrequency:
+          'Lun–sáb 4:00 AM · Dom 8:00 PM CDMX (Actions · sync-gmail.yml)',
         scripts: ['ingest_infocaja_gmail.py', 'sync_gmail_diario.py'],
         sourceFiles: ['infocaja'],
         routes: ['/ventas'],
@@ -554,8 +563,9 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
       {
         id: 'gmail-corte',
         label: 'CORTE CARRANZA (XLS)',
-        role: 'Adjunto de corte de caja → source_file=corte_caja.',
-        updateFrequency: 'Diario ~5:00 AM CDMX (Actions · sync-gmail.yml)',
+        role: 'Función: cancelaciones/descuentos/cortesías → source_file=corte_caja (/ventas).',
+        updateFrequency:
+          'Lun–sáb 4:00 AM · Dom 8:00 PM CDMX (Actions · sync-gmail.yml)',
         scripts: ['ingest_corte_gmail.py', 'sync_gmail_diario.py'],
         sourceFiles: ['corte_caja'],
         routes: ['/ventas'],
@@ -563,8 +573,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
       {
         id: 'gmail-facturas',
         label: 'Facturas CFDI (XML/PDF)',
-        role: 'Adjuntos fiscales; local completo, Actions con --skip-facturas.',
-        updateFrequency: 'Manual local · CI omite (--skip-facturas)',
+        role: 'Función: índice CFDI → ERP (financial_records); cloud vía sync-gmail (best-effort).',
+        updateFrequency: 'Cloud: sync-gmail (CFDI → financial_records · best-effort)',
         scripts: ['ingest_facturas_gmail.py'],
         sourceFiles: ['factura_cfdi'],
         routes: ['/finanzas/facturas'],
@@ -586,34 +596,38 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           {
             label: 'sync_gmail_diario.py',
             kind: 'script',
-            note: 'orquesta Infocaja + CORTE (+ facturas local)',
-            updateFrequency: 'Diario ~5:00 AM en Actions',
+            note: 'Función: orquesta Infocaja + CORTE; CFDI en paso aparte (Actions)',
+            updateFrequency: 'Lun–sáb 4:00 AM · Dom 8:00 PM CDMX (Actions)',
           },
           {
             label: 'sync_saldos_al_dia.py',
             kind: 'script',
-            note: 'flujo + cxp_por_pagar',
-            updateFrequency: 'Cada ~5 min en Actions',
+            note: 'Función: flujo efectivo + cxp_por_pagar → Saldos al día',
+            updateFrequency: 'Cada hora · cron 7 * * * * (:07 CDMX)',
           },
           {
             label: 'ingest_infocaja_gmail.py',
             kind: 'script',
-            updateFrequency: 'Diario (vía sync-gmail)',
+            note: 'Función: venta diaria',
+            updateFrequency: 'Vía sync-gmail (Actions)',
           },
           {
             label: 'ingest_corte_gmail.py',
             kind: 'script',
-            updateFrequency: 'Diario (vía sync-gmail)',
+            note: 'Función: cancelaciones/descuentos/cortesías',
+            updateFrequency: 'Vía sync-gmail (Actions)',
           },
           {
             label: 'ingest_facturas_gmail.py',
             kind: 'script',
-            updateFrequency: 'Manual local · omitido en CI',
+            note: 'Función: índice CFDI',
+            updateFrequency: 'Vía sync-gmail (Actions · best-effort → ERP)',
           },
           {
             label: 'ingest_saldos_flujo.py',
             kind: 'script',
-            updateFrequency: 'Cada ~5 min (vía sync-saldos)',
+            note: 'Función: caja chica / movimientos',
+            updateFrequency: 'Cada hora (vía sync-saldos)',
           },
           { label: 'ingest_presupuesto.py', kind: 'script', updateFrequency: 'Manual' },
           {
@@ -625,9 +639,16 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           {
             label: 'ingest_cxp.py / ingest_cxp_por_pagar.py',
             kind: 'script',
-            updateFrequency: 'cxp_por_pagar ~5 min; cxp manual',
+            note: 'Función: CxP saldo vivo + historial',
+            updateFrequency: 'cxp_por_pagar cada hora; cxp manual',
           },
           { label: 'ingest_eventos.py', kind: 'script', updateFrequency: 'Manual' },
+          {
+            label: 'sync_hr_drive_cloud.py',
+            kind: 'script',
+            note: 'Función: soft-sync hr_* → hr_drive_sync_state',
+            updateFrequency: 'Diario 12:00 PM CDMX (Actions)',
+          },
           { label: 'google_auth.py', kind: 'script', updateFrequency: 'Utilidad (bajo demanda)' },
         ],
         scripts: [
@@ -685,22 +706,30 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         id: 'repo-workflows',
         label: '.github/workflows/',
         role: 'Automatización en GitHub Actions (horario CDMX).',
-        updateFrequency: 'Programado · sync-gmail diario; sync-saldos cada 5 min',
+        updateFrequency:
+          'Programado · sync-gmail L–S 4:00 AM / Dom 8:00 PM; sync-saldos cada hora; sync-hr-drive 12:00 PM',
         leaves: [
           {
             label: 'sync-gmail.yml',
             kind: 'workflow',
-            note: '~5:00 AM CDMX · Infocaja + CORTE · --skip-facturas',
-            updateFrequency: 'Diario · cron 0 11 * * * UTC',
+            note: 'Función: ventas diarias + CFDI → ERP (paso best-effort)',
+            updateFrequency:
+              'Lun–sáb 4:00 AM CDMX (0 10 * * 1-6) · Dom 8:00 PM (0 2 * * 1) · respaldo 17 11 * * 1-6',
           },
           {
             label: 'sync-saldos.yml',
             kind: 'workflow',
-            note: 'cada 5 min · flujo + cxp_por_pagar',
-            updateFrequency: 'Cada 5 min · cron */5 * * * *',
+            note: 'Función: Saldos al día (flujo Drive + cxp_por_pagar Sheets)',
+            updateFrequency: 'Cada hora · cron 7 * * * * (:07 CDMX)',
+          },
+          {
+            label: 'sync-hr-drive.yml',
+            kind: 'workflow',
+            note: 'Función: soft-sync RR.HH. (hr_* + hr_drive_sync_state)',
+            updateFrequency: 'Diario 12:00 PM CDMX · cron 0 18 * * *',
           },
         ],
-        scripts: ['sync-gmail.yml', 'sync-saldos.yml'],
+        scripts: ['sync-gmail.yml', 'sync-saldos.yml', 'sync-hr-drive.yml'],
       },
     ],
   },

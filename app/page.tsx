@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
 import { APP_MODULES, homePathForModules } from '@/app/lib/modules';
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from '@/app/lib/product';
 import { canSeeModule, canSeeAdmin, useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
 
@@ -30,11 +31,11 @@ export default function HubPage() {
 
   return (
     <SuiteShell
-      title="Dashboard"
-      subtitle={`${hoy}${user ? ` · ${user.username}` : ''}`}
+      title={PRODUCT_NAME}
+      subtitle={`${PRODUCT_TAGLINE} · ${hoy}${user ? ` · ${user.username}` : ''}`}
     >
       <p className="mb-6 max-w-2xl text-sm" style={{ color: theme.muted }}>
-        Centro de dashboards. Elige un módulo.
+        Tablero de negocio y control operativo. Elige un módulo.
       </p>
 
       {loading ? (

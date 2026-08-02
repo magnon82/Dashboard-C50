@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { PRODUCT_META_DESCRIPTION, PRODUCT_META_TITLE } from "@/app/lib/product";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Centro de dashboards · Carranza 50",
-  description: "Suite de dashboards Cluster Culinario Carranza 50",
+  title: PRODUCT_META_TITLE,
+  description: PRODUCT_META_DESCRIPTION,
 };
 
 export default function RootLayout({

@@ -13,9 +13,11 @@ import {
 } from '@/app/lib/admin-resources';
 import {
   fetchDetectedSourceFiles,
+  fetchHrLastUpdate,
   measureSupabase,
   scanDriveInventory,
 } from '@/app/lib/storage-stats';
+import { buildAreaLastUpdates } from '@/app/lib/admin-last-updates';
 import type { DataInventoryResult } from '@/app/lib/storage-format';
 
 export const runtime = 'nodejs';
@@ -51,10 +53,11 @@ export async function GET() {
   const auth = await requireAdmin();
   if (auth instanceof NextResponse) return auth;
 
-  const [supabase, drive, detected] = await Promise.all([
+  const [supabase, drive, detected, hr] = await Promise.all([
     measureSupabase(),
     scanDriveInventory(),
     fetchDetectedSourceFiles(),
+    fetchHrLastUpdate(),
   ]);
 
   const body: DataInventoryResult = {
@@ -86,6 +89,7 @@ export async function GET() {
       driveAvailable: drive.driveAvailable,
       driveMessage: drive.driveMessage,
     },
+    areaLastUpdates: buildAreaLastUpdates(detected.detectedSourceFiles, hr),
   };
 
   return NextResponse.json(body);

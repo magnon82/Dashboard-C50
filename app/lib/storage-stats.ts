@@ -6,7 +6,10 @@ import { existsSync } from 'fs';
 import { readdir, stat } from 'fs/promises';
 import path from 'path';
 import type { DetectedSourceFile, DrivePathStat } from '@/app/lib/storage-format';
+import type { HrLastUpdateProbe } from '@/app/lib/admin-last-updates';
+import { ALL_SOURCE_FILES } from '@/app/lib/admin-resources';
 import { getServiceSupabase } from '@/app/lib/users';
+import { listHrDriveSyncState } from '@/app/lib/hr-drive-sync';
 
 export type DriveInventoryEntry = {
   /** Coincide con ResourceBranch.id en admin-resources. */
@@ -206,7 +209,12 @@ export async function scanDriveInventory(): Promise<{
 }
 
 function normalizeDetectedRows(
-  rows: Array<{ source_file?: unknown; row_count?: unknown; last_date?: unknown }>,
+  rows: Array<{
+    source_file?: unknown;
+    row_count?: unknown;
+    last_date?: unknown;
+    last_created_at?: unknown;
+  }>,
 ): DetectedSourceFile[] {
   const out: DetectedSourceFile[] = [];
   for (const row of rows) {
@@ -219,7 +227,12 @@ function normalizeDetectedRows(
       const raw = String(row.last_date);
       lastDate = raw.slice(0, 10) || null;
     }
-    out.push({ sourceFile, rowCount, lastDate });
+    let lastIngestedAt: string | null = null;
+    if (row.last_created_at != null) {
+      const raw = String(row.last_created_at).trim();
+      lastIngestedAt = raw || null;
+    }
+    out.push({ sourceFile, rowCount, lastDate, lastIngestedAt });
   }
   out.sort((a, b) => a.sourceFile.localeCompare(b.sourceFile, 'es'));
   return out;
@@ -227,7 +240,7 @@ function normalizeDetectedRows(
 
 /**
  * Una sola agregación DISTINCT source_file (RPC).
- * Fallback: lectura paginada solo de source_file + date (sin N+1).
+ * Fallback: una query por source_file (max created_at) — barato y admin-only.
  */
 export async function fetchDetectedSourceFiles(): Promise<{
   detectedSourceFiles: DetectedSourceFile[];
@@ -237,80 +250,38 @@ export async function fetchDetectedSourceFiles(): Promise<{
     const sb = getServiceSupabase();
     const rpc = await sb.rpc('admin_source_file_stats');
     if (!rpc.error && Array.isArray(rpc.data)) {
+      const normalized = normalizeDetectedRows(
+        rpc.data as Array<{
+          source_file?: unknown;
+          row_count?: unknown;
+          last_date?: unknown;
+          last_created_at?: unknown;
+        }>,
+      );
+      // RPC antiguo sin last_created_at: completar con sondeos puntuales.
+      const needsIngest = normalized.some(
+        (r) => r.rowCount > 0 && !r.lastIngestedAt,
+      );
+      if (!needsIngest) {
+        return {
+          detectedSourceFiles: normalized,
+          detectedSourceFilesError: null,
+        };
+      }
+      const enriched = await enrichLastIngested(normalized);
       return {
-        detectedSourceFiles: normalizeDetectedRows(
-          rpc.data as Array<{
-            source_file?: unknown;
-            row_count?: unknown;
-            last_date?: unknown;
-          }>,
-        ),
+        detectedSourceFiles: enriched,
         detectedSourceFilesError: null,
       };
     }
 
-    // Fallback sin RPC: agregar en memoria (columnas mínimas, una pasada).
-    const tallies = new Map<string, { rowCount: number; lastDate: string | null }>();
-    let from = 0;
-    const pageSize = 1000;
-    const maxRows = 80_000;
-    let truncated = false;
-
-    while (from < maxRows) {
-      const { data, error } = await sb
-        .from('financial_records')
-        .select('source_file, date')
-        .order('id', { ascending: true })
-        .range(from, from + pageSize - 1);
-
-      if (error) {
-        return {
-          detectedSourceFiles: [],
-          detectedSourceFilesError: rpc.error
-            ? `RPC no disponible (${rpc.error.message}); fallback falló: ${error.message}`
-            : error.message,
-        };
-      }
-      if (!data?.length) break;
-
-      for (const row of data) {
-        const sourceFile = String(
-          (row as { source_file?: unknown }).source_file ?? '',
-        ).trim() || '(vacío)';
-        const dateRaw = (row as { date?: unknown }).date;
-        const dateStr =
-          dateRaw != null ? String(dateRaw).slice(0, 10) || null : null;
-        const prev = tallies.get(sourceFile);
-        if (!prev) {
-          tallies.set(sourceFile, { rowCount: 1, lastDate: dateStr });
-        } else {
-          prev.rowCount += 1;
-          if (dateStr && (!prev.lastDate || dateStr > prev.lastDate)) {
-            prev.lastDate = dateStr;
-          }
-        }
-      }
-
-      if (data.length < pageSize) break;
-      from += pageSize;
-      if (from >= maxRows) truncated = true;
-    }
-
-    const detectedSourceFiles = [...tallies.entries()]
-      .map(([sourceFile, v]) => ({
-        sourceFile,
-        rowCount: v.rowCount,
-        lastDate: v.lastDate,
-      }))
-      .sort((a, b) => a.sourceFile.localeCompare(b.sourceFile, 'es'));
-
+    // Fallback sin RPC: por source_file conocido + descubiertos vía count head.
+    const perSource = await fetchPerSourceStats();
     return {
-      detectedSourceFiles,
-      detectedSourceFilesError: truncated
-        ? `Agregación parcial (límite ${maxRows.toLocaleString('es-MX')} filas). Ejecuta supabase/admin_source_file_stats.sql para el RPC exacto.`
-        : rpc.error
-          ? `RPC no disponible; agregación por lectura (${rpc.error.message}). Ejecuta supabase/admin_source_file_stats.sql.`
-          : null,
+      detectedSourceFiles: perSource.rows,
+      detectedSourceFilesError: rpc.error
+        ? `RPC no disponible; agregación por source_file (${rpc.error.message}). Ejecuta supabase/admin_source_file_stats.sql.`
+        : null,
     };
   } catch (e) {
     return {
@@ -319,6 +290,151 @@ export async function fetchDetectedSourceFiles(): Promise<{
         e instanceof Error ? e.message : 'Error detectando source_file',
     };
   }
+}
+
+async function enrichLastIngested(
+  rows: DetectedSourceFile[],
+): Promise<DetectedSourceFile[]> {
+  const sb = getServiceSupabase();
+  const out = await Promise.all(
+    rows.map(async (row) => {
+      if (row.lastIngestedAt || row.rowCount <= 0) return row;
+      try {
+        const { data } = await sb
+          .from('financial_records')
+          .select('created_at')
+          .eq('source_file', row.sourceFile)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        const created = data?.[0]
+          ? String((data[0] as { created_at?: unknown }).created_at || '')
+          : '';
+        return {
+          ...row,
+          lastIngestedAt: created || null,
+        };
+      } catch {
+        return row;
+      }
+    }),
+  );
+  return out;
+}
+
+async function fetchPerSourceStats(): Promise<{ rows: DetectedSourceFile[] }> {
+  const sb = getServiceSupabase();
+  const sources = new Set(ALL_SOURCE_FILES);
+
+  // Descubrir source_file extra con una muestra acotada.
+  try {
+    const { data } = await sb
+      .from('financial_records')
+      .select('source_file')
+      .order('id', { ascending: false })
+      .limit(2000);
+    for (const row of data || []) {
+      const sf = String((row as { source_file?: unknown }).source_file || '').trim();
+      if (sf) sources.add(sf);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const rows: DetectedSourceFile[] = [];
+  await Promise.all(
+    [...sources].map(async (sourceFile) => {
+      try {
+        const [countRes, lastRes] = await Promise.all([
+          sb
+            .from('financial_records')
+            .select('id', { count: 'exact', head: true })
+            .eq('source_file', sourceFile),
+          sb
+            .from('financial_records')
+            .select('created_at, date')
+            .eq('source_file', sourceFile)
+            .order('created_at', { ascending: false })
+            .limit(1),
+        ]);
+        const rowCount = countRes.count ?? 0;
+        if (rowCount <= 0) {
+          rows.push({
+            sourceFile,
+            rowCount: 0,
+            lastDate: null,
+            lastIngestedAt: null,
+          });
+          return;
+        }
+        const head = lastRes.data?.[0] as
+          | { created_at?: unknown; date?: unknown }
+          | undefined;
+        const lastIngestedAt = head?.created_at
+          ? String(head.created_at)
+          : null;
+        const lastDate = head?.date ? String(head.date).slice(0, 10) : null;
+        rows.push({ sourceFile, rowCount, lastDate, lastIngestedAt });
+      } catch {
+        /* skip broken source */
+      }
+    }),
+  );
+
+  rows.sort((a, b) => a.sourceFile.localeCompare(b.sourceFile, 'es'));
+  return { rows };
+}
+
+/** Última sync / mutación RR.HH. para el mapa e inventario. */
+export async function fetchHrLastUpdate(): Promise<HrLastUpdateProbe> {
+  try {
+    const state = await listHrDriveSyncState();
+    if (!state.tableMissing) {
+      let best: string | null = null;
+      for (const r of state.rows) {
+        const ts = r.last_synced_at || r.updated_at;
+        if (ts && (!best || ts > best)) best = ts;
+      }
+      if (best) {
+        return { lastAt: best, source: 'hr_drive_sync_state' };
+      }
+    }
+  } catch {
+    /* fall through to table probes */
+  }
+
+  const sb = getServiceSupabase();
+  const tables = [
+    'hr_payroll_periods',
+    'hr_schedule_weeks',
+    'hr_employees',
+    'hr_leave_requests',
+    'hr_resguardo_requests',
+  ] as const;
+  const stamps = await Promise.all(
+    tables.map(async (table) => {
+      try {
+        const { data, error } = await sb
+          .from(table)
+          .select('updated_at')
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        if (error || !data?.[0]) return null;
+        const ts = String(
+          (data[0] as { updated_at?: unknown }).updated_at || '',
+        );
+        return ts || null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  let best: string | null = null;
+  for (const ts of stamps) {
+    if (ts && (!best || ts > best)) best = ts;
+  }
+  return best
+    ? { lastAt: best, source: 'hr_tables' }
+    : { lastAt: null, source: 'none' };
 }
 
 /** Bytes estimados de payload JSON de una fila (aprox. tamaño útil). */
