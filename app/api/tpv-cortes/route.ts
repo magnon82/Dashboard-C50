@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import { requireVentasSession } from '@/app/lib/tpv-api';
 import {
-  TPV_MAX_BYTES,
+  TPV_UPLOAD_MAX_BYTES,
   TPV_MIN_BYTES,
   TPV_MIN_LONG_SIDE,
   TPV_MIN_SHARPNESS,
@@ -552,11 +552,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Defensa extra en servidor
-    if (file.size > TPV_MAX_BYTES || file.size < TPV_MIN_BYTES) {
+    // Defensa extra en servidor (Vercel ~4.5 MB; cliente comprime a ≤3 MB)
+    if (file.size > TPV_UPLOAD_MAX_BYTES || file.size < TPV_MIN_BYTES) {
       return NextResponse.json(
         {
-          error: 'La foto no tiene el tamaño adecuado. Vuelve a tomar la foto.',
+          error:
+            file.size > TPV_UPLOAD_MAX_BYTES
+              ? 'Foto demasiado grande. Actualiza la página, toma de nuevo la foto y súbela (se comprime sola).'
+              : 'La foto no tiene el tamaño adecuado. Vuelve a tomar la foto.',
           retake: true,
         },
         { status: 400 }

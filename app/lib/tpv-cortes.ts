@@ -15,7 +15,15 @@ export type TpvTerminalNumber = (typeof TPV_TERMINALS)[number];
 export const TPV_PHOTO_KINDS = ['venta', 'propina'] as const;
 export type TpvPhotoKind = (typeof TPV_PHOTO_KINDS)[number];
 
+/** Límite storage / defensa servidor (Supabase bucket). */
 export const TPV_MAX_BYTES = 8 * 1024 * 1024;
+/**
+ * Techo tras compresión en cliente. Vercel serverless rechaza bodies ≳4.5 MB
+ * con HTML "Request Entity Too Large" (antes de llegar a la ruta).
+ */
+export const TPV_UPLOAD_MAX_BYTES = 3 * 1024 * 1024;
+/** Objetivo de compresión JPEG en el celular (~margen OCR). */
+export const TPV_UPLOAD_TARGET_BYTES = 2 * 1024 * 1024;
 export const TPV_MIN_BYTES = 40 * 1024;
 export const TPV_MIN_LONG_SIDE = 1200;
 /** Varianza de luminancia mínima — por debajo se pide retomar la foto */
@@ -184,7 +192,11 @@ export function validateTpvImageQuality(opts: {
   const { width, height, byteSize, sharpness } = opts;
   const longSide = Math.max(width, height);
 
-  if (byteSize > TPV_MAX_BYTES) {
+  if (byteSize > TPV_UPLOAD_MAX_BYTES) {
+    errors.push(
+      'Foto demasiado grande. Aléjate un poco del ticket y vuelve a tomar la foto (se comprime sola al subir).'
+    );
+  } else if (byteSize > TPV_MAX_BYTES) {
     errors.push(
       'La foto pesa más de 8 MB. Vuelve a tomar la foto un poco más lejos o con menos zoom.'
     );
