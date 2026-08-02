@@ -22,6 +22,14 @@ export interface AppModule {
 
 export const APP_MODULES: AppModule[] = [
   {
+    id: 'reportes-socios',
+    href: '/reportes-socios',
+    label: 'Reportes Socios',
+    short: 'Socios',
+    description: 'Tablero de reportes para socios · indicadores y visión consolidada',
+    status: 'activo',
+  },
+  {
     id: 'staff',
     href: '/staff',
     label: 'Staff',
@@ -36,14 +44,6 @@ export const APP_MODULES: AppModule[] = [
     label: 'Ventas',
     short: 'Ventas',
     description: 'Ventas diarias, comparativos, pagos y cancelaciones · Carranza 50',
-    status: 'activo',
-  },
-  {
-    id: 'reportes-socios',
-    href: '/reportes-socios',
-    label: 'Reportes Socios',
-    short: 'Socios',
-    description: 'Tablero de reportes para socios · indicadores y visión consolidada',
     status: 'activo',
   },
   {

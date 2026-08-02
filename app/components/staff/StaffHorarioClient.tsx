@@ -1,14 +1,23 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
 import {
   addIsoDays,
+  employeeNotesHasFlag,
   formatHrDate,
+  formatHrPuesto,
+  isGenericPisoArea,
+  isPlantillaExterno,
+  meseroWithinFamilyRank,
+  plantillaPositionKey,
+  scheduleSectionFromPosition,
   todayIsoCdmx,
+  type HrEmployee,
   type HrScheduleShift,
 } from '@/app/lib/hr';
+import { formatHrListName } from '@/app/lib/hr-person-match';
 import {
   mondayOfWeek,
   sundayOfWeek,
@@ -18,14 +27,44 @@ import {
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
-const WEEKDAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const DAY_HEADERS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] as const;
 
-type Linked = {
-  id: string;
+/** Vie–Dom CDMX: mostrar también la próxima semana publicada. */
+function isWeekendPreviewDay(iso: string): boolean {
+  const wd = weekdayOfIso(iso);
+  return wd === 5 || wd === 6 || wd === 0;
+}
+
+const AREA_ORDER = [
+  'Gerencia',
+  'Hostess',
+  'Caja',
+  'Barra',
+  'Meseros',
+  'Runner',
+  'Cocina',
+  'Limpieza',
+  'Mantenimiento',
+  'Administración',
+  'Externos',
+] as const;
+
+type DaySegment = { start: string; end: string };
+
+type DayCell = {
+  start: string;
+  end: string;
+  off: boolean;
+  extra?: DaySegment[];
+};
+
+type PersonRow = {
+  employee_id: string;
   full_name: string;
+  area: string;
   puesto: string | null;
-  area: string | null;
-} | null;
+  days: DayCell[];
+};
 
 type WeekInfo = {
   id: string;
@@ -37,30 +76,223 @@ type WeekInfo = {
 
 type Payload = {
   ready: boolean;
-  linked: boolean;
-  linkedEmployee: Linked;
-  needLink?: boolean;
-  isFriday?: boolean;
+  includeNextWeek?: boolean;
   week: WeekInfo;
-  myShifts: HrScheduleShift[];
-  rosterHint: HrScheduleShift[];
+  shifts: HrScheduleShift[];
   message?: string | null;
   weekStart: string;
   weekEnd: string;
   nextWeek?: WeekInfo;
-  nextMyShifts?: HrScheduleShift[];
-  nextRosterHint?: HrScheduleShift[];
+  nextShifts?: HrScheduleShift[];
   nextMessage?: string | null;
   nextWeekStart?: string | null;
   nextWeekEnd?: string | null;
 };
 
-function fmtTime(t: string | null | undefined): string {
-  if (!t) return '—';
+function normalizeArea(raw: string | null | undefined): string {
+  if (!raw?.trim() || isGenericPisoArea(raw)) return 'Otros';
+  return scheduleSectionFromPosition(raw);
+}
+
+function areaSortKey(area: string): number {
+  const i = AREA_ORDER.indexOf(area as (typeof AREA_ORDER)[number]);
+  return i >= 0 ? i : AREA_ORDER.length;
+}
+
+function resolveRowSection(
+  emp: HrEmployee | undefined,
+  shiftAreas: string[],
+  shiftRoles: string[],
+  fallbackName: string,
+  notesFallback?: string | null
+): { section: string; puesto: string | null } {
+  const notes = emp?.notes ?? notesFallback ?? null;
+  const dual = employeeNotesHasFlag(notes, 'dual_limpieza_mesero');
+  const posKey = emp ? plantillaPositionKey(emp) : null;
+  const fromPuesto = posKey ? scheduleSectionFromPosition(posKey) : null;
+
+  const areaCounts = new Map<string, number>();
+  for (const a of shiftAreas) {
+    const sec = normalizeArea(a);
+    if (sec === 'Otros') continue;
+    areaCounts.set(sec, (areaCounts.get(sec) || 0) + 1);
+  }
+  let fromShifts: string | null = null;
+  let best = 0;
+  for (const [sec, n] of areaCounts) {
+    if (n > best) {
+      best = n;
+      fromShifts = sec;
+    }
+  }
+
+  const roleCounts = new Map<string, number>();
+  for (const r of shiftRoles) {
+    const t = String(r || '').trim();
+    if (!t) continue;
+    roleCounts.set(t, (roleCounts.get(t) || 0) + 1);
+  }
+  let topRole: string | null = null;
+  let roleBest = 0;
+  for (const [r, n] of roleCounts) {
+    if (n > roleBest) {
+      roleBest = n;
+      topRole = r;
+    }
+  }
+  const fromRole = topRole ? scheduleSectionFromPosition(topRole) : null;
+
+  let section =
+    (fromPuesto && fromPuesto !== 'Otros' ? fromPuesto : null) ||
+    (fromRole && fromRole !== 'Otros' ? fromRole : null) ||
+    fromShifts ||
+    (dual ? 'Meseros' : null) ||
+    'Otros';
+
+  if (
+    dual &&
+    (section === 'Limpieza' || section === 'Otros' || section === 'Piso')
+  ) {
+    section = 'Meseros';
+  }
+
+  if (isPlantillaExterno({ full_name: emp?.full_name || fallbackName, notes })) {
+    section = 'Externos';
+  }
+
+  const puesto =
+    emp?.puesto ||
+    (dual ? 'Mesero encargado' : null) ||
+    topRole ||
+    (fromPuesto && fromPuesto !== 'Otros' ? fromPuesto : null) ||
+    null;
+
+  return { section, puesto };
+}
+
+function comparePersonRows(a: PersonRow, b: PersonRow): number {
+  const ka = areaSortKey(a.area);
+  const kb = areaSortKey(b.area);
+  if (ka !== kb) return ka - kb;
+  if (a.area === 'Meseros' && b.area === 'Meseros') {
+    const ra = meseroWithinFamilyRank(a.puesto);
+    const rb = meseroWithinFamilyRank(b.puesto);
+    if (ra !== rb) return ra - rb;
+  }
+  return a.full_name.localeCompare(b.full_name, 'es');
+}
+
+function toHhmm(t: string | null | undefined): string {
+  if (!t) return '';
   return t.slice(0, 5);
 }
 
-function WeekGrid({
+function emptyDay(): DayCell {
+  return { start: '', end: '', off: true };
+}
+
+function buildRowsFromShifts(
+  shifts: HrScheduleShift[],
+  dates: string[]
+): PersonRow[] {
+  const byId = new Map<string, PersonRow>();
+  const shiftAreasByEmp = new Map<string, string[]>();
+  const shiftRolesByEmp = new Map<string, string[]>();
+  const notesByEmp = new Map<string, string | null>();
+
+  for (const s of shifts) {
+    if (s.employee_notes != null && !notesByEmp.has(s.employee_id)) {
+      notesByEmp.set(s.employee_id, s.employee_notes);
+    }
+    const areas = shiftAreasByEmp.get(s.employee_id) || [];
+    if (s.area) areas.push(s.area);
+    else if (s.employee_area) areas.push(s.employee_area);
+    shiftAreasByEmp.set(s.employee_id, areas);
+
+    const roles = shiftRolesByEmp.get(s.employee_id) || [];
+    if (s.role_label) roles.push(s.role_label);
+    else if (s.employee_puesto) roles.push(s.employee_puesto);
+    shiftRolesByEmp.set(s.employee_id, roles);
+
+    let row = byId.get(s.employee_id);
+    if (!row) {
+      const stub: HrEmployee | undefined = s.employee_puesto
+        ? ({
+            id: s.employee_id,
+            full_name: s.employee_name || s.employee_id,
+            status: 'activo',
+            puesto: s.employee_puesto,
+            area: s.employee_area ?? null,
+            fecha_ingreso: null,
+            email: null,
+            phone: null,
+            drive_folder_path: null,
+            notes: s.employee_notes ?? null,
+          } as HrEmployee)
+        : undefined;
+      const { section, puesto } = resolveRowSection(
+        stub,
+        areas,
+        roles,
+        s.employee_name || s.employee_id,
+        s.employee_notes
+      );
+      row = {
+        employee_id: s.employee_id,
+        full_name: s.employee_name || s.employee_id.slice(0, 8),
+        area: section,
+        puesto,
+        days: dates.map(() => emptyDay()),
+      };
+      byId.set(s.employee_id, row);
+    }
+    const di = dates.indexOf(s.shift_date);
+    if (di < 0) continue;
+    const start = toHhmm(s.start_time);
+    const end = toHhmm(s.end_time);
+    if (!start || !end) continue;
+    const cur = row.days[di];
+    if (cur.off || !cur.start || !cur.end) {
+      row.days[di] = { start, end, off: false };
+    } else if (cur.start === start && cur.end === end) {
+      // duplicate
+    } else {
+      const extras = cur.extra ? [...cur.extra] : [];
+      if (!extras.some((e) => e.start === start && e.end === end)) {
+        extras.push({ start, end });
+      }
+      row.days[di] = { ...cur, off: false, extra: extras };
+    }
+  }
+
+  for (const [id, row] of byId) {
+    const stub: HrEmployee = {
+      id,
+      full_name: row.full_name,
+      status: 'activo',
+      puesto: row.puesto,
+      area: row.area,
+      fecha_ingreso: null,
+      email: null,
+      phone: null,
+      drive_folder_path: null,
+      notes: notesByEmp.get(id) ?? null,
+    };
+    const { section, puesto } = resolveRowSection(
+      stub,
+      shiftAreasByEmp.get(id) || [],
+      shiftRolesByEmp.get(id) || [],
+      row.full_name,
+      notesByEmp.get(id)
+    );
+    row.area = section;
+    row.puesto = puesto || row.puesto;
+  }
+
+  return [...byId.values()].sort(comparePersonRows);
+}
+
+function TeamScheduleTable({
   weekStart,
   shifts,
 }: {
@@ -68,83 +300,158 @@ function WeekGrid({
   shifts: HrScheduleShift[];
 }) {
   const dates = useMemo(() => weekDateList(weekStart), [weekStart]);
-  const byDate = useMemo(() => {
-    const m = new Map<string, HrScheduleShift[]>();
-    for (const s of shifts) {
-      const list = m.get(s.shift_date) || [];
-      list.push(s);
-      m.set(s.shift_date, list);
-    }
-    return m;
-  }, [shifts]);
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {dates.map((d) => {
-        const list = byDate.get(d) || [];
-        const wd = new Date(d + 'T12:00:00').getDay();
-        return (
-          <div
-            key={d}
-            className="rounded-2xl bg-white px-3 py-3"
-            style={{ boxShadow: SUITE.shadow }}
-          >
-            <p
-              className="text-xs font-bold uppercase tracking-wide"
-              style={{ color: theme.muted }}
-            >
-              {WEEKDAY_SHORT[wd]} · {formatHrDate(d)}
-            </p>
-            {list.length === 0 ? (
-              <p className="mt-2 text-xs" style={{ color: theme.muted }}>
-                Libre / sin turno
-              </p>
-            ) : (
-              <ul className="mt-2 space-y-1">
-                {list.map((s, i) => (
-                  <li key={`${s.id || i}`} className="text-sm">
-                    <span
-                      className="font-semibold"
-                      style={{ color: theme.title }}
-                    >
-                      {fmtTime(s.start_time)}–{fmtTime(s.end_time)}
-                    </span>
-                    {s.area ? (
-                      <span style={{ color: theme.muted }}>
-                        {' '}
-                        · {s.area}
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        );
-      })}
-    </div>
+  const rows = useMemo(
+    () => buildRowsFromShifts(shifts, dates),
+    [shifts, dates]
   );
-}
+  const grouped = useMemo(() => {
+    const map = new Map<string, PersonRow[]>();
+    for (const r of rows) {
+      const list = map.get(r.area) || [];
+      list.push(r);
+      map.set(r.area, list);
+    }
+    const keys = [...map.keys()].sort(
+      (a, b) => areaSortKey(a) - areaSortKey(b)
+    );
+    return keys.map((area) => ({ area, people: map.get(area)! }));
+  }, [rows]);
 
-function RosterHintList({ shifts }: { shifts: HrScheduleShift[] }) {
-  if (shifts.length === 0) return null;
   return (
-    <SuiteCard>
-      <p className="text-sm font-bold" style={{ color: theme.title }}>
-        Roster publicado (lectura)
-      </p>
-      <ul className="mt-3 divide-y divide-slate-100">
-        {shifts.map((s, i) => (
-          <li key={`${s.id || i}`} className="py-2 text-sm">
-            <strong>{s.employee_name || '—'}</strong>
-            {' · '}
-            {formatHrDate(s.shift_date)} · {fmtTime(s.start_time)}–
-            {fmtTime(s.end_time)}
-            {s.area ? ` · ${s.area}` : ''}
-          </li>
-        ))}
-      </ul>
-    </SuiteCard>
+    <div
+      className="overflow-x-auto rounded-xl bg-white"
+      style={{ boxShadow: SUITE.shadow }}
+    >
+      <table className="w-full min-w-[860px] border-collapse text-sm">
+        <thead>
+          <tr style={{ backgroundColor: SUITE.navy, color: '#fff' }}>
+            <th
+              className="sticky left-0 z-10 px-2 py-2 text-left text-xs font-bold uppercase tracking-wide"
+              style={{ backgroundColor: SUITE.navy, minWidth: 140 }}
+            >
+              Nombre
+            </th>
+            {DAY_HEADERS.map((d, i) => (
+              <th
+                key={d}
+                colSpan={2}
+                className="border-l border-white/20 px-1 py-2 text-center text-xs font-bold uppercase"
+              >
+                <div>{d}</div>
+                <div className="font-normal opacity-80">
+                  {dates[i]?.slice(5)}
+                </div>
+              </th>
+            ))}
+          </tr>
+          <tr style={{ backgroundColor: '#1e3a5f', color: '#cbd5e1' }}>
+            <th
+              className="sticky left-0 z-10 px-2 py-1"
+              style={{ backgroundColor: '#1e3a5f' }}
+            />
+            {DAY_HEADERS.map((d) => (
+              <Fragment key={d}>
+                <th className="border-l border-white/10 px-0.5 py-1 text-center text-[10px] font-semibold w-[4.5rem]">
+                  Ent.
+                </th>
+                <th className="px-0.5 py-1 text-center text-[10px] font-semibold w-[4.5rem]">
+                  Sal.
+                </th>
+              </Fragment>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {grouped.length === 0 ? (
+            <tr>
+              <td
+                colSpan={15}
+                className="px-3 py-6 text-center text-sm"
+                style={{ color: theme.muted }}
+              >
+                Sin turnos en esta semana.
+              </td>
+            </tr>
+          ) : (
+            grouped.map(({ area, people }) => (
+              <Fragment key={area}>
+                <tr>
+                  <td
+                    colSpan={15}
+                    className="px-2 py-1.5 text-[11px] font-bold tracking-wide uppercase"
+                    style={{
+                      backgroundColor: '#e8eef8',
+                      color: SUITE.navy,
+                      borderBottom: `1px solid ${SUITE.border}`,
+                    }}
+                  >
+                    {formatHrPuesto(area)}
+                  </td>
+                </tr>
+                {people.map((p) => (
+                  <tr
+                    key={p.employee_id}
+                    className="border-t border-slate-100"
+                  >
+                    <td
+                      className="sticky left-0 z-[1] bg-white px-2 py-1 text-sm font-medium whitespace-nowrap"
+                      style={{
+                        color: theme.title,
+                        boxShadow: '1px 0 0 #e2e8f0',
+                      }}
+                    >
+                      {formatHrListName(p.full_name)}
+                    </td>
+                    {p.days.map((d, di) =>
+                      d.off ? (
+                        <td
+                          key={di}
+                          colSpan={2}
+                          className="border-l border-slate-100 px-1 py-0.5 text-center"
+                        >
+                          <span
+                            className="inline-block w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide"
+                            style={{
+                              backgroundColor: '#fef3c7',
+                              color: '#92400e',
+                            }}
+                          >
+                            DESCANSO
+                          </span>
+                        </td>
+                      ) : (
+                        <Fragment key={`${p.employee_id}-${di}`}>
+                          <td className="border-l border-slate-100 px-0.5 py-0.5">
+                            <span className="block w-full min-w-[4.25rem] rounded border border-slate-200 bg-slate-50 px-0.5 py-1 text-center text-xs tabular-nums text-slate-700">
+                              {d.start || '—'}
+                            </span>
+                          </td>
+                          <td className="px-0.5 py-0.5">
+                            <span className="block w-full min-w-[4.25rem] rounded border border-slate-200 bg-slate-50 px-0.5 py-1 text-center text-xs tabular-nums text-slate-700">
+                              {d.end || '—'}
+                              {(d.extra?.length ?? 0) > 0 ? (
+                                <span
+                                  className="mt-0.5 block text-[9px] font-semibold text-amber-800"
+                                  title={d.extra!
+                                    .map((e) => `${e.start}–${e.end}`)
+                                    .join(', ')}
+                                >
+                                  +{d.extra!.length}
+                                </span>
+                              ) : null}
+                            </span>
+                          </td>
+                        </Fragment>
+                      )
+                    )}
+                  </tr>
+                ))}
+              </Fragment>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -152,7 +459,7 @@ export function StaffHorarioClient() {
   const today = todayIsoCdmx();
   const weekStart = mondayOfWeek(today);
   const weekEnd = sundayOfWeek(weekStart);
-  const clientIsFriday = weekdayOfIso(today) === 5;
+  const clientIncludeNext = isWeekendPreviewDay(today);
   const nextMon = addIsoDays(weekStart, 7);
   const nextSun = sundayOfWeek(nextMon);
 
@@ -168,44 +475,45 @@ export function StaffHorarioClient() {
     } catch {
       setData({
         ready: false,
-        linked: false,
-        linkedEmployee: null,
-        isFriday: clientIsFriday,
+        includeNextWeek: clientIncludeNext,
         week: null,
-        myShifts: [],
-        rosterHint: [],
+        shifts: [],
         message: 'Error de red',
         weekStart,
         weekEnd,
         nextWeek: null,
-        nextMyShifts: [],
-        nextRosterHint: [],
+        nextShifts: [],
         nextMessage: null,
-        nextWeekStart: clientIsFriday ? nextMon : null,
-        nextWeekEnd: clientIsFriday ? nextSun : null,
+        nextWeekStart: clientIncludeNext ? nextMon : null,
+        nextWeekEnd: clientIncludeNext ? nextSun : null,
       });
     } finally {
       setLoading(false);
     }
-  }, [weekStart, weekEnd, clientIsFriday, nextMon, nextSun]);
+  }, [weekStart, weekEnd, clientIncludeNext, nextMon, nextSun]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  const isFriday = data?.isFriday ?? clientIsFriday;
-  const hasMyShifts = (data?.myShifts?.length ?? 0) > 0;
-  const showWeekGrid = Boolean(data?.week) && hasMyShifts;
+  const includeNextWeek = data?.includeNextWeek ?? clientIncludeNext;
+  const shifts = data?.shifts || [];
+  const showTable = Boolean(data?.week) && shifts.length > 0;
 
   const nextWeekStartIso =
-    data?.nextWeekStart || (isFriday ? nextMon : null);
-  const nextWeekEndIso = data?.nextWeekEnd || (isFriday ? nextSun : null);
-  const nextHasShifts = (data?.nextMyShifts?.length ?? 0) > 0;
-  const showNextGrid = Boolean(data?.nextWeek) && nextHasShifts;
+    data?.nextWeekStart || (includeNextWeek ? nextMon : null);
+  const nextWeekEndIso =
+    data?.nextWeekEnd || (includeNextWeek ? nextSun : null);
+  const nextShifts = data?.nextShifts || [];
+  // Vie–Dom: only surface next week when RH has published it.
+  const showNextPublished =
+    includeNextWeek && Boolean(data?.nextWeek) && nextShifts.length > 0;
+  const showNextEmpty =
+    includeNextWeek && Boolean(data?.nextWeek) && nextShifts.length === 0;
 
-  const subtitle = isFriday
-    ? 'Semana en curso · los viernes también la próxima (si RH ya publicó)'
-    : 'Semana en curso · solo lo publicado por RH';
+  const subtitle = includeNextWeek
+    ? 'Consulta · esta semana y la próxima (vie–dom, si RH ya publicó)'
+    : 'Consulta · tabla del personal, semana en curso publicada';
 
   return (
     <SuiteShell title="Mi horario" subtitle={subtitle}>
@@ -224,42 +532,10 @@ export function StaffHorarioClient() {
           Cargando horario…
         </p>
       ) : (
-        <div className="space-y-6 max-w-3xl">
-          {data?.needLink && (
-            <SuiteCard accent>
-              <p
-                className="text-xs font-bold uppercase tracking-[0.16em]"
-                style={{ color: SUITE.orangeDeep }}
-              >
-                Vinculación
-              </p>
-              <p
-                className="mt-2 text-sm leading-relaxed"
-                style={{ color: theme.muted }}
-              >
-                Pide a RH vincular tu usuario de la Suite en tu ficha
-                (`suite_username`). Sin eso, solo intentamos coincidir por nombre
-                en el roster publicado.
-              </p>
-            </SuiteCard>
-          )}
-
-          {data?.linkedEmployee && (
-            <p className="text-sm" style={{ color: theme.muted }}>
-              Vinculado:{' '}
-              <strong style={{ color: theme.title }}>
-                {data.linkedEmployee.full_name}
-              </strong>
-              {data.linkedEmployee.puesto
-                ? ` · ${data.linkedEmployee.puesto}`
-                : ''}
-            </p>
-          )}
-
-          {/* ——— Esta semana ——— */}
-          <section className="space-y-3">
+        <section className="space-y-8">
+          <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
-              {isFriday && (
+              {(showNextPublished || showNextEmpty) && (
                 <span
                   className="text-sm font-bold"
                   style={{ color: theme.title }}
@@ -277,8 +553,8 @@ export function StaffHorarioClient() {
               <span
                 className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                 style={{
-                  backgroundColor: SUITE.orangeSoft,
-                  color: SUITE.navy,
+                  backgroundColor: '#fef3c7',
+                  color: '#92400e',
                 }}
               >
                 En curso
@@ -298,115 +574,81 @@ export function StaffHorarioClient() {
                   style={{ color: theme.muted }}
                 >
                   {data?.message ||
-                    'RH aún no publicó la semana en curso. Cuando lo hagan, verás tus turnos aquí.'}
+                    'RH aún no publicó la semana en curso. Cuando lo hagan, verás la tabla de horarios del personal aquí.'}
                 </p>
               </SuiteCard>
             )}
 
-            {data?.week && !hasMyShifts && data.message && (
+            {data?.week && !showTable && (
               <SuiteCard>
                 <p
                   className="text-sm leading-relaxed"
                   style={{ color: theme.muted }}
                 >
-                  {data.message}
+                  {data.message ||
+                    'La semana en curso está publicada, pero aún no hay turnos en la grilla.'}
                 </p>
               </SuiteCard>
             )}
 
-            {data?.week && hasMyShifts && data.message && (
-              <SuiteCard>
-                <p className="text-sm" style={{ color: theme.muted }}>
-                  {data.message}
-                </p>
-              </SuiteCard>
-            )}
-
-            {showWeekGrid && (
-              <WeekGrid
+            {showTable && (
+              <TeamScheduleTable
                 weekStart={data!.weekStart || weekStart}
-                shifts={data!.myShifts}
+                shifts={shifts}
               />
             )}
+          </div>
 
-            {!data?.linked && (data?.rosterHint?.length ?? 0) > 0 && (
-              <RosterHintList shifts={data!.rosterHint} />
-            )}
-          </section>
-
-          {/* ——— Próxima semana (solo viernes) ——— */}
-          {isFriday && nextWeekStartIso && nextWeekEndIso && (
-            <section className="space-y-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <span
-                  className="text-sm font-bold"
-                  style={{ color: theme.title }}
-                >
-                  Próxima semana
-                </span>
-                <span
-                  className="text-sm font-semibold"
-                  style={{ color: theme.title }}
-                >
-                  {formatHrDate(nextWeekStartIso)} –{' '}
-                  {formatHrDate(nextWeekEndIso)}
-                </span>
-                <span
-                  className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-                  style={{
-                    backgroundColor: data?.nextWeek
-                      ? SUITE.orangeSoft
-                      : '#e2e8f0',
-                    color: SUITE.navy,
-                  }}
-                >
-                  {data?.nextWeek ? 'Publicado' : 'Pendiente'}
-                </span>
-              </div>
-
-              {!data?.nextWeek && (
-                <SuiteCard>
-                  <p
+          {(showNextPublished || showNextEmpty) &&
+            nextWeekStartIso &&
+            nextWeekEndIso && (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span
+                    className="text-sm font-bold"
+                    style={{ color: theme.title }}
+                  >
+                    Próxima semana
+                  </span>
+                  <span
                     className="text-sm font-semibold"
                     style={{ color: theme.title }}
                   >
-                    Próxima semana aún no publicada
-                  </p>
-                  <p
-                    className="mt-2 text-sm leading-relaxed"
-                    style={{ color: theme.muted }}
+                    {formatHrDate(nextWeekStartIso)} –{' '}
+                    {formatHrDate(nextWeekEndIso)}
+                  </span>
+                  <span
+                    className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                    style={{
+                      backgroundColor: '#ecfdf5',
+                      color: '#065f46',
+                    }}
                   >
-                    {data?.nextMessage ||
-                      'RH aún no publicó la próxima semana. Los viernes verás esos turnos aquí cuando estén publicados.'}
-                  </p>
-                </SuiteCard>
-              )}
+                    Publicado
+                  </span>
+                </div>
 
-              {data?.nextWeek && !nextHasShifts && data.nextMessage && (
-                <SuiteCard>
-                  <p
-                    className="text-sm leading-relaxed"
-                    style={{ color: theme.muted }}
-                  >
-                    {data.nextMessage}
-                  </p>
-                </SuiteCard>
-              )}
-
-              {showNextGrid && (
-                <WeekGrid
-                  weekStart={nextWeekStartIso}
-                  shifts={data!.nextMyShifts || []}
-                />
-              )}
-
-              {!data?.linked &&
-                (data?.nextRosterHint?.length ?? 0) > 0 && (
-                  <RosterHintList shifts={data!.nextRosterHint || []} />
+                {showNextEmpty && (
+                  <SuiteCard>
+                    <p
+                      className="text-sm leading-relaxed"
+                      style={{ color: theme.muted }}
+                    >
+                      {data?.nextMessage ||
+                        'La próxima semana está publicada, pero aún no hay turnos en la grilla.'}
+                    </p>
+                  </SuiteCard>
                 )}
-            </section>
-          )}
-        </div>
+
+                {showNextPublished && (
+                  <TeamScheduleTable
+                    weekStart={nextWeekStartIso}
+                    shifts={nextShifts}
+                  />
+                )}
+              </div>
+            )}
+        </section>
       )}
     </SuiteShell>
   );

@@ -1529,10 +1529,11 @@ function AreaFragment({
       <tr>
         <td
           colSpan={16}
-          className="px-2 py-1.5 text-[11px] font-bold tracking-wide"
+          className="px-2 py-1.5 text-[11px] font-bold tracking-wide uppercase"
           style={{
-            backgroundColor: SUITE.orangeSoft,
+            backgroundColor: '#e8eef8',
             color: SUITE.navy,
+            borderBottom: `1px solid ${SUITE.border}`,
           }}
         >
           {formatHrPuesto(area)}

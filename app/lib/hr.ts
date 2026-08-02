@@ -151,6 +151,8 @@ export type HrScheduleShift = {
   employee_name?: string | null;
   employee_area?: string | null;
   employee_puesto?: string | null;
+  /** Notas de ficha (flags dual/externo) cuando el join las trae. */
+  employee_notes?: string | null;
 };
 
 export const HR_SCHEDULE_STATUS_LABELS: Record<HrScheduleStatus, string> = {
