@@ -74,8 +74,6 @@ export function HrDocViewer({
   const [docxTruncated, setDocxTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
   useEffect(() => {
     setStack([target]);
   }, [target]);
@@ -179,16 +177,6 @@ export function HrDocViewer({
     onClose();
   };
 
-  const copyPath = async () => {
-    try {
-      await navigator.clipboard.writeText(current.path);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore */
-    }
-  };
-
   const isPdf = current.preview === 'pdf';
   const isDocx = current.preview === 'docx';
   const isFolder = current.preview === 'folder' || current.kind === 'folder';
@@ -290,13 +278,6 @@ export function HrDocViewer({
               </a>
             </>
           ) : null}
-          <button
-            type="button"
-            onClick={() => void copyPath()}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            {copied ? 'Ruta copiada' : 'Copiar ruta'}
-          </button>
           {current.driveUrl ? (
             <a
               href={current.driveUrl}

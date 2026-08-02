@@ -52,7 +52,6 @@ export function EstadosCuentaPdfIndex({
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<string>('');
   const [rootExists, setRootExists] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
   const [preferScan, setPreferScan] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -132,16 +131,6 @@ export function EstadosCuentaPdfIndex({
       return a[0].localeCompare(b[0], 'es');
     });
   }, [visibleItems]);
-
-  async function copyPath(p: string) {
-    try {
-      await navigator.clipboard.writeText(p);
-      setCopied(p);
-      window.setTimeout(() => setCopied(null), 1600);
-    } catch {
-      setError('No se pudo copiar la ruta');
-    }
-  }
 
   const content = (
         <>
@@ -329,18 +318,6 @@ export function EstadosCuentaPdfIndex({
                               </td>
                               <td className="whitespace-nowrap py-1.5 text-right">
                                 <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    className="text-xs font-semibold underline-offset-2 hover:underline"
-                                    style={{ color: SUITE.navy }}
-                                    onClick={() =>
-                                      copyPath(it.path || it.rel_path)
-                                    }
-                                  >
-                                    {copied === (it.path || it.rel_path)
-                                      ? 'Copiado'
-                                      : 'Copiar ruta'}
-                                  </button>
                                   {rootExists && (it.path || it.rel_path) ? (
                                     <a
                                       className="text-xs font-semibold underline-offset-2 hover:underline"
@@ -406,7 +383,7 @@ export function EstadosCuentaPdfIndex({
       {standalone && (
         <p className="mb-4 text-sm" style={{ color: theme.muted }}>
           PDFs mensuales en Administración\Bancos · más recientes primero.
-          Usa Abrir PDF o Copiar ruta.
+          Usa Abrir PDF para consultar en la plataforma.
         </p>
       )}
 

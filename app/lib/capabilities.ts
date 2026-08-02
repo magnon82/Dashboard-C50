@@ -4,7 +4,7 @@
  * Ampliar aquí cuando Master agregue más «palomitas».
  */
 
-export type CapabilityId = 'staff.corte';
+export type CapabilityId = 'staff.corte' | 'rrhh.employees_edit';
 
 export type AppCapability = {
   id: CapabilityId;
@@ -19,6 +19,11 @@ export const APP_CAPABILITIES: AppCapability[] = [
     id: 'staff.corte',
     label: 'Puede hacer el corte',
     hint: 'Staff · Corte del día / TPV (subir fotos y cerrar caja)',
+  },
+  {
+    id: 'rrhh.employees_edit',
+    label: 'Edición de empleados',
+    hint: 'RR.HH. · Alta, baja y editar ficha / perfil de colaboradores',
   },
 ];
 

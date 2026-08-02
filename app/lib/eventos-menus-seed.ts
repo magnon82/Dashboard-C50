@@ -1,7 +1,7 @@
 /**
  * Catálogo local de menús Eventos (fallback si Supabase aún no tiene tablas).
  * Fuente: supabase/seed_event_menus.json (= seed de eventos_module.sql),
- * derivado solo de I:\Mi unidad\Eventos\Menús\Menús eventos vigentes.
+ * alimentos/barra desde Menús eventos vigentes; bebidas desde Menú C50 Esp.pdf.
  */
 import { readFile } from 'fs/promises';
 import path from 'path';

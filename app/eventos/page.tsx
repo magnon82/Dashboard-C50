@@ -43,6 +43,7 @@ type SummaryPayload = {
     company?: string | null;
     event_date: string | null;
     stage: string;
+    status?: string | null;
     pax?: number | null;
     estimated_amount?: number | null;
     source?: string;
@@ -50,6 +51,10 @@ type SummaryPayload = {
     detail?: string | null;
     lead_id?: string | null;
     digital_os_id?: string | null;
+    os_path?: string | null;
+    os_filename?: string | null;
+    has_os?: boolean;
+    has_anticipo?: boolean;
     quote_id?: string | null;
   }>;
 };
@@ -164,7 +169,7 @@ export default function EventosPage() {
             }
             bullets={[
               'Abre Supabase → SQL Editor',
-              'Pega y ejecuta supabase/eventos_module.sql (tablas + seed: 3 tiempos, desayunos, parejas, barra libre, bebidas)',
+              'Pega y ejecuta supabase/eventos_module.sql + supabase/eventos_menus_bebidas_c50.sql (3 tiempos, desayunos, parejas, barra libre, bebidas C50)',
               'Recarga /eventos → Cotizador',
               'Opcional: CRM → Importar Excel clientes / Importar Seguimiento',
               'Precios con * aún requieren verificación operativa',

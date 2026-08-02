@@ -3,13 +3,18 @@ import { getServiceSupabase } from '@/app/lib/users';
 import {
   hrSchemaMissing,
   requireRrhhSession,
-  requireRrhhWrite,
+  requireRrhhEmployeesWrite,
 } from '@/app/lib/hr-api';
 import {
   plantillaTeamGroup,
   type HrEmployee,
   type HrEmployeeStatus,
 } from '@/app/lib/hr';
+import {
+  hasDualLimpiezaServicio,
+  parseRolesFromBody,
+  syncDualFlagInNotes,
+} from '@/app/lib/hr-puestos';
 import {
   invalidatePlantillaCache,
   resolvePlantillaVigente,
@@ -19,9 +24,15 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const EMP_SELECT_FULL =
-  'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+  'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+
+const EMP_SELECT_NO_ROLES =
+  'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
 
 const EMP_SELECT_NO_DOB =
+  'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+
+const EMP_SELECT_MIN =
   'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
 
 function areaFromPuesto(puesto: string | null): string | null {
@@ -151,6 +162,8 @@ export async function GET(request: Request) {
     }
 
     const EMP_ACTIVOS =
+      'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+    const EMP_ACTIVOS_NO_ROLES =
       'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
     const EMP_ACTIVOS_BAJA =
       'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
@@ -163,6 +176,20 @@ export async function GET(request: Request) {
       .eq('status', 'activo')
       .eq('force_exclude', false)
       .order('full_name', { ascending: true });
+
+    if (
+      fallback.error &&
+      /puestos_secundarios|column .* does not exist|42703/i.test(
+        fallback.error.message
+      )
+    ) {
+      fallback = (await sb
+        .from('hr_employees')
+        .select(EMP_ACTIVOS_NO_ROLES)
+        .eq('status', 'activo')
+        .eq('force_exclude', false)
+        .order('full_name', { ascending: true })) as typeof fallback;
+    }
 
     if (
       fallback.error &&
@@ -255,7 +282,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireRrhhSession();
   if (auth instanceof NextResponse) return auth;
-  const denied = requireRrhhWrite(auth);
+  const denied = requireRrhhEmployeesWrite(auth);
   if (denied) return denied;
 
   let body: Record<string, unknown>;
@@ -273,9 +300,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const puestoRaw =
-    body.puesto == null ? '' : String(body.puesto).trim().replace(/\s+/g, ' ');
-  const puesto = puestoRaw || null;
+  const rolesParsed = parseRolesFromBody(body);
+  if (!rolesParsed.ok) {
+    return NextResponse.json({ error: rolesParsed.error }, { status: 400 });
+  }
+  const puesto =
+    rolesParsed.roles.primary ||
+    (body.puesto == null
+      ? null
+      : String(body.puesto).trim().replace(/\s+/g, ' ') || null);
+  const puestosSecundarios = rolesParsed.roles.secondary;
   const areaExplicit =
     body.area == null ? null : String(body.area).trim() || null;
   const area = areaExplicit || areaFromPuesto(puesto);
@@ -286,10 +320,19 @@ export async function POST(request: Request) {
   }
   const fechaIngreso = ingreso.set ? ingreso.value : null;
 
-  const notes =
+  const notesRaw =
     body.notes != null && String(body.notes).trim()
       ? String(body.notes).trim()
       : null;
+  const notes = syncDualFlagInNotes(
+    notesRaw,
+    hasDualLimpiezaServicio({
+      puesto,
+      puestos_secundarios: puestosSecundarios,
+      notes: notesRaw,
+      full_name: fullName,
+    })
+  );
 
   try {
     const sb = getServiceSupabase();
@@ -298,6 +341,7 @@ export async function POST(request: Request) {
       full_name: fullName,
       status: 'activo',
       puesto,
+      puestos_secundarios: puestosSecundarios,
       area,
       fecha_ingreso: fechaIngreso,
       force_include: true,
@@ -314,13 +358,39 @@ export async function POST(request: Request) {
       .select(EMP_SELECT_FULL)
       .single();
 
+    if (error && /puestos_secundarios/i.test(error.message)) {
+      const { puestos_secundarios: _ps, ...withoutRoles } = row;
+      void _ps;
+      const retry = await sb
+        .from('hr_employees')
+        .insert(withoutRoles)
+        .select(EMP_SELECT_NO_ROLES)
+        .single();
+      data = retry.data as typeof data;
+      error = retry.error;
+      if (!error) {
+        return NextResponse.json(
+          {
+            ready: true,
+            employee: data,
+            message:
+              'Alta registrada. Ejecuta supabase/hr_employee_puestos.sql para roles secundarios.',
+            hint: 'supabase/hr_employee_puestos.sql',
+          },
+          { status: 201 }
+        );
+      }
+    }
+
     if (
       error &&
       /fecha_nacimiento|column .* does not exist|42703/i.test(error.message)
     ) {
+      const { puestos_secundarios: _ps, ...withoutRoles } = row;
+      void _ps;
       const retry = await sb
         .from('hr_employees')
-        .insert(row)
+        .insert(withoutRoles)
         .select(EMP_SELECT_NO_DOB)
         .single();
       data = retry.data as typeof data;
@@ -357,10 +427,22 @@ export async function POST(request: Request) {
     }
 
     invalidatePlantillaCache();
+
+    try {
+      const { checklistSeedRows } = await import(
+        '@/app/lib/hr-employee-profile'
+      );
+      await sb.from('hr_employee_documents').insert(
+        checklistSeedRows((data as HrEmployee).id)
+      );
+    } catch {
+      /* tabla aún no migrada — perfil pedirá SQL */
+    }
+
     return NextResponse.json({
       ready: true,
       employee: data as HrEmployee,
-      message: `Alta registrada: ${fullName}. Aparece en plantilla (force_include).`,
+      message: `Alta registrada: ${fullName}. Completa el perfil (documentos) desde el nombre en plantilla.`,
     });
   } catch (e) {
     return NextResponse.json(
@@ -374,7 +456,7 @@ export async function POST(request: Request) {
  * PATCH /api/hr/employees
  * RH: ficha, overrides, alta/reactivación y baja.
  * Body: { id, force_include?, force_exclude?, suite_username?, email?, phone?,
- *         puesto?, area?, fecha_nacimiento?, fecha_ingreso?, fecha_baja?,
+ *         puesto?, area?, sueldo_diario?, fecha_nacimiento?, fecha_ingreso?, fecha_baja?,
  *         status?: 'activo'|'baja'|'suspendido', full_name?,
  *         action?: 'baja'|'alta' }
  * action=baja → status baja + force_exclude + fecha_baja (requerida).
@@ -383,7 +465,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const auth = await requireRrhhSession();
   if (auth instanceof NextResponse) return auth;
-  const denied = requireRrhhWrite(auth);
+  const denied = requireRrhhEmployeesWrite(auth);
   if (denied) return denied;
 
   let body: Record<string, unknown>;
@@ -460,9 +542,31 @@ export async function PATCH(request: Request) {
     }
     patch.full_name = n;
   }
-  if (body.puesto !== undefined) {
-    patch.puesto =
-      body.puesto == null ? null : String(body.puesto).trim() || null;
+  const rolesTouched =
+    body.puesto !== undefined ||
+    body.puestos_secundarios !== undefined ||
+    Array.isArray(body.puestos) ||
+    Array.isArray(body.roles);
+  if (rolesTouched) {
+    const rolesParsed = parseRolesFromBody(body);
+    if (!rolesParsed.ok) {
+      return NextResponse.json({ error: rolesParsed.error }, { status: 400 });
+    }
+    // Si solo mandan secundarios, no borrar puesto existente salvo que venga puesto/roles
+    if (
+      body.puesto !== undefined ||
+      Array.isArray(body.puestos) ||
+      Array.isArray(body.roles)
+    ) {
+      patch.puesto = rolesParsed.roles.primary;
+    }
+    if (
+      body.puestos_secundarios !== undefined ||
+      Array.isArray(body.puestos) ||
+      Array.isArray(body.roles)
+    ) {
+      patch.puestos_secundarios = rolesParsed.roles.secondary;
+    }
     if (body.area === undefined && patch.puesto) {
       const inferred = areaFromPuesto(String(patch.puesto));
       if (inferred) patch.area = inferred;
@@ -470,6 +574,40 @@ export async function PATCH(request: Request) {
   }
   if (body.area !== undefined) {
     patch.area = body.area == null ? null : String(body.area).trim() || null;
+  }
+  if (body.notes !== undefined || rolesTouched) {
+    const notesIn =
+      body.notes !== undefined
+        ? body.notes == null
+          ? null
+          : String(body.notes).trim() || null
+        : undefined;
+    // Sync dual flag cuando hay roles; si notes no viene, se fusiona en update abajo
+    if (notesIn !== undefined) {
+      patch.notes = syncDualFlagInNotes(
+        notesIn,
+        hasDualLimpiezaServicio({
+          puesto: (patch.puesto as string | null | undefined) ?? null,
+          puestos_secundarios:
+            (patch.puestos_secundarios as string[] | undefined) ?? [],
+          notes: notesIn,
+        })
+      );
+    }
+  }
+  if (body.sueldo_diario !== undefined) {
+    if (body.sueldo_diario == null || body.sueldo_diario === '') {
+      patch.sueldo_diario = null;
+    } else {
+      const n = Number(String(body.sueldo_diario).replace(/,/g, '').trim());
+      if (!Number.isFinite(n) || n < 0) {
+        return NextResponse.json(
+          { error: 'sueldo_diario inválido' },
+          { status: 400 }
+        );
+      }
+      patch.sueldo_diario = Math.round(n * 100) / 100;
+    }
   }
   if (body.status !== undefined && !action) {
     const st = String(body.status).trim() as HrEmployeeStatus;
@@ -535,6 +673,20 @@ export async function PATCH(request: Request) {
 
     if (
       error &&
+      /sueldo_diario|column .* does not exist|42703/i.test(error.message) &&
+      patch.sueldo_diario !== undefined
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Falta columna sueldo_diario. Ejecuta supabase/hr_employee_sueldo.sql en Supabase.',
+        },
+        { status: 503 }
+      );
+    }
+
+    if (
+      error &&
       /fecha_nacimiento|column .* does not exist|42703/i.test(error.message)
     ) {
       const { fecha_nacimiento: _dob, ...withoutDob } = patch;
@@ -544,6 +696,22 @@ export async function PATCH(request: Request) {
         .update(withoutDob)
         .eq('id', id)
         .select(EMP_SELECT_NO_DOB)
+        .maybeSingle();
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
+
+    if (
+      error &&
+      /sueldo_diario|column .* does not exist|42703/i.test(error.message)
+    ) {
+      const { sueldo_diario: _sd, ...withoutSd } = patch;
+      void _sd;
+      const retry = await sb
+        .from('hr_employees')
+        .update(withoutSd)
+        .eq('id', id)
+        .select(EMP_SELECT_MIN)
         .maybeSingle();
       data = retry.data as typeof data;
       error = retry.error;
@@ -568,9 +736,7 @@ export async function PATCH(request: Request) {
         .from('hr_employees')
         .update(withoutBaja)
         .eq('id', id)
-        .select(
-          'id, full_name, status, puesto, area, fecha_ingreso, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes'
-        )
+        .select(EMP_SELECT_MIN)
         .maybeSingle();
       data = retry.data as typeof data;
       error = retry.error;

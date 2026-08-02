@@ -1,19 +1,38 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { SuiteCard } from '@/app/components/SuiteShell';
 import {
+  EVENTOS_COTIZADOR_HIDDEN_CATEGORIES,
+  EVENTOS_MAX_PAX,
   EVENTOS_MIN_PAX_GRUPOS,
   EVENTOS_NO_HOLD_WITHIN_DAYS,
+  EVENTOS_OPTIONAL_MENU_CHOICE_IDS,
   EVENTOS_QUOTE_LOCK_WITHIN_DAYS,
   EVENTOS_SERVICIO_PCT,
   canPlaceHold,
+  checkOptionalMenuChoicesOnLines,
+  computeOptionalMenuChoiceDeadline,
   computeQuoteTotals,
+  formatIsoDateEs,
   formatMxn,
   formatQuoteLineDescription,
+  missingOptionalMenuChoiceLabels,
+  isEventosCotizadorFoodMenu,
+  isEventosDrinkMenu,
   isPaxAllocationLine,
   isQuoteLockedByEventDate,
+  mexicoTodayIso,
+  optionalMenuChoiceDeadlineCopy,
+  quoteHasFoodLines,
   quoteLockMessage,
+  resolveAnticipoDateFromActivity,
   resolveItemUnitPrice,
   summarizePaxAllocation,
   validateChoiceSelections,
@@ -28,7 +47,11 @@ import {
   COTIZACION_DRAFT_STORAGE_KEY,
   type CotizacionDoc,
 } from '@/app/lib/eventos-cotizacion-doc';
-import { EventosPaxCounter } from '@/app/components/eventos/EventosPaxCounter';
+import {
+  EventosLinePaxControl,
+  EventosPaxCounter,
+  clampLinePax,
+} from '@/app/components/eventos/EventosPaxCounter';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import { useSession } from '@/app/lib/useSession';
 
@@ -88,7 +111,10 @@ export function EventosCotizador({
 }) {
   const { user } = useSession();
   const canEdit = !!user?.canEdit;
-  const [menuId, setMenuId] = useState(menus[0]?.id || '');
+  const [menuId, setMenuId] = useState(() => {
+    const firstFood = menus.find(isEventosCotizadorFoodMenu);
+    return firstFood?.id || menus[0]?.id || '';
+  });
   const [itemId, setItemId] = useState('');
   const [pax, setPax] = useState(EVENTOS_MIN_PAX_GRUPOS);
   const [clientId, setClientId] = useState('');
@@ -102,7 +128,8 @@ export function EventosCotizador({
   const [clientPath, setClientPath] = useState<'alta' | 'existente' | null>(
     null
   );
-  const [eventDate, setEventDate] = useState('');
+  /** Nueva cotización: hoy civil CDMX (yyyy-mm-dd) para el input date nativo. */
+  const [eventDate, setEventDate] = useState(() => mexicoTodayIso());
   const [celebration, setCelebration] = useState('');
   const [notes, setNotes] = useState('');
   const [applyServicio, setApplyServicio] = useState(true);
@@ -126,22 +153,89 @@ export function EventosCotizador({
     email: '',
   });
 
-  const selectedMenu = menus.find((m) => m.id === menuId) || null;
+  // Fallback en montaje: si aún no hay fecha (nueva cotización), usar hoy CDMX.
+  // No sobrescribe una fecha ya cargada o elegida.
+  useEffect(() => {
+    setEventDate((prev) => (prev ? prev : mexicoTodayIso()));
+  }, []);
+
+  /**
+   * Catálogos del cotizador: sin parejas (solo Biblioteca), filtrados por min_pax.
+   * Orden: alimentos primero, luego bebidas.
+   */
+  const availableMenus = useMemo(() => {
+    const eligible = menus.filter((m) => {
+      const cat = String(m.category || '');
+      if (
+        (EVENTOS_COTIZADOR_HIDDEN_CATEGORIES as readonly string[]).includes(cat)
+      ) {
+        return false;
+      }
+      const min = Number(m.min_pax || 0);
+      return min <= 0 || pax >= min;
+    });
+    const food = eligible
+      .filter(isEventosCotizadorFoodMenu)
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const drinks = eligible
+      .filter(isEventosDrinkMenu)
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    return [...food, ...drinks];
+  }, [menus, pax]);
+
+  const foodMenus = useMemo(
+    () => availableMenus.filter(isEventosCotizadorFoodMenu),
+    [availableMenus]
+  );
+  const drinkMenus = useMemo(
+    () => availableMenus.filter(isEventosDrinkMenu),
+    [availableMenus]
+  );
+
+  /** Bebidas solo tras agregar al menos una línea de alimentos. */
+  const hasFoodInQuote = useMemo(() => quoteHasFoodLines(lines), [lines]);
+
+  const selectedMenu =
+    availableMenus.find((m) => m.id === menuId) ||
+    menus.find((m) => m.id === menuId) ||
+    null;
   const items = selectedMenu?.items || [];
   const selectedItem: EventMenuItem | undefined = items.find(
     (i) => i.id === itemId
   );
   const choiceGroups = selectedItem?.choice_groups || [];
 
-  // Si el menú activo no tiene id válido (catálogo recargado), tomar el primero
+  const isDrinkMenu = selectedMenu ? isEventosDrinkMenu(selectedMenu) : false;
+
+  /** Top bebidas pedidas en OS (ya vienen ordenadas por os_count desde la API). */
+  const topPedidas = useMemo(() => {
+    if (!isDrinkMenu) return [];
+    return items
+      .filter((it) => (it.os_count || 0) > 0 && !String(it.sku || '').endsWith('-XH'))
+      .slice(0, selectedMenu?.code === 'barra_libre_2025' ? 6 : 10);
+  }, [isDrinkMenu, items, selectedMenu?.code]);
+
+  // Menú activo inválido / bebidas sin alimentos → primer catálogo de alimentos
   useEffect(() => {
-    if (!menus.length) return;
-    if (!menuId || !menus.some((m) => m.id === menuId)) {
-      setMenuId(menus[0].id);
-      setItemId('');
-      setChoices({});
+    if (!availableMenus.length) return;
+    const stillOk = availableMenus.some((m) => m.id === menuId);
+    const drinkLocked =
+      selectedMenu && isEventosDrinkMenu(selectedMenu) && !hasFoodInQuote;
+    if (!menuId || !stillOk || drinkLocked) {
+      const next = foodMenus[0] || availableMenus[0];
+      if (next && next.id !== menuId) {
+        setMenuId(next.id);
+        setItemId('');
+        setChoices({});
+      }
     }
-  }, [menus, menuId]);
+  }, [
+    availableMenus,
+    foodMenus,
+    hasFoodInQuote,
+    menuId,
+    selectedMenu,
+  ]);
 
   // Autoseleccionar primer ítem del menú cuando cambia el catálogo
   useEffect(() => {
@@ -198,6 +292,27 @@ export function EventosCotizador({
   const quoteLocked = isQuoteLockedByEventDate(eventDate || null);
   const lockMsg = quoteLockMessage(eventDate || null);
 
+  const anticipoDate = useMemo(() => {
+    const c = clients.find((x) => x.id === clientId);
+    return resolveAnticipoDateFromActivity(
+      c?.activity_timeline,
+      eventDate || null
+    );
+  }, [clients, clientId, eventDate]);
+
+  const optionalChoiceDeadline = useMemo(
+    () =>
+      computeOptionalMenuChoiceDeadline(anticipoDate, eventDate || null),
+    [anticipoDate, eventDate]
+  );
+
+  const optionalChoiceCopy = useMemo(
+    () => optionalMenuChoiceDeadlineCopy(optionalChoiceDeadline),
+    [optionalChoiceDeadline]
+  );
+
+  const optionalChoicesForced = optionalChoiceDeadline.isRequired;
+
   const nextLineIsAlloc =
     !!selectedItem &&
     !!selectedMenu &&
@@ -206,7 +321,9 @@ export function EventosCotizador({
       category: selectedMenu.category,
     });
 
-  // Al cambiar pax / líneas / ítem: sugerir cantidad = pax restantes (menús alimentos)
+  // Al cambiar pax / líneas / ítem: sugerir cantidad = pax restantes (menús alimentos).
+  // Deps por id (no objetos): si selectedItem/selectedMenu cambian de identidad en cada
+  // render del padre, el efecto pisaba lineQty y el círculo quedaba “congelado” en remaining.
   useEffect(() => {
     if (!selectedItem || !selectedMenu) return;
     if (
@@ -216,7 +333,7 @@ export function EventosCotizador({
       })
     ) {
       const rem = Math.max(0, paxAlloc.remaining);
-      setLineQty(rem > 0 ? rem : Math.max(1, pax));
+      setLineQty(rem > 0 ? clampLinePax(rem, rem) : 0);
       return;
     }
     if (selectedItem.unit === 'persona') {
@@ -224,7 +341,9 @@ export function EventosCotizador({
       return;
     }
     setLineQty(1);
-  }, [selectedItem, selectedMenu, pax, paxAlloc.remaining]);
+    // selectedItem/selectedMenu solo se leen; identidad inestable — usar ids
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- itemId/menuId estabilizan
+  }, [itemId, menuId, pax, paxAlloc.remaining]);
 
   const sortedClients = useMemo(() => {
     const needle = clientFilter.trim().toLowerCase();
@@ -246,6 +365,17 @@ export function EventosCotizador({
     [lines, applyServicio]
   );
 
+  const linesOptionalMenuWarn = useMemo(
+    () =>
+      checkOptionalMenuChoicesOnLines(
+        lines,
+        anticipoDate,
+        eventDate || null,
+        'warn'
+      ),
+    [lines, anticipoDate, eventDate]
+  );
+
   const liveHint = useMemo(() => {
     if (!lines.length) return null;
     return validateQuotePax(
@@ -259,6 +389,37 @@ export function EventosCotizador({
   }, [lines, pax]);
 
   const holdBlocked = placeHold && !canPlaceHold(eventDate || null);
+
+  const choiceErrPending = selectedItem
+    ? validateChoiceSelections(selectedItem, choices, {
+        requireOptionalIds: optionalChoicesForced
+          ? EVENTOS_OPTIONAL_MENU_CHOICE_IDS
+          : undefined,
+      })
+    : 'Selecciona un ítem';
+
+  const canAddLine =
+    !quoteLocked &&
+    !!items.length &&
+    !!itemId &&
+    !!selectedItem &&
+    !choiceErrPending &&
+    !(nextLineIsAlloc && paxAlloc.remaining <= 0);
+
+  /** Preview: líneas + reglas de menú; no exige asignación completa ni candado. */
+  const canPreview =
+    !busy && lines.length > 0 && !liveHint;
+
+  /** Guardar: asignación completa + candado 7 días + persistencia. */
+  const canSave =
+    canEdit &&
+    !busy &&
+    !quoteLocked &&
+    lines.length > 0 &&
+    !liveHint &&
+    !allocHint &&
+    !holdBlocked &&
+    persistQuotes;
 
   const clientQuotes = useMemo(() => {
     if (!clientId) return [];
@@ -316,7 +477,7 @@ export function EventosCotizador({
     void loadQuotes();
   }, [loadQuotes]);
 
-  function addLine() {
+  function addLine(qtyOverride?: number) {
     if (quoteLocked) {
       setErr(lockMsg || 'Cotización bloqueada por fecha del evento.');
       return;
@@ -326,7 +487,17 @@ export function EventosCotizador({
       setErr('Selecciona un ítem del catálogo');
       return;
     }
-    const choiceErr = validateChoiceSelections(item, choices);
+    if (isEventosDrinkMenu(selectedMenu) && !hasFoodInQuote) {
+      setErr(
+        'Primero agrega un menú de alimentos; después puedes cotizar barra libre o bebidas.'
+      );
+      return;
+    }
+    const choiceErr = validateChoiceSelections(item, choices, {
+      requireOptionalIds: optionalChoicesForced
+        ? EVENTOS_OPTIONAL_MENU_CHOICE_IDS
+        : undefined,
+    });
     if (choiceErr) {
       setErr(choiceErr);
       return;
@@ -338,7 +509,11 @@ export function EventosCotizador({
     });
     let qty: number;
     if (isAlloc) {
-      qty = Math.max(0, Math.floor(Number(lineQty) || 0));
+      const raw =
+        qtyOverride != null && Number.isFinite(qtyOverride)
+          ? qtyOverride
+          : lineQty;
+      qty = clampLinePax(Number(raw), paxAlloc.remaining);
       if (qty < 1) {
         setErr(
           paxAlloc.remaining <= 0
@@ -353,16 +528,29 @@ export function EventosCotizador({
         );
         return;
       }
-      if (qty > paxAlloc.remaining) {
-        setErr(
-          `Solo faltan ${paxAlloc.remaining} persona${paxAlloc.remaining === 1 ? '' : 's'} por asignar.`
-        );
-        return;
-      }
     } else if (item.unit === 'persona') {
-      qty = Math.max(1, Math.floor(Number(lineQty) || pax));
+      qty = Math.max(
+        1,
+        Math.floor(
+          Number(
+            qtyOverride != null && Number.isFinite(qtyOverride)
+              ? qtyOverride
+              : lineQty
+          ) || pax
+        )
+      );
     } else {
-      qty = item.unit === 'paquete' ? 1 : Math.max(1, Number(lineQty) || 1);
+      qty =
+        item.unit === 'paquete'
+          ? 1
+          : Math.max(
+              1,
+              Number(
+                qtyOverride != null && Number.isFinite(qtyOverride)
+                  ? qtyOverride
+                  : lineQty
+              ) || 1
+            );
     }
 
     setErr('');
@@ -496,6 +684,8 @@ export function EventosCotizador({
       status: 'borrador',
       client_name: client?.company_name || null,
       contact_name: clientContactName.trim() || client?.contact_name || null,
+      phone: clientPhone.trim() || client?.phone || null,
+      email: clientEmail.trim() || client?.email || null,
       celebration: celebration.trim() || null,
       event_date: eventDate || null,
       pax,
@@ -514,6 +704,7 @@ export function EventosCotizador({
     };
   }
 
+  /** Vista previa: basta con líneas válidas (no exige pax completo ni candado). */
   function openPreview() {
     if (!clientId) {
       setErr(
@@ -539,17 +730,20 @@ export function EventosCotizador({
       setErr(validation);
       return;
     }
-    const allocErr = validatePaxAllocation(pax, lines);
-    if (allocErr) {
-      setErr(allocErr);
-      return;
-    }
     setErr('');
     sessionStorage.setItem(
       COTIZACION_DRAFT_STORAGE_KEY,
       JSON.stringify(buildDraftDoc())
     );
     window.open('/eventos/cotizacion/preview', '_blank', 'noopener,noreferrer');
+  }
+
+  function tryAddLineOnEnter(
+    e: KeyboardEvent<HTMLInputElement | HTMLSelectElement>
+  ) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    addLine();
   }
 
   async function saveDraft() {
@@ -681,10 +875,14 @@ export function EventosCotizador({
       const checklistNote = json.follow_up_synced
         ? ' · Checklist: alta cliente + cotización'
         : '';
+      const optionalNote =
+        linesOptionalMenuWarn.message || json.optional_menu_warning
+          ? ` · ⚠ ${linesOptionalMenuWarn.message || json.optional_menu_warning}`
+          : '';
       setMsg(
         `Nueva cotización ${json.quote?.quote_number || ''} guardada · ${formatMxn(
           Number(json.quote?.total || totals.total)
-        )}${leadNote}${checklistNote}${holdNote}. Puedes armar otra con otros platillos (no sobrescribe).`
+        )}${leadNote}${checklistNote}${holdNote}${optionalNote}. Puedes armar otra con otros platillos (no sobrescribe).`
       );
       setLines([]);
       setNotes('');
@@ -713,7 +911,10 @@ export function EventosCotizador({
       const res = await fetch('/api/eventos/os', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quote_id: quoteId }),
+        body: JSON.stringify({
+          quote_id: quoteId,
+          anticipo_date: anticipoDate,
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -1067,12 +1268,27 @@ export function EventosCotizador({
               </p>
             </label>
             <label className="text-sm">
-              <span className="font-semibold text-slate-700">Personas (pax)</span>
+              <span className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                <span className="font-semibold text-slate-700">
+                  Personas (pax)
+                </span>
+                <span className="text-xs font-medium text-slate-500">
+                  mín. {EVENTOS_MIN_PAX_GRUPOS} · máx. {EVENTOS_MAX_PAX}
+                </span>
+              </span>
               <EventosPaxCounter
                 value={pax}
                 onChange={setPax}
-                disabled={quoteLocked}
+                disabled={!canEdit}
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Total del evento entre {EVENTOS_MIN_PAX_GRUPOS} y{' '}
+                {EVENTOS_MAX_PAX} personas
+                {quoteLocked
+                  ? ' · editable con candado (menú/líneas bloqueados)'
+                  : ''}
+                .
+              </p>
             </label>
             <label className="text-sm md:col-span-2">
               <span className="font-semibold text-slate-700">
@@ -1082,7 +1298,7 @@ export function EventosCotizador({
                 type="text"
                 value={celebration}
                 onChange={(e) => setCelebration(e.target.value)}
-                disabled={quoteLocked}
+                disabled={!canEdit}
                 placeholder="Boda, XV años, corporativo, aniversario…"
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
               />
@@ -1095,6 +1311,13 @@ export function EventosCotizador({
               <select
                 value={menuId}
                 onChange={(e) => {
+                  const next = availableMenus.find((m) => m.id === e.target.value);
+                  if (next && isEventosDrinkMenu(next) && !hasFoodInQuote) {
+                    setErr(
+                      'Primero agrega un menú de alimentos a la cotización; luego elige bebidas.'
+                    );
+                    return;
+                  }
                   setMenuId(e.target.value);
                   setItemId('');
                   setChoices({});
@@ -1102,44 +1325,119 @@ export function EventosCotizador({
                 disabled={quoteLocked}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
               >
-                {menus.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                    {m.min_pax ? ` · min ${m.min_pax} pax` : ''}
-                    {m.category === 'barra_libre' ? ' (requiere alimentos)' : ''}
-                    {m.code === 'bebidas_a_la_carta'
-                      ? ' (por pieza / consumo)'
-                      : ''}
-                    {m.includes_servicio ? ' · servicio en PDF' : ''}
-                  </option>
-                ))}
+                {foodMenus.length > 0 ? (
+                  <optgroup label="1. Alimentos">
+                    {foodMenus.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                        {m.min_pax ? ` · min ${m.min_pax} pax` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {drinkMenus.length > 0 ? (
+                  <optgroup label="2. Bebidas">
+                    {drinkMenus.map((m) => (
+                      <option
+                        key={m.id}
+                        value={m.id}
+                        disabled={!hasFoodInQuote}
+                      >
+                        {m.name}
+                        {m.min_pax ? ` · min ${m.min_pax} pax` : ''}
+                        {m.category === 'barra_libre'
+                          ? ' (requiere alimentos)'
+                          : ''}
+                        {m.code === 'bebidas_a_la_carta'
+                          ? ' (por pieza · Menú C50)'
+                          : ''}
+                        {!hasFoodInQuote ? ' · primero alimentos' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
               <p className="mt-1 text-xs text-slate-500">
-                {menus.length} catálogos · {items.length} ítems en el menú
-                seleccionado
-                {selectedMenu?.category === 'barra_libre' ||
-                selectedMenu?.code === 'bebidas_a_la_carta'
-                  ? ' · Bebidas: vigentes PDF + a la carta (OS)'
+                Primero alimentos, después bebidas
+                {foodMenus.length + drinkMenus.length > 0
+                  ? ` · ${foodMenus.length} alimentos / ${drinkMenus.length} bebidas`
                   : ''}
+                {items.length ? ` · ${items.length} ítems en el menú` : ''}
+                {!hasFoodInQuote && drinkMenus.length > 0
+                  ? ' · Agrega una línea de alimentos para habilitar barra libre y bebidas C50'
+                  : selectedMenu?.category === 'barra_libre'
+                    ? ' · Barra libre: PDF eventos vigentes (requiere alimentos)'
+                    : selectedMenu?.code === 'bebidas_a_la_carta'
+                      ? ' · Bebidas: Menú C50 Esp (solo bebidas)'
+                      : ''}
               </p>
             </label>
           </div>
 
-          {selectedMenu?.notes && (
-            <p
-              className="mt-2 rounded-lg border px-3 py-2 text-xs"
+          {isDrinkMenu && topPedidas.length > 0 && !quoteLocked ? (
+            <div
+              className="mt-3 rounded-xl border px-3 py-3"
               style={{
                 borderColor: SUITE.border,
-                backgroundColor: SUITE.orangeSoft,
-                color: SUITE.navySoft,
+                backgroundColor: SUITE.pageBg,
               }}
             >
-              {selectedMenu.notes}
-              {selectedMenu.requires_food
-                ? ' · Requiere alimentos en la misma cotización.'
-                : ''}
-            </p>
-          )}
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p
+                  className="text-sm font-bold"
+                  style={{ color: SUITE.navy }}
+                >
+                  Más pedidas en eventos
+                </p>
+                <p className="text-xs" style={{ color: SUITE.muted }}>
+                  Según órdenes de servicio históricas · toca para elegir
+                </p>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {topPedidas.map((it, idx) => {
+                  const active = it.id === itemId;
+                  return (
+                    <button
+                      key={it.id}
+                      type="button"
+                      onClick={() => {
+                        setItemId(it.id);
+                        setChoices({});
+                      }}
+                      className="inline-flex max-w-full items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-sm transition-colors"
+                      style={{
+                        borderColor: active ? SUITE.navy : SUITE.border,
+                        backgroundColor: active ? '#E8F1F8' : '#fff',
+                        color: SUITE.navy,
+                      }}
+                      title={`${it.name} · pedida en ${it.os_count} OS`}
+                    >
+                      {idx < 3 ? (
+                        <span
+                          className="shrink-0 text-[10px] font-bold uppercase tracking-wide"
+                          style={{ color: SUITE.orange }}
+                        >
+                          Top
+                        </span>
+                      ) : null}
+                      <span className="min-w-0 truncate font-semibold">
+                        {it.name}
+                      </span>
+                      <span
+                        className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-bold"
+                        style={{
+                          backgroundColor: SUITE.orangeSoft,
+                          color: SUITE.navySoft,
+                        }}
+                      >
+                        {it.os_count} OS
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           {(nextLineIsAlloc || paxAlloc.hasAllocLines) && (
             <div
@@ -1191,17 +1489,20 @@ export function EventosCotizador({
               </p>
               <p className="mt-0.5 text-xs" style={{ color: SUITE.muted }}>
                 {nextLineIsAlloc
-                  ? 'Indica cuántas personas llevan este menú (Personas por línea). Bebidas no cuentan en esta asignación.'
-                  : 'Solo menús de alimentos por persona suman al pax. Ajusta cantidades en la tabla si hace falta.'}
+                  ? `Indica cuántas personas llevan este menú (Personas por línea). Bebidas no cuentan. Total evento: mín. ${EVENTOS_MIN_PAX_GRUPOS} · máx. ${EVENTOS_MAX_PAX}.`
+                  : `Solo menús de alimentos por persona suman al pax (mín. ${EVENTOS_MIN_PAX_GRUPOS} · máx. ${EVENTOS_MAX_PAX}). Ajusta cantidades en la tabla si hace falta.`}
               </p>
             </div>
           )}
 
           <div
             className={`mt-3 grid grid-cols-1 items-end gap-3 ${
-              nextLineIsAlloc || selectedItem?.unit === 'persona'
+              choiceGroups.length === 0 &&
+              (nextLineIsAlloc || selectedItem?.unit === 'persona')
                 ? 'sm:grid-cols-[minmax(0,1fr)_7.5rem_auto]'
-                : 'sm:grid-cols-[minmax(0,1fr)_auto]'
+                : choiceGroups.length === 0
+                  ? 'sm:grid-cols-[minmax(0,1fr)_auto]'
+                  : 'sm:grid-cols-1'
             }`}
           >
             <label className="min-w-0 text-sm">
@@ -1219,75 +1520,79 @@ export function EventosCotizador({
                 ) : (
                   items.map((it) => (
                     <option key={it.id} value={it.id}>
-                      {it.name}
+                      {it.os_count && it.os_count > 0
+                        ? `★ ${it.name}`
+                        : it.name}
                       {it.choice_groups?.some((g) => g.affects_price)
                         ? ' · precio según fuerte'
                         : ` · ${formatMxn(Number(it.unit_price))}/${it.unit}`}
+                      {it.os_count && it.os_count > 0
+                        ? ` · ${it.os_count} OS`
+                        : ''}
                       {!it.price_verified ? ' *' : ''}
                     </option>
                   ))
                 )}
               </select>
             </label>
-            {(nextLineIsAlloc || selectedItem?.unit === 'persona') && (
-              <label className="text-sm">
-                <span className="font-semibold" style={{ color: SUITE.navy }}>
-                  {nextLineIsAlloc ? 'Personas (línea)' : 'Cantidad'}
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  max={nextLineIsAlloc ? Math.max(1, paxAlloc.remaining) : undefined}
-                  value={lineQty}
-                  disabled={quoteLocked}
-                  onChange={(e) =>
-                    setLineQty(Math.max(0, Math.floor(Number(e.target.value) || 0)))
-                  }
-                  className={`mt-1 h-10 w-full rounded-lg px-3 text-sm disabled:bg-slate-50 ${
-                    nextLineIsAlloc
-                      ? 'border font-semibold'
-                      : 'border border-slate-300'
-                  }`}
-                  style={
-                    nextLineIsAlloc
-                      ? {
-                          borderColor: SUITE.orange,
-                          backgroundColor: SUITE.orangeSoft,
-                          color: SUITE.navy,
-                        }
-                      : undefined
-                  }
-                  aria-describedby={
-                    nextLineIsAlloc ? 'line-qty-pax-hint' : undefined
-                  }
-                />
-              </label>
+            {/* Cantidad / Agregar solo si no hay choice_groups (desayunos, bebidas…). */}
+            {choiceGroups.length === 0 &&
+              (nextLineIsAlloc || selectedItem?.unit === 'persona') && (
+                <label className="text-sm">
+                  <span className="font-semibold" style={{ color: SUITE.navy }}>
+                    {nextLineIsAlloc ? 'Personas (línea)' : 'Cantidad'}
+                  </span>
+                  {nextLineIsAlloc ? (
+                    <EventosLinePaxControl
+                      variant="field"
+                      value={lineQty}
+                      remaining={paxAlloc.remaining}
+                      disabled={quoteLocked}
+                      onChange={setLineQty}
+                      onEnter={(qty) => addLine(qty)}
+                    />
+                  ) : (
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      max={EVENTOS_MAX_PAX}
+                      value={lineQty}
+                      disabled={quoteLocked}
+                      onChange={(e) => {
+                        const raw = Math.max(
+                          0,
+                          Math.floor(Number(e.target.value) || 0)
+                        );
+                        setLineQty(Math.min(EVENTOS_MAX_PAX, raw));
+                      }}
+                      onKeyDown={tryAddLineOnEnter}
+                      className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm disabled:bg-slate-50"
+                    />
+                  )}
+                </label>
+              )}
+            {choiceGroups.length === 0 && (
+              <button
+                type="button"
+                onClick={() => addLine()}
+                disabled={!canAddLine}
+                className="h-10 w-full rounded-lg px-4 text-sm font-bold text-white disabled:opacity-50 sm:w-auto"
+                style={{ backgroundColor: SUITE.navy }}
+              >
+                Agregar línea
+              </button>
             )}
-            <button
-              type="button"
-              onClick={addLine}
-              disabled={
-                quoteLocked ||
-                !items.length ||
-                !itemId ||
-                !selectedItem ||
-                !!validateChoiceSelections(selectedItem, choices) ||
-                (nextLineIsAlloc && paxAlloc.remaining <= 0)
-              }
-              className="h-10 w-full rounded-lg px-4 text-sm font-bold text-white disabled:opacity-50 sm:w-auto"
-              style={{ backgroundColor: SUITE.navy }}
-            >
-              Agregar línea
-            </button>
-            {nextLineIsAlloc && !quoteLocked ? (
+            {choiceGroups.length === 0 &&
+            nextLineIsAlloc &&
+            !quoteLocked ? (
               <p
                 id="line-qty-pax-hint"
                 className="text-xs font-medium sm:col-start-2"
                 style={{ color: SUITE.muted }}
               >
                 {paxAlloc.remaining > 0
-                  ? `De ${paxAlloc.remaining} por asignar`
+                  ? `Elige 1–${paxAlloc.remaining} · Enter agrega`
                   : 'Todos asignados'}
               </p>
             ) : null}
@@ -1295,14 +1600,23 @@ export function EventosCotizador({
 
           {choiceGroups.length > 0 && selectedItem && (
             <div
-              className="mt-3 grid gap-3 rounded-xl border p-3 md:grid-cols-2"
+              className="mt-3 rounded-xl border p-3"
               style={{
                 borderColor: SUITE.border,
                 backgroundColor: SUITE.pageBg,
               }}
+              onKeyDown={(e) => {
+                if (
+                  e.key === 'Enter' &&
+                  (e.target as HTMLElement).tagName === 'SELECT'
+                ) {
+                  e.preventDefault();
+                  if (canAddLine) addLine();
+                }
+              }}
             >
               <p
-                className="text-xs font-semibold md:col-span-2"
+                className="text-xs font-semibold"
                 style={{ color: SUITE.navy }}
               >
                 Elige opciones del menú
@@ -1310,39 +1624,113 @@ export function EventosCotizador({
                   ? ` · Precio unitario: ${formatMxn(previewUnitPrice)}`
                   : ''}
               </p>
-              {choiceGroups.map((g) => (
-                <label key={g.id} className="text-sm">
-                  <span className="font-semibold" style={{ color: SUITE.navy }}>
-                    {g.label}
-                    {g.required ? ' *' : ' (opcional)'}
-                  </span>
-                  <select
-                    value={choices[g.id] || ''}
-                    onChange={(e) =>
-                      setChoices((prev) => ({
-                        ...prev,
-                        [g.id]: e.target.value,
-                      }))
-                    }
-                    className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
-                    disabled={quoteLocked}
+              <p
+                className="mt-2 rounded-lg border px-3 py-2 text-xs"
+                style={{
+                  borderColor:
+                    optionalChoiceCopy.tone === 'danger'
+                      ? '#FECACA'
+                      : optionalChoiceCopy.tone === 'warn'
+                        ? '#FDE68A'
+                        : SUITE.border,
+                  backgroundColor:
+                    optionalChoiceCopy.tone === 'danger'
+                      ? '#FEF2F2'
+                      : optionalChoiceCopy.tone === 'warn'
+                        ? '#FFFBEB'
+                        : '#fff',
+                  color: SUITE.navySoft,
+                }}
+              >
+                {optionalChoiceCopy.text}
+                {anticipoDate
+                  ? ` Anticipo registrado: ${formatIsoDateEs(anticipoDate)}.`
+                  : ' Sin fecha de anticipo confiable en CRM (no se inventa).'}
+              </p>
+              <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end">
+                <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {choiceGroups.map((g) => {
+                    const forceOptional =
+                      optionalChoicesForced &&
+                      (
+                        EVENTOS_OPTIONAL_MENU_CHOICE_IDS as readonly string[]
+                      ).includes(g.id);
+                    const showRequired = g.required || forceOptional;
+                    return (
+                      <label key={g.id} className="text-sm">
+                        <span
+                          className="font-semibold"
+                          style={{ color: SUITE.navy }}
+                        >
+                          {g.label}
+                          {showRequired ? ' *' : ' (opcional)'}
+                        </span>
+                        <select
+                          value={choices[g.id] || ''}
+                          onChange={(e) =>
+                            setChoices((prev) => ({
+                              ...prev,
+                              [g.id]: e.target.value,
+                            }))
+                          }
+                          className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
+                          disabled={quoteLocked}
+                        >
+                          <option value="">
+                            {showRequired
+                              ? `Selecciona ${g.label.toLowerCase()}…`
+                              : 'Sin elegir'}
+                          </option>
+                          {g.options.map((o) => (
+                            <option key={o.id} value={o.label}>
+                              {o.label}
+                              {g.affects_price && o.unit_price != null
+                                ? ` · ${formatMxn(Number(o.unit_price))}`
+                                : ''}
+                              {o.is_vegetarian ? ' (V)' : ''}
+                              {o.price_verified === false ? ' *' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex shrink-0 flex-col items-center gap-2 self-center lg:self-end lg:pb-0">
+                  <span
+                    className="text-xs font-semibold"
+                    style={{ color: SUITE.navy }}
                   >
-                    <option value="">
-                      {g.required ? `Selecciona ${g.label.toLowerCase()}…` : 'Sin elegir'}
-                    </option>
-                    {g.options.map((o) => (
-                      <option key={o.id} value={o.label}>
-                        {o.label}
-                        {g.affects_price && o.unit_price != null
-                          ? ` · ${formatMxn(Number(o.unit_price))}`
-                          : ''}
-                        {o.is_vegetarian ? ' (V)' : ''}
-                        {o.price_verified === false ? ' *' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ))}
+                    Personas (línea)
+                  </span>
+                  <EventosLinePaxControl
+                    variant="circle"
+                    value={lineQty}
+                    remaining={paxAlloc.remaining}
+                    disabled={quoteLocked || paxAlloc.remaining <= 0}
+                    onChange={setLineQty}
+                    onEnter={(qty) => addLine(qty)}
+                  />
+                  <p
+                    id="line-qty-pax-circle-hint"
+                    className="max-w-[10rem] text-center text-[11px] font-medium leading-snug"
+                    style={{ color: SUITE.muted }}
+                  >
+                    {paxAlloc.remaining > 0
+                      ? `Elige 1–${paxAlloc.remaining} · Enter agrega`
+                      : 'Todos asignados'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => addLine()}
+                    disabled={!canAddLine}
+                    className="h-9 rounded-lg px-3 text-xs font-bold text-white disabled:opacity-50"
+                    style={{ backgroundColor: SUITE.navy }}
+                  >
+                    Agregar línea
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1381,8 +1769,8 @@ export function EventosCotizador({
                 {lines.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-3 py-4 text-slate-400">
-                      Sin líneas. Elige menú (alimentos, barra libre o bebidas a
-                      la carta), opciones si aplica, luego «Agregar línea».
+                      Sin líneas. Elige primero un menú de alimentos, agrega la
+                      línea; luego barra libre o bebidas a la carta.
                     </td>
                   </tr>
                 ) : (
@@ -1395,10 +1783,22 @@ export function EventosCotizador({
                             Plato fuerte: {l.options.plato_fuerte}
                             {l.options.entrada
                               ? ` · Entrada: ${l.options.entrada}`
-                              : ''}
+                              : optionalChoicesForced
+                                ? ' · Entrada: sin elegir'
+                                : ''}
                             {l.options.postre
                               ? ` · Postre: ${l.options.postre}`
-                              : ''}
+                              : optionalChoicesForced
+                                ? ' · Postre: sin elegir'
+                                : ''}
+                            {optionalChoicesForced &&
+                            missingOptionalMenuChoiceLabels(l).length > 0 ? (
+                              <span className="mt-0.5 block font-semibold text-red-700">
+                                Falta elegir{' '}
+                                {missingOptionalMenuChoiceLabels(l).join(' y ')}{' '}
+                                (plazo)
+                              </span>
+                            ) : null}
                           </div>
                         )}
                       </td>
@@ -1406,6 +1806,7 @@ export function EventosCotizador({
                         <input
                           type="number"
                           min={isPaxAllocationLine(l) ? 1 : 0.01}
+                          max={isPaxAllocationLine(l) ? EVENTOS_MAX_PAX : undefined}
                           step={isPaxAllocationLine(l) ? 1 : 0.01}
                           value={l.quantity}
                           disabled={quoteLocked}
@@ -1416,9 +1817,14 @@ export function EventosCotizador({
                                   ? {
                                       ...x,
                                       quantity: isPaxAllocationLine(x)
-                                        ? Math.max(
-                                            0,
-                                            Math.floor(Number(e.target.value) || 0)
+                                        ? Math.min(
+                                            EVENTOS_MAX_PAX,
+                                            Math.max(
+                                              0,
+                                              Math.floor(
+                                                Number(e.target.value) || 0
+                                              )
+                                            )
                                           )
                                         : Number(e.target.value) || 0,
                                     }
@@ -1548,7 +1954,7 @@ export function EventosCotizador({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              disabled={quoteLocked}
+              disabled={!canEdit}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
               placeholder="Detalle del evento, horario, observaciones…"
             />
@@ -1594,13 +2000,13 @@ export function EventosCotizador({
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={
-                  busy ||
-                  lines.length === 0 ||
-                  !!liveHint ||
-                  !!allocHint
-                }
+                disabled={!canPreview}
                 onClick={openPreview}
+                title={
+                  lines.length === 0
+                    ? 'Agrega al menos una línea'
+                    : liveHint || undefined
+                }
                 className="rounded-xl border px-4 py-2.5 text-sm font-bold disabled:opacity-50"
                 style={{ borderColor: SUITE.navy, color: SUITE.navy }}
               >
@@ -1608,16 +2014,21 @@ export function EventosCotizador({
               </button>
               <button
                 type="button"
-                disabled={
-                  busy ||
-                  quoteLocked ||
-                  lines.length === 0 ||
-                  !!liveHint ||
-                  !!allocHint ||
-                  holdBlocked ||
-                  !persistQuotes
-                }
+                disabled={!canSave}
                 onClick={saveDraft}
+                title={
+                  quoteLocked
+                    ? lockMsg || undefined
+                    : allocHint ||
+                      liveHint ||
+                      (holdBlocked
+                        ? `Hold no disponible (<${EVENTOS_NO_HOLD_WITHIN_DAYS} días)`
+                        : !persistQuotes
+                          ? 'Ejecuta supabase/eventos_module.sql'
+                          : lines.length === 0
+                            ? 'Agrega líneas y asigna todo el pax'
+                            : undefined)
+                }
                 className="rounded-xl px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
                 style={{ backgroundColor: SUITE.orange }}
               >
@@ -1634,13 +2045,36 @@ export function EventosCotizador({
           {!canEdit && lines.length > 0 && (
             <button
               type="button"
-              disabled={!!liveHint || !!allocHint}
+              disabled={!canPreview}
               onClick={openPreview}
               className="mt-4 rounded-xl border px-4 py-2.5 text-sm font-bold disabled:opacity-50"
               style={{ borderColor: SUITE.navy, color: SUITE.navy }}
             >
               Vista previa cotización
             </button>
+          )}
+          {canEdit &&
+            lines.length > 0 &&
+            !canSave &&
+            !busy &&
+            (quoteLocked || allocHint || holdBlocked || !persistQuotes) && (
+              <p className="mt-2 text-xs text-slate-600">
+                {quoteLocked
+                  ? `${lockMsg || 'Fecha dentro del candado de 7 días.'} Puedes usar Vista previa.`
+                  : allocHint
+                    ? `${allocHint} Completa la asignación para guardar; Vista previa ya está disponible.`
+                    : holdBlocked
+                      ? `Desactiva Hold o elige una fecha con ≥${EVENTOS_NO_HOLD_WITHIN_DAYS} días para guardar.`
+                      : !persistQuotes
+                        ? 'Vista previa disponible; para guardar ejecuta el SQL de Eventos.'
+                        : null}
+              </p>
+            )}
+          {linesOptionalMenuWarn.message && (
+            <p className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {linesOptionalMenuWarn.message} Puedes guardar el borrador; Generar
+              OS lo bloqueará hasta completar entrada y postre.
+            </p>
           )}
           {canEdit && !persistQuotes && (
             <p className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
@@ -1686,9 +2120,9 @@ export function EventosCotizador({
             </div>
           </dl>
           <p className="mt-3 text-xs" style={{ color: theme.muted }}>
-            * Precio sin verificar (seed). Parejas: el PDF ya incluye servicio —
-            desactiva el cargo si aplica. Barra libre solo con alimentos. A la
-            carta: edita P. unit. si el consumo difiere.
+            * Precio sin verificar (seed). Flujo: alimentos → bebidas. Barra
+            libre y bebidas C50 solo con alimentos. A la carta: edita P. unit.
+            si el consumo difiere. Menú parejas: consulta en Biblioteca.
           </p>
         </SuiteCard>
 

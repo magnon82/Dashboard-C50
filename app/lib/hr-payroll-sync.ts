@@ -598,15 +598,280 @@ export async function enrichEmployeesFromBaseDatos(
   return { matched, updated, created };
 }
 
+/**
+ * Copia sueldo_diario de líneas de un periodo a la ficha (`hr_employees`).
+ * Solo escribe cuando la línea trae SD > 0 y difiere del valor actual (o está vacío).
+ * Operativa: nómina se paga martes ~19:00 CDMX y el periodo se marca `pagado`
+ * (paid_at = fecha de ese día); la ficha debe reflejar la última semana pagada.
+ */
+export async function syncSueldoDiarioFromPeriod(
+  sb: SupabaseClient,
+  periodId: string,
+  opts?: { onlyIfEmpty?: boolean }
+): Promise<{ updated: number; skipped: number; linesWithSd: number }> {
+  const onlyIfEmpty = opts?.onlyIfEmpty === true;
+  const { data: lines, error } = await sb
+    .from('hr_payroll_lines')
+    .select('employee_id, sueldo_diario')
+    .eq('period_id', periodId);
+  if (error) throw new Error(error.message);
+
+  const byEmp = new Map<string, number>();
+  for (const raw of lines || []) {
+    const l = raw as { employee_id: string; sueldo_diario: number | null };
+    const sd = l.sueldo_diario != null ? Number(l.sueldo_diario) : NaN;
+    if (!l.employee_id || !Number.isFinite(sd) || sd <= 0) continue;
+    byEmp.set(String(l.employee_id), Math.round(sd * 100) / 100);
+  }
+
+  const ids = [...byEmp.keys()];
+  if (ids.length === 0) {
+    return { updated: 0, skipped: 0, linesWithSd: 0 };
+  }
+
+  const { data: emps, error: eErr } = await sb
+    .from('hr_employees')
+    .select('id, sueldo_diario')
+    .in('id', ids);
+  if (eErr) {
+    if (/sueldo_diario|column .* does not exist|42703/i.test(eErr.message)) {
+      throw new Error(
+        'Falta columna sueldo_diario. Ejecuta supabase/hr_employee_sueldo.sql en Supabase.'
+      );
+    }
+    throw new Error(eErr.message);
+  }
+
+  const curById = new Map<string, number | null>();
+  for (const raw of emps || []) {
+    const e = raw as { id: string; sueldo_diario: number | null };
+    curById.set(
+      String(e.id),
+      e.sueldo_diario != null ? Number(e.sueldo_diario) : null
+    );
+  }
+
+  let updated = 0;
+  let skipped = 0;
+  for (const [employeeId, sueldo] of byEmp) {
+    if (!curById.has(employeeId)) {
+      skipped += 1;
+      continue;
+    }
+    const cur = curById.get(employeeId) ?? null;
+    const empty = cur == null || !Number.isFinite(cur) || cur === 0;
+    if (onlyIfEmpty && !empty) {
+      skipped += 1;
+      continue;
+    }
+    if (!empty && cur === sueldo) {
+      skipped += 1;
+      continue;
+    }
+    const { error: uErr } = await sb
+      .from('hr_employees')
+      .update({ sueldo_diario: sueldo })
+      .eq('id', employeeId);
+    if (uErr) {
+      if (/sueldo_diario|column .* does not exist|42703/i.test(uErr.message)) {
+        throw new Error(
+          'Falta columna sueldo_diario. Ejecuta supabase/hr_employee_sueldo.sql en Supabase.'
+        );
+      }
+      skipped += 1;
+      continue;
+    }
+    updated += 1;
+  }
+
+  return { updated, skipped, linesWithSd: byEmp.size };
+}
+
+/**
+ * Última nómina pagada con líneas (semana transcurrida); si no, cerrado.
+ * Con `allPaid`, recorre periodos pagados (period_end desc) y escribe el SD
+ * más reciente por empleado (útil si alguien no salió en la última semana).
+ */
+export async function syncSueldoDiarioFromLatestPaid(
+  sb: SupabaseClient,
+  opts?: {
+    onlyIfEmpty?: boolean;
+    preferClosed?: boolean;
+    allPaid?: boolean;
+  }
+): Promise<{
+  periodId: string | null;
+  periodLabel: string | null;
+  periodEnd: string | null;
+  status: string | null;
+  updated: number;
+  skipped: number;
+  linesWithSd: number;
+}> {
+  if (opts?.allPaid) {
+    const { data: periods, error } = await sb
+      .from('hr_payroll_periods')
+      .select('id, label, period_end, status, paid_at')
+      .eq('status', 'pagado')
+      .order('period_end', { ascending: false })
+      .limit(60);
+    if (error) throw new Error(error.message);
+
+    const seen = new Set<string>();
+    let updated = 0;
+    let skipped = 0;
+    let linesWithSd = 0;
+    let first: {
+      id: string;
+      label: string;
+      period_end: string;
+      status: string;
+    } | null = null;
+
+    for (const raw of periods || []) {
+      const p = raw as {
+        id: string;
+        label: string;
+        period_end: string;
+        status: string;
+      };
+      if (!first) first = p;
+      const { data: lines } = await sb
+        .from('hr_payroll_lines')
+        .select('employee_id, sueldo_diario')
+        .eq('period_id', p.id);
+      const fresh: { employee_id: string; sueldo_diario: number }[] = [];
+      for (const l of lines || []) {
+        const row = l as { employee_id: string; sueldo_diario: number | null };
+        const id = String(row.employee_id || '');
+        const sd = row.sueldo_diario != null ? Number(row.sueldo_diario) : NaN;
+        if (!id || seen.has(id) || !Number.isFinite(sd) || sd <= 0) continue;
+        seen.add(id);
+        fresh.push({ employee_id: id, sueldo_diario: Math.round(sd * 100) / 100 });
+      }
+      if (!fresh.length) continue;
+      // Sync solo estos employee_ids vía update directo (periodo ya “virtual”)
+      linesWithSd += fresh.length;
+      const ids = fresh.map((f) => f.employee_id);
+      const { data: emps } = await sb
+        .from('hr_employees')
+        .select('id, sueldo_diario')
+        .in('id', ids);
+      const curById = new Map(
+        (emps || []).map((e) => {
+          const er = e as { id: string; sueldo_diario: number | null };
+          return [
+            String(er.id),
+            er.sueldo_diario != null ? Number(er.sueldo_diario) : null,
+          ] as const;
+        })
+      );
+      const onlyIfEmpty = opts?.onlyIfEmpty === true;
+      for (const f of fresh) {
+        if (!curById.has(f.employee_id)) {
+          skipped += 1;
+          continue;
+        }
+        const cur = curById.get(f.employee_id) ?? null;
+        const empty = cur == null || !Number.isFinite(cur) || cur === 0;
+        if (onlyIfEmpty && !empty) {
+          skipped += 1;
+          continue;
+        }
+        if (!empty && cur === f.sueldo_diario) {
+          skipped += 1;
+          continue;
+        }
+        const { error: uErr } = await sb
+          .from('hr_employees')
+          .update({ sueldo_diario: f.sueldo_diario })
+          .eq('id', f.employee_id);
+        if (uErr) skipped += 1;
+        else updated += 1;
+      }
+    }
+
+    return {
+      periodId: first?.id ?? null,
+      periodLabel: first?.label ?? null,
+      periodEnd: first?.period_end
+        ? String(first.period_end).slice(0, 10)
+        : null,
+      status: first?.status ?? null,
+      updated,
+      skipped,
+      linesWithSd,
+    };
+  }
+
+  const statuses = opts?.preferClosed
+    ? (['cerrado', 'pagado'] as const)
+    : (['pagado', 'cerrado'] as const);
+
+  for (const status of statuses) {
+    const { data, error } = await sb
+      .from('hr_payroll_periods')
+      .select('id, label, period_end, status, paid_at')
+      .eq('status', status)
+      .order('period_end', { ascending: false })
+      .order('paid_at', { ascending: false })
+      .limit(8);
+    if (error || !data?.length) continue;
+    const rows = data as {
+      id: string;
+      label: string;
+      period_end: string;
+      status: string;
+      paid_at: string | null;
+    }[];
+    const withLines = await periodIdsWithPayrollLines(
+      sb,
+      rows.map((p) => p.id)
+    );
+    for (const p of rows) {
+      if (!withLines.has(p.id)) continue;
+      const stats = await syncSueldoDiarioFromPeriod(sb, p.id, opts);
+      return {
+        periodId: p.id,
+        periodLabel: p.label,
+        periodEnd: p.period_end ? String(p.period_end).slice(0, 10) : null,
+        status: p.status,
+        ...stats,
+      };
+    }
+  }
+
+  return {
+    periodId: null,
+    periodLabel: null,
+    periodEnd: null,
+    status: null,
+    updated: 0,
+    skipped: 0,
+    linesWithSd: 0,
+  };
+}
+
 export async function applyPaidSideEffects(
   sb: SupabaseClient,
   periodId: string,
   paidAt?: string | null
-): Promise<{ balancesSynced: number; paid_at: string }> {
+): Promise<{
+  balancesSynced: number;
+  sueldoSynced: number;
+  paid_at: string;
+}> {
   const paid_at = paidAt || todayIsoCdmxPayroll();
   const year = Number(paid_at.slice(0, 4));
   const balancesSynced = await syncLeaveBalancesFromPeriod(sb, periodId, year);
-  return { balancesSynced, paid_at };
+  let sueldoSynced = 0;
+  try {
+    const sd = await syncSueldoDiarioFromPeriod(sb, periodId);
+    sueldoSynced = sd.updated;
+  } catch {
+    /* columna ausente u otro — no bloquea marcar pagado */
+  }
+  return { balancesSynced, sueldoSynced, paid_at };
 }
 
 function sheetNameFromSource(source: string | null | undefined): string | null {

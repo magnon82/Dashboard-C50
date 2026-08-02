@@ -3,7 +3,7 @@ import { hashPassword } from '@/app/lib/password';
 import {
   hrSchemaMissing,
   requireRrhhSession,
-  requireRrhhWrite,
+  requireRrhhEmployeesWrite,
 } from '@/app/lib/hr-api';
 import {
   passwordFromFechaIngreso,
@@ -32,7 +32,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   const auth = await requireRrhhSession();
   if (auth instanceof NextResponse) return auth;
-  const denied = requireRrhhWrite(auth);
+  const denied = requireRrhhEmployeesWrite(auth);
   if (denied) return denied;
 
   let body: {

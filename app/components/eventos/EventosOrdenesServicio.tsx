@@ -6,7 +6,8 @@ import {
   filterControlClass,
   filterSelectClass,
 } from '@/app/components/SectionHeader';
-import type { CalendarEventItem } from '@/app/lib/eventos-calendario';
+import type { CalendarEventItem } from '@/app/lib/eventos-calendario-shared';
+import { isAnticipoSinOs } from '@/app/lib/eventos-calendario-shared';
 import { mexicoTodayIso } from '@/app/lib/eventos';
 import { useSession } from '@/app/lib/useSession';
 import { getTheme, SUITE } from '@/app/lib/themes';
@@ -52,6 +53,7 @@ type PendingOsRow = {
   title: string;
   client: string | null;
   source_label: string;
+  has_anticipo: boolean;
   quote_id?: string | null;
   lead_id?: string | null;
 };
@@ -64,6 +66,43 @@ type TableRow =
 
 function openUrl(filePath: string) {
   return `/api/eventos/os?open=${encodeURIComponent(filePath)}`;
+}
+
+function downloadUrl(filePath: string) {
+  return `/api/eventos/os?open=${encodeURIComponent(filePath)}&download=1`;
+}
+
+function DocChip({
+  href,
+  label,
+  title,
+  primary,
+  download,
+}: {
+  href: string;
+  label: string;
+  title?: string;
+  primary?: boolean;
+  download?: boolean | string;
+}) {
+  const forceFile = Boolean(download);
+  return (
+    <a
+      href={href}
+      target={forceFile ? undefined : '_blank'}
+      rel={forceFile ? undefined : 'noreferrer'}
+      download={forceFile ? download : undefined}
+      title={title}
+      className={
+        primary
+          ? 'inline-flex rounded-lg px-2 py-0.5 text-xs font-semibold text-white'
+          : 'inline-flex rounded-lg border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'
+      }
+      style={primary ? { backgroundColor: SUITE.navy } : undefined}
+    >
+      {label}
+    </a>
+  );
 }
 
 function formatWhen(iso: string | null, mtimeMs: number, hasEventDate: boolean) {
@@ -150,8 +189,9 @@ export function EventosOrdenesServicio() {
         }
         const pendingRows: PendingOsRow[] = [];
         for (const ev of events) {
-          if (ev.os_path || ev.digital_os_id) continue;
-          if (ev.source === 'os') continue;
+          if (ev.has_os || ev.os_path || ev.digital_os_id || ev.source === 'os') {
+            continue;
+          }
           const who = clientKey(ev.client || ev.title);
           if (who && osKeys.has(`${ev.event_date}|${who}`)) continue;
           if (
@@ -173,6 +213,7 @@ export function EventosOrdenesServicio() {
             title: ev.title,
             client: ev.client,
             source_label: ev.source_label,
+            has_anticipo: Boolean(ev.has_anticipo),
             quote_id: ev.quote_id,
             lead_id: ev.lead_id,
           });
@@ -478,10 +519,20 @@ export function EventosOrdenesServicio() {
                 visible.map((row) => {
                   if (row.kind === 'pending') {
                     const p = row.item;
+                    const anticipoSinOs = isAnticipoSinOs({
+                      has_anticipo: p.has_anticipo,
+                      os_path: null,
+                      digital_os_id: null,
+                      status: null,
+                    });
                     return (
                       <tr
                         key={p.id}
-                        className="border-t border-dashed border-slate-200 bg-slate-50/80"
+                        className={`border-t border-dashed ${
+                          anticipoSinOs
+                            ? 'border-amber-200 bg-amber-50/70'
+                            : 'border-slate-200 bg-slate-50/80'
+                        }`}
                       >
                         <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
                           {formatWhen(p.event_date, 0, true)}
@@ -497,6 +548,18 @@ export function EventosOrdenesServicio() {
                                 {p.client}
                               </span>
                             )}
+                          {anticipoSinOs && (
+                            <span
+                              className="mt-1 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900"
+                              title="Hay anticipo registrado pero aún no hay orden de servicio"
+                            >
+                              <span
+                                className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-600"
+                                aria-hidden
+                              />
+                              Anticipo sin OS
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 text-slate-400">—</td>
                         <td className="px-4 py-2.5 text-xs text-slate-500">
@@ -529,10 +592,20 @@ export function EventosOrdenesServicio() {
                             )
                           ) : (
                             <span
-                              className="inline-flex rounded-lg bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900"
-                              title="Visible en Calendario; aún no hay OS digital ni PDF"
+                              className={`inline-flex rounded-lg px-2 py-0.5 text-xs font-semibold ${
+                                anticipoSinOs
+                                  ? 'border border-amber-300 bg-amber-50 text-amber-900'
+                                  : 'bg-amber-50 text-amber-900'
+                              }`}
+                              title={
+                                anticipoSinOs
+                                  ? 'Anticipo registrado; falta generar o vincular la OS'
+                                  : 'Visible en Calendario; aún no hay OS digital ni PDF'
+                              }
                             >
-                              Sin OS / pendiente
+                              {anticipoSinOs
+                                ? 'Anticipo sin OS'
+                                : 'Sin OS / pendiente'}
                             </span>
                           )}
                         </td>
@@ -582,32 +655,44 @@ export function EventosOrdenesServicio() {
                       </td>
                       <td className="px-4 py-2.5">
                         {it.kind === 'digital' && it.digital_id ? (
-                          <a
-                            href={`/eventos/os/${it.digital_id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex rounded-lg px-2 py-0.5 text-xs font-semibold text-white"
-                            style={{ backgroundColor: SUITE.navy }}
-                          >
-                            Ver OS digital
-                          </a>
-                        ) : it.path && it.source === 'scan' ? (
-                          <a
-                            href={openUrl(it.path)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-sm font-semibold underline-offset-2 hover:underline"
-                            style={{ color: SUITE.navy }}
-                            title={it.path}
-                          >
-                            {it.filename}
-                          </a>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <DocChip
+                              href={`/eventos/os/${it.digital_id}`}
+                              label="Consultar"
+                              title="Abrir orden de servicio digital"
+                            />
+                            <DocChip
+                              href={`/eventos/os/${it.digital_id}?print=1`}
+                              label="Descargar"
+                              title="Abrir diálogo para guardar PDF"
+                              primary
+                            />
+                          </div>
+                        ) : it.path ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <DocChip
+                              href={openUrl(it.path)}
+                              label="Consultar"
+                              title={it.filename || 'Ver PDF en el navegador'}
+                            />
+                            <DocChip
+                              href={downloadUrl(it.path)}
+                              label="Descargar"
+                              title={it.filename || 'Descargar PDF'}
+                              primary
+                              download={it.filename || 'orden-de-servicio.pdf'}
+                            />
+                          </div>
                         ) : (
                           <span
                             className="text-xs text-slate-500"
-                            title={it.rel_path || undefined}
+                            title={
+                              it.rel_path
+                                ? `En índice (${it.rel_path}). Monta Drive local para descargar.`
+                                : undefined
+                            }
                           >
-                            {it.filename}
+                            Sin archivo local
                           </span>
                         )}
                       </td>

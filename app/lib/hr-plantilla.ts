@@ -44,10 +44,23 @@ const PERIOD_SELECT_LEAN =
 const WEEK_SELECT = 'id, week_start, week_end, status, notes';
 
 const EMP_SELECT_BASE =
-  'id, full_name, status, puesto, area, fecha_ingreso, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+  'id, full_name, status, puesto, area, fecha_ingreso, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+
+const EMP_SELECT_BASE_ROLES = `${EMP_SELECT_BASE.replace(
+  'puesto, area',
+  'puesto, puestos_secundarios, area'
+)}`;
 
 const EMP_SELECT_BAJA = `${EMP_SELECT_BASE}, fecha_baja`;
+const EMP_SELECT_BAJA_ROLES = `${EMP_SELECT_BASE_ROLES}, fecha_baja`;
 const EMP_SELECT = `${EMP_SELECT_BAJA}, fecha_nacimiento`;
+const EMP_SELECT_ROLES = `${EMP_SELECT_BAJA_ROLES}, fecha_nacimiento`;
+
+/** Fallback si aún no existe sueldo_diario en DB. */
+const EMP_SELECT_BASE_NO_SD =
+  'id, full_name, status, puesto, area, fecha_ingreso, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+const EMP_SELECT_BAJA_NO_SD = `${EMP_SELECT_BASE_NO_SD}, fecha_baja`;
+const EMP_SELECT_NO_SD = `${EMP_SELECT_BAJA_NO_SD}, fecha_nacimiento`;
 
 /** Elegible: no baja, no force_exclude, no fecha_baja antes de hoy. */
 export function isEligibleForPlantilla(
@@ -148,12 +161,32 @@ async function selectEmployees(
     return q.neq('status', 'baja').order('full_name', { ascending: true });
   };
 
-  let res = await run(EMP_SELECT);
+  let res = await run(EMP_SELECT_ROLES);
+  if (
+    res.error &&
+    /puestos_secundarios|column .* does not exist|42703/i.test(
+      res.error.message || ''
+    )
+  ) {
+    res = await run(EMP_SELECT);
+  }
   if (res.error && missingFechaNacimientoColumn(res.error.message)) {
     res = await run(EMP_SELECT_BAJA);
   }
   if (res.error && missingFechaBajaColumn(res.error.message)) {
     res = await run(EMP_SELECT_BASE);
+  }
+  if (
+    res.error &&
+    /sueldo_diario|column .* does not exist|42703/i.test(res.error.message || '')
+  ) {
+    res = await run(EMP_SELECT_NO_SD);
+    if (res.error && missingFechaNacimientoColumn(res.error.message)) {
+      res = await run(EMP_SELECT_BAJA_NO_SD);
+    }
+    if (res.error && missingFechaBajaColumn(res.error.message)) {
+      res = await run(EMP_SELECT_BASE_NO_SD);
+    }
   }
   if (res.error || !res.data) return [];
   return filterEligible(res.data as unknown as HrEmployee[]);

@@ -10,6 +10,7 @@ export interface ClientSession {
   canEdit: boolean;
   canAccessAdmin: boolean;
   canAccessStaffCorte?: boolean;
+  canEditHrEmployees?: boolean;
 }
 
 export function useSession() {
@@ -45,4 +46,11 @@ export function canSeeModule(user: ClientSession | null, moduleId: string): bool
 
 export function canSeeAdmin(user: ClientSession | null): boolean {
   return Boolean(user?.canAccessAdmin);
+}
+
+export function canEditEmployees(user: ClientSession | null): boolean {
+  if (!user) return false;
+  if (user.role === 'admin' || user.modules.includes('*')) return true;
+  if (user.canEditHrEmployees) return true;
+  return (user.capabilities || []).includes('rrhh.employees_edit');
 }

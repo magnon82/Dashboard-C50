@@ -205,3 +205,12 @@ export function canAccessAdmin(session: SessionUser): boolean {
     session.username.trim().toLowerCase() === getDashboardUser()
   );
 }
+
+/**
+ * Alta / baja / editar ficha de empleados (plantilla + perfil Datos).
+ * Admin (Master) implícito; resto vía palomita `rrhh.employees_edit` en Master.
+ */
+export function canEditHrEmployees(session: SessionUser): boolean {
+  if (session.role === 'admin' || session.modules.includes('*')) return true;
+  return sessionHasCapability(session, 'rrhh.employees_edit');
+}

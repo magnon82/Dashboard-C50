@@ -2,8 +2,24 @@
 
 import { Card, Metric, Text } from '@tremor/react';
 import { SuiteCard } from '@/app/components/SuiteShell';
-import { LEAD_STAGE_LABELS, formatMxn, type LeadStage } from '@/app/lib/eventos';
+import {
+  LEAD_STAGE_LABELS,
+  PIPELINE_CLOSED_COUNT_FROM,
+  formatMxn,
+  type LeadStage,
+} from '@/app/lib/eventos';
+import { isAnticipoSinOs } from '@/app/lib/eventos-calendario-shared';
 import { getTheme, SUITE } from '@/app/lib/themes';
+
+function formatPipelineCutoffLabel(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString('es-MX', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
 
 const theme = getTheme('suite');
 
@@ -23,6 +39,10 @@ type UpcomingEvent = {
   detail?: string | null;
   lead_id?: string | null;
   digital_os_id?: string | null;
+  os_path?: string | null;
+  os_filename?: string | null;
+  has_os?: boolean;
+  has_anticipo?: boolean;
   quote_id?: string | null;
 };
 
@@ -42,6 +62,8 @@ type Summary = {
     activityEvents?: number;
   };
   byStage: Record<string, number>;
+  /** YYYY-MM-DD: Ganado/Perdido solo cuentan desde esta fecha (CDMX). */
+  pipelineClosedCountFrom?: string;
   upcomingEvents: UpcomingEvent[];
 };
 
@@ -180,6 +202,13 @@ export function EventosTablero({
           <h3 className="text-base font-bold" style={{ color: theme.title }}>
             Pipeline por etapa
           </h3>
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+            Ganado y Perdido: recuento desde{' '}
+            {formatPipelineCutoffLabel(
+              summary?.pipelineClosedCountFrom || PIPELINE_CLOSED_COUNT_FROM
+            )}{' '}
+            (cierras anteriores en cero).
+          </p>
           <ul className="mt-4 space-y-2">
             {(Object.keys(LEAD_STAGE_LABELS) as LeadStage[]).map((stage) => (
               <li
@@ -230,15 +259,29 @@ export function EventosTablero({
                     (ev.celebration || ev.title || '')
                       .trim()
                       .toLowerCase();
-                const goOs = Boolean(ev.digital_os_id || ev.source === 'os');
+                const goOs = Boolean(
+                  ev.has_os || ev.digital_os_id || ev.source === 'os'
+                );
                 const goCrm = Boolean(ev.lead_id || ev.source === 'crm');
+                const anticipoSinOs = isAnticipoSinOs({
+                  has_anticipo: Boolean(ev.has_anticipo),
+                  source_label: ev.source_label || null,
+                  has_os: Boolean(ev.has_os),
+                  os_path: ev.os_path || null,
+                  os_filename: ev.os_filename || null,
+                  digital_os_id: ev.digital_os_id || null,
+                  status: ev.status || null,
+                  source: (ev.source as 'crm' | 'os' | 'activity') || 'activity',
+                });
                 return (
                   <li
                     key={ev.id}
                     className={`rounded-xl border px-3 py-2 text-sm ${
                       ev.status === 'cancelado'
                         ? 'border-rose-200 bg-rose-50/60'
-                        : 'border-slate-100'
+                        : anticipoSinOs
+                          ? 'border-amber-200 bg-amber-50/50'
+                          : 'border-slate-100'
                     }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -256,6 +299,18 @@ export function EventosTablero({
                           {ev.status === 'cancelado' && (
                             <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-800">
                               Cancelado
+                            </span>
+                          )}
+                          {anticipoSinOs && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900"
+                              title="Hay anticipo registrado pero aún no hay orden de servicio"
+                            >
+                              <span
+                                className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-600"
+                                aria-hidden
+                              />
+                              Anticipo sin OS
                             </span>
                           )}
                         </div>
@@ -288,13 +343,44 @@ export function EventosTablero({
                           </button>
                         )}
                         {ev.digital_os_id ? (
-                          <a
-                            href={`/eventos/os/${ev.digital_os_id}`}
-                            className="rounded-lg px-2 py-1 text-[11px] font-bold text-white"
-                            style={{ backgroundColor: SUITE.orange }}
-                          >
-                            Ver OS
-                          </a>
+                          <>
+                            <a
+                              href={`/eventos/os/${ev.digital_os_id}`}
+                              className="rounded-lg px-2 py-1 text-[11px] font-bold text-white"
+                              style={{ backgroundColor: SUITE.orange }}
+                              title="Abrir orden de servicio digital"
+                            >
+                              Consultar
+                            </a>
+                            <a
+                              href={`/eventos/os/${ev.digital_os_id}?print=1`}
+                              className="rounded-lg border border-orange-200 bg-orange-50 px-2 py-1 text-[11px] font-bold text-orange-900 hover:bg-orange-100"
+                              title="Abrir diálogo para guardar PDF"
+                            >
+                              Descargar
+                            </a>
+                          </>
+                        ) : ev.os_path ? (
+                          <>
+                            <a
+                              href={`/api/eventos/os?open=${encodeURIComponent(ev.os_path)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+                              title={ev.os_filename || 'Ver PDF'}
+                            >
+                              Consultar
+                            </a>
+                            <a
+                              href={`/api/eventos/os?open=${encodeURIComponent(ev.os_path)}&download=1`}
+                              className="rounded-lg px-2 py-1 text-[11px] font-bold text-white"
+                              style={{ backgroundColor: SUITE.orange }}
+                              title={ev.os_filename || 'Descargar PDF'}
+                              download={ev.os_filename || true}
+                            >
+                              Descargar
+                            </a>
+                          </>
                         ) : goOs && onGoOs ? (
                           <button
                             type="button"

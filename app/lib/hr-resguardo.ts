@@ -74,6 +74,103 @@ export const HR_RESGUARDO_STATUS_LABELS: Record<HrResguardoStatus, string> = {
   cancelado: 'Cancelado',
 };
 
+/** Vigentes para inventario: pendientes de entrega + ya entregados (no devueltos/cancelados). */
+export const HR_RESGUARDO_ACTIVE_STATUSES: readonly HrResguardoStatus[] = [
+  'pendiente',
+  'entregado',
+] as const;
+
+export function isResguardoActive(status: HrResguardoStatus): boolean {
+  return status === 'pendiente' || status === 'entregado';
+}
+
+/** Fila de inventario: un ítem (equipo/herramienta) → quién lo tiene. */
+export type HrResguardoInventoryRow = {
+  key: string;
+  concepto: string;
+  cantidad: number;
+  marca?: string;
+  modelo?: string;
+  numero_serie?: string;
+  holderName: string;
+  holderPuesto?: string;
+  employeeId: string | null;
+  folio: string | null;
+  kind: HrResguardoKind;
+  status: HrResguardoStatus;
+  fechaResguardo?: string;
+  requestId: string;
+  created_at: string;
+};
+
+function sortEs(a: string, b: string): number {
+  return a.localeCompare(b, 'es', { sensitivity: 'base' });
+}
+
+/** Aplana cartas vigentes a filas por concepto (equipo → colaborador). */
+export function flattenResguardoInventory(
+  requests: HrResguardoRequest[],
+  opts?: { activeOnly?: boolean }
+): HrResguardoInventoryRow[] {
+  const activeOnly = opts?.activeOnly !== false;
+  const rows: HrResguardoInventoryRow[] = [];
+  for (const req of requests) {
+    if (activeOnly && !isResguardoActive(req.status)) continue;
+    const holderName =
+      String(req.payload?.nombre || '').trim() ||
+      String(req.payload?.receptor_nombre || '').trim() ||
+      '—';
+    const holderPuesto = String(req.payload?.puesto || '').trim() || undefined;
+    const fechaResguardo =
+      String(req.payload?.fecha_resguardo || '').trim() ||
+      String(req.payload?.fecha_asignacion || '').trim() ||
+      undefined;
+    const items = Array.isArray(req.items) ? req.items : [];
+    items.forEach((item, idx) => {
+      const concepto = String(item.concepto || '').trim();
+      if (!concepto) return;
+      rows.push({
+        key: `${req.id}:${idx}`,
+        concepto,
+        cantidad: item.cantidad > 0 ? item.cantidad : 1,
+        marca: item.marca,
+        modelo: item.modelo,
+        numero_serie: item.numero_serie,
+        holderName,
+        holderPuesto,
+        employeeId: req.employee_id,
+        folio: req.folio,
+        kind: req.kind,
+        status: req.status,
+        fechaResguardo,
+        requestId: req.id,
+        created_at: req.created_at,
+      });
+    });
+  }
+  rows.sort((a, b) => {
+    const byConcepto = sortEs(a.concepto, b.concepto);
+    if (byConcepto !== 0) return byConcepto;
+    const byHolder = sortEs(a.holderName, b.holderName);
+    if (byHolder !== 0) return byHolder;
+    return sortEs(a.folio || '', b.folio || '');
+  });
+  return rows;
+}
+
+export function formatResguardoSpec(row: {
+  marca?: string;
+  modelo?: string;
+  numero_serie?: string;
+}): string {
+  const parts = [row.marca, row.modelo].filter(Boolean);
+  const base = parts.join(' · ');
+  if (row.numero_serie) {
+    return base ? `${base} · S/N ${row.numero_serie}` : `S/N ${row.numero_serie}`;
+  }
+  return base || '—';
+}
+
 /** Texto legal del formato (hoja Resguardo de Equipo / Para editar). */
 export const HR_RESGUARDO_LEGAL = {
   recibo:

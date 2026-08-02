@@ -14,6 +14,10 @@ import {
   type HrScheduleWeek,
 } from '@/app/lib/hr';
 import { preparePayrollFromSchedule } from '@/app/lib/hr-payroll-sync';
+import {
+  findLimpiezaServicioConflicts,
+  hasDualLimpiezaServicio,
+} from '@/app/lib/hr-puestos';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,11 +26,20 @@ const WEEK_SELECT =
   'id, week_start, week_end, status, notes, created_by, published_by, published_at, created_at, updated_at';
 
 const SHIFT_SELECT =
-  'id, week_id, employee_id, shift_date, start_time, end_time, area, role_label, origin, notes, hr_employees(full_name, area, puesto)';
+  'id, week_id, employee_id, shift_date, start_time, end_time, area, role_label, origin, notes, hr_employees(full_name, area, puesto, puestos_secundarios, notes)';
+
+const SHIFT_SELECT_LEAN =
+  'id, week_id, employee_id, shift_date, start_time, end_time, area, role_label, origin, notes, hr_employees(full_name, area, puesto, notes)';
 
 function mapShift(raw: Record<string, unknown>): HrScheduleShift {
   const emp = raw.hr_employees as
-    | { full_name?: string; area?: string; puesto?: string }
+    | {
+        full_name?: string;
+        area?: string;
+        puesto?: string;
+        puestos_secundarios?: string[] | null;
+        notes?: string | null;
+      }
     | null
     | undefined;
   return {
@@ -43,6 +56,7 @@ function mapShift(raw: Record<string, unknown>): HrScheduleShift {
     employee_name: emp?.full_name ?? null,
     employee_area: emp?.area ?? null,
     employee_puesto: emp?.puesto ?? null,
+    employee_notes: emp?.notes ?? null,
   };
 }
 
@@ -75,6 +89,23 @@ export async function GET(_request: Request, ctx: Ctx) {
         .order('shift_date', { ascending: true }),
     ]);
 
+    let shiftsResFinal: {
+      data: unknown[] | null;
+      error: { message: string } | null;
+    } = shiftsRes;
+    if (
+      shiftsRes.error &&
+      /puestos_secundarios|column .* does not exist|42703/i.test(
+        shiftsRes.error.message
+      )
+    ) {
+      shiftsResFinal = await sb
+        .from('hr_schedule_shifts')
+        .select(SHIFT_SELECT_LEAN)
+        .eq('week_id', weekId)
+        .order('shift_date', { ascending: true });
+    }
+
     if (weekRes.error) {
       return NextResponse.json(
         {
@@ -90,9 +121,9 @@ export async function GET(_request: Request, ctx: Ctx) {
       return NextResponse.json({ error: 'Semana no encontrada' }, { status: 404 });
     }
 
-    if (shiftsRes.error) {
+    if (shiftsResFinal.error) {
       return NextResponse.json(
-        { ready: false, message: shiftsRes.error.message },
+        { ready: false, message: shiftsResFinal.error.message },
         { status: 200 }
       );
     }
@@ -105,7 +136,7 @@ export async function GET(_request: Request, ctx: Ctx) {
         week_start: String(w.week_start).slice(0, 10),
         week_end: String(w.week_end).slice(0, 10),
       },
-      shifts: (shiftsRes.data || []).map((s) =>
+      shifts: (shiftsResFinal.data || []).map((s) =>
         mapShift(s as Record<string, unknown>)
       ),
     });
@@ -260,6 +291,74 @@ export async function PATCH(request: Request, ctx: Ctx) {
 
     if (Array.isArray(body.shifts)) {
       const incoming = body.shifts as Record<string, unknown>[];
+
+      // Candado Limpieza ↔ servicio (roles duales)
+      if (incoming.length > 0) {
+        const empIds = [
+          ...new Set(incoming.map((s) => String(s.employee_id))),
+        ];
+        let empRes: {
+          data: unknown[] | null;
+          error: { message: string } | null;
+        } = await sb
+          .from('hr_employees')
+          .select('id, full_name, puesto, puestos_secundarios, notes')
+          .in('id', empIds);
+        if (
+          empRes.error &&
+          /puestos_secundarios|column .* does not exist|42703/i.test(
+            empRes.error.message
+          )
+        ) {
+          empRes = await sb
+            .from('hr_employees')
+            .select('id, full_name, puesto, notes')
+            .in('id', empIds);
+        }
+        const dualIds = new Set<string>();
+        for (const e of empRes.data || []) {
+          const row = e as {
+            id: string;
+            full_name?: string;
+            puesto?: string | null;
+            puestos_secundarios?: string[] | null;
+            notes?: string | null;
+          };
+          if (
+            hasDualLimpiezaServicio({
+              full_name: row.full_name,
+              puesto: row.puesto,
+              puestos_secundarios: row.puestos_secundarios,
+              notes: row.notes,
+            })
+          ) {
+            dualIds.add(String(row.id));
+          }
+        }
+        const conflicts = findLimpiezaServicioConflicts(
+          incoming.map((s) => ({
+            employee_id: String(s.employee_id),
+            shift_date: String(s.shift_date).slice(0, 10),
+            start_time: s.start_time ? String(s.start_time) : null,
+            end_time: s.end_time ? String(s.end_time) : null,
+            area: s.area != null ? String(s.area) : null,
+            role_label: s.role_label != null ? String(s.role_label) : null,
+            notes: s.notes != null ? String(s.notes) : null,
+          })),
+          dualIds
+        );
+        if (conflicts.length > 0) {
+          return NextResponse.json(
+            {
+              error: conflicts[0]!.message,
+              code: 'limpieza_servicio_overlap',
+              conflicts,
+            },
+            { status: 400 }
+          );
+        }
+      }
+
       await sb.from('hr_schedule_shifts').delete().eq('week_id', weekId);
 
       if (incoming.length > 0) {
@@ -282,12 +381,27 @@ export async function PATCH(request: Request, ctx: Ctx) {
         }
       }
 
-      const { data: shifts } = await sb
+      let shiftsQuery: {
+        data: unknown[] | null;
+        error: { message: string } | null;
+      } = await sb
         .from('hr_schedule_shifts')
         .select(SHIFT_SELECT)
         .eq('week_id', weekId)
         .order('shift_date', { ascending: true });
-      shiftsOut = (shifts || []).map((s) =>
+      if (
+        shiftsQuery.error &&
+        /puestos_secundarios|column .* does not exist|42703/i.test(
+          shiftsQuery.error.message
+        )
+      ) {
+        shiftsQuery = await sb
+          .from('hr_schedule_shifts')
+          .select(SHIFT_SELECT_LEAN)
+          .eq('week_id', weekId)
+          .order('shift_date', { ascending: true });
+      }
+      shiftsOut = (shiftsQuery.data || []).map((s) =>
         mapShift(s as Record<string, unknown>)
       );
     }

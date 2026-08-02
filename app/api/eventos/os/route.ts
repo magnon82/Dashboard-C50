@@ -35,7 +35,7 @@ type UnifiedOsItem = EventOsItem & {
 /**
  * GET /api/eventos/os
  * Lista OS PDF (Drive) + OS digitales (Supabase).
- * Query: year, q, open=<path PDF>, digital=1 (solo digitales)
+ * Query: year, q, open=<path PDF>, download=1 (fuerza attachment), digital=1 (solo digitales)
  */
 export async function GET(request: Request) {
   const auth = await requireEventosSession();
@@ -43,6 +43,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const openPath = url.searchParams.get('open') || '';
+  const forceDownload = url.searchParams.get('download') === '1';
   const root = getEventosOsRoot();
   const digitalOnly = url.searchParams.get('digital') === '1';
 
@@ -62,10 +63,11 @@ export async function GET(request: Request) {
       }
       const stream = createReadStream(decoded);
       const webStream = Readable.toWeb(stream) as ReadableStream;
+      const disposition = forceDownload ? 'attachment' : 'inline';
       return new NextResponse(webStream, {
         headers: {
           'Content-Type': 'application/pdf',
-          'Content-Disposition': `inline; filename="${encodeURIComponent(path.basename(decoded))}"`,
+          'Content-Disposition': `${disposition}; filename="${encodeURIComponent(path.basename(decoded))}"`,
           'Cache-Control': 'private, max-age=120',
         },
       });
@@ -246,6 +248,8 @@ export async function POST(request: Request) {
     quote_id?: string;
     lead_id?: string;
     refresh?: boolean;
+    /** Fecha de anticipo (YYYY-MM-DD) si el cliente la conoce; no inventar */
+    anticipo_date?: string | null;
   };
   try {
     body = await request.json();
@@ -255,6 +259,11 @@ export async function POST(request: Request) {
 
   const quoteId = typeof body.quote_id === 'string' ? body.quote_id.trim() : '';
   const leadId = typeof body.lead_id === 'string' ? body.lead_id.trim() : '';
+  const anticipoDate =
+    typeof body.anticipo_date === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(body.anticipo_date.trim().slice(0, 10))
+      ? body.anticipo_date.trim().slice(0, 10)
+      : null;
 
   if (!quoteId && !leadId) {
     return NextResponse.json(
@@ -272,6 +281,7 @@ export async function POST(request: Request) {
           refresh: body.refresh !== false,
           markQuoteAccepted: true,
           markLeadGanado: true,
+          anticipoDate,
         })
       : await createServiceOrderFromLead(sb, {
           leadId,

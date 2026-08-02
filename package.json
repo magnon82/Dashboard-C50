@@ -12,7 +12,9 @@
     "gcal:probe": "node scripts/gcal-probe.mjs",
     "hr:backfill-expedientes": "node --experimental-strip-types scripts/hr-backfill-expediente-links.mjs",
     "hr:reconcile-dupes": "node --experimental-strip-types scripts/hr-reconcile-duplicates.mjs",
-    "hr:import-horarios": "node scripts/hr-import-horarios-2026.mjs"
+    "hr:import-horarios": "node scripts/hr-import-horarios-2026.mjs",
+    "hr:sync-sueldo": "node --experimental-strip-types scripts/hr-sync-sueldo-diario.mjs",
+    "hr:pull-docs": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-pull-expediente-docs.mjs"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
@@ -20,6 +22,7 @@
     "@tremor/react": "^3.18.7",
     "googleapis": "^173.0.0",
     "next": "16.2.12",
+    "pdf-lib": "^1.17.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^2.15.4",

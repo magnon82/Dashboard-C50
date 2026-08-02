@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import {
   SESSION_COOKIE,
+  canAccessAdmin,
   canAccessModule,
+  canEditHrEmployees,
   verifySessionToken,
   type SessionUser,
 } from '@/app/lib/auth';
@@ -37,6 +39,17 @@ export async function requireRrhhSession(): Promise<SessionUser | NextResponse> 
   return session;
 }
 
+/** Solo Master bootstrap (DASHBOARD_USER) — p.ej. verificar documentos. */
+export function requireMasterAdmin(session: SessionUser): NextResponse | null {
+  if (!canAccessAdmin(session)) {
+    return NextResponse.json(
+      { error: 'Solo el administrador Master puede verificar documentos' },
+      { status: 403 }
+    );
+  }
+  return null;
+}
+
 /** Staff (piso) o RR.HH. — formularios publicados al personal. */
 export async function requireStaffOrRrhhSession(): Promise<
   SessionUser | NextResponse
@@ -62,6 +75,19 @@ export function requireRrhhWrite(session: SessionUser): NextResponse | null {
   if (!session.canEdit && session.role !== 'admin') {
     return NextResponse.json(
       { error: 'Sin permiso de edición en RR.HH.' },
+      { status: 403 }
+    );
+  }
+  return null;
+}
+
+/** Alta / baja / editar ficha de empleados (palomita Master o admin). */
+export function requireRrhhEmployeesWrite(
+  session: SessionUser
+): NextResponse | null {
+  if (!canEditHrEmployees(session)) {
+    return NextResponse.json(
+      { error: 'Sin permiso de edición de empleados' },
       { status: 403 }
     );
   }

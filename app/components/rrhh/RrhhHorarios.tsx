@@ -5,7 +5,6 @@ import { SuiteCard } from '@/app/components/SuiteShell';
 import {
   HR_SCHEDULE_STATUS_LABELS,
   addIsoDays,
-  employeeNotesHasFlag,
   formatHrDate,
   formatHrPuesto,
   isCurrentScheduleWeek,
@@ -23,6 +22,11 @@ import {
   type HrScheduleWeek,
 } from '@/app/lib/hr';
 import { formatHrListName } from '@/app/lib/hr-person-match';
+import {
+  daySegmentsOverlap,
+  findLimpiezaServicioConflicts,
+  hasDualLimpiezaServicio,
+} from '@/app/lib/hr-puestos';
 import { weekNumberForHorariosMonday } from '@/app/lib/hr-schedule-import';
 import {
   mondayOfWeek,
@@ -41,7 +45,7 @@ const AREA_ORDER = [
   'Gerencia',
   'Hostess',
   'Caja',
-  'Barra',
+  'Bartender',
   'Meseros',
   'Runner',
   'Cocina',
@@ -54,12 +58,14 @@ const AREA_ORDER = [
 type DaySegment = {
   start: string; // HH:mm
   end: string;
+  role?: string | null;
 };
 
 type DayCell = {
   start: string; // HH:mm — turno principal (editable en grilla)
   end: string;
   off: boolean;
+  role?: string | null;
   /** Turnos adicionales el mismo día (p. ej. mañana+cena); cuentan en «h». */
   extra?: DaySegment[];
 };
@@ -69,6 +75,7 @@ type PersonRow = {
   full_name: string;
   area: string;
   puesto: string | null;
+  dualLimpiezaServicio?: boolean;
   days: DayCell[]; // 7 lun–dom
 };
 
@@ -139,11 +146,8 @@ function resolveRowSection(
   shiftRoles: string[],
   fallbackName: string
 ): { section: string; puesto: string | null } {
-  const notes = emp?.notes ?? null;
-  const dual = employeeNotesHasFlag(notes, 'dual_limpieza_mesero');
-  const posKey = emp
-    ? plantillaPositionKey(emp)
-    : null;
+  const dual = emp ? hasDualLimpiezaServicio(emp) : false;
+  const posKey = emp ? plantillaPositionKey(emp) : null;
   const fromPuesto = posKey ? scheduleSectionFromPosition(posKey) : null;
 
   // Contar áreas de turnos (ignorar Piso genérico)
@@ -191,13 +195,18 @@ function resolveRowSection(
     section = 'Meseros';
   }
 
-  if (isPlantillaExterno({ full_name: emp?.full_name || fallbackName, notes })) {
+  if (
+    isPlantillaExterno({
+      full_name: emp?.full_name || fallbackName,
+      notes: emp?.notes,
+    })
+  ) {
     section = 'Externos';
   }
 
   const puesto =
     emp?.puesto ||
-    (dual ? 'Mesero encargado' : null) ||
+    (dual ? 'Meserx Encargadx' : null) ||
     topRole ||
     (fromPuesto && fromPuesto !== 'Otros' ? fromPuesto : null) ||
     null;
@@ -292,6 +301,7 @@ function buildRowsFromShifts(
         full_name: emp?.full_name || s.employee_name || s.employee_id.slice(0, 8),
         area: section,
         puesto,
+        dualLimpiezaServicio: emp ? hasDualLimpiezaServicio(emp) : false,
         days: dates.map(() => emptyDay()),
       };
       byId.set(s.employee_id, row);
@@ -301,16 +311,17 @@ function buildRowsFromShifts(
     const start = toHhmm(s.start_time);
     const end = toHhmm(s.end_time);
     if (!start || !end) continue;
+    const role = s.role_label || null;
     const cur = row.days[di];
     if (cur.off || !cur.start || !cur.end) {
-      row.days[di] = { start, end, off: false };
+      row.days[di] = { start, end, off: false, role };
     } else if (cur.start === start && cur.end === end) {
       // mismo turno duplicado — ignorar
     } else {
       // Segundo+ turno el mismo día → acumular para la fórmula «h»
       const extras = cur.extra ? [...cur.extra] : [];
       if (!extras.some((e) => e.start === start && e.end === end)) {
-        extras.push({ start, end });
+        extras.push({ start, end, role });
       }
       row.days[di] = { ...cur, off: false, extra: extras };
     }
@@ -338,6 +349,7 @@ function buildRowsFromShifts(
         full_name: e.full_name,
         area: section,
         puesto,
+        dualLimpiezaServicio: hasDualLimpiezaServicio(e),
         days: dates.map(() => emptyDay()),
       });
     }
@@ -356,18 +368,29 @@ function rowsToShifts(rows: PersonRow[], dates: string[]): Omit<
       const d = r.days[i];
       if (!d || d.off) continue;
       const segments: DaySegment[] = [];
-      if (d.start && d.end) segments.push({ start: d.start, end: d.end });
+      if (d.start && d.end) {
+        segments.push({ start: d.start, end: d.end, role: d.role || r.puesto });
+      }
       for (const e of d.extra || []) {
         if (e.start && e.end) segments.push(e);
       }
       for (const seg of segments) {
+        const role = seg.role || r.puesto;
+        const areaFromRole = role
+          ? scheduleSectionFromPosition(role)
+          : r.area;
         out.push({
           employee_id: r.employee_id,
           shift_date: dates[i],
           start_time: toTimeDb(seg.start),
           end_time: toTimeDb(seg.end),
-          area: r.area === 'Otros' ? null : r.area,
-          role_label: r.puesto,
+          area:
+            areaFromRole && areaFromRole !== 'Otros'
+              ? areaFromRole
+              : r.area === 'Otros'
+                ? null
+                : r.area,
+          role_label: role,
           origin: 'manual',
           notes: null,
           employee_name: r.full_name,
@@ -376,6 +399,18 @@ function rowsToShifts(rows: PersonRow[], dates: string[]): Omit<
     }
   }
   return out;
+}
+
+function rowDayHasOverlapConflict(row: PersonRow, dayIndex: number): boolean {
+  if (!row.dualLimpiezaServicio) return false;
+  const d = row.days[dayIndex];
+  if (!d || d.off) return false;
+  const segs: Array<{ start: string; end: string }> = [];
+  if (d.start && d.end) segs.push({ start: d.start, end: d.end });
+  for (const e of d.extra || []) {
+    if (e.start && e.end) segs.push({ start: e.start, end: e.end });
+  }
+  return daySegmentsOverlap(segs);
 }
 
 /**
@@ -844,10 +879,18 @@ export function RrhhHorarios() {
 
   async function saveShifts() {
     if (!weekDetail || pastLocked) return;
+    const shifts = rowsToShifts(rows, dates);
+    const dualIds = new Set(
+      rows.filter((r) => r.dualLimpiezaServicio).map((r) => r.employee_id)
+    );
+    const conflicts = findLimpiezaServicioConflicts(shifts, dualIds);
+    if (conflicts.length > 0) {
+      setToast(conflicts[0]!.message);
+      return;
+    }
     setBusy(true);
     setToast(null);
     try {
-      const shifts = rowsToShifts(rows, dates);
       // En curso → publicar al Guardar; futuras quedan borrador hasta Publicar.
       const body: Record<string, unknown> = { shifts };
       if (isCurrentScheduleWeek(weekDetail.week_start)) {
@@ -960,8 +1003,8 @@ export function RrhhHorarios() {
     patch: Partial<DayCell>
   ) {
     if (pastLocked || dayLocked[dayIndex]) return;
-    setRows((prev) =>
-      prev.map((r) => {
+    setRows((prev) => {
+      const nextRows = prev.map((r) => {
         if (r.employee_id !== employeeId) return r;
         const days = r.days.map((d, i) => {
           if (i !== dayIndex) return d;
@@ -971,15 +1014,27 @@ export function RrhhHorarios() {
             next.end = '';
             next.off = true;
             next.extra = undefined;
+            next.role = undefined;
           } else if (patch.start !== undefined || patch.end !== undefined) {
             next.off = !(next.start || next.end);
-            if (next.off) next.extra = undefined;
+            if (next.off) {
+              next.extra = undefined;
+              next.role = undefined;
+            }
           }
           return next;
         });
         return { ...r, days };
-      })
-    );
+      });
+      const row = nextRows.find((r) => r.employee_id === employeeId);
+      if (row && rowDayHasOverlapConflict(row, dayIndex)) {
+        setToast(
+          'Candado: Limpieza y servicio no pueden solaparse el mismo día.'
+        );
+        return prev;
+      }
+      return nextRows;
+    });
   }
 
   function toggleOff(employeeId: string, dayIndex: number) {
@@ -1016,6 +1071,7 @@ export function RrhhHorarios() {
           full_name: emp.full_name,
           area: resolved.section,
           puesto: resolved.puesto || emp.puesto,
+          dualLimpiezaServicio: hasDualLimpiezaServicio(emp),
           days: dates.map(() => emptyDay()),
         },
       ].sort(comparePersonRows)
@@ -1576,9 +1632,18 @@ function AreaFragment({
             style={{ color: theme.title, boxShadow: '1px 0 0 #e2e8f0' }}
           >
             {formatHrListName(p.full_name)}
+            {p.dualLimpiezaServicio ? (
+              <span
+                className="ml-1 rounded border border-amber-300 bg-amber-50 px-1 text-[9px] font-bold uppercase tracking-wide text-amber-900"
+                title="Rol dual: Limpieza y servicio no pueden solaparse"
+              >
+                dual
+              </span>
+            ) : null}
           </td>
           {p.days.map((d, di) => {
             const cellLocked = readOnly || Boolean(dayLocked[di]);
+            const overlapConflict = rowDayHasOverlapConflict(p, di);
             return d.off ? (
               <td
                 key={di}
@@ -1622,7 +1687,7 @@ function AreaFragment({
                 <td
                   className={`border-l border-slate-100 px-0.5 py-0.5${
                     cellLocked && !readOnly ? ' bg-slate-50/70' : ''
-                  }`}
+                  }${overlapConflict ? ' bg-rose-50' : ''}`}
                 >
                   <input
                     type="time"
@@ -1632,17 +1697,23 @@ function AreaFragment({
                       onCell(p.employee_id, di, { start: e.target.value })
                     }
                     title={
-                      !readOnly && dayLocked[di]
-                        ? 'Día pasado: solo consulta'
-                        : undefined
+                      overlapConflict
+                        ? 'Candado: turnos solapados (Limpieza ↔ servicio)'
+                        : !readOnly && dayLocked[di]
+                          ? 'Día pasado: solo consulta'
+                          : undefined
                     }
-                    className="w-full min-w-[4.25rem] rounded border border-slate-200 px-0.5 py-1 text-xs tabular-nums disabled:bg-slate-50 disabled:text-slate-500"
+                    className={`w-full min-w-[4.25rem] rounded border px-0.5 py-1 text-xs tabular-nums disabled:bg-slate-50 disabled:text-slate-500${
+                      overlapConflict
+                        ? ' border-rose-400'
+                        : ' border-slate-200'
+                    }`}
                   />
                 </td>
                 <td
                   className={`px-0.5 py-0.5${
                     cellLocked && !readOnly ? ' bg-slate-50/70' : ''
-                  }`}
+                  }${overlapConflict ? ' bg-rose-50' : ''}`}
                 >
                   <div className="flex items-center gap-0.5">
                     <input
@@ -1653,11 +1724,17 @@ function AreaFragment({
                         onCell(p.employee_id, di, { end: e.target.value })
                       }
                       title={
-                        !readOnly && dayLocked[di]
-                          ? 'Día pasado: solo consulta'
-                          : undefined
+                        overlapConflict
+                          ? 'Candado: turnos solapados (Limpieza ↔ servicio)'
+                          : !readOnly && dayLocked[di]
+                            ? 'Día pasado: solo consulta'
+                            : undefined
                       }
-                      className="w-full min-w-[4.25rem] rounded border border-slate-200 px-0.5 py-1 text-xs tabular-nums disabled:bg-slate-50 disabled:text-slate-500"
+                      className={`w-full min-w-[4.25rem] rounded border px-0.5 py-1 text-xs tabular-nums disabled:bg-slate-50 disabled:text-slate-500${
+                        overlapConflict
+                          ? ' border-rose-400'
+                          : ' border-slate-200'
+                      }`}
                     />
                     {!cellLocked && (
                       <button

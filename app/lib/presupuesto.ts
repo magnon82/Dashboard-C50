@@ -79,6 +79,16 @@ export const RUBRO_CRISTALERIA_Y_EQUIPO = 'Cristalería y Equipo';
 const LEGACY_CRISTALERIA_EQUIPO_KEYS = new Set(['EQUIPO', 'CRISTALERIA']);
 
 /**
+ * Excel SEM / TOTAL suele partir Nómina en operativa vs administrativa.
+ * El catálogo UI es un solo rubro «Nómina» (también pagos vía Administración Zen).
+ */
+const NOMINA_ALIAS_KEYS = new Set([
+  'NOMINA OPERATIVA Y BONOS',
+  'NOMINA ADMINISTRATIVA Y BONOS',
+  'NOMINA',
+]);
+
+/**
  * Rubros cuyo presupuesto el admin puede editar por mes.
  * Incluye fijos de fórmula, semanales, % venta y top-level / servicios del Excel.
  */
@@ -236,6 +246,16 @@ export function normRubroKey(name: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, ' ')
     .trim();
+}
+
+/** Clave de catálogo tras aliases Excel (Nómina partida, Cristalería legacy). */
+export function canonicalRubroKey(name: string): string {
+  const key = normRubroKey(name);
+  if (NOMINA_ALIAS_KEYS.has(key)) return 'NOMINA';
+  if (LEGACY_CRISTALERIA_EQUIPO_KEYS.has(key) || key === 'CRISTALERIA Y EQUIPO') {
+    return 'CRISTALERIA Y EQUIPO';
+  }
+  return key;
 }
 
 function catalogKey(rubro: string, parent: string | null): string {
@@ -502,11 +522,6 @@ export function buildPresupuestoRubros(
     'GAS CALENTADORES',
     'MATERIAS PRIMAS',
   ]);
-  const nominaKeys = new Set([
-    'NOMINA OPERATIVA Y BONOS',
-    'NOMINA ADMINISTRATIVA Y BONOS',
-    'NOMINA',
-  ]);
   const PARENT_COCINA = 'Insumos de cocina';
   const PARENT_BARRA = 'Insumos de barra';
   const PARENT_SERVICIOS = 'Servicios';
@@ -560,7 +575,7 @@ export function buildPresupuestoRubros(
       row.parent = PARENT_SERVICIOS;
       row.isParent = false;
       section = null;
-    } else if (nominaKeys.has(upper)) {
+    } else if (NOMINA_ALIAS_KEYS.has(upper)) {
       row.rubro = 'Nómina';
       row.parent = null;
       row.isParent = false;
@@ -735,17 +750,32 @@ type SemDetallePayload = {
   note?: string | null;
 };
 
+/** Concepto visible en desglose cuando el Excel trae rubro alias (p. ej. Nómina partida). */
+function semDetalleConceptLabel(
+  lineRubro: string,
+  note: string | null
+): string | null {
+  if (note) return note;
+  const key = normRubroKey(lineRubro);
+  if (key === 'NOMINA OPERATIVA Y BONOS') return 'Nómina operativa y bonos';
+  if (key === 'NOMINA ADMINISTRATIVA Y BONOS') {
+    return 'Nómina administrativa y bonos';
+  }
+  return null;
+}
+
 function matchesRubroTarget(
   lineRubro: string,
   lineParent: string | null | undefined,
   target: RubroRow,
   childNames?: Set<string>
 ): boolean {
-  const lineKey = normRubroKey(lineRubro);
+  const lineKey = canonicalRubroKey(lineRubro);
+  const rawLineKey = normRubroKey(lineRubro);
   if (target.isParent && childNames) {
-    return childNames.has(lineKey);
+    return childNames.has(rawLineKey) || childNames.has(lineKey);
   }
-  if (lineKey !== normRubroKey(target.rubro)) return false;
+  if (lineKey !== canonicalRubroKey(target.rubro)) return false;
   if (target.parent && lineParent) {
     return sameParent(lineParent, target.parent);
   }
@@ -832,11 +862,12 @@ export function buildRubroDesglose(
     if (!matchesRubroTarget(rubro, data.parent, target, childNames)) continue;
     const amount = Number(data.amount ?? r.amount ?? 0);
     if (!amount && !data.note) continue;
+    const rawNote = data.note ? String(data.note).trim() || null : null;
     semLines.push({
       week: Number(data.week),
       canal: String(data.canal || '—'),
       amount,
-      note: data.note ? String(data.note).trim() || null : null,
+      note: semDetalleConceptLabel(rubro, rawNote),
     });
   }
 
@@ -970,9 +1001,17 @@ export function rubrosWithSemDetalle(
     if (!p || p.y !== year || p.m !== month) continue;
     const data = parseJson<SemDetallePayload>(r.description);
     if (!data?.rubro) continue;
-    keys.add(catalogKey(String(data.rubro), data.parent ?? null));
+    const rubroName = String(data.rubro);
+    keys.add(catalogKey(rubroName, data.parent ?? null));
     // Also name-only for top-level matching
-    keys.add(catalogKey(String(data.rubro), null));
+    keys.add(catalogKey(rubroName, null));
+    // Aliases Excel (Nómina operativa/admin → Nómina)
+    const canon = canonicalRubroKey(rubroName);
+    if (canon === 'NOMINA') {
+      keys.add(catalogKey('Nómina', null));
+    } else if (canon === 'CRISTALERIA Y EQUIPO') {
+      keys.add(catalogKey(RUBRO_CRISTALERIA_Y_EQUIPO, null));
+    }
   }
   return keys;
 }

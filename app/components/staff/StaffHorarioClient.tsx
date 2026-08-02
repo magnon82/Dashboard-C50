@@ -18,6 +18,7 @@ import {
   type HrScheduleShift,
 } from '@/app/lib/hr';
 import { formatHrListName } from '@/app/lib/hr-person-match';
+import { hasDualLimpiezaServicio } from '@/app/lib/hr-puestos';
 import {
   mondayOfWeek,
   sundayOfWeek,
@@ -39,7 +40,7 @@ const AREA_ORDER = [
   'Gerencia',
   'Hostess',
   'Caja',
-  'Barra',
+  'Bartender',
   'Meseros',
   'Runner',
   'Cocina',
@@ -107,7 +108,9 @@ function resolveRowSection(
   notesFallback?: string | null
 ): { section: string; puesto: string | null } {
   const notes = emp?.notes ?? notesFallback ?? null;
-  const dual = employeeNotesHasFlag(notes, 'dual_limpieza_mesero');
+  const dual =
+    (emp ? hasDualLimpiezaServicio({ ...emp, notes }) : false) ||
+    employeeNotesHasFlag(notes, 'dual_limpieza_mesero');
   const posKey = emp ? plantillaPositionKey(emp) : null;
   const fromPuesto = posKey ? scheduleSectionFromPosition(posKey) : null;
 
@@ -162,7 +165,7 @@ function resolveRowSection(
 
   const puesto =
     emp?.puesto ||
-    (dual ? 'Mesero encargado' : null) ||
+    (dual ? 'Meserx Encargadx' : null) ||
     topRole ||
     (fromPuesto && fromPuesto !== 'Otros' ? fromPuesto : null) ||
     null;
@@ -300,6 +303,11 @@ function TeamScheduleTable({
   shifts: HrScheduleShift[];
 }) {
   const dates = useMemo(() => weekDateList(weekStart), [weekStart]);
+  /** Índice Lun–Dom del día civil de hoy (CDMX); -1 si la semana mostrada no lo incluye. */
+  const todayIdx = useMemo(() => {
+    const today = todayIsoCdmx();
+    return dates.findIndex((d) => d.slice(0, 10) === today);
+  }, [dates]);
   const rows = useMemo(
     () => buildRowsFromShifts(shifts, dates),
     [shifts, dates]
@@ -331,34 +339,66 @@ function TeamScheduleTable({
             >
               Nombre
             </th>
-            {DAY_HEADERS.map((d, i) => (
-              <th
-                key={d}
-                colSpan={2}
-                className="border-l border-white/20 px-1 py-2 text-center text-xs font-bold uppercase"
-              >
-                <div>{d}</div>
-                <div className="font-normal opacity-80">
-                  {dates[i]?.slice(5)}
-                </div>
-              </th>
-            ))}
+            {DAY_HEADERS.map((d, i) => {
+              const isToday = i === todayIdx;
+              return (
+                <th
+                  key={d}
+                  colSpan={2}
+                  className="border-l border-white/20 px-1 py-2 text-center text-xs font-bold uppercase"
+                  style={
+                    isToday
+                      ? {
+                          backgroundColor: SUITE.navySoft,
+                          boxShadow: `inset 0 -3px 0 ${SUITE.orange}`,
+                        }
+                      : undefined
+                  }
+                >
+                  <div>{d}</div>
+                  <div
+                    className="font-normal"
+                    style={{
+                      opacity: isToday ? 1 : 0.8,
+                      color: isToday ? SUITE.orange : undefined,
+                    }}
+                  >
+                    {dates[i]?.slice(5)}
+                  </div>
+                </th>
+              );
+            })}
           </tr>
           <tr style={{ backgroundColor: '#1e3a5f', color: '#cbd5e1' }}>
             <th
               className="sticky left-0 z-10 px-2 py-1"
               style={{ backgroundColor: '#1e3a5f' }}
             />
-            {DAY_HEADERS.map((d) => (
-              <Fragment key={d}>
-                <th className="border-l border-white/10 px-0.5 py-1 text-center text-[10px] font-semibold w-[4.5rem]">
-                  Ent.
-                </th>
-                <th className="px-0.5 py-1 text-center text-[10px] font-semibold w-[4.5rem]">
-                  Sal.
-                </th>
-              </Fragment>
-            ))}
+            {DAY_HEADERS.map((d, i) => {
+              const isToday = i === todayIdx;
+              const todaySub = isToday
+                ? {
+                    backgroundColor: '#334e78',
+                    color: SUITE.orangeSoft,
+                  }
+                : undefined;
+              return (
+                <Fragment key={d}>
+                  <th
+                    className="border-l border-white/10 px-0.5 py-1 text-center text-[10px] font-semibold w-[4.5rem]"
+                    style={todaySub}
+                  >
+                    Ent.
+                  </th>
+                  <th
+                    className="px-0.5 py-1 text-center text-[10px] font-semibold w-[4.5rem]"
+                    style={todaySub}
+                  >
+                    Sal.
+                  </th>
+                </Fragment>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -402,12 +442,20 @@ function TeamScheduleTable({
                     >
                       {formatHrListName(p.full_name)}
                     </td>
-                    {p.days.map((d, di) =>
-                      d.off ? (
+                    {p.days.map((d, di) => {
+                      const isToday = di === todayIdx;
+                      const colWash = isToday
+                        ? { backgroundColor: SUITE.orangeSoft }
+                        : undefined;
+                      const colEdge = isToday
+                        ? `border-l border-orange-200`
+                        : 'border-l border-slate-100';
+                      return d.off ? (
                         <td
                           key={di}
                           colSpan={2}
-                          className="border-l border-slate-100 px-1 py-0.5 text-center"
+                          className={`${colEdge} px-1 py-0.5 text-center`}
+                          style={colWash}
                         >
                           <span
                             className="inline-block w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide"
@@ -421,12 +469,15 @@ function TeamScheduleTable({
                         </td>
                       ) : (
                         <Fragment key={`${p.employee_id}-${di}`}>
-                          <td className="border-l border-slate-100 px-0.5 py-0.5">
+                          <td
+                            className={`${colEdge} px-0.5 py-0.5`}
+                            style={colWash}
+                          >
                             <span className="block w-full min-w-[4.25rem] rounded border border-slate-200 bg-slate-50 px-0.5 py-1 text-center text-xs tabular-nums text-slate-700">
                               {d.start || '—'}
                             </span>
                           </td>
-                          <td className="px-0.5 py-0.5">
+                          <td className="px-0.5 py-0.5" style={colWash}>
                             <span className="block w-full min-w-[4.25rem] rounded border border-slate-200 bg-slate-50 px-0.5 py-1 text-center text-xs tabular-nums text-slate-700">
                               {d.end || '—'}
                               {(d.extra?.length ?? 0) > 0 ? (
@@ -442,8 +493,8 @@ function TeamScheduleTable({
                             </span>
                           </td>
                         </Fragment>
-                      )
-                    )}
+                      );
+                    })}
                   </tr>
                 ))}
               </Fragment>

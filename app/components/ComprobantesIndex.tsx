@@ -72,7 +72,6 @@ export function ComprobantesIndex({
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<string>('');
   const [rootExists, setRootExists] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
   /** When true, force Supabase index even if I: is mounted (sparse). Default: disk scan. */
   const [preferIndex, setPreferIndex] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -136,16 +135,6 @@ export function ComprobantesIndex({
     [sortedItems, showAll]
   );
   const hasMore = sortedItems.length > PAGE_SIZE && !showAll;
-
-  async function copyPath(p: string) {
-    try {
-      await navigator.clipboard.writeText(p);
-      setCopied(p);
-      window.setTimeout(() => setCopied(null), 1600);
-    } catch {
-      setError('No se pudo copiar la ruta');
-    }
-  }
 
   const content = (
         <>
@@ -344,16 +333,6 @@ export function ComprobantesIndex({
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-right">
                         <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            className="text-xs font-semibold underline-offset-2 hover:underline"
-                            style={{ color: SUITE.navy }}
-                            onClick={() => copyPath(it.path || it.rel_path)}
-                          >
-                            {copied === (it.path || it.rel_path)
-                              ? 'Copiado'
-                              : 'Copiar ruta'}
-                          </button>
                           {rootExists && (it.path || it.rel_path) ? (
                             <a
                               className="text-xs font-semibold underline-offset-2 hover:underline"
@@ -415,7 +394,7 @@ export function ComprobantesIndex({
       {standalone && (
         <p className="mb-4 text-sm" style={{ color: theme.muted }}>
           PDFs de pagos en COMPROBANTES BANCARIOS · más recientes primero.
-          Usa Abrir o Copiar ruta.
+          Usa Abrir para consultar en la plataforma.
         </p>
       )}
 

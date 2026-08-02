@@ -42,13 +42,18 @@ export type HrEmployee = {
   id: string;
   full_name: string;
   status: HrEmployeeStatus;
+  /** Posición administrativa / principal (plantilla). */
   puesto: string | null;
+  /** Roles adicionales (catálogo); no duplica fila en plantilla. */
+  puestos_secundarios?: string[] | null;
   area: string | null;
   fecha_ingreso: string | null;
   /** Último día laborado / fecha de baja (patch `hr_employee_baja.sql`). */
   fecha_baja?: string | null;
   /** Cumpleaños (patch `hr_employee_nacimiento.sql`). */
   fecha_nacimiento?: string | null;
+  /** Sueldo diario vigente en ficha (también snapshot en líneas de nómina). */
+  sueldo_diario?: number | null;
   email: string | null;
   phone: string | null;
   drive_folder_path: string | null;
@@ -725,10 +730,22 @@ const PUESTO_DISPLAY_FIXES: Record<string, string> = {
   hosses: 'Hostess',
   hostes: 'Hostess',
   hostess: 'Hostess',
-  'lava loza': 'Lava loza',
-  lavaloza: 'Lava loza',
-  capitan: 'Capitán',
-  captain: 'Capitán',
+  'lava loza': 'Lavaloza',
+  lavaloza: 'Lavaloza',
+  capitan: 'Capitan',
+  captain: 'Capitan',
+  barra: 'Bartender',
+  barman: 'Bartender',
+  bartender: 'Bartender',
+  'mesero encargado': 'Meserx Encargadx',
+  'mesera encargada': 'Meserx Encargadx',
+  'meserx encargadx': 'Meserx Encargadx',
+  mesero: 'Meserx',
+  mesera: 'Meserx',
+  meserx: 'Meserx',
+  cajero: 'Cajerx',
+  cajera: 'Cajerx',
+  cajerx: 'Cajerx',
   'sub chef': 'Sub chef',
   subchef: 'Sub chef',
 };
@@ -865,7 +882,7 @@ const POSITION_FAMILY_META: Record<
 > = {
   mesero: { label: 'Mesero', order: 10 },
   hostess: { label: 'Hostess', order: 20 },
-  barra: { label: 'Barra', order: 30 },
+  barra: { label: 'Bartender', order: 30 },
   runner: { label: 'Runner', order: 40 },
   limpieza: { label: 'Limpieza', order: 50 },
   chef: { label: 'Chef', order: 60 },
@@ -907,12 +924,12 @@ export function isGenericPisoArea(raw: string | null | undefined): boolean {
  * Clave de posición para plantilla/horarios: puesto, o área si no es «Piso» vacío.
  */
 export function plantillaPositionKey(
-  e: Pick<HrEmployee, 'puesto' | 'area' | 'notes'>
+  e: Pick<HrEmployee, 'puesto' | 'area' | 'notes' | 'puestos_secundarios'>
 ): string | null {
   const puesto = String(e.puesto || '').trim();
   if (puesto) return puesto;
   if (employeeNotesHasFlag(e.notes, 'dual_limpieza_mesero')) {
-    return 'Mesero encargado';
+    return 'Meserx Encargadx';
   }
   const area = String(e.area || '').trim();
   if (!area || isGenericPisoArea(area)) return null;
@@ -921,7 +938,7 @@ export function plantillaPositionKey(
 
 /**
  * Sección tipo Excel de horarios a partir de puesto/área/familia.
- * Orden canónico: Hostess → Caja → Barra → Meseros → Runner → Cocina → …
+ * Orden canónico: Hostess → Caja → Bartender → Meseros → Runner → Cocina → …
  */
 export function scheduleSectionFromPosition(
   puestoOrArea: string | null | undefined
@@ -930,15 +947,17 @@ export function scheduleSectionFromPosition(
   if (!raw || isGenericPisoArea(raw)) return 'Otros';
 
   const folded = foldPuestoKey(raw);
-  // Headers Excel directos
+  // Headers Excel directos (Barra legado → Bartender)
   const direct: Record<string, string> = {
     gerencia: 'Gerencia',
     hostess: 'Hostess',
     caja: 'Caja',
-    barra: 'Barra',
+    barra: 'Bartender',
+    bartender: 'Bartender',
     meseros: 'Meseros',
     mesero: 'Meseros',
     mesera: 'Meseros',
+    meserx: 'Meseros',
     runner: 'Runner',
     cocina: 'Cocina',
     limpieza: 'Limpieza',
@@ -955,7 +974,7 @@ export function scheduleSectionFromPosition(
     case 'caja':
       return 'Caja';
     case 'barra':
-      return 'Barra';
+      return 'Bartender';
     case 'mesero':
       return 'Meseros';
     case 'runner':

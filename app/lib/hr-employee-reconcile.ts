@@ -9,6 +9,7 @@ import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { isMergedDuplicateShell } from '@/app/lib/hr';
 import {
+  canonicalHrEmployeeName,
   folderBasenameFromPath,
   matchPerson,
   normalizePersonKey,
@@ -239,7 +240,8 @@ export function resolveCanonicalName(
   for (const m of members) {
     best = preferCanonicalFullName(best, m.full_name);
   }
-  return best.replace(/\s+/g, ' ').trim();
+  // Persistir «nombres + un apellido», no basename ALL CAPS de carpeta.
+  return canonicalHrEmployeeName(best, survivor.full_name);
 }
 
 /**

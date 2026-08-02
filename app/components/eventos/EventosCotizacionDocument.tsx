@@ -4,6 +4,7 @@ import {
   Cormorant_Garamond,
   Source_Sans_3,
 } from 'next/font/google';
+import { BrandLogo } from '@/app/components/BrandLogo';
 import { EventosDocActions } from '@/app/components/eventos/EventosDocActions';
 import {
   EVENTOS_CONTACT,
@@ -70,21 +71,41 @@ export function EventosCotizacionDocument({
             className="absolute inset-x-0 bottom-0 h-1"
             style={{ backgroundColor: SUITE.orange }}
           />
-          <p
-            className="text-[11px] font-semibold uppercase tracking-[0.22em]"
-            style={{ color: SUITE.orange }}
-          >
-            Cotización de evento
-          </p>
-          <h1
-            className={`mt-2 text-3xl font-semibold tracking-tight md:text-4xl ${display.className}`}
-          >
-            {EVENTOS_CONTACT.brand}
-          </h1>
-          <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">
-            Propuesta gastronómica para tu celebración · Menús, servicio y
-            atención Cluster Culinario
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <BrandLogo
+                variant="onDark"
+                className="h-10 w-auto max-w-[220px] object-contain object-left md:h-12"
+              />
+              <p
+                className="mt-4 text-[11px] font-semibold uppercase tracking-[0.22em]"
+                style={{ color: SUITE.orange }}
+              >
+                Cotización de evento · Terraza
+              </p>
+              <h1
+                className={`mt-2 text-2xl font-semibold tracking-tight md:text-3xl ${display.className}`}
+              >
+                Carranza 50
+              </h1>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">
+                Propuesta gastronómica para tu celebración · Menús, servicio y
+                atención Cluster Culinario
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-right text-xs text-white/80">
+              <p className="font-semibold uppercase tracking-[0.14em] text-white/55">
+                Contacto Eventos
+              </p>
+              <a
+                href={`mailto:${EVENTOS_CONTACT.email}`}
+                className="mt-1 block text-sm font-bold text-white underline-offset-2 hover:underline"
+              >
+                {EVENTOS_CONTACT.email}
+              </a>
+              <p className="mt-1">{EVENTOS_CONTACT.phone}</p>
+            </div>
+          </div>
           <div className="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-white/70">
             <span>
               Folio{' '}
@@ -275,17 +296,26 @@ export function EventosCotizacionDocument({
             color: SUITE.muted,
           }}
         >
-          <p className="font-semibold" style={{ color: SUITE.navy }}>
+          <BrandLogo
+            variant="navy"
+            className="mx-auto h-8 w-auto max-w-[180px] object-contain"
+          />
+          <p className="mt-3 font-semibold" style={{ color: SUITE.navy }}>
             {EVENTOS_CONTACT.brand}
           </p>
           <p className="mt-1">{EVENTOS_CONTACT.address}</p>
-          <p className="mt-1">
-            {EVENTOS_CONTACT.phone} · {EVENTOS_CONTACT.email}
-            {EVENTOS_CONTACT.emailAlt
-              ? ` · ${EVENTOS_CONTACT.emailAlt}`
-              : ''}
+          <p className="mt-2 text-sm font-bold" style={{ color: SUITE.navy }}>
+            <a
+              href={`mailto:${EVENTOS_CONTACT.email}`}
+              className="underline-offset-2 hover:underline"
+              style={{ color: SUITE.orangeDeep }}
+            >
+              {EVENTOS_CONTACT.email}
+            </a>
           </p>
-          <p className="mt-1">{EVENTOS_CONTACT.web}</p>
+          <p className="mt-1">
+            {EVENTOS_CONTACT.phone} · {EVENTOS_CONTACT.web}
+          </p>
         </footer>
       </article>
 

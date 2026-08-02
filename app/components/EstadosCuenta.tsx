@@ -1013,18 +1013,6 @@ export function EstadosCuenta({
                                       </p>
                                       {pdf?.rel_path ? (
                                         <div className="mt-1 flex flex-wrap gap-2">
-                                          <button
-                                            type="button"
-                                            className="text-[11px] font-semibold underline-offset-2 hover:underline"
-                                            style={{ color: SUITE.navy }}
-                                            onClick={() => {
-                                              void navigator.clipboard.writeText(
-                                                pdf.rel_path
-                                              );
-                                            }}
-                                          >
-                                            Copiar ruta
-                                          </button>
                                           <a
                                             className="text-[11px] font-semibold underline-offset-2 hover:underline"
                                             style={{

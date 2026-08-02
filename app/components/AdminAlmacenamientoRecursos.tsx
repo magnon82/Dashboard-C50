@@ -211,15 +211,30 @@ function CopyChip({
   copied: string | null;
   onCopy: (v: string) => void;
 }) {
+  const isPathLike =
+    kind === 'path' || kind === 'file' || kind === 'route';
+
+  if (isPathLike) {
+    return (
+      <code
+        className="inline-flex max-w-full truncate rounded-md border px-2 py-1 font-mono text-[11px] font-medium"
+        style={{
+          borderColor: SUITE.border,
+          background: '#F4F6F9',
+          color: SUITE.navy,
+        }}
+        title={label}
+      >
+        {label}
+      </code>
+    );
+  }
+
   const isCopied = copied === value;
   const title =
     kind === 'source_file'
       ? 'Copiar source_file'
-      : kind === 'path' || kind === 'file'
-        ? 'Copiar ruta'
-        : kind === 'route'
-          ? 'Copiar ruta'
-          : 'Copiar';
+      : 'Copiar';
 
   return (
     <button
@@ -527,14 +542,6 @@ function ResourceAccordion({
               <code className="rounded bg-[#F4F6F9] px-1.5 py-0.5 font-mono text-[11px]" style={{ color: SUITE.navy }}>
                 {branch.note}
               </code>
-              <button
-                type="button"
-                className="ml-2 text-[11px] font-semibold"
-                style={{ color: SUITE.orangeDeep }}
-                onClick={() => onCopy(branch.note!)}
-              >
-                {copied === branch.note ? 'Copiado' : 'Copiar ruta'}
-              </button>
             </p>
           ) : null}
 

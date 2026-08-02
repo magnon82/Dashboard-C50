@@ -5,13 +5,20 @@ import {
   requireEventosWrite,
 } from '@/app/lib/eventos-api';
 import {
+  indexActivityByName,
+  loadEventClientActivity,
+  pickActivityForClient,
+} from '@/app/lib/eventos-activity';
+import {
   EVENTOS_QUOTE_LOCK_WITHIN_DAYS,
   EVENTOS_SERVICIO_PCT,
   canPlaceHold,
+  checkOptionalMenuChoicesOnLines,
   computeQuoteTotals,
   defaultHoldUntil,
   isQuoteLockedByEventDate,
   quoteLockMessage,
+  resolveAnticipoDateFromActivity,
   validatePaxAllocation,
   validateQuotePax,
   type QuoteLineInput,
@@ -161,7 +168,7 @@ export async function POST(request: Request) {
   }
 
   const pax = Number(body.pax || 10);
-  if (!Number.isFinite(pax) || pax < 1) {
+  if (!Number.isFinite(pax)) {
     return NextResponse.json({ error: 'pax inválido' }, { status: 400 });
   }
 
@@ -357,6 +364,35 @@ export async function POST(request: Request) {
       .eq('id', quoteId)
       .single();
 
+    let anticipoDate: string | null = null;
+    try {
+      const { data: clientRow } = await sb
+        .from('event_clients')
+        .select('company_name, contact_name')
+        .eq('id', clientId)
+        .maybeSingle();
+      const activity = await loadEventClientActivity();
+      if (activity && clientRow) {
+        const hit = pickActivityForClient(
+          indexActivityByName(activity),
+          clientRow.company_name || '',
+          clientRow.contact_name
+        );
+        anticipoDate = resolveAnticipoDateFromActivity(
+          hit?.timeline,
+          body.event_date || null
+        );
+      }
+    } catch {
+      /* sin activity seed */
+    }
+    const optionalCheck = checkOptionalMenuChoicesOnLines(
+      lines,
+      anticipoDate,
+      body.event_date || null,
+      'warn'
+    );
+
     return NextResponse.json(
       {
         quote: full || quote,
@@ -364,6 +400,7 @@ export async function POST(request: Request) {
         lead_created: leadResult.leadCreated,
         follow_up_synced: leadResult.followUpSynced || false,
         lead_error: leadResult.error || null,
+        optional_menu_warning: optionalCheck.message,
       },
       { status: 201 }
     );

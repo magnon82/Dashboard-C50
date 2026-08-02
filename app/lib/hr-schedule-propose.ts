@@ -54,6 +54,7 @@ export type ProposeEmployee = {
   full_name: string;
   area: string | null;
   puesto: string | null;
+  puestos_secundarios?: string[] | null;
   /** Opcional: flag `dual_limpieza_mesero` en notes (p. ej. Roman Sanchez). */
   notes?: string | null;
 };
@@ -67,12 +68,37 @@ export const DUAL_LIMPIEZA_MORNING = {
   end: '16:00:00',
 } as const;
 
-/** Detecta doble rol limpieza mañana + mesero tarde/noche (notes o nombre). */
+/** Detecta doble rol limpieza mañana + mesero tarde/noche (roles, notes o nombre). */
 export function isDualLimpiezaMesero(
-  emp: Pick<ProposeEmployee, 'full_name' | 'notes'>
+  emp: Pick<ProposeEmployee, 'full_name' | 'notes'> & {
+    puesto?: string | null;
+    puestos_secundarios?: string[] | null;
+  }
 ): boolean {
+  // Import dinámico evitado: misma lógica que hasDualLimpiezaServicio
   const notes = (emp.notes || '').toLowerCase();
   if (notes.includes('dual_limpieza_mesero')) return true;
+  const roles = [
+    emp.puesto,
+    ...(Array.isArray(emp.puestos_secundarios) ? emp.puestos_secundarios : []),
+  ]
+    .map((r) =>
+      String(r || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+    )
+    .filter(Boolean);
+  const hasLimp = roles.some((r) => r.includes('limpieza'));
+  const hasServ = roles.some(
+    (r) =>
+      /\bmeser/.test(r) ||
+      /\bhoste/.test(r) ||
+      /\bbartender\b/.test(r) ||
+      /\bbarra\b/.test(r) ||
+      /\bcapitan\b/.test(r)
+  );
+  if (hasLimp && hasServ) return true;
   const n = (emp.full_name || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -826,7 +852,7 @@ function reshapeDualLimpiezaMesero(
       start_time: dinner.start,
       end_time: end,
       area: emp.area || 'Piso',
-      role_label: emp.puesto || 'Mesero encargado',
+      role_label: emp.puesto || 'Meserx Encargadx',
       origin: 'auto',
       notes: 'dual_limpieza_mesero:mesero',
     });

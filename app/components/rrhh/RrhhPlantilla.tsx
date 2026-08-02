@@ -11,21 +11,27 @@ import {
   HrDocViewer,
   type HrViewerTarget,
 } from '@/app/components/rrhh/HrDocViewer';
+import { RrhhEmployeeProfile } from '@/app/components/rrhh/RrhhEmployeeProfile';
 import { RrhhResguardosPanel } from '@/app/components/rrhh/RrhhResguardosPanel';
 import {
   formatAntiguedad,
   formatHrDate,
   formatHrPuesto,
   groupPlantillaByTeam,
-  isMergedDuplicateShell,
   isPlantillaExterno,
   plantillaPositionKey,
   type HrEmployee,
   type PlantillaTeamGroup,
 } from '@/app/lib/hr';
-import { formatHrListName } from '@/app/lib/hr-person-match';
+import type { HrDocAlertSummary } from '@/app/lib/hr-employee-profile';
+import { formatHrListName, matchPerson } from '@/app/lib/hr-person-match';
+import {
+  HR_PUESTO_CATALOG,
+  formatPlantillaPuestoLabel,
+} from '@/app/lib/hr-puestos';
 import { suggestSuiteUsername } from '@/app/lib/hr-suite-user';
 import { getTheme, SUITE } from '@/app/lib/themes';
+import { canEditEmployees, useSession } from '@/app/lib/useSession';
 
 const theme = getTheme('suite');
 
@@ -100,45 +106,6 @@ const TEAM_ACCENT: Record<
   otros: { accent: SUITE.muted, wash: '#f1f5f9' },
 };
 
-function badgeText(data: Payload | null): string {
-  const hasNomina =
-    data?.source === 'nomina_horarios' ||
-    data?.source === 'periodo_transcurrido' ||
-    data?.source === 'plantilla_vigente' ||
-    data?.source === 'seed_local_2026' ||
-    data?.periodStatus === 'pagado' ||
-    data?.periodStatus === 'cerrado' ||
-    Boolean(data?.periodLabel || data?.periodEnd || data?.paidAt);
-  const hasSchedule =
-    data?.source === 'nomina_horarios' ||
-    data?.source === 'solo_horarios' ||
-    Boolean(data?.scheduleWeekStart || data?.scheduleWeekEnd);
-
-  if (!hasNomina && !hasSchedule) {
-    return 'Sin referencia de plantilla';
-  }
-  if (hasNomina && hasSchedule) {
-    const periodo =
-      data?.periodLabel || formatHrDate(data?.periodEnd || data?.paidAt);
-    return periodo && periodo !== '—'
-      ? `Conciliada con horarios · ${periodo}`
-      : 'Conciliada con horarios';
-  }
-  if (hasSchedule) {
-    const semana = formatHrDate(
-      data?.scheduleWeekStart || data?.scheduleWeekEnd
-    );
-    return semana && semana !== '—'
-      ? `Según última semana de horarios · ${semana}`
-      : 'Según última semana de horarios';
-  }
-  const periodo =
-    data?.periodLabel || formatHrDate(data?.periodEnd || data?.paidAt);
-  return periodo && periodo !== '—'
-    ? `Según nómina conciliada · ${periodo}`
-    : 'Según nómina conciliada';
-}
-
 function normKey(name: string): string {
   return name
     .normalize('NFD')
@@ -150,15 +117,6 @@ function normKey(name: string): string {
     .filter(Boolean)
     .sort()
     .join(' ');
-}
-
-function currentYearCdmx(): number {
-  return Number(
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Mexico_City',
-      year: 'numeric',
-    }).format(new Date())
-  );
 }
 
 function formatFechaBaja(iso: string | null | undefined): string | null {
@@ -193,37 +151,39 @@ function formatPeriodoTrabajado(
   return 'sin fechas';
 }
 
-function isBajaDelAno(a: ArchivedDb, year: number): boolean {
-  if (isMergedDuplicateShell(a.notes)) return false;
-  if (a.status !== 'baja' && !a.fecha_baja) return false;
-  if (a.fecha_baja) {
-    return Number(String(a.fecha_baja).slice(0, 4)) === year;
-  }
-  // Baja operativa sin fecha: mostrar para no perder expediente
-  return a.status === 'baja';
-}
-
 function PlantillaPersonRow({
   employee,
   asOf,
   alt,
   folderPath,
   busy,
+  canEdit,
+  docAlert,
   onOpenExpediente,
-  onEdit,
+  onOpenProfile,
+  onEditProfile,
 }: {
   employee: HrEmployee;
   asOf: string | null;
   alt: boolean;
   folderPath: string | null;
   busy: boolean;
+  canEdit: boolean;
+  docAlert: HrDocAlertSummary | null;
   onOpenExpediente: (employee: HrEmployee, path: string) => void;
-  onEdit: (employee: HrEmployee) => void;
+  onOpenProfile: (employee: HrEmployee) => void;
+  onEditProfile: (employee: HrEmployee) => void;
 }) {
-  const puesto =
+  const puestoFmt = formatPlantillaPuestoLabel(employee);
+  const puestoPrimary =
     formatHrPuesto(
-      plantillaPositionKey(employee) || employee.puesto || employee.area
+      puestoFmt.primary !== '—'
+        ? puestoFmt.primary
+        : plantillaPositionKey(employee) || employee.puesto || employee.area
     ) || '—';
+  const missing = docAlert?.missingCount ?? 0;
+  const missingTitles =
+    docAlert?.missing.map((d) => d.title).join(', ') || '';
   return (
     <div
       className={`rrhh-plantilla__cols rrhh-plantilla__row${
@@ -231,12 +191,44 @@ function PlantillaPersonRow({
       }`}
     >
       <div className="rrhh-plantilla__name">
-        {formatHrListName(employee.full_name)}
+        <button
+          type="button"
+          className="rrhh-plantilla__name-btn"
+          onClick={() => onOpenProfile(employee)}
+          title="Abrir perfil"
+        >
+          {formatHrListName(employee.full_name)}
+        </button>
+        {missing > 0 ? (
+          <button
+            type="button"
+            className="rrhh-plantilla__doc-alert"
+            onClick={() => onOpenProfile(employee)}
+            title={`Documentos obligatorios faltantes: ${missingTitles}`}
+          >
+            <span className="rrhh-plantilla__doc-alert-icon" aria-hidden>
+              !
+            </span>
+            <span className="rrhh-plantilla__doc-alert-text">
+              {missing === 1
+                ? `Falta ${missingTitles}`
+                : `Faltan ${missing} docs`}
+            </span>
+          </button>
+        ) : null}
       </div>
       <div>
-        <span className="rrhh-plantilla__badge" title={puesto}>
-          {puesto}
+        <span className="rrhh-plantilla__badge" title={puestoFmt.title}>
+          {puestoPrimary}
         </span>
+        {puestoFmt.secondaryHint ? (
+          <span
+            className="rrhh-plantilla__badge-sec"
+            title={`También: ${puestoFmt.secondaryHint}`}
+          >
+            + {puestoFmt.secondaryHint}
+          </span>
+        ) : null}
       </div>
       <div className="rrhh-plantilla__meta">
         <div className="rrhh-plantilla__date">
@@ -262,29 +254,31 @@ function PlantillaPersonRow({
         )}
       </div>
       <div className="rrhh-plantilla__actions">
-        <button
-          type="button"
-          className="rrhh-plantilla__edit-btn"
-          disabled={busy}
-          onClick={() => onEdit(employee)}
-          title="Editar colaborador"
-          aria-label={`Editar ${formatHrListName(employee.full_name)}`}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
+        {canEdit ? (
+          <button
+            type="button"
+            className="rrhh-plantilla__edit-btn"
+            disabled={busy}
+            onClick={() => onEditProfile(employee)}
+            title="Editar perfil"
+            aria-label={`Editar perfil de ${formatHrListName(employee.full_name)}`}
           >
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-          </svg>
-        </button>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -303,6 +297,8 @@ export function RrhhPlantilla({
   onGoBiblioteca?: () => void;
   initialShowResguardos?: boolean;
 }) {
+  const { user } = useSession();
+  const canEditEmp = canEditEmployees(user);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [editUser, setEditUser] = useState<Record<string, string>>({});
@@ -311,7 +307,7 @@ export function RrhhPlantilla({
     password: string;
     displayName: string;
   } | null>(null);
-  const [showCatalog, setShowCatalog] = useState(false);
+  const [showCatalog] = useState(false);
   const [catalog, setCatalog] = useState<HrEmployee[] | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [expIndex, setExpIndex] = useState<ExpedienteIndex | null>(null);
@@ -333,23 +329,14 @@ export function RrhhPlantilla({
       return '';
     }
   });
-  /** Panel de ficha: editar / dar de baja (no botón rojo en la lista). */
-  const [editTarget, setEditTarget] = useState<HrEmployee | null>(null);
-  const [showBajaForm, setShowBajaForm] = useState(false);
-  /** Archivo de bajas: fuera de la plantilla vigente (no como alerta). */
-  const [showArchivoBajas, setShowArchivoBajas] = useState(false);
-  const [bajaFecha, setBajaFecha] = useState(() => {
-    try {
-      return new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/Mexico_City',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).format(new Date());
-    } catch {
-      return '';
-    }
-  });
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [profileTab, setProfileTab] = useState<
+    'docs' | 'medico' | 'resguardos' | 'datos'
+  >('docs');
+  const [docAlerts, setDocAlerts] = useState<
+    Record<string, HrDocAlertSummary>
+  >({});
+  const [docAlertsWithMissing, setDocAlertsWithMissing] = useState(0);
 
   useEffect(() => {
     if (initialShowResguardos) setShowResguardos(true);
@@ -360,13 +347,21 @@ export function RrhhPlantilla({
   const plantillaGroups = showCatalog ? [] : groupPlantillaByTeam(employees);
   const asOf = data?.periodEnd || data?.paidAt || null;
   const emptyPlantilla = !loading && !showCatalog && baseEmployees.length === 0;
+  const plantillaIdsKey = useMemo(
+    () =>
+      showCatalog
+        ? ''
+        : (data?.employees ?? [])
+            .map((e) => e.id)
+            .sort()
+            .join(','),
+    [showCatalog, data?.employees]
+  );
   const statusMessage =
     toast ||
     (emptyPlantilla && (data?.message || EMPTY_HINT)) ||
     (data?.ready === false && data?.message) ||
     null;
-
-  const year = currentYearCdmx();
 
   const loadExpedientes = useCallback(async () => {
     try {
@@ -418,6 +413,39 @@ export function RrhhPlantilla({
     void loadExpedientes();
   }, [loadExpedientes, data?.count]);
 
+  const loadDocAlerts = useCallback(async (idsKey: string) => {
+    if (!idsKey) {
+      setDocAlerts({});
+      setDocAlertsWithMissing(0);
+      return;
+    }
+    try {
+      const q = new URLSearchParams({ ids: idsKey });
+      const res = await fetch(`/api/hr/employees/doc-alerts?${q}`, {
+        cache: 'no-store',
+      });
+      const json = (await res.json()) as {
+        ready?: boolean;
+        alerts?: Record<string, HrDocAlertSummary>;
+        withMissing?: number;
+      };
+      if (!res.ok || json.ready === false) {
+        setDocAlerts({});
+        setDocAlertsWithMissing(0);
+        return;
+      }
+      setDocAlerts(json.alerts || {});
+      setDocAlertsWithMissing(json.withMissing ?? 0);
+    } catch {
+      setDocAlerts({});
+      setDocAlertsWithMissing(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDocAlerts(plantillaIdsKey);
+  }, [loadDocAlerts, plantillaIdsKey]);
+
   useEffect(() => {
     if (!showCatalog) return;
     let cancelled = false;
@@ -468,50 +496,26 @@ export function RrhhPlantilla({
       const byId = folderByEmployeeId.get(emp.id);
       if (byId) return byId.path;
       const byName = folderByName.get(normKey(emp.full_name));
-      return byName?.path ?? null;
+      if (byName) return byName.path;
+      // Nombre corto Excel ↔ carpeta Altas (p. ej. Elizabeth Torrijos ↔ TORRIJOS…JOANA ELIZABETH).
+      for (const f of folders) {
+        if (f.employeeId && f.employeeId !== emp.id) continue;
+        const m = matchPerson(f.name, [
+          { id: emp.id, full_name: emp.full_name },
+        ]);
+        if (
+          m.employeeId === emp.id &&
+          (m.autoLink ||
+            m.confidence === 'exact' ||
+            m.confidence === 'high')
+        ) {
+          return f.path;
+        }
+      }
+      return null;
     },
-    [folderByEmployeeId, folderByName]
+    [folderByEmployeeId, folderByName, folders]
   );
-
-  const bajasDelAno = useMemo(() => {
-    const list = (expIndex?.archivedFromDb ?? []).filter((a) =>
-      isBajaDelAno(a, year)
-    );
-    const byLabel = new Map<string, ArchivedDb>();
-    for (const a of list) {
-      const label = formatHrListName(a.full_name).toLocaleLowerCase('es-MX');
-      const prev = byLabel.get(label);
-      if (!prev) {
-        byLabel.set(label, a);
-        continue;
-      }
-      const aHas = Boolean(resolveFolderPath(a));
-      const prevHas = Boolean(resolveFolderPath(prev));
-      if (aHas && !prevHas) byLabel.set(label, a);
-      else if (aHas === prevHas && a.full_name.length > prev.full_name.length) {
-        byLabel.set(label, a);
-      }
-    }
-    return [...byLabel.values()].sort((a, b) => {
-      const da = a.fecha_baja || '';
-      const db = b.fecha_baja || '';
-      if (da !== db) return db.localeCompare(da);
-      return formatHrListName(a.full_name).localeCompare(
-        formatHrListName(b.full_name),
-        'es',
-        { sensitivity: 'base' }
-      );
-    });
-  }, [expIndex?.archivedFromDb, year, resolveFolderPath]);
-
-  /** Carpetas en Altas cuyo empleado ya está baja en sistema. */
-  const expedienteMismatches = useMemo(() => {
-    return folders.filter(
-      (f) =>
-        f.archiveStatus === 'baja' &&
-        (f.archiveNote || '').toLowerCase().includes('altas')
-    );
-  }, [folders]);
 
   const openExpediente = useCallback(
     (
@@ -602,35 +606,6 @@ export function RrhhPlantilla({
     } finally {
       setBusyId(null);
     }
-  }
-
-  async function submitBaja() {
-    if (!editTarget) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(bajaFecha)) {
-      setToast('Indica la fecha de baja (YYYY-MM-DD)');
-      return;
-    }
-    const ok = await patchEmployee(editTarget.id, {
-      action: 'baja',
-      fecha_baja: bajaFecha,
-    });
-    if (ok) {
-      setEditTarget(null);
-      setShowBajaForm(false);
-      void loadExpedientes();
-    }
-  }
-
-  async function reactivarBaja(a: ArchivedDb) {
-    if (
-      !confirm(
-        `¿Reactivar a ${formatHrListName(a.full_name)} en la plantilla vigente?`
-      )
-    ) {
-      return;
-    }
-    const ok = await patchEmployee(a.id, { action: 'alta' });
-    if (ok) void loadExpedientes();
   }
 
   async function createSuiteUser(emp: HrEmployee) {
@@ -732,60 +707,26 @@ export function RrhhPlantilla({
         <h3 className="text-lg font-bold" style={{ color: theme.title }}>
           Plantilla vigente
         </h3>
-        <span
-          className="rounded-full px-3 py-1 text-xs font-semibold"
-          style={{ backgroundColor: SUITE.orangeSoft, color: SUITE.navy }}
-        >
-          {badgeText(data)}
-        </span>
-        <button
-          type="button"
-          className="rounded-full px-3 py-1 text-xs font-semibold text-white"
-          style={{ backgroundColor: SUITE.orangeDeep }}
-          onClick={() => {
-            setShowAlta((v) => !v);
-            setEditTarget(null);
-            setShowBajaForm(false);
-          }}
-        >
-          {showAlta ? 'Cerrar alta' : 'Alta empleado'}
-        </button>
+        {canEditEmp ? (
+          <button
+            type="button"
+            className="rounded-full px-3 py-1 text-xs font-semibold text-white"
+            style={{ backgroundColor: SUITE.orangeDeep }}
+            onClick={() => {
+              setShowAlta((v) => !v);
+            }}
+          >
+            {showAlta ? 'Cerrar alta' : 'Alta empleado'}
+          </button>
+        ) : null}
         <button
           type="button"
           className="rounded-full px-3 py-1 text-xs font-semibold border border-slate-200"
           style={{ color: theme.title }}
-          onClick={() => setShowCatalog((v) => !v)}
-        >
-          {showCatalog ? 'Ver plantilla' : 'Overrides'}
-        </button>
-        <button
-          type="button"
-          className="rounded-full px-3 py-1 text-xs font-semibold border border-slate-200"
-          style={{ color: theme.title }}
-          onClick={() => setShowArchivoBajas((v) => !v)}
-          title="Bajas y desajustes de expediente — fuera de la plantilla vigente"
-        >
-          {showArchivoBajas
-            ? 'Ocultar archivo'
-            : `Archivo / Bajas${
-                bajasDelAno.length || expedienteMismatches.length
-                  ? ` (${bajasDelAno.length}${
-                      expedienteMismatches.length
-                        ? ` · ${expedienteMismatches.length} desajuste${
-                            expedienteMismatches.length === 1 ? '' : 's'
-                          }`
-                        : ''
-                    })`
-                  : ''
-              }`}
-        </button>
-        <button
-          type="button"
-          className="rounded-full px-3 py-1 text-xs font-semibold text-white"
-          style={{ backgroundColor: SUITE.navy }}
+          title="Inventario por equipo/herramienta y quién lo tiene. Captura/edición: perfil → Resguardos."
           onClick={() => setShowResguardos((v) => !v)}
         >
-          {showResguardos ? 'Ocultar resguardo' : 'Nuevo resguardo'}
+          {showResguardos ? 'Ocultar inventario' : 'Ver resguardos'}
         </button>
         {onGoBiblioteca ? (
           <button
@@ -827,7 +768,7 @@ export function RrhhPlantilla({
         </p>
       )}
 
-      {showAlta ? (
+      {showAlta && canEditEmp ? (
         <div
           className="rounded-xl border border-slate-200 bg-white px-4 py-3 max-w-2xl space-y-3"
           style={{ boxShadow: SUITE.shadow }}
@@ -836,11 +777,8 @@ export function RrhhPlantilla({
             Alta de empleado
           </p>
           <p className="text-xs" style={{ color: theme.muted }}>
-            Se agrega a la plantilla vigente (force_include). El usuario Suite se
-            puede crear después en Overrides. Futuro: checklist de documentos
-            (INE, contrato, etc.) subidos a la base —{' '}
-            <code className="text-[10px]">supabase/hr_employee_documents.sql</code>
-            .
+            Se agrega a la plantilla vigente. Luego abre el perfil (clic en el
+            nombre) para documentos, médico, resguardos y datos.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block sm:col-span-2">
@@ -857,14 +795,20 @@ export function RrhhPlantilla({
             </label>
             <label className="block">
               <span className="text-xs font-semibold text-slate-600">
-                Puesto
+                Posición (principal)
               </span>
-              <input
+              <select
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 value={altaPuesto}
                 onChange={(e) => setAltaPuesto(e.target.value)}
-                placeholder="Ej. Mesero, Cocina, Caja…"
-              />
+              >
+                <option value="">— Elegir —</option>
+                {HR_PUESTO_CATALOG.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block">
               <span className="text-xs font-semibold text-slate-600">
@@ -897,118 +841,6 @@ export function RrhhPlantilla({
               Cancelar
             </button>
           </div>
-        </div>
-      ) : null}
-
-      {editTarget ? (
-        <div
-          className="rounded-xl border border-slate-200 bg-white px-4 py-3 max-w-2xl space-y-3"
-          role="dialog"
-          aria-label="Ficha de colaborador"
-          style={{ boxShadow: SUITE.shadow }}
-        >
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold" style={{ color: theme.title }}>
-                {formatHrListName(editTarget.full_name)}
-              </p>
-              <p className="text-xs text-slate-500">
-                {[
-                  formatHrPuesto(
-                    plantillaPositionKey(editTarget) ||
-                      editTarget.puesto ||
-                      editTarget.area
-                  ),
-                  formatHrDate(editTarget.fecha_ingreso),
-                  formatAntiguedad(editTarget.fecha_ingreso, asOf),
-                ]
-                  .filter((x) => x && x !== '—')
-                  .join(' · ') || 'Ficha de colaborador'}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="rounded-full px-3 py-1 text-xs font-semibold border border-slate-200"
-              style={{ color: theme.muted }}
-              onClick={() => {
-                setEditTarget(null);
-                setShowBajaForm(false);
-              }}
-            >
-              Cerrar
-            </button>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {resolveFolderPath(editTarget) ? (
-              <button
-                type="button"
-                className="rounded-full px-3 py-1.5 text-xs font-semibold text-white"
-                style={{ backgroundColor: SUITE.orangeDeep }}
-                onClick={() => {
-                  const path = resolveFolderPath(editTarget);
-                  if (path) openExpediente(editTarget, path);
-                }}
-              >
-                Abrir expediente
-              </button>
-            ) : (
-              <span className="text-xs text-slate-400 self-center">
-                Sin carpeta de expediente vinculada
-              </span>
-            )}
-            {!showBajaForm ? (
-              <button
-                type="button"
-                className="rounded-full px-3 py-1.5 text-xs font-semibold border border-rose-200 bg-rose-50 text-rose-900"
-                onClick={() => {
-                  setShowBajaForm(true);
-                  setBajaFecha((prev) => prev || altaIngreso);
-                }}
-              >
-                Dar de baja…
-              </button>
-            ) : null}
-          </div>
-
-          {showBajaForm ? (
-            <div className="rounded-lg border border-rose-200 bg-rose-50/70 px-3 py-3 space-y-3">
-              <p className="text-xs text-rose-800/90">
-                Sale de la plantilla vigente y pasa a Archivo / Bajas. El
-                expediente se conserva.
-              </p>
-              <label className="block max-w-xs">
-                <span className="text-xs font-semibold text-rose-900">
-                  Último día laborado *
-                </span>
-                <input
-                  type="date"
-                  className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm"
-                  value={bajaFecha}
-                  onChange={(e) => setBajaFecha(e.target.value)}
-                />
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={busyId === editTarget.id}
-                  className="rounded-full px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                  style={{ backgroundColor: '#be123c' }}
-                  onClick={() => void submitBaja()}
-                >
-                  {busyId === editTarget.id ? 'Guardando…' : 'Confirmar baja'}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-full px-4 py-1.5 text-xs font-semibold border border-rose-200 bg-white"
-                  style={{ color: theme.muted }}
-                  onClick={() => setShowBajaForm(false)}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          ) : null}
         </div>
       ) : null}
 
@@ -1265,13 +1097,20 @@ export function RrhhPlantilla({
                     alt={i % 2 === 1}
                     folderPath={resolveFolderPath(e)}
                     busy={busyId === e.id}
+                    canEdit={canEditEmp}
+                    docAlert={docAlerts[e.id] ?? null}
                     onOpenExpediente={(emp, path) =>
                       openExpediente(emp, path)
                     }
-                    onEdit={(emp) => {
+                    onEditProfile={(emp) => {
                       setShowAlta(false);
-                      setShowBajaForm(false);
-                      setEditTarget(emp);
+                      setProfileTab('datos');
+                      setProfileId(emp.id);
+                    }}
+                    onOpenProfile={(emp) => {
+                      setShowAlta(false);
+                      setProfileTab('docs');
+                      setProfileId(emp.id);
                     }}
                   />
                 ))}
@@ -1294,13 +1133,20 @@ export function RrhhPlantilla({
                         alt={i % 2 === 1}
                         folderPath={resolveFolderPath(e)}
                         busy={busyId === e.id}
+                        canEdit={canEditEmp}
+                        docAlert={docAlerts[e.id] ?? null}
                         onOpenExpediente={(emp, path) =>
                           openExpediente(emp, path)
                         }
-                        onEdit={(emp) => {
+                        onEditProfile={(emp) => {
                           setShowAlta(false);
-                          setShowBajaForm(false);
-                          setEditTarget(emp);
+                          setProfileTab('datos');
+                          setProfileId(emp.id);
+                        }}
+                        onOpenProfile={(emp) => {
+                          setShowAlta(false);
+                          setProfileTab('docs');
+                          setProfileId(emp.id);
                         }}
                       />
                     ))}
@@ -1314,201 +1160,30 @@ export function RrhhPlantilla({
             {employees.length} colaborador
             {employees.length === 1 ? '' : 'es'}
             {data?.periodLabel ? ` · ${data.periodLabel}` : ''}
+            {docAlertsWithMissing > 0
+              ? ` · ${docAlertsWithMissing} con docs obligatorios faltantes`
+              : ''}
           </p>
         </div>
       )}
 
-      {showArchivoBajas && !showCatalog ? (
-        <section className="space-y-3 border-t border-slate-100 pt-4">
-          <div className="flex flex-wrap items-baseline gap-2">
-            <h3 className="text-lg font-bold" style={{ color: theme.title }}>
-              Archivo / Bajas
-            </h3>
-            <span className="text-xs text-slate-500">
-              No forma parte de la plantilla vigente · {year}
-            </span>
-          </div>
-          <p className="text-xs text-slate-500">
-            Altas = vigentes; Bajas = archivo. Si una carpeta sigue en Altas con
-            status baja en el sistema, aparece abajo como desajuste (mover
-            carpeta en Drive o reactivar).
-          </p>
-
-          {expedienteMismatches.length > 0 ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-amber-900">
-                Reconciliar · mal marcados · {expedienteMismatches.length}{' '}
-                desajuste
-                {expedienteMismatches.length === 1 ? '' : 's'}
-              </p>
-              <p className="mt-1 text-[11px] text-amber-900/80">
-                En sistema figuran como baja pero su carpeta sigue en Altas. Si
-                siguen activos, usa «Corregir (reactivar)».
-              </p>
-              <ul className="mt-2 space-y-1.5">
-                {expedienteMismatches.map((f) => (
-                  <li
-                    key={f.path}
-                    className="flex flex-wrap items-center gap-2 text-sm text-amber-950"
-                  >
-                    <span className="font-semibold">
-                      {formatHrListName(f.matchedName || f.name)}
-                    </span>
-                    <span className="text-[11px] text-amber-800/80">
-                      {f.archiveNote || 'Baja con carpeta en Altas'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openExpediente(
-                          {
-                            full_name: f.matchedName || f.name,
-                            fecha_baja: f.fechaBaja,
-                          },
-                          f.path,
-                          { baja: true }
-                        )
-                      }
-                      className="text-xs font-semibold"
-                      style={{ color: SUITE.orangeDeep }}
-                    >
-                      Abrir carpeta
-                    </button>
-                    {f.employeeId ? (
-                      <button
-                        type="button"
-                        disabled={busyId === f.employeeId}
-                        onClick={() =>
-                          void reactivarBaja({
-                            id: f.employeeId!,
-                            full_name: f.matchedName || f.name,
-                            status: 'baja',
-                            fecha_baja: f.fechaBaja ?? null,
-                            puesto: null,
-                            force_exclude: true,
-                          })
-                        }
-                        className="text-xs font-semibold disabled:opacity-50"
-                        style={{ color: SUITE.navy }}
-                      >
-                        Corregir (reactivar)
-                      </button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-500">
-              Sin desajustes Altas↔baja detectados en el índice actual.
-            </p>
-          )}
-
-          {bajasDelAno.length > 0 ? (
-            <>
-              <div className="flex flex-wrap items-baseline gap-2 pt-1">
-                <h4
-                  className="text-sm font-bold"
-                  style={{ color: theme.title }}
-                >
-                  Bajas del año
-                </h4>
-                <span className="text-xs text-slate-500">
-                  {bajasDelAno.length} persona
-                  {bajasDelAno.length === 1 ? '' : 's'}
-                </span>
-              </div>
-              <ul
-                className="overflow-hidden rounded-2xl bg-white"
-                style={{ boxShadow: SUITE.shadow }}
-              >
-                {bajasDelAno.map((a, i) => {
-                  const path = resolveFolderPath(a);
-                  const periodo = formatPeriodoTrabajado(
-                    a.fecha_ingreso,
-                    a.fecha_baja
-                  );
-                  const periodoMuted = periodo === 'sin fechas';
-                  return (
-                    <li
-                      key={a.id}
-                      className={`flex flex-wrap items-center gap-2 px-4 py-2.5 ${
-                        i > 0 ? 'border-t border-slate-100' : ''
-                      }`}
-                      style={{
-                        background:
-                          i % 2 === 1 ? 'rgba(15, 23, 42, 0.03)' : undefined,
-                      }}
-                    >
-                      <span className="rounded-md bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-700">
-                        Baja
-                      </span>
-                      <span
-                        className="min-w-0 flex-1 text-sm font-semibold"
-                        style={{ color: theme.title }}
-                      >
-                        {formatHrListName(a.full_name)}
-                      </span>
-                      {a.puesto ? (
-                        <span className="text-[11px] text-slate-500">
-                          {a.puesto}
-                        </span>
-                      ) : null}
-                      <span
-                        className={`text-[11px] ${
-                          periodoMuted ? 'text-slate-400' : 'text-slate-600'
-                        }`}
-                      >
-                        {periodo}
-                      </span>
-                      {path ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openExpediente(
-                              {
-                                full_name: a.full_name,
-                                fecha_ingreso: a.fecha_ingreso,
-                                fecha_baja: a.fecha_baja,
-                              },
-                              path,
-                              { baja: true }
-                            )
-                          }
-                          className="text-xs font-semibold"
-                          style={{ color: SUITE.orangeDeep }}
-                        >
-                          Abrir carpeta
-                        </button>
-                      ) : (
-                        <span className="text-[11px] text-slate-400">
-                          Sin carpeta
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        disabled={busyId === a.id}
-                        onClick={() => void reactivarBaja(a)}
-                        className="text-xs font-semibold disabled:opacity-50"
-                        style={{ color: SUITE.navy }}
-                        title="Volver a plantilla vigente"
-                      >
-                        Reactivar
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          ) : (
-            <p className="text-xs text-slate-500">
-              No hay bajas registradas en {year}.
-            </p>
-          )}
-        </section>
-      ) : null}
-
       {showResguardos ? <RrhhResguardosPanel /> : null}
+
+      {profileId ? (
+        <RrhhEmployeeProfile
+          employeeId={profileId}
+          initialTab={profileTab}
+          onClose={() => {
+            setProfileId(null);
+            setProfileTab('docs');
+          }}
+          onChanged={() => {
+            onChanged?.();
+            void loadExpedientes();
+            void loadDocAlerts(plantillaIdsKey);
+          }}
+        />
+      ) : null}
 
       {viewer ? (
         <HrDocViewer target={viewer} onClose={() => setViewer(null)} />

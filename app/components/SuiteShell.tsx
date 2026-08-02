@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import { BrandLogo } from '@/app/components/BrandLogo';
 import { APP_MODULES } from '@/app/lib/modules';
-import { PRODUCT_ORG } from '@/app/lib/product';
+import { PRODUCT_CLUSTER } from '@/app/lib/product';
 import { canSeeModule, canSeeAdmin, useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
 
@@ -78,7 +79,7 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
     >
       <div className="mb-8 flex flex-col items-center text-center">
         <div
-          className="mb-3 flex h-16 w-16 items-center justify-center rounded-full text-2xl font-bold"
+          className="mb-3 flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold"
           style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: SUITE.orange }}
         >
           {(user?.username || 'C').slice(0, 1).toUpperCase()}
@@ -152,27 +153,33 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="mb-5 flex items-start justify-between gap-3">
-            <div>
+          <header className="mb-5 flex items-start justify-between gap-3 sm:items-center">
+            <div className="min-w-0 flex-1">
               <p
                 className="text-[11px] font-semibold uppercase tracking-[0.18em]"
                 style={{ color: theme.muted }}
               >
-                {PRODUCT_ORG}
+                {PRODUCT_CLUSTER}
               </p>
-              <h1
-                className="mt-1 text-2xl font-bold tracking-tight md:text-3xl"
-                style={{ color: theme.title }}
-              >
-                {title}
-              </h1>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <h1
+                  className="min-w-0 break-words text-2xl font-bold tracking-tight md:text-3xl"
+                  style={{ color: theme.title }}
+                >
+                  {title}
+                </h1>
+                <BrandLogo
+                  variant="navy"
+                  className="h-10 w-auto shrink-0 sm:h-11 md:h-12"
+                />
+              </div>
               {subtitle ? (
                 <p className="mt-1 text-sm" style={{ color: theme.muted }}>
                   {subtitle}
                 </p>
               ) : null}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
               {actions}
               <button
                 type="button"

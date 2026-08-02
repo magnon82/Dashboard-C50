@@ -5,6 +5,7 @@ import {
   verifySessionToken,
   canAccessAdmin,
   canAccessStaffCorte,
+  canEditHrEmployees,
 } from '@/app/lib/auth';
 
 export async function GET() {
@@ -26,6 +27,7 @@ export async function GET() {
       canEdit: session.canEdit,
       canAccessAdmin: canAccessAdmin(session),
       canAccessStaffCorte: canAccessStaffCorte(session),
+      canEditHrEmployees: canEditHrEmployees(session),
     },
   });
 }

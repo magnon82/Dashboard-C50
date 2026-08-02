@@ -1,14 +1,14 @@
 /**
  * Backfill: vincula Altas ↔ hr_employees y fija full_name canónico
- * (= basename de carpeta de expediente / drive_folder_path).
+ * (= nombres de pila + un apellido, desde basename de carpeta).
  *
  * Uso: node --experimental-strip-types scripts/hr-backfill-expediente-links.mjs
  *      node --experimental-strip-types scripts/hr-backfill-expediente-links.mjs --dry-run
  *      npm run hr:backfill-expedientes
  *
  * Pasos:
- *  1) Empleados con drive_folder_path → full_name = basename de la carpeta
- *  2) Carpetas Altas sin path: fuzzy match → escribe path + full_name carpeta
+ *  1) Empleados con drive_folder_path → full_name = format «Nombres Apellido»
+ *  2) Carpetas Altas sin path: fuzzy match → escribe path + nombre canónico
  *
  * Requiere .env.local (Supabase). Paso 2 necesita Drive montado en
  * I:\Mi unidad\RH\Expedientes personal C50\Altas (o HR_EXPEDIENTES_DIR).
@@ -17,6 +17,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { createClient } from '@supabase/supabase-js';
 import {
+  canonicalHrEmployeeName,
   folderBasenameFromPath,
   matchPerson,
   linkStatusFromMatch,
@@ -106,30 +107,31 @@ async function main() {
   for (const emp of employees) {
     const base = folderBasenameFromPath(emp.drive_folder_path);
     if (!base) continue;
+    const canonical = canonicalHrEmployeeName(base, emp.full_name);
     const cur = String(emp.full_name || '').replace(/\s+/g, ' ').trim();
-    if (cur === base) continue;
+    if (!canonical || cur === canonical) continue;
     if (renameSamples.length < 12) {
-      renameSamples.push({ before: cur, after: base, id: emp.id });
+      renameSamples.push({ before: cur, after: canonical, id: emp.id });
     }
     if (DRY) {
       renamedFromPath += 1;
-      emp.full_name = base;
+      emp.full_name = canonical;
       continue;
     }
     const { error: upErr } = await sb
       .from('hr_employees')
       .update({
-        full_name: base,
+        full_name: canonical,
         updated_at: new Date().toISOString(),
       })
       .eq('id', emp.id);
     if (!upErr) {
       renamedFromPath += 1;
-      emp.full_name = base;
+      emp.full_name = canonical;
     }
   }
 
-  console.log('=== Paso 1: full_name ← basename(drive_folder_path) ===');
+  console.log('=== Paso 1: full_name ← nombres + apellido (desde carpeta) ===');
   console.log(`Actualizados: ${renamedFromPath}`);
   if (renameSamples.length) {
     console.log('Ejemplos (antes → después):');
@@ -216,7 +218,10 @@ async function main() {
         patch.drive_folder_path = folder.path;
         willWritePath = true;
       }
-      const canonical = folder.name.replace(/\s+/g, ' ').trim();
+      const canonical = canonicalHrEmployeeName(
+        folder.name,
+        emp?.full_name || folder.name
+      );
       if (
         emp &&
         canonical &&

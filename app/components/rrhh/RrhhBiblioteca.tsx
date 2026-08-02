@@ -437,22 +437,6 @@ export function RrhhBiblioteca({
                             Solo metadatos
                           </span>
                         ) : null}
-                        {doc.local_path &&
-                        !canConsult &&
-                        !isCultura &&
-                        !doc.drive_url ? (
-                          <button
-                            type="button"
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(
-                                doc.local_path || ''
-                              );
-                            }}
-                          >
-                            Copiar ruta
-                          </button>
-                        ) : null}
                       </div>
                     </article>
                   );

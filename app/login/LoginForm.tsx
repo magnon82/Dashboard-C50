@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { BrandLogo } from '@/app/components/BrandLogo';
 import { InstallAppPrompt } from '@/app/components/InstallAppPrompt';
 import { homePathForModules } from '@/app/lib/modules';
 import { PRODUCT_NAME, PRODUCT_ORG, PRODUCT_TAGLINE } from '@/app/lib/product';
@@ -60,12 +61,11 @@ export default function LoginForm() {
         style={{ boxShadow: SUITE.shadow }}
       >
         <div className="px-8 py-7 text-white" style={{ backgroundColor: SUITE.navy }}>
-          <div
-            className="mb-4 flex h-14 w-14 items-center justify-center rounded-full text-xl font-bold"
-            style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: SUITE.orange }}
-          >
-            C50
-          </div>
+          <BrandLogo
+            variant="onDark"
+            priority
+            className="mb-5 h-auto w-[min(100%,320px)] opacity-95"
+          />
           <p className="text-xs font-semibold uppercase tracking-widest text-white/70">
             {PRODUCT_ORG}
           </p>

@@ -4,6 +4,7 @@ import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react';
 import { SuiteCard } from '@/app/components/SuiteShell';
 import { filterControlClass, filterSelectClass } from '@/app/components/SectionHeader';
 import {
+  EVENTOS_MAX_PAX,
   EVENTOS_MIN_PAX_GRUPOS,
   LEAD_STAGE_LABELS,
   LEAD_STAGES,
@@ -602,7 +603,12 @@ export function EventosCrm({
                   />
                 </label>
                 <label className="block text-xs font-medium text-slate-600">
-                  Número de personas (pax)
+                  <span className="flex flex-wrap items-baseline justify-between gap-x-2">
+                    <span>Número de personas (pax)</span>
+                    <span className="font-normal text-slate-500">
+                      mín. {EVENTOS_MIN_PAX_GRUPOS} · máx. {EVENTOS_MAX_PAX}
+                    </span>
+                  </span>
                   <EventosPaxCounter
                     value={leadForm.pax}
                     onChange={(pax) => setLeadForm((f) => ({ ...f, pax }))}

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { SuiteCard } from '@/app/components/SuiteShell';
 import { filterControlClass, filterSelectClass } from '@/app/components/SectionHeader';
-import type { CalendarEventItem, CalendarSource } from '@/app/lib/eventos-calendario';
+import type { CalendarEventItem, CalendarSource } from '@/app/lib/eventos-calendario-shared';
+import { isAnticipoSinOs } from '@/app/lib/eventos-calendario-shared';
 import { daysUntilEvent } from '@/app/lib/eventos';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
@@ -42,6 +43,10 @@ function daysLabel(iso: string): string {
 
 function osOpenUrl(filePath: string) {
   return `/api/eventos/os?open=${encodeURIComponent(filePath)}`;
+}
+
+function osDownloadUrl(filePath: string) {
+  return `/api/eventos/os?open=${encodeURIComponent(filePath)}&download=1`;
 }
 
 function ActionChip({
@@ -246,6 +251,7 @@ export function EventosCalendario() {
         <ul className="space-y-3">
           {visible.map((ev) => {
             const badge = SOURCE_STYLE[ev.source];
+            const anticipoSinOs = isAnticipoSinOs(ev);
             const showClient =
               ev.client &&
               ev.client.trim().toLowerCase() !==
@@ -259,9 +265,11 @@ export function EventosCalendario() {
                     borderLeft: `4px solid ${
                       ev.status === 'cancelado'
                         ? '#BE123C'
-                        : ev.source === 'crm'
-                          ? SUITE.orange
-                          : SUITE.navy
+                        : anticipoSinOs
+                          ? '#D97706'
+                          : ev.source === 'crm'
+                            ? SUITE.orange
+                            : SUITE.navy
                     }`,
                     opacity: ev.status === 'cancelado' ? 0.92 : 1,
                   }}
@@ -296,6 +304,18 @@ export function EventosCalendario() {
                           Cancelado
                         </span>
                       )}
+                      {anticipoSinOs && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-900"
+                          title="Hay anticipo registrado pero aún no hay orden de servicio"
+                        >
+                          <span
+                            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-600"
+                            aria-hidden
+                          />
+                          Anticipo sin OS
+                        </span>
+                      )}
                       <span
                         className="rounded-lg px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide"
                         style={{
@@ -326,25 +346,47 @@ export function EventosCalendario() {
                       )}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <ActionChip
-                        href={
-                          ev.digital_os_id
-                            ? `/eventos/os/${ev.digital_os_id}`
-                            : ev.os_path
-                              ? osOpenUrl(ev.os_path)
-                              : null
-                        }
-                        label={ev.digital_os_id ? 'Ver OS' : 'Descargar OS'}
-                        disabled={!ev.digital_os_id && !ev.os_path}
-                        disabledLabel="Sin OS"
-                        title={
-                          ev.digital_os_id
-                            ? 'Abrir orden de servicio digital'
-                            : ev.os_path
-                              ? ev.os_filename || 'Abrir PDF de orden de servicio'
-                              : 'Sin OS digital ni PDF en Drive'
-                        }
-                      />
+                      {ev.digital_os_id ? (
+                        <>
+                          <ActionChip
+                            href={`/eventos/os/${ev.digital_os_id}`}
+                            label="Consultar OS"
+                            disabledLabel="Sin OS"
+                            title="Abrir orden de servicio digital"
+                          />
+                          <ActionChip
+                            href={`/eventos/os/${ev.digital_os_id}?print=1`}
+                            label="Descargar OS"
+                            disabledLabel="Sin OS"
+                            title="Abrir diálogo para guardar PDF"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <ActionChip
+                            href={ev.os_path ? osOpenUrl(ev.os_path) : null}
+                            label="Consultar OS"
+                            disabled={!ev.os_path}
+                            disabledLabel="Sin OS"
+                            title={
+                              ev.os_path
+                                ? ev.os_filename || 'Ver PDF en el navegador'
+                                : 'Sin OS digital ni PDF en Drive'
+                            }
+                          />
+                          {ev.os_path ? (
+                            <ActionChip
+                              href={osDownloadUrl(ev.os_path)}
+                              label="Descargar OS"
+                              disabledLabel="Sin OS"
+                              title={
+                                ev.os_filename ||
+                                'Descargar PDF de orden de servicio'
+                              }
+                            />
+                          ) : null}
+                        </>
+                      )}
                       <ActionChip
                         href={
                           ev.quote_id

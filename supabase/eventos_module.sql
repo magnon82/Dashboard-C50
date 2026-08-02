@@ -318,9 +318,10 @@ comment on table public.event_payments is
   'Stub pagos / anticipos de eventos.';
 
 -- ---------------------------------------------------------------------------
--- Seed catálogo — SOLO Menús eventos vigentes
+-- Seed catálogo — Menús eventos vigentes + bebidas C50 Esp
 -- I:\Mi unidad\Eventos\Menús\Menús eventos vigentes
--- (no usar Menús eventos viejos / NUEVOS PRECIOS / carta C50 en el cotizador)
+-- Bebidas add-on: I:\Mi unidad\Menú C50\Menú C50 Esp.pdf (solo bebidas; ver eventos_menus_bebidas_c50.sql)
+-- (no usar Menús eventos viejos / NUEVOS PRECIOS / alimentos de carta C50)
 -- ---------------------------------------------------------------------------
 insert into public.event_menus (code, name, category, description, min_pax, requires_food, includes_servicio, sort_order, notes)
 values
@@ -333,18 +334,18 @@ values
     false,
     false,
     10,
-    'Fuente: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Menú 3 tiempos 2025.pdf'
+    'Fuente definitiva: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Menú 3 tiempos 2025.pdf — solo 7 fuertes del PDF (sin extras OS/carta C50).'
   ),
   (
     'desayunos_2025',
     'Menú desayunos 2025',
     'desayunos',
-    'Desayunos por persona. Pack ≥50 pax = $30,000. Mínimo menú regular 50 / buffet 30 (PDF).',
-    30,
+    'Desayunos por persona (PDF 2025). Mínimo 50 personas. Pack ≥50 pax = $30,000 (regla comercial).',
+    50,
     false,
     false,
     20,
-    'Fuente: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Menú desayunos 2025.pdf. Pack $30k ≥50 pax = regla comercial locked.'
+    'Fuente definitiva: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Menú desayunos 2025.pdf. Pack $30k ≥50 pax = regla comercial locked. TODO: CON HUEVO/CON CHILAQUILES $550 (pág. 3).'
   ),
   (
     'desayunos_pack_50',
@@ -388,18 +389,18 @@ values
     true,
     false,
     40,
-    'Fuente: Menús eventos vigentes / Barra libre eventos 2025.pdf. Precios con I.V.A.; no incluyen propina. Para consumo por pieza usa «Bebidas a la carta».'
+    'Fuente definitiva: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Barra libre eventos 2025.pdf. Precios con I.V.A.; no incluyen propina. Consumo por pieza → Bebidas (Menú C50).'
   ),
   (
     'bebidas_a_la_carta',
-    'Bebidas a la carta',
+    'Bebidas (Menú C50)',
     'extra',
-    'Consumo por pieza (sin paquete de barra). Ítems frecuentes en órdenes de servicio; edita el precio unitario si aplica.',
+    'Consumo por pieza / botella según Menú C50 Esp.pdf (solo bebidas; sin alimentos de la carta). Edita precio unitario si aplica.',
     null,
     false,
     false,
     45,
-    'No hay PDF de carta en vigentes. Precios mezcalita/margarita/cerveza desde OS 2024–2026 (price_verified=false).'
+    'Fuente: I:\Mi unidad\Menú C50\Menú C50 Esp.pdf — VINOS, CAFÉ, COCTELERÍA, DESTILADOS, CERVEZAS, SIN ALCOHOL. Alimentos ignorados. Patch completo: eventos_menus_bebidas_c50.sql.'
   )
 on conflict (code) do update set
   name = excluded.name,
@@ -463,12 +464,12 @@ set
       "affects_price": true,
       "options": [
         {"id":"3T-FET","label":"Fetuccini cherry","unit_price":480,"is_vegetarian":true,"price_verified":true,"price_source":"pdf_3_tiempos_2025"},
-        {"id":"3T-PECH","label":"Pechuga en moles (250 g)","unit_price":580,"is_vegetarian":false,"price_verified":true,"price_source":"pdf_3_tiempos_2025"},
         {"id":"3T-RAV","label":"Ravioles de requesón y espinaca (130 g)","unit_price":560,"is_vegetarian":true,"price_verified":true,"price_source":"pdf_3_tiempos_2025"},
+        {"id":"3T-PECH","label":"Pechuga en moles (250 g)","unit_price":580,"is_vegetarian":false,"price_verified":true,"price_source":"pdf_3_tiempos_2025"},
         {"id":"3T-CHA","label":"Chamorro al pastor (½ pz)","unit_price":580,"is_vegetarian":false,"price_verified":true,"price_source":"pdf_3_tiempos_2025"},
+        {"id":"3T-ATUN","label":"Atún en ponzu","unit_price":560,"is_vegetarian":false,"price_verified":true,"price_source":"pdf_3_tiempos_2025"},
         {"id":"3T-SIR","label":"Sirloin a las brasas (300 g)","unit_price":850,"is_vegetarian":false,"price_verified":true,"price_source":"pdf_3_tiempos_2025"},
-        {"id":"3T-RIB","label":"Rib eye (300 g)","unit_price":850,"is_vegetarian":false,"price_verified":true,"price_source":"pdf_3_tiempos_2025"},
-        {"id":"3T-ATUN","label":"Atún en ponzu","unit_price":560,"is_vegetarian":false,"price_verified":true,"price_source":"pdf_3_tiempos_2025"}
+        {"id":"3T-RIB","label":"Rib eye (300 g)","unit_price":850,"is_vegetarian":false,"price_verified":true,"price_source":"pdf_3_tiempos_2025"}
       ]
     },
     {
@@ -492,8 +493,7 @@ set
       "affects_price": false,
       "options": [
         {"id":"POS-MOUSSE","label":"Mousse de 3 chocolates"},
-        {"id":"POS-CHEESE","label":"Cheesecake"},
-        {"id":"POS-ELOTE","label":"Pan de elote"}
+        {"id":"POS-CHEESE-ELOTE","label":"Cheesecake pan de elote"}
       ]
     }
   ]$cg$::jsonb
@@ -505,7 +505,7 @@ where i.menu_id = m.id
 update public.event_menus
 set
   description = 'Entrada + plato fuerte (a elegir) + postre. Precio por persona según el fuerte. Grupos desde 10 personas.',
-  notes = 'Fuente: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Menú 3 tiempos 2025.pdf. Solo fuertes del PDF vigente.'
+  notes = 'Fuente definitiva: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Menú 3 tiempos 2025.pdf — solo 7 fuertes del PDF (sin extras OS/carta C50).'
 where code = 'menu_3_tiempos_2025';
 
 -- Desayunos por persona
@@ -527,6 +527,49 @@ where m.code = 'desayunos_2025'
     select 1 from public.event_menu_items i
     where i.menu_id = m.id and i.sku = v.sku
   );
+
+-- Desayunos: descripciones / flags alineados a Menú desayunos 2025.pdf
+update public.event_menu_items i
+set
+  name = v.name,
+  description = v.descr,
+  unit_price = v.price,
+  price_source = 'pdf_desayunos_2025',
+  price_verified = v.verified,
+  active = true
+from public.event_menus m
+cross join (values
+  ('DES-1', 'Menú 1 — Huevos (variedad)',
+   'Con chorizo, tocino, a la mexicana, queso panela, jamón, divorciados, rancheros o en salsa pasilla (fritos)',
+   250.00, true),
+  ('DES-2', 'Menú 2 — Enchiladas / enfrijoladas',
+   'Enchiladas verdes/rojas con pollo, suizas con pollo, adobo de 4 chiles; o enfrijoladas',
+   320.00, true),
+  ('DES-3', 'Menú 3 — Chilaquiles',
+   'Verdes o rojos con pollo o huevo; adobo de 4 chiles con pollo o huevo',
+   280.00, true),
+  ('DES-4', 'Menú 4 — Emparedado de salmón curado', null, 350.00, true),
+  ('DES-5', 'Menú 5 — Costilla de res + chilaquiles',
+   'Con chilaquiles verdes o rojos', 320.00, true),
+  ('DES-5B', 'Menú 5 — Costilla con huevo',
+   'TODO PDF: «CON HUEVO $550» en pág. 3 (ubicación ambigua respecto a Menú 5/6)',
+   550.00, false),
+  ('DES-5C', 'Menú 5 — Costilla con chilaquiles (pack)',
+   'TODO PDF: «CON CHILAQUILES $550» en pág. 3 (ubicación ambigua; distinto del Menú 5 a $320)',
+   550.00, false),
+  ('DES-6', 'Menú 6 — Cecina de res + chilaquiles',
+   'Con chilaquiles verdes o rojos', 320.00, true)
+) as v(sku, name, descr, price, verified)
+where i.menu_id = m.id
+  and m.code = 'desayunos_2025'
+  and i.sku = v.sku;
+
+update public.event_menus
+set
+  min_pax = 50,
+  description = 'Desayunos por persona (PDF 2025). Mínimo 50 personas. Pack ≥50 pax = $30,000 (regla comercial).',
+  notes = 'Fuente definitiva: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Menú desayunos 2025.pdf. Pack $30k ≥50 pax = regla comercial locked. TODO: CON HUEVO/CON CHILAQUILES $550 (pág. 3) — variantes Menú 5 hasta confirmación.'
+where code = 'desayunos_2025';
 
 insert into public.event_menu_items (menu_id, sku, name, unit, unit_price, min_pax, sort_order, price_source, price_verified)
 select m.id, 'DES-PACK50', 'Pack desayunos ≥50 personas', 'paquete', 30000.00, 50, 10,
@@ -579,7 +622,7 @@ cross join (values
   ('BAR-NAC-XH', 'Barra nacional — hora extra', 'Hora adicional sobre barra libre nacional', 'hora', 185.00, 11),
   ('BAR-INT', 'Barra libre internacional', '3 horas · hora extra $300 · Matusalem Platino, Don Julio Blanco, Absolut Azul, Etiqueta Negra, Tanqueray, cerveza nacional, café, té', 'persona', 950.00, 20),
   ('BAR-INT-XH', 'Barra internacional — hora extra', 'Hora adicional sobre barra libre internacional', 'hora', 300.00, 21),
-  ('BAR-REF', 'Barra libre de refrescos', 'Con menú 3 tiempos · 3 h · refrescos, limonada, naranjada, café americano y té · descorche destilados/vino (sin cerveza) · hora extra $90', 'persona', 290.00, 30),
+  ('BAR-REF', 'Barra libre de refrescos', 'Aplica con cualquier menú de 3 tiempos · 3 h · refrescos, limonada, naranjada, café americano y té · descorche destilados/vino (sin cerveza) · hora extra $90', 'persona', 290.00, 30),
   ('BAR-REF-XH', 'Barra refrescos — hora extra', 'Hora adicional sobre barra libre de refrescos', 'hora', 90.00, 31)
 ) as v(sku, name, descr, unit, price, ord)
 where m.code = 'barra_libre_2025'
@@ -602,46 +645,67 @@ cross join (values
   ('BAR-NAC-XH', 'Hora adicional sobre barra libre nacional', 185.00),
   ('BAR-INT', '3 horas · hora extra $300 · Matusalem Platino, Don Julio Blanco, Absolut Azul, Etiqueta Negra, Tanqueray, cerveza nacional, café, té', 950.00),
   ('BAR-INT-XH', 'Hora adicional sobre barra libre internacional', 300.00),
-  ('BAR-REF', 'Con menú 3 tiempos · 3 h · refrescos, limonada, naranjada, café americano y té · descorche destilados/vino (sin cerveza) · hora extra $90', 290.00),
+  ('BAR-REF', 'Aplica con cualquier menú de 3 tiempos · 3 h · refrescos, limonada, naranjada, café americano y té · descorche destilados/vino (sin cerveza) · hora extra $90', 290.00),
   ('BAR-REF-XH', 'Hora adicional sobre barra libre de refrescos', 90.00)
 ) as v(sku, descr, price)
 where i.menu_id = m.id
   and m.code = 'barra_libre_2025'
   and i.sku = v.sku;
 
--- Bebidas a la carta (OS frecuentes; no inventar carta C50 vieja)
+update public.event_menus
+set
+  description = 'Solo con comida (menú 3 tiempos u otro menú de alimentos). Precio por persona / 3 h. Nacional, internacional y refrescos (refrescos aplica con cualquier menú de 3 tiempos).',
+  notes = 'Fuente definitiva: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Barra libre eventos 2025.pdf. Precios con I.V.A.; no incluyen propina. Consumo por pieza → Bebidas (Menú C50).'
+where code = 'barra_libre_2025';
+
+-- Bebidas: catálogo completo desde Menú C50 Esp (solo bebidas).
+-- Ejecutar también supabase/eventos_menus_bebidas_c50.sql tras este seed
+-- (inserta/actualiza ~180 ítems; desactiva SKUs OS viejos).
+-- Stub mínimo aquí para que el menú exista exista si el patch aún no se corrió:
 insert into public.event_menu_items (
   menu_id, sku, name, description, unit, unit_price, is_vegetarian, sort_order, price_source, price_verified
 )
-select m.id, v.sku, v.name, v.descr, v.unit, v.price, true, v.ord, v.src, false
+select m.id, v.sku, v.name, v.descr, 'unidad', v.price, true, v.ord, 'pdf_menu_c50_esp', v.verified
 from public.event_menus m
 cross join (values
-  ('BEB-CARTA', 'Bebidas a la carta (consumo)', 'Línea genérica · captura cantidad y precio según consumo · detalle en notas', 'unidad', 0.00, 5, 'sin_precio_fijo_carta'),
-  ('BEB-MEZ', 'Mezcalita', 'Por unidad · frecuente en OS (bienvenida / coctelería)', 'unidad', 135.00, 10, 'os_frecuente_2024_2026'),
-  ('BEB-MAR', 'Margarita', 'Por unidad · frecuente en OS junto con mezcalitas', 'unidad', 135.00, 20, 'os_frecuente_2024_2026'),
-  ('BEB-CERV', 'Cerveza nacional', 'Por unidad · frecuente en OS (a veces junto a barra de refrescos)', 'unidad', 65.00, 30, 'os_frecuente_2024_2026'),
-  ('BEB-GAV', 'Gavilán / Paloma', 'Por unidad · aparece en OS recientes · confirma precio operativo', 'unidad', 135.00, 40, 'os_frecuente_2024_2026')
-) as v(sku, name, descr, unit, price, ord, src)
+  ('BEB-MEZ', 'Mezcalita', 'Limón, mango, tamarindo o fresa', 135.00, 12, true),
+  ('BEB-MAR', 'Margarita', 'Limón, mango, tamarindo o fresa', 135.00, 11, true),
+  ('BEB-GAV', 'Gavilán / Paloma', 'Centenario plata, Ancho Reyes, toronja, limón, chile pasilla, sal de gusano', 170.00, 24, true),
+  ('BEB-CERV', 'Cerveza nacional', '355 ml · Bohemia / Tecate / XX (Menú C50 Esp)', 65.00, 40, true),
+  ('BEB-CARTA', 'Bebida otra (consumo)', 'Línea genérica · captura cantidad y precio · detalle en notas', 0.00, 999, false)
+) as v(sku, name, descr, price, ord, verified)
 where m.code = 'bebidas_a_la_carta'
   and not exists (
     select 1 from public.event_menu_items i
     where i.menu_id = m.id and i.sku = v.sku
   );
 
--- Normaliza unidad (pieza no está en el check constraint → unidad)
 update public.event_menu_items i
-set unit = 'unidad', active = true
+set
+  name = v.name,
+  description = v.descr,
+  unit = 'unidad',
+  unit_price = v.price,
+  price_source = 'pdf_menu_c50_esp',
+  price_verified = v.verified,
+  active = true
 from public.event_menus m
+cross join (values
+  ('BEB-MEZ', 'Mezcalita', 'Limón, mango, tamarindo o fresa', 135.00, true),
+  ('BEB-MAR', 'Margarita', 'Limón, mango, tamarindo o fresa', 135.00, true),
+  ('BEB-GAV', 'Gavilán / Paloma', 'Centenario plata, Ancho Reyes, toronja, limón, chile pasilla, sal de gusano', 170.00, true),
+  ('BEB-CERV', 'Cerveza nacional', '355 ml · Bohemia / Tecate / XX (Menú C50 Esp)', 65.00, true),
+  ('BEB-CARTA', 'Bebida otra (consumo)', 'Línea genérica · captura cantidad y precio · detalle en notas', 0.00, false)
+) as v(sku, name, descr, price, verified)
 where i.menu_id = m.id
   and m.code = 'bebidas_a_la_carta'
-  and i.sku like 'BEB-%'
-  and i.unit is distinct from 'unidad';
+  and i.sku = v.sku;
 
--- Retirar catálogos obsoletos del cotizador (no están en Menús eventos vigentes)
+-- Retirar catálogo legado menu_c50_bebidas (unificado en bebidas_a_la_carta)
 update public.event_menus
 set
   active = false,
-  notes = 'Inactivo: no está en Menús eventos vigentes. No usar en cotizador.'
+  notes = 'Inactivo: bebidas C50 viven en code=bebidas_a_la_carta (Menú C50 Esp).'
 where code = 'menu_c50_bebidas';
 
 update public.event_menu_items i

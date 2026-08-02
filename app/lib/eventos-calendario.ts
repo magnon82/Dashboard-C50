@@ -5,48 +5,19 @@ import {
 } from '@/app/lib/eventos-activity';
 import { listEventOs, parseFolio } from '@/app/lib/eventos-os';
 import { getServiceSupabase } from '@/app/lib/users';
+import type {
+  CalendarEventItem,
+  CalendarPayload,
+  CalendarSource,
+} from '@/app/lib/eventos-calendario-shared';
 
-export type CalendarSource = 'crm' | 'os' | 'activity';
-
-export type CalendarEventItem = {
-  id: string;
-  event_date: string;
-  title: string;
-  client: string | null;
-  pax: number | null;
-  source: CalendarSource;
-  source_label: string;
-  detail: string | null;
-  /** Etapa CRM (lead) si aplica */
-  stage: string | null;
-  /** Reserva / fecha: tentativo | confirmado | cancelado | completado */
-  status: string | null;
-  /** Nota operativa (p. ej. reembolso de anticipo en cancelados) */
-  notes: string | null;
-  /** PDF en disco (scan). Vacío si solo hay seed / Anticipos. */
-  os_path: string | null;
-  os_filename: string | null;
-  /** id de event_service_orders (OS digital) */
-  digital_os_id: string | null;
-  /** id de event_quotes si hay match en Supabase */
-  quote_id: string | null;
-  lead_id: string | null;
-  client_id: string | null;
-};
-
-export type CalendarPayload = {
-  ready: boolean;
-  today: string;
-  events: CalendarEventItem[];
-  count: number;
-  sources: {
-    activity: boolean;
-    os: boolean;
-    crm: boolean;
-  };
-  note: string;
-  error?: string;
-};
+export type { CalendarEventItem, CalendarPayload, CalendarSource };
+export {
+  eventHasAnticipo,
+  eventHasOs,
+  filterEnPuertaEvents,
+  isAnticipoSinOs,
+} from '@/app/lib/eventos-calendario-shared';
 
 const SOURCE_PRIORITY: Record<CalendarSource, number> = {
   crm: 3,
@@ -198,6 +169,19 @@ function mergeItem(
     os_path: base.os_path || other.os_path,
     os_filename: base.os_filename || other.os_filename,
     digital_os_id: base.digital_os_id || other.digital_os_id,
+    has_os: Boolean(
+      base.has_os ||
+        other.has_os ||
+        base.os_path ||
+        other.os_path ||
+        base.digital_os_id ||
+        other.digital_os_id ||
+        base.os_filename ||
+        other.os_filename ||
+        base.source === 'os' ||
+        other.source === 'os'
+    ),
+    has_anticipo: Boolean(base.has_anticipo || other.has_anticipo),
     quote_id: base.quote_id || other.quote_id,
     lead_id: base.lead_id || other.lead_id,
     client_id: base.client_id || other.client_id,
@@ -212,6 +196,8 @@ function emptyLinks(): Pick<
   | 'os_path'
   | 'os_filename'
   | 'digital_os_id'
+  | 'has_os'
+  | 'has_anticipo'
   | 'quote_id'
   | 'lead_id'
   | 'client_id'
@@ -223,6 +209,8 @@ function emptyLinks(): Pick<
     os_path: null,
     os_filename: null,
     digital_os_id: null,
+    has_os: false,
+    has_anticipo: false,
     quote_id: null,
     lead_id: null,
     client_id: null,
@@ -326,6 +314,7 @@ export async function buildUpcomingCalendar(
               source_label: activitySourceLabel(t.source),
               detail: t.detail || null,
               ...emptyLinks(),
+              has_anticipo: t.source === 'anticipos_c50',
             },
             folio
           );
@@ -341,7 +330,7 @@ export async function buildUpcomingCalendar(
   // 2) OS con event_date (disco o seed)
   const osIndex = new Map<
     string,
-    { path: string | null; filename: string | null }
+    { path: string | null; filename: string | null; has_os: boolean }
   >();
   try {
     const { items, source } = await listEventOs();
@@ -364,9 +353,11 @@ export async function buildUpcomingCalendar(
         const k = dedupeKey(eventDate, who || '', who, folio);
         const prev = osIndex.get(k);
         if (!prev?.path && osPath) {
-          osIndex.set(k, { path: osPath, filename: osFilename });
+          osIndex.set(k, { path: osPath, filename: osFilename, has_os: true });
         } else if (!prev) {
-          osIndex.set(k, { path: osPath, filename: osFilename });
+          osIndex.set(k, { path: osPath, filename: osFilename, has_os: true });
+        } else if (!prev.has_os) {
+          osIndex.set(k, { ...prev, has_os: true });
         }
       }
       mergeItem(
@@ -383,6 +374,7 @@ export async function buildUpcomingCalendar(
           ...emptyLinks(),
           os_path: osPath,
           os_filename: osFilename,
+          has_os: true,
         },
         folio
       );
@@ -452,9 +444,9 @@ export async function buildUpcomingCalendar(
     );
   }
 
-  // Adjuntar OS PDF a filas CRM/Anticipos del mismo día+folio o día+cliente
+  // Adjuntar OS (PDF o seed indexada) a filas CRM/Anticipos del mismo día+folio o día+cliente
   for (const [key, item] of map) {
-    if (item.os_path) continue;
+    if (item.os_path && item.has_os) continue;
     const folio = resolveFolio(null, item.title, item.client);
     const k = dedupeKey(item.event_date, item.title, item.client, folio);
     const hit =
@@ -462,11 +454,12 @@ export async function buildUpcomingCalendar(
       osIndex.get(
         dedupeKey(item.event_date, item.client || '', item.client, folio)
       );
-    if (hit?.path) {
+    if (hit?.path || hit?.has_os) {
       map.set(key, {
         ...item,
-        os_path: hit.path,
-        os_filename: hit.filename,
+        os_path: hit.path || item.os_path,
+        os_filename: hit.filename || item.os_filename,
+        has_os: true,
       });
     }
   }
@@ -645,6 +638,7 @@ export async function buildUpcomingCalendar(
             detail: o.os_number || null,
             ...emptyLinks(),
             digital_os_id: oid,
+            has_os: true,
             quote_id: o.quote_id ? String(o.quote_id) : null,
             lead_id: o.lead_id ? String(o.lead_id) : null,
             client_id: o.client_id ? String(o.client_id) : null,
@@ -671,7 +665,7 @@ export async function buildUpcomingCalendar(
             ) || null;
         }
         if (oid) {
-          map.set(key, { ...item, digital_os_id: oid });
+          map.set(key, { ...item, digital_os_id: oid, has_os: true });
         }
       }
     }
@@ -759,9 +753,3 @@ export async function buildUpcomingCalendar(
   };
 }
 
-/** «En puerta» = próximos activos (cancelados quedan en Calendario, no en el tablero). */
-export function filterEnPuertaEvents(
-  events: CalendarEventItem[]
-): CalendarEventItem[] {
-  return events.filter((e) => e.status !== 'cancelado');
-}

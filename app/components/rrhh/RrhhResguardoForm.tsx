@@ -6,16 +6,22 @@ import { SUITE } from '@/app/lib/themes';
 import {
   HR_RESGUARDO_KIND_LABELS,
   HR_RESGUARDO_LEGAL,
+  HR_RESGUARDO_STATUS_LABELS,
   defaultLugarFecha,
   emptyResguardoItem,
   type HrResguardoItem,
   type HrResguardoKind,
+  type HrResguardoRequest,
+  type HrResguardoStatus,
 } from '@/app/lib/hr-resguardo';
 
 const inputClass =
   'mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
 
 const KINDS = Object.keys(HR_RESGUARDO_KIND_LABELS) as HrResguardoKind[];
+const STATUSES = Object.keys(
+  HR_RESGUARDO_STATUS_LABELS
+) as HrResguardoStatus[];
 
 function todayIso(): string {
   return new Date().toLocaleDateString('en-CA', {
@@ -24,29 +30,72 @@ function todayIso(): string {
 }
 
 export function RrhhResguardoForm({
+  employeeId,
+  defaultNombre,
+  defaultPuesto,
+  existing,
   onCreated,
   onCancel,
 }: {
+  /** Si se abre desde un perfil, enlaza la carta a esa ficha. */
+  employeeId?: string | null;
+  defaultNombre?: string;
+  defaultPuesto?: string;
+  /** Si se pasa, el formulario edita esa carta (PATCH). */
+  existing?: HrResguardoRequest | null;
   onCreated?: () => void;
   onCancel?: () => void;
 }) {
-  const [kind, setKind] = useState<HrResguardoKind>('equipo');
-  const [lugarFecha, setLugarFecha] = useState(defaultLugarFecha);
-  const [nombre, setNombre] = useState('');
-  const [rfc, setRfc] = useState('');
-  const [puesto, setPuesto] = useState('');
-  const [email, setEmail] = useState('');
-  const [telefono, setTelefono] = useState('');
-  const [domicilio, setDomicilio] = useState('');
-  const [fechaAsignacion, setFechaAsignacion] = useState(todayIso);
-  const [fechaResguardo, setFechaResguardo] = useState(todayIso);
-  const [emisorNombre, setEmisorNombre] = useState('');
-  const [emisorPuesto, setEmisorPuesto] = useState('');
-  const [items, setItems] = useState<HrResguardoItem[]>([emptyResguardoItem()]);
-  const [acepta, setAcepta] = useState(false);
-  const [aceptaDanio, setAceptaDanio] = useState(false);
-  const [aceptaPerdida, setAceptaPerdida] = useState(false);
-  const [observaciones, setObservaciones] = useState('');
+  const isEdit = Boolean(existing?.id);
+  const p = existing?.payload;
+  const [kind, setKind] = useState<HrResguardoKind>(
+    existing?.kind || 'equipo'
+  );
+  const [status, setStatus] = useState<HrResguardoStatus>(
+    existing?.status || 'pendiente'
+  );
+  const [lugarFecha, setLugarFecha] = useState(
+    () => p?.lugar_fecha || defaultLugarFecha()
+  );
+  const [nombre, setNombre] = useState(
+    () => p?.nombre || defaultNombre || ''
+  );
+  const [rfc, setRfc] = useState(() => p?.rfc || '');
+  const [puesto, setPuesto] = useState(
+    () => p?.puesto || defaultPuesto || ''
+  );
+  const [email, setEmail] = useState(() => p?.email || '');
+  const [telefono, setTelefono] = useState(() => p?.telefono || '');
+  const [domicilio, setDomicilio] = useState(() => p?.domicilio || '');
+  const [fechaAsignacion, setFechaAsignacion] = useState(
+    () => p?.fecha_asignacion || todayIso()
+  );
+  const [fechaResguardo, setFechaResguardo] = useState(
+    () => p?.fecha_resguardo || todayIso()
+  );
+  const [emisorNombre, setEmisorNombre] = useState(
+    () => p?.emisor_nombre || ''
+  );
+  const [emisorPuesto, setEmisorPuesto] = useState(
+    () => p?.emisor_puesto || ''
+  );
+  const [items, setItems] = useState<HrResguardoItem[]>(() =>
+    existing?.items?.length
+      ? existing.items.map((it) => ({ ...it }))
+      : [emptyResguardoItem()]
+  );
+  const [acepta, setAcepta] = useState(() =>
+    isEdit ? Boolean(p?.acepta_condiciones) : false
+  );
+  const [aceptaDanio, setAceptaDanio] = useState(() =>
+    Boolean(p?.acepta_danio_parcial)
+  );
+  const [aceptaPerdida, setAceptaPerdida] = useState(() =>
+    Boolean(p?.acepta_perdida_total)
+  );
+  const [observaciones, setObservaciones] = useState(
+    () => p?.observaciones || existing?.notes || ''
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
@@ -93,42 +142,58 @@ export function RrhhResguardoForm({
     setOkMsg(null);
     setSaving(true);
     try {
+      const payload = {
+        lugar_fecha: lugarFecha,
+        nombre,
+        rfc,
+        puesto,
+        email,
+        telefono,
+        domicilio,
+        fecha_asignacion: fechaAsignacion,
+        fecha_resguardo: fechaResguardo,
+        receptor_nombre: nombre,
+        receptor_puesto: puesto,
+        emisor_nombre: emisorNombre,
+        emisor_puesto: emisorPuesto,
+        acepta_condiciones: acepta,
+        acepta_danio_parcial: aceptaDanio,
+        acepta_perdida_total: aceptaPerdida,
+        observaciones,
+      };
       const res = await fetch('/api/hr/resguardo', {
-        method: 'POST',
+        method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kind,
-          items,
-          payload: {
-            lugar_fecha: lugarFecha,
-            nombre,
-            rfc,
-            puesto,
-            email,
-            telefono,
-            domicilio,
-            fecha_asignacion: fechaAsignacion,
-            fecha_resguardo: fechaResguardo,
-            receptor_nombre: nombre,
-            receptor_puesto: puesto,
-            emisor_nombre: emisorNombre,
-            emisor_puesto: emisorPuesto,
-            acepta_condiciones: acepta,
-            acepta_danio_parcial: aceptaDanio,
-            acepta_perdida_total: aceptaPerdida,
-            observaciones,
-          },
-        }),
+        body: JSON.stringify(
+          isEdit
+            ? {
+                id: existing!.id,
+                kind,
+                status,
+                items,
+                notes: observaciones || null,
+                payload,
+              }
+            : {
+                kind,
+                items,
+                ...(employeeId ? { employee_id: employeeId } : {}),
+                payload,
+              }
+        ),
       });
       const json = await res.json();
       if (!res.ok) {
         setError(json.error || 'No se pudo guardar');
         return;
       }
+      const folio = json.request?.folio;
       setOkMsg(
-        `Resguardo registrado${json.request?.folio ? ` · Folio ${json.request.folio}` : ''}`
+        isEdit
+          ? `Resguardo actualizado${folio ? ` · Folio ${folio}` : ''}`
+          : `Resguardo registrado${folio ? ` · Folio ${folio}` : ''}`
       );
-      resetForm();
+      if (!isEdit) resetForm();
       onCreated?.();
     } catch {
       setError('Error de red al guardar');
@@ -147,7 +212,9 @@ export function RrhhResguardoForm({
           Cluster Culinario · Carranza 50
         </p>
         <h3 className="mt-2 text-xl font-bold" style={{ color: SUITE.navy }}>
-          Nuevo resguardo
+          {isEdit
+            ? `Editar resguardo${existing?.folio ? ` · ${existing.folio}` : ''}`
+            : 'Nuevo resguardo'}
         </h3>
         <p className="mt-2 text-sm leading-relaxed" style={{ color: SUITE.muted }}>
           Carta de resguardo y responsiva (formato C50). Equipo, herramientas,
@@ -179,6 +246,24 @@ export function RrhhResguardoForm({
             );
           })}
         </div>
+        {isEdit ? (
+          <label className="mt-4 block">
+            <span className="text-sm font-semibold text-slate-700">Estado</span>
+            <select
+              className={inputClass}
+              value={status}
+              onChange={(e) =>
+                setStatus(e.target.value as HrResguardoStatus)
+              }
+            >
+              {STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {HR_RESGUARDO_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="mt-4 block">
           <span className="text-sm font-semibold text-slate-700">
             Lugar y fecha
@@ -547,7 +632,11 @@ export function RrhhResguardoForm({
           className="min-h-12 rounded-xl px-8 text-sm font-bold text-white disabled:opacity-60"
           style={{ backgroundColor: SUITE.navy }}
         >
-          {saving ? 'Guardando…' : 'Registrar resguardo'}
+          {saving
+            ? 'Guardando…'
+            : isEdit
+              ? 'Guardar cambios'
+              : 'Registrar resguardo'}
         </button>
         {onCancel ? (
           <button

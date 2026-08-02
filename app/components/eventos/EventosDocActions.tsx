@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
+import { EVENTOS_CONTACT } from '@/app/lib/eventos';
 import { SUITE } from '@/app/lib/themes';
 
 function digitsOnly(phone: string): string {
@@ -63,6 +64,7 @@ export function EventosDocActions({
     '',
     'Saludos,',
     'Eventos · Carranza 50',
+    EVENTOS_CONTACT.email,
   ].filter((x): x is string => x != null);
 
   const mailtoHref = recipientEmail

@@ -363,8 +363,12 @@ const GIVEN_NAME_SET: Set<string> = (() => {
     'jessica',
     'jesus',
     'jimena',
+    'joana',
+    'joanna',
     'joaquin',
     'joel',
+    'johana',
+    'johanna',
     'jonathan',
     'jorge',
     'jose',
@@ -658,7 +662,8 @@ function toHrDisplayCase(name: string): string {
 /**
  * Nombre para listados RH: nombres de pila primero + solo primer apellido + Title Case.
  * Detecta orden carpeta (APELLIDOS NOMBRES) vs occidental (NOMBRES APELLIDOS).
- * No muta `hr_employees.full_name` — solo presentación.
+ * No muta `hr_employees.full_name` — solo presentación (salvo callers que
+ * persisten el resultado vía `canonicalHrEmployeeName`).
  *
  * @example
  * formatHrListName('SANCHEZ CORTES JUAN ROMAN') // 'Juan Roman Sanchez'
@@ -668,9 +673,11 @@ function toHrDisplayCase(name: string): string {
  * formatHrListName('ROMAN SANCHEZ') // 'Roman Sanchez'
  * formatHrListName('GALLARDO ÁVILA LUIS FERNANDO') // 'Luis Fernando Gallardo'
  * formatHrListName('DE LA ROSA MARIA') // 'Maria de la Rosa'
+ * formatHrListName('TORRIJOS DE LA CRUZ JOANA ELIZABETH') // 'Joana Elizabeth Torrijos'
+ * formatHrListName('Joana Elizabeth Torrijos') // 'Joana Elizabeth Torrijos'
  *
- * Conserva el segundo nombre de pila (Roman / Roberto / Fernando) — no lo
- * reduce a «Juan Sanchez» / «Juan Ramirez».
+ * Conserva el segundo nombre de pila (Roman / Roberto / Fernando / Joana) —
+ * no lo reduce a «Juan Sanchez» / «Elizabeth Torrijos».
  */
 export function formatHrListName(fullName: string): string {
   const cleaned = String(fullName || '').replace(/\s+/g, ' ').trim();
@@ -727,6 +734,20 @@ export function formatHrListName(fullName: string): string {
 
 /** Alias de presentación — mismo helper que `formatHrListName`. */
 export const formatHrDisplayName = formatHrListName;
+
+/**
+ * Nombre a persistir en `hr_employees.full_name` al vincular expediente:
+ * «Nombres + primer apellido» (Title Case), no el basename ALL CAPS de carpeta.
+ */
+export function canonicalHrEmployeeName(
+  folderOrFullName: string,
+  fallback?: string
+): string {
+  const fromFolder = formatHrListName(folderOrFullName);
+  if (fromFolder) return fromFolder;
+  const fb = formatHrListName(fallback || '');
+  return fb || String(fallback || folderOrFullName || '').replace(/\s+/g, ' ').trim();
+}
 
 
 const AUTO_LINK_MIN = 0.85;

@@ -1,0 +1,804 @@
+{
+  "generated_at": "2026-08-02T19:15:35Z",
+  "source": {
+    "os_dir": "I:\\Mi unidad\\Eventos\\Ordenes de servicio",
+    "menus": "supabase/seed_event_menus.json",
+    "note": "Conteo = nº de OS PDF distintas donde aparece la bebida/paquete (no unidades)."
+  },
+  "stats": {
+    "pdfs_scanned": 184,
+    "pdfs_with_text": 180,
+    "pdfs_empty_or_scan": 4,
+    "pdfs_with_drink_match": 137,
+    "skus_matched": 37
+  },
+  "by_sku": {
+    "BEB-AGUA-DIA": 19,
+    "BEB-MOJ": 3,
+    "BEB-CERV-BOH-C": 9,
+    "BEB-MAR": 20,
+    "BEB-CERV": 26,
+    "BAR-REF": 63,
+    "BEB-CERV-XX-L": 9,
+    "BEB-CERV-TEC-L": 6,
+    "BEB-CERV-XX-A": 8,
+    "TEQ-CUE-C": 2,
+    "BEB-CLER-C": 2,
+    "BEB-AGUA-EMB": 1,
+    "BEB-CERV-BOH-O": 4,
+    "BAR-NAC": 8,
+    "BEB-NAR": 4,
+    "BEB-LIM": 6,
+    "BEB-JARRA-AG": 2,
+    "VIN-CM-R-B": 2,
+    "BEB-PROS-C": 1,
+    "BEB-MEZ": 16,
+    "BEB-CERV-HEI": 3,
+    "VOD-STO-C": 1,
+    "TEQ-CEN-P-C": 2,
+    "VOD-SMI-C": 1,
+    "BEB-TE": 2,
+    "RON-BAC-C": 1,
+    "VIN-PUE-C": 1,
+    "VIN-PUE-B": 1,
+    "BAR-INT": 4,
+    "BEB-TORO": 1,
+    "BEB-CERV-AMS": 2,
+    "BEB-AGUA-MIN": 1,
+    "VIN-LAB-G-C": 1,
+    "VIN-SUR-C": 1,
+    "VIN-MAG-R-C": 1,
+    "BEB-AMER": 1,
+    "BEB-GAV": 1
+  },
+  "barra": [
+    {
+      "sku": "BAR-REF",
+      "name": "Barra libre de refrescos",
+      "menu_code": "barra_libre_2025",
+      "os_count": 63,
+      "examples": [
+        "2021/FOLIO 10 BODA ESTEF Y JORGE.pdf",
+        "2021/FOLIO 12 ERIN Y ERNESTO (3).pdf",
+        "2021/FOLIO 16 VANESSA Y BERNARDO MAY 22.pdf"
+      ]
+    },
+    {
+      "sku": "BAR-NAC",
+      "name": "Barra libre nacional",
+      "menu_code": "barra_libre_2025",
+      "os_count": 8,
+      "examples": [
+        "2022/FOLIO 11 ORDEN DE SERVICIO WIZELINE (1).pdf",
+        "2023/FOLIO 14 ORDEN DE SERVICIO PREBODA LISA Y POLO (2).pdf",
+        "2024/FOLIO 10 ORDEN DE SERVICIO PREBODA JULIA Y MARC (4).pdf"
+      ]
+    },
+    {
+      "sku": "BAR-INT",
+      "name": "Barra libre internacional",
+      "menu_code": "barra_libre_2025",
+      "os_count": 4,
+      "examples": [
+        "2024/FOLIO 07 ORDEN DE SERVICIO PREBODA JUL 05 (10).pdf",
+        "2024/FOLIO 09 ORDEN DE SERVICIO ROMPEHIELOS CASEY Y TRAVIS SEP 27 (11).pdf",
+        "2024/FOLIO 10 ORDEN DE SERVICIO PREBODA JULIA Y MARC (4).pdf"
+      ]
+    }
+  ],
+  "carta_top": [
+    {
+      "sku": "BEB-CERV",
+      "name": "Cerveza nacional",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 26,
+      "examples": [
+        "2021/FOLIO 09 ORDEN DE SERVICIO PREBODA MARIA Y GIL (1).pdf",
+        "2021/FOLIO 11 ORDEN DE SERVICIO PREBODA VANESSA Y DAVID (2).pdf",
+        "2021/FOLIO 14 PREBODA ANDREA Y OMAR (3).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-MAR",
+      "name": "Margarita",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 20,
+      "examples": [
+        "2021/FOLIO 06 PREBODA STEPHANIE Y OSVALDO C.pdf",
+        "2022/FOLIO 12 Orden se servicio Preboda Mariela y Andrés.pdf",
+        "2023/FOLIO 05 ORDEN DE SERVICIO PREBODA ERIKA Y CHRISTIAN (1).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-AGUA-DIA",
+      "name": "Agua del día",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 19,
+      "examples": [
+        "2021/FOLIO 05 PREBODA ESTEPHANIA Y CRIS (1).pdf",
+        "2021/FOLIO 06 PREBODA STEPHANIE Y OSVALDO C.pdf",
+        "2021/FOLIO 09 ORDEN DE SERVICIO PREBODA MARIA Y GIL (1).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-MEZ",
+      "name": "Mezcalita",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 16,
+      "examples": [
+        "2023/FOLIO 05 ORDEN DE SERVICIO PREBODA ERIKA Y CHRISTIAN (1).pdf",
+        "2023/FOLIO 16 ORDEN DE SERVICIO MAYRA Y AURELIO (5).pdf",
+        "2024/FOLIO 01 ORDEN DE SERVICIO ANDY Y JORGE .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-BOH-C",
+      "name": "Bohemia cristal",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 9,
+      "examples": [
+        "2021/FOLIO 06 PREBODA STEPHANIE Y OSVALDO C.pdf",
+        "2022/FOLIO 02 ORDEN DE SERVICIO PREBODA NATE Y AYLA (1).pdf",
+        "2022/FOLIO 39 ORDEN DE SERVICIO ILKA Y GUILLERMO.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-XX-L",
+      "name": "XX Lager",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 9,
+      "examples": [
+        "2021/FOLIO 11 ORDEN DE SERVICIO PREBODA VANESSA Y DAVID (2).pdf",
+        "2022/FOLIO 04 ORDEN DE SERVICIO PAULINA Y DAMIAN (2).pdf",
+        "2022/FOLIO 12 Orden se servicio Preboda Mariela y Andrés.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-XX-A",
+      "name": "XX Ámbar",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 8,
+      "examples": [
+        "2021/FOLIO 11 ORDEN DE SERVICIO PREBODA VANESSA Y DAVID (2).pdf",
+        "2022/FOLIO 05 ORDEN DE SERVICIO REGINA Y ALFONSO.pdf",
+        "2022/FOLIO 12 Orden se servicio Preboda Mariela y Andrés.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-LIM",
+      "name": "Limonada",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 6,
+      "examples": [
+        "2022/FOLIO 14 ORDEN DE SERVICIO TORNEO DE LA AMISTAD .pdf",
+        "2022/Folio 30 PLAYTRIP 29 AGO.pdf",
+        "2023/FOLIO 23 ORDEN DE SERVICIO NUTEC .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-TEC-L",
+      "name": "Tecate Light",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 6,
+      "examples": [
+        "2021/FOLIO 11 ORDEN DE SERVICIO PREBODA VANESSA Y DAVID (2).pdf",
+        "2022/FOLIO 05 ORDEN DE SERVICIO REGINA Y ALFONSO.pdf",
+        "2023/FOLIO 07 ORDEN DE SERVICIO ALMA Y CARLOS (5).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-BOH-O",
+      "name": "Bohemia oscura",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 4,
+      "examples": [
+        "2022/FOLIO 02 ORDEN DE SERVICIO PREBODA NATE Y AYLA (1).pdf",
+        "2023/FOLIO 07 ORDEN DE SERVICIO ALMA Y CARLOS (5).pdf",
+        "2024/FOLIO 02 ORDEN DE SERVICIO EMBAJADA DE AUSTRIA (7).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-NAR",
+      "name": "Naranjada",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 4,
+      "examples": [
+        "2022/FOLIO 14 ORDEN DE SERVICIO TORNEO DE LA AMISTAD .pdf",
+        "2022/Folio 30 PLAYTRIP 29 AGO.pdf",
+        "2023/FOLIO 23 ORDEN DE SERVICIO NUTEC .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-HEI",
+      "name": "Heineken",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 3,
+      "examples": [
+        "2023/FOLIO 07 ORDEN DE SERVICIO ALMA Y CARLOS (5).pdf",
+        "2025/FOLIO 07 ORDEN DE SERVICIO PREBODA THERESA Y GAD (2).pdf",
+        "2025/ORDEN DE SERVICIO G23 (1).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-MOJ",
+      "name": "Mojito clásico",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 3,
+      "examples": [
+        "2021/FOLIO 06 PREBODA STEPHANIE Y OSVALDO C.pdf",
+        "2022/FOLIO 02 ORDEN DE SERVICIO PREBODA NATE Y AYLA (1).pdf",
+        "2024/FOLIO 03 ORDEN DE SERVICIO CHRISTINE Y ALEX (7).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-AMS",
+      "name": "Amstel",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2025/FOLIO 03 ORDEN DE SERVICIO PREBODA MARIANA Y GABRIEL.pdf",
+        "2025/ORDEN DE SERVICIO G23 (1).pdf"
+      ]
+    },
+    {
+      "sku": "VIN-CM-R-B",
+      "name": "Casa Madero V Rosado (botella)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2022/FOLIO 20 CENA ROMANTICA CATALINA MEJIA (1).pdf",
+        "2022/FOLIO 31 ENTREGA DE ANILLO ADRIAN LUGO.pdf"
+      ]
+    },
+    {
+      "sku": "TEQ-CEN-P-C",
+      "name": "Centenario plata (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2023/FOLIO 15 ORDEN DE SERVICIO HRISA Y ALEX (1).pdf",
+        "2025/ORDEN DE SERVICIO G5 (1).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CLER-C",
+      "name": "Clericot (copa)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2021/FOLIO 26 PREBODA ARELHY Y JOSE LUIS.pdf",
+        "2021/FOLIO 32 ORDEN DE SERVICIO BODA LUDIN Y MANUEL (1).pdf"
+      ]
+    },
+    {
+      "sku": "TEQ-CUE-C",
+      "name": "Cuervo especial (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2021/FOLIO 26 PREBODA ARELHY Y JOSE LUIS.pdf",
+        "2023/FOLIO 19 ORDEN DE SERVICIO PREBODA NICOLE Y DIEGO (10).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-JARRA-AG",
+      "name": "Jarra de agua",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2022/FOLIO 14 ORDEN DE SERVICIO TORNEO DE LA AMISTAD .pdf",
+        "2026/SIN FOLIO Evento bdmx .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-TE",
+      "name": "Té",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2023/FOLIO 19 ORDEN DE SERVICIO PREBODA NICOLE Y DIEGO (10).pdf",
+        "2023/FOLIO 23 ORDEN DE SERVICIO NUTEC .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-AGUA-EMB",
+      "name": "Agua embotellada",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2021/FOLIO 26 PREBODA ARELHY Y JOSE LUIS.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-AGUA-MIN",
+      "name": "Agua mineral",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2025/FOLIO 07 ORDEN DE SERVICIO PREBODA THERESA Y GAD (2).pdf"
+      ]
+    },
+    {
+      "sku": "RON-BAC-C",
+      "name": "Bacardí blanco (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2024/FOLIO 03 ORDEN DE SERVICIO CHRISTINE Y ALEX (7).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-AMER",
+      "name": "Café americano",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/Orden de Servicio G5.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-GAV",
+      "name": "Gavilán / Paloma",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/ORDEN DE SERVICIO G6.pdf"
+      ]
+    },
+    {
+      "sku": "VIN-LAB-G-C",
+      "name": "Laberinto Gewürztraminer (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/ORDEN DE SERVICIO 02.pdf"
+      ]
+    },
+    {
+      "sku": "VIN-MAG-R-C",
+      "name": "Magoni Rosé (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/ORDEN DE SERVICIO 02.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-PROS-C",
+      "name": "Prosecco (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2023/FOLIO 01 ORDEN DE SERVICIO PREBODA GABY Y MARCO (5).pdf"
+      ]
+    },
+    {
+      "sku": "VIN-PUE-B",
+      "name": "Puerto Nuevo (botella)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2024/FOLIO 03 ORDEN DE SERVICIO CHRISTINE Y ALEX (7).pdf"
+      ]
+    },
+    {
+      "sku": "VIN-PUE-C",
+      "name": "Puerto Nuevo (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2024/FOLIO 03 ORDEN DE SERVICIO CHRISTINE Y ALEX (7).pdf"
+      ]
+    },
+    {
+      "sku": "VOD-SMI-C",
+      "name": "Smirnoff (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2023/FOLIO 19 ORDEN DE SERVICIO PREBODA NICOLE Y DIEGO (10).pdf"
+      ]
+    },
+    {
+      "sku": "VOD-STO-C",
+      "name": "Stolichnaya (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2023/FOLIO 15 ORDEN DE SERVICIO HRISA Y ALEX (1).pdf"
+      ]
+    },
+    {
+      "sku": "VIN-SUR-C",
+      "name": "Surco 2.7 (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/ORDEN DE SERVICIO 02.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-TORO",
+      "name": "Toro",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2024/FOLIO 09 ORDEN DE SERVICIO ROMPEHIELOS CASEY Y TRAVIS SEP 27 (11).pdf"
+      ]
+    }
+  ],
+  "top": [
+    {
+      "sku": "BAR-REF",
+      "name": "Barra libre de refrescos",
+      "menu_code": "barra_libre_2025",
+      "os_count": 63,
+      "examples": [
+        "2021/FOLIO 10 BODA ESTEF Y JORGE.pdf",
+        "2021/FOLIO 12 ERIN Y ERNESTO (3).pdf",
+        "2021/FOLIO 16 VANESSA Y BERNARDO MAY 22.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV",
+      "name": "Cerveza nacional",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 26,
+      "examples": [
+        "2021/FOLIO 09 ORDEN DE SERVICIO PREBODA MARIA Y GIL (1).pdf",
+        "2021/FOLIO 11 ORDEN DE SERVICIO PREBODA VANESSA Y DAVID (2).pdf",
+        "2021/FOLIO 14 PREBODA ANDREA Y OMAR (3).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-MAR",
+      "name": "Margarita",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 20,
+      "examples": [
+        "2021/FOLIO 06 PREBODA STEPHANIE Y OSVALDO C.pdf",
+        "2022/FOLIO 12 Orden se servicio Preboda Mariela y Andrés.pdf",
+        "2023/FOLIO 05 ORDEN DE SERVICIO PREBODA ERIKA Y CHRISTIAN (1).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-AGUA-DIA",
+      "name": "Agua del día",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 19,
+      "examples": [
+        "2021/FOLIO 05 PREBODA ESTEPHANIA Y CRIS (1).pdf",
+        "2021/FOLIO 06 PREBODA STEPHANIE Y OSVALDO C.pdf",
+        "2021/FOLIO 09 ORDEN DE SERVICIO PREBODA MARIA Y GIL (1).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-MEZ",
+      "name": "Mezcalita",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 16,
+      "examples": [
+        "2023/FOLIO 05 ORDEN DE SERVICIO PREBODA ERIKA Y CHRISTIAN (1).pdf",
+        "2023/FOLIO 16 ORDEN DE SERVICIO MAYRA Y AURELIO (5).pdf",
+        "2024/FOLIO 01 ORDEN DE SERVICIO ANDY Y JORGE .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-BOH-C",
+      "name": "Bohemia cristal",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 9,
+      "examples": [
+        "2021/FOLIO 06 PREBODA STEPHANIE Y OSVALDO C.pdf",
+        "2022/FOLIO 02 ORDEN DE SERVICIO PREBODA NATE Y AYLA (1).pdf",
+        "2022/FOLIO 39 ORDEN DE SERVICIO ILKA Y GUILLERMO.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-XX-L",
+      "name": "XX Lager",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 9,
+      "examples": [
+        "2021/FOLIO 11 ORDEN DE SERVICIO PREBODA VANESSA Y DAVID (2).pdf",
+        "2022/FOLIO 04 ORDEN DE SERVICIO PAULINA Y DAMIAN (2).pdf",
+        "2022/FOLIO 12 Orden se servicio Preboda Mariela y Andrés.pdf"
+      ]
+    },
+    {
+      "sku": "BAR-NAC",
+      "name": "Barra libre nacional",
+      "menu_code": "barra_libre_2025",
+      "os_count": 8,
+      "examples": [
+        "2022/FOLIO 11 ORDEN DE SERVICIO WIZELINE (1).pdf",
+        "2023/FOLIO 14 ORDEN DE SERVICIO PREBODA LISA Y POLO (2).pdf",
+        "2024/FOLIO 10 ORDEN DE SERVICIO PREBODA JULIA Y MARC (4).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-XX-A",
+      "name": "XX Ámbar",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 8,
+      "examples": [
+        "2021/FOLIO 11 ORDEN DE SERVICIO PREBODA VANESSA Y DAVID (2).pdf",
+        "2022/FOLIO 05 ORDEN DE SERVICIO REGINA Y ALFONSO.pdf",
+        "2022/FOLIO 12 Orden se servicio Preboda Mariela y Andrés.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-LIM",
+      "name": "Limonada",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 6,
+      "examples": [
+        "2022/FOLIO 14 ORDEN DE SERVICIO TORNEO DE LA AMISTAD .pdf",
+        "2022/Folio 30 PLAYTRIP 29 AGO.pdf",
+        "2023/FOLIO 23 ORDEN DE SERVICIO NUTEC .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-TEC-L",
+      "name": "Tecate Light",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 6,
+      "examples": [
+        "2021/FOLIO 11 ORDEN DE SERVICIO PREBODA VANESSA Y DAVID (2).pdf",
+        "2022/FOLIO 05 ORDEN DE SERVICIO REGINA Y ALFONSO.pdf",
+        "2023/FOLIO 07 ORDEN DE SERVICIO ALMA Y CARLOS (5).pdf"
+      ]
+    },
+    {
+      "sku": "BAR-INT",
+      "name": "Barra libre internacional",
+      "menu_code": "barra_libre_2025",
+      "os_count": 4,
+      "examples": [
+        "2024/FOLIO 07 ORDEN DE SERVICIO PREBODA JUL 05 (10).pdf",
+        "2024/FOLIO 09 ORDEN DE SERVICIO ROMPEHIELOS CASEY Y TRAVIS SEP 27 (11).pdf",
+        "2024/FOLIO 10 ORDEN DE SERVICIO PREBODA JULIA Y MARC (4).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-BOH-O",
+      "name": "Bohemia oscura",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 4,
+      "examples": [
+        "2022/FOLIO 02 ORDEN DE SERVICIO PREBODA NATE Y AYLA (1).pdf",
+        "2023/FOLIO 07 ORDEN DE SERVICIO ALMA Y CARLOS (5).pdf",
+        "2024/FOLIO 02 ORDEN DE SERVICIO EMBAJADA DE AUSTRIA (7).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-NAR",
+      "name": "Naranjada",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 4,
+      "examples": [
+        "2022/FOLIO 14 ORDEN DE SERVICIO TORNEO DE LA AMISTAD .pdf",
+        "2022/Folio 30 PLAYTRIP 29 AGO.pdf",
+        "2023/FOLIO 23 ORDEN DE SERVICIO NUTEC .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-HEI",
+      "name": "Heineken",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 3,
+      "examples": [
+        "2023/FOLIO 07 ORDEN DE SERVICIO ALMA Y CARLOS (5).pdf",
+        "2025/FOLIO 07 ORDEN DE SERVICIO PREBODA THERESA Y GAD (2).pdf",
+        "2025/ORDEN DE SERVICIO G23 (1).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-MOJ",
+      "name": "Mojito clásico",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 3,
+      "examples": [
+        "2021/FOLIO 06 PREBODA STEPHANIE Y OSVALDO C.pdf",
+        "2022/FOLIO 02 ORDEN DE SERVICIO PREBODA NATE Y AYLA (1).pdf",
+        "2024/FOLIO 03 ORDEN DE SERVICIO CHRISTINE Y ALEX (7).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CERV-AMS",
+      "name": "Amstel",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2025/FOLIO 03 ORDEN DE SERVICIO PREBODA MARIANA Y GABRIEL.pdf",
+        "2025/ORDEN DE SERVICIO G23 (1).pdf"
+      ]
+    },
+    {
+      "sku": "VIN-CM-R-B",
+      "name": "Casa Madero V Rosado (botella)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2022/FOLIO 20 CENA ROMANTICA CATALINA MEJIA (1).pdf",
+        "2022/FOLIO 31 ENTREGA DE ANILLO ADRIAN LUGO.pdf"
+      ]
+    },
+    {
+      "sku": "TEQ-CEN-P-C",
+      "name": "Centenario plata (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2023/FOLIO 15 ORDEN DE SERVICIO HRISA Y ALEX (1).pdf",
+        "2025/ORDEN DE SERVICIO G5 (1).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-CLER-C",
+      "name": "Clericot (copa)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2021/FOLIO 26 PREBODA ARELHY Y JOSE LUIS.pdf",
+        "2021/FOLIO 32 ORDEN DE SERVICIO BODA LUDIN Y MANUEL (1).pdf"
+      ]
+    },
+    {
+      "sku": "TEQ-CUE-C",
+      "name": "Cuervo especial (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2021/FOLIO 26 PREBODA ARELHY Y JOSE LUIS.pdf",
+        "2023/FOLIO 19 ORDEN DE SERVICIO PREBODA NICOLE Y DIEGO (10).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-JARRA-AG",
+      "name": "Jarra de agua",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2022/FOLIO 14 ORDEN DE SERVICIO TORNEO DE LA AMISTAD .pdf",
+        "2026/SIN FOLIO Evento bdmx .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-TE",
+      "name": "Té",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 2,
+      "examples": [
+        "2023/FOLIO 19 ORDEN DE SERVICIO PREBODA NICOLE Y DIEGO (10).pdf",
+        "2023/FOLIO 23 ORDEN DE SERVICIO NUTEC .pdf"
+      ]
+    },
+    {
+      "sku": "BEB-AGUA-EMB",
+      "name": "Agua embotellada",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2021/FOLIO 26 PREBODA ARELHY Y JOSE LUIS.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-AGUA-MIN",
+      "name": "Agua mineral",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2025/FOLIO 07 ORDEN DE SERVICIO PREBODA THERESA Y GAD (2).pdf"
+      ]
+    },
+    {
+      "sku": "RON-BAC-C",
+      "name": "Bacardí blanco (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2024/FOLIO 03 ORDEN DE SERVICIO CHRISTINE Y ALEX (7).pdf"
+      ]
+    },
+    {
+      "sku": "BEB-AMER",
+      "name": "Café americano",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/Orden de Servicio G5.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-GAV",
+      "name": "Gavilán / Paloma",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/ORDEN DE SERVICIO G6.pdf"
+      ]
+    },
+    {
+      "sku": "VIN-LAB-G-C",
+      "name": "Laberinto Gewürztraminer (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/ORDEN DE SERVICIO 02.pdf"
+      ]
+    },
+    {
+      "sku": "VIN-MAG-R-C",
+      "name": "Magoni Rosé (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/ORDEN DE SERVICIO 02.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-PROS-C",
+      "name": "Prosecco (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2023/FOLIO 01 ORDEN DE SERVICIO PREBODA GABY Y MARCO (5).pdf"
+      ]
+    },
+    {
+      "sku": "VIN-PUE-B",
+      "name": "Puerto Nuevo (botella)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2024/FOLIO 03 ORDEN DE SERVICIO CHRISTINE Y ALEX (7).pdf"
+      ]
+    },
+    {
+      "sku": "VIN-PUE-C",
+      "name": "Puerto Nuevo (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2024/FOLIO 03 ORDEN DE SERVICIO CHRISTINE Y ALEX (7).pdf"
+      ]
+    },
+    {
+      "sku": "VOD-SMI-C",
+      "name": "Smirnoff (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2023/FOLIO 19 ORDEN DE SERVICIO PREBODA NICOLE Y DIEGO (10).pdf"
+      ]
+    },
+    {
+      "sku": "VOD-STO-C",
+      "name": "Stolichnaya (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2023/FOLIO 15 ORDEN DE SERVICIO HRISA Y ALEX (1).pdf"
+      ]
+    },
+    {
+      "sku": "VIN-SUR-C",
+      "name": "Surco 2.7 (copeo)",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2026/ORDEN DE SERVICIO 02.pdf"
+      ]
+    },
+    {
+      "sku": "BEB-TORO",
+      "name": "Toro",
+      "menu_code": "bebidas_a_la_carta",
+      "os_count": 1,
+      "examples": [
+        "2024/FOLIO 09 ORDEN DE SERVICIO ROMPEHIELOS CASEY Y TRAVIS SEP 27 (11).pdf"
+      ]
+    }
+  ]
+}

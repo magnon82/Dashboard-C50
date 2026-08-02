@@ -5,7 +5,14 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  indexActivityByName,
+  loadEventClientActivity,
+  pickActivityForClient,
+} from '@/app/lib/eventos-activity';
+import {
   EVENTOS_SERVICIO_PCT,
+  checkOptionalMenuChoicesOnLines,
+  resolveAnticipoDateFromActivity,
   type QuoteLineOptions,
 } from '@/app/lib/eventos';
 import { syncLeadFollowUpAfterQuote } from '@/app/lib/eventos-follow-up';
@@ -135,6 +142,50 @@ function mapRow(raw: Record<string, unknown>): ServiceOrderRow {
  * Idempotente por quote_id (unique parcial).
  * Si refresh=true y ya existe, actualiza snapshot desde la cotización.
  */
+async function resolveAnticipoDateForQuote(
+  sb: SupabaseClient,
+  quoteId: string,
+  client: {
+    company_name?: string | null;
+    contact_name?: string | null;
+  } | null,
+  eventDate: string | null,
+  hint?: string | null
+): Promise<string | null> {
+  const hintDay = hint?.slice(0, 10) || null;
+  if (hintDay && /^\d{4}-\d{2}-\d{2}$/.test(hintDay)) return hintDay;
+
+  try {
+    const { data } = await sb
+      .from('event_payments')
+      .select('paid_at')
+      .eq('quote_id', quoteId)
+      .not('paid_at', 'is', null)
+      .order('paid_at', { ascending: true })
+      .limit(1);
+    const paid = data?.[0]?.paid_at;
+    if (paid) return String(paid).slice(0, 10);
+  } catch {
+    /* stub / tabla ausente */
+  }
+
+  try {
+    const payload = await loadEventClientActivity();
+    if (payload && client) {
+      const index = indexActivityByName(payload);
+      const hit = pickActivityForClient(
+        index,
+        client.company_name || '',
+        client.contact_name
+      );
+      return resolveAnticipoDateFromActivity(hit?.timeline, eventDate);
+    }
+  } catch {
+    /* seed ausente */
+  }
+  return null;
+}
+
 export async function createServiceOrderFromQuote(
   sb: SupabaseClient,
   opts: {
@@ -146,6 +197,8 @@ export async function createServiceOrderFromQuote(
     markQuoteAccepted?: boolean;
     /** Subir lead vinculado a ganado */
     markLeadGanado?: boolean;
+    /** Fecha de anticipo conocida (CRM / UI); no inventar si falta */
+    anticipoDate?: string | null;
   }
 ): Promise<CreateOsResult> {
   const quoteId = opts.quoteId.trim();
@@ -220,6 +273,31 @@ export async function createServiceOrderFromQuote(
       options: (l.options || {}) as QuoteLineOptions,
     };
   });
+
+  const willWrite = !existing?.id || opts.refresh !== false;
+  if (willWrite) {
+    const anticipoDate = await resolveAnticipoDateForQuote(
+      sb,
+      quoteId,
+      client,
+      (quote.event_date as string | null) || null,
+      opts.anticipoDate
+    );
+    const menuCheck = checkOptionalMenuChoicesOnLines(
+      linesRaw,
+      anticipoDate,
+      (quote.event_date as string | null) || null,
+      'enforce'
+    );
+    if (!menuCheck.ok && menuCheck.message) {
+      return {
+        order: null,
+        created: false,
+        error: menuCheck.message,
+        hint: 'Completa entrada y postre en la cotización (Cotizador) y vuelve a generar la OS.',
+      };
+    }
+  }
 
   const now = new Date().toISOString();
   const payload: ServiceOrderPayload = {

@@ -520,10 +520,12 @@ async function walkOsFiles(root: string): Promise<EventOsItem[]> {
   return items;
 }
 
-/** Fallback: filas os_pdf del seed de actividad (sin abrir PDF en disco). */
+/** Fallback: filas os_pdf del seed de actividad; path si el PDF existe en Drive. */
 async function fromActivitySeed(): Promise<EventOsItem[]> {
   const payload = await loadEventClientActivity();
   if (!payload) return [];
+  const root = getEventosOsRoot();
+  const canResolve = localDriveFsEnabled() && existsSync(root);
   const items: EventOsItem[] = [];
   for (const client of payload.clients) {
     for (const t of client.timeline || []) {
@@ -539,10 +541,21 @@ async function fromActivitySeed(): Promise<EventOsItem[]> {
       const mtimeMs = date
         ? new Date(`${date}T12:00:00`).getTime()
         : 0;
+      let fullPath = '';
+      if (canResolve && rel) {
+        const candidate = path.join(root, ...rel.split(/[/\\]+/));
+        if (
+          existsSync(candidate) &&
+          isUnderOsRoot(candidate, root) &&
+          candidate.toLowerCase().endsWith('.pdf')
+        ) {
+          fullPath = candidate;
+        }
+      }
       items.push({
         id: `seed:${rel || `${client.client_key}-${date}-${t.folio}`}`,
         filename,
-        path: '',
+        path: fullPath,
         rel_path: rel,
         label: t.label || client.company_name,
         folio: t.folio || null,

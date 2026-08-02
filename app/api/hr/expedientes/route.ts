@@ -22,6 +22,7 @@ import {
 } from '@/app/lib/hr-drive-sync';
 import { localDriveFsEnabled } from '@/app/lib/local-fs';
 import {
+  canonicalHrEmployeeName,
   folderBasenameFromPath,
   linkStatusFromMatch,
   matchPerson,
@@ -221,14 +222,14 @@ function archivedOperational(employees: DbEmp[]): DbEmp[] {
 
 /**
  * Al vincular expediente ↔ empleado: escribe drive_folder_path (si falta)
- * y fija full_name al nombre de carpeta del expediente (canónico).
+ * y fija full_name a «nombres + un apellido» (desde carpeta Altas/Bajas).
  */
 async function persistExpedienteLink(
   emp: DbEmp,
   folderPath: string,
   folderName: string
 ): Promise<{ pathWritten: boolean; nameUpdated: boolean }> {
-  const canonical = folderName.replace(/\s+/g, ' ').trim();
+  const canonical = canonicalHrEmployeeName(folderName, emp.full_name);
   const patch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   };
@@ -240,7 +241,6 @@ async function persistExpedienteLink(
     pathWritten = true;
   }
 
-  // Carpeta de expediente = nombre canónico (ID / contrato).
   if (canonical && emp.full_name.replace(/\s+/g, ' ').trim() !== canonical) {
     patch.full_name = canonical;
     nameUpdated = true;

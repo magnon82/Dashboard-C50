@@ -3,6 +3,8 @@ import {
   SESSION_COOKIE,
   SESSION_MAX_AGE,
   canAccessAdmin,
+  canAccessStaffCorte,
+  canEditHrEmployees,
   createSessionToken,
   getDashboardPassword,
   getDashboardUser,
@@ -103,10 +105,8 @@ export async function POST(request: Request) {
       capabilities: session.capabilities,
       canEdit: session.canEdit,
       canAccessAdmin: canAccessAdmin(session),
-      canAccessStaffCorte:
-        session.role === 'admin' ||
-        session.modules.includes('*') ||
-        session.capabilities.includes('staff.corte'),
+      canAccessStaffCorte: canAccessStaffCorte(session),
+      canEditHrEmployees: canEditHrEmployees(session),
     },
   });
   response.cookies.set(SESSION_COOKIE, token, {
