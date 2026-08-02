@@ -15,7 +15,7 @@ Ya no dependen de que tu PC esté encendido ni abren ventanas de PowerShell.
 ## Workflows
 
 - `.github/workflows/sync-saldos.yml` — cada ~15 min (`7,22,37,52`) + manual
-- `.github/workflows/sync-gmail.yml` — lun–sáb ~5:17 AM CDMX (+ respaldo ~6:47 AM); domingo 8:00 PM CDMX; + manual
+- `.github/workflows/sync-gmail.yml` — lun–sáb 4:00 AM CDMX (+ respaldo ~5:17 AM); domingo 8:00 PM CDMX; + manual
 
 Tras agregar o cambiar secrets, dispara **Run workflow** una vez en Actions (el cron de GitHub es best-effort y puede saltarse el primer día).
 
@@ -92,7 +92,7 @@ python ingest_infocaja_gmail.py --after 2022/01/01   # opcional, años previos
 ```
 
 Actions: `.github/workflows/sync-gmail.yml` → `sync_gmail_diario.py --newer-than 7 --skip-facturas`
-(lun–sáb ~5:17 / 6:47 AM CDMX; domingo 8:00 PM CDMX). Requiere los 4 secrets de la tabla arriba.
+(lun–sáb 4:00 AM / respaldo ~5:17 AM CDMX; domingo 8:00 PM CDMX). Requiere los 4 secrets de la tabla arriba.
 
 Sin el backfill, años como 2023 muestran WI/Eventos (Acumulado) pero
 «Sin datos de efectivo/tarjetas».
