@@ -8,8 +8,8 @@ export type ModuleId =
   | 'reportes-socios'
   | 'cocina'
   | 'barra'
-  | 'calidad'
-  | 'inventarios';
+  | 'inventarios'
+  | 'calidad';
 
 export interface AppModule {
   id: ModuleId;
@@ -89,19 +89,19 @@ export const APP_MODULES: AppModule[] = [
     status: 'próximo',
   },
   {
-    id: 'calidad',
-    href: '/calidad',
-    label: 'Calidad',
-    short: 'Calidad',
-    description: 'Incidencias, motivos de cancelación y KPIs de servicio',
-    status: 'próximo',
-  },
-  {
     id: 'inventarios',
     href: '/inventarios',
     label: 'Costos e Inventarios',
     short: 'Costos',
     description: 'Costeo, existencias, mermas y puntos de reorden',
+    status: 'próximo',
+  },
+  {
+    id: 'calidad',
+    href: '/calidad',
+    label: 'Calidad',
+    short: 'Calidad',
+    description: 'Incidencias, motivos de cancelación y KPIs de servicio',
     status: 'próximo',
   },
 ];
