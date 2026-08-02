@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
-import { requireVentasSession } from '@/app/lib/tpv-api';
+import {
+  assertWritableCorteDate,
+  requireVentasSession,
+  tpvSchemaHint,
+} from '@/app/lib/tpv-api';
 import {
   TPV_UPLOAD_MAX_BYTES,
   TPV_MIN_BYTES,
@@ -241,7 +245,7 @@ export async function GET(request: Request) {
         return NextResponse.json(
           {
             error: upErr.message,
-            hint: '¿Ejecutaste supabase/tpv_cortes.sql en el SQL Editor?',
+            hint: tpvSchemaHint(upErr.message),
           },
           { status: 500 }
         );
@@ -429,6 +433,8 @@ export async function POST(request: Request) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) {
         return NextResponse.json({ error: 'Fecha inválida' }, { status: 400 });
       }
+      const dateGate = assertWritableCorteDate(auth, corteDate);
+      if (dateGate) return dateGate;
 
       const sb = getServiceSupabase();
       await deleteExistingForTerminal(sb, corteDate, terminal);
@@ -472,7 +478,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error: error.message,
-            hint: '¿Ejecutaste supabase/tpv_cortes.sql o tpv_cortes_two_photos.sql?',
+            hint: tpvSchemaHint(error.message),
           },
           { status: 500 }
         );
@@ -595,6 +601,8 @@ export async function POST(request: Request) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) {
       return NextResponse.json({ error: 'Fecha de corte inválida' }, { status: 400 });
     }
+    const dateGate = assertWritableCorteDate(auth, corteDate);
+    if (dateGate) return dateGate;
 
     // Montos manuales opcionales (override / fallback si OCR no corre)
     const totalCobradoRaw = form.get('total_cobrado');
@@ -697,7 +705,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: upErr.message,
-          hint: '¿Creaste el bucket tpv-cortes? Ejecuta supabase/tpv_cortes.sql',
+          hint: tpvSchemaHint(upErr.message),
         },
         { status: 500 }
       );
@@ -744,7 +752,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: error.message,
-          hint: '¿Ejecutaste supabase/tpv_cortes_two_photos.sql (columna photo_kind)?',
+          hint: tpvSchemaHint(error.message),
         },
         { status: 500 }
       );

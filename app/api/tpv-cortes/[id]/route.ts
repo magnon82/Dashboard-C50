@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
-import { requireVentasSession } from '@/app/lib/tpv-api';
+import {
+  assertWritableCorteDate,
+  requireVentasSession,
+  tpvSchemaHint,
+} from '@/app/lib/tpv-api';
 import {
   TPV_STORAGE_BUCKET,
   asTpvRow,
@@ -117,6 +121,27 @@ export async function PATCH(request: Request, ctx: Ctx) {
   }
 
   try {
+    const sb = getServiceSupabase();
+    const { data: existing, error: loadErr } = await sb
+      .from('tpv_corte_uploads')
+      .select('corte_date')
+      .eq('id', id)
+      .maybeSingle();
+    if (loadErr) {
+      return NextResponse.json(
+        { error: loadErr.message, hint: tpvSchemaHint(loadErr.message) },
+        { status: 500 }
+      );
+    }
+    if (!existing) {
+      return NextResponse.json({ error: 'No encontrado' }, { status: 404 });
+    }
+    const dateGate = assertWritableCorteDate(
+      auth,
+      String(existing.corte_date).slice(0, 10)
+    );
+    if (dateGate) return dateGate;
+
     const body = (await request.json()) as Record<string, unknown>;
     const patch: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -174,7 +199,6 @@ export async function PATCH(request: Request, ctx: Ctx) {
         body.ocr_text == null ? null : String(body.ocr_text).slice(0, 8000);
     }
 
-    const sb = getServiceSupabase();
     const { data, error } = await sb
       .from('tpv_corte_uploads')
       .update(patch)
@@ -183,7 +207,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
       .maybeSingle();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json(
+        { error: error.message, hint: tpvSchemaHint(error.message) },
+        { status: 500 }
+      );
     }
     if (!data) {
       return NextResponse.json({ error: 'No encontrado' }, { status: 404 });
@@ -250,6 +277,9 @@ export async function DELETE(_request: Request, ctx: Ctx) {
     }
 
     const upload = asTpvRow(data as Record<string, unknown>);
+    const dateGate = assertWritableCorteDate(auth, upload.corte_date);
+    if (dateGate) return dateGate;
+
     if (upload.storage_path) {
       await sb.storage.from(TPV_STORAGE_BUCKET).remove([upload.storage_path]);
     }
