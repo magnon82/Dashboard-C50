@@ -8,6 +8,7 @@ import {
   EVENTOS_SERVICIO_PCT,
   type QuoteLineOptions,
 } from '@/app/lib/eventos';
+import { syncLeadFollowUpAfterQuote } from '@/app/lib/eventos-follow-up';
 
 export type ServiceOrderLine = {
   description: string;
@@ -21,7 +22,18 @@ export type ServiceOrderPayload = {
   lines: ServiceOrderLine[];
   quote_number?: string | null;
   source?: string;
+  phone?: string | null;
+  email?: string | null;
 };
+
+export const SERVICE_ORDER_STATUSES = [
+  'borrador',
+  'emitida',
+  'en_curso',
+  'cerrada',
+] as const;
+
+export type ServiceOrderStatus = (typeof SERVICE_ORDER_STATUSES)[number];
 
 export type ServiceOrderRow = {
   id: string;
@@ -35,6 +47,9 @@ export type ServiceOrderRow = {
   celebration: string | null;
   client_name: string | null;
   contact_name: string | null;
+  /** Desde payload (snapshot al generar OS) */
+  phone: string | null;
+  email: string | null;
   notes: string | null;
   subtotal: number;
   servicio_pct: number;
@@ -94,6 +109,8 @@ function mapRow(raw: Record<string, unknown>): ServiceOrderRow {
     celebration: (raw.celebration as string | null) || null,
     client_name: (raw.client_name as string | null) || null,
     contact_name: (raw.contact_name as string | null) || null,
+    phone: trimOrNull(payload.phone) || (raw.phone as string | null) || null,
+    email: trimOrNull(payload.email) || (raw.email as string | null) || null,
     notes: (raw.notes as string | null) || null,
     subtotal: Number(raw.subtotal || 0),
     servicio_pct: Number(raw.servicio_pct ?? EVENTOS_SERVICIO_PCT),
@@ -105,6 +122,8 @@ function mapRow(raw: Record<string, unknown>): ServiceOrderRow {
       lines: Array.isArray(payload.lines) ? payload.lines : [],
       quote_number: payload.quote_number ?? null,
       source: payload.source,
+      phone: payload.phone ?? null,
+      email: payload.email ?? null,
     },
     created_at: raw.created_at as string | undefined,
     updated_at: raw.updated_at as string | undefined,
@@ -137,7 +156,7 @@ export async function createServiceOrderFromQuote(
   const { data: quote, error: qErr } = await sb
     .from('event_quotes')
     .select(
-      '*, lines:event_quote_lines(*), client:event_clients(id, company_name, contact_name)'
+      '*, lines:event_quote_lines(*), client:event_clients(id, company_name, contact_name, phone, email)'
     )
     .eq('id', quoteId)
     .maybeSingle();
@@ -170,6 +189,8 @@ export async function createServiceOrderFromQuote(
   const client = quote.client as {
     company_name?: string | null;
     contact_name?: string | null;
+    phone?: string | null;
+    email?: string | null;
   } | null;
 
   const linesRaw = (
@@ -205,6 +226,8 @@ export async function createServiceOrderFromQuote(
     lines,
     quote_number: quote.quote_number || null,
     source: 'quote',
+    phone: trimOrNull(client?.phone),
+    email: trimOrNull(client?.email),
   };
 
   const row = {
@@ -299,9 +322,71 @@ export async function createServiceOrderFromQuote(
       .update({ stage: 'ganado', updated_at: now })
       .eq('id', leadId)
       .neq('stage', 'perdido');
+    // Checklist: cotización hecha + cierre operativo (OS generada)
+    await syncLeadFollowUpAfterQuote(sb, leadId, {
+      extraSteps: ['cierre'],
+    });
+  } else if (leadId) {
+    await syncLeadFollowUpAfterQuote(sb, leadId);
   }
 
   return { order, created };
+}
+
+/**
+ * Actualiza campos operativos de una OS digital (status, notes).
+ */
+export async function updateServiceOrder(
+  sb: SupabaseClient,
+  id: string,
+  patch: {
+    status?: string;
+    notes?: string | null;
+  }
+): Promise<{
+  order: ServiceOrderRow | null;
+  error?: string;
+  hint?: string;
+}> {
+  const osId = id.trim();
+  if (!osId) return { order: null, error: 'id requerido' };
+
+  const row: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (patch.status !== undefined) {
+    if (
+      !(SERVICE_ORDER_STATUSES as readonly string[]).includes(patch.status)
+    ) {
+      return { order: null, error: 'status inválido' };
+    }
+    row.status = patch.status;
+  }
+  if (patch.notes !== undefined) {
+    row.notes = trimOrNull(patch.notes);
+  }
+
+  if (Object.keys(row).length <= 1) {
+    return { order: null, error: 'Nada que actualizar' };
+  }
+
+  const { data, error } = await sb
+    .from('event_service_orders')
+    .update(row)
+    .eq('id', osId)
+    .select('*')
+    .single();
+
+  if (error) {
+    return {
+      order: null,
+      error: error.message,
+      hint: isMissingTable(error.message)
+        ? 'Ejecuta supabase/eventos_service_orders.sql en el SQL Editor de Supabase.'
+        : undefined,
+    };
+  }
+  return { order: mapRow(data as Record<string, unknown>) };
 }
 
 /**

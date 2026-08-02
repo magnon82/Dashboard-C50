@@ -8,12 +8,14 @@
     "start": "next start",
     "lint": "eslint",
     "ingest:estados": "cd ingestor && python ingest_estados_cuenta.py",
-    "ingest:estados:dry": "cd ingestor && python ingest_estados_cuenta.py --dry-run"
+    "ingest:estados:dry": "cd ingestor && python ingest_estados_cuenta.py --dry-run",
+    "gcal:probe": "node scripts/gcal-probe.mjs"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "@supabase/supabase-js": "^2.111.0",
     "@tremor/react": "^3.18.7",
+    "googleapis": "^173.0.0",
     "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4",

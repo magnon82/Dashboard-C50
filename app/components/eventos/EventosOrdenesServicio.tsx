@@ -8,6 +8,7 @@ import {
 } from '@/app/components/SectionHeader';
 import type { CalendarEventItem } from '@/app/lib/eventos-calendario';
 import { mexicoTodayIso } from '@/app/lib/eventos';
+import { useSession } from '@/app/lib/useSession';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 function clientKey(s: string | null | undefined): string {
@@ -95,6 +96,8 @@ function formatWhen(iso: string | null, mtimeMs: number, hasEventDate: boolean) 
 }
 
 export function EventosOrdenesServicio() {
+  const { user } = useSession();
+  const canEdit = !!user?.canEdit;
   const [year, setYear] = useState<number | 'all'>('all');
   const [when, setWhen] = useState<WhenFilter>('proximas');
   const [query, setQuery] = useState('');
@@ -106,6 +109,8 @@ export function EventosOrdenesServicio() {
   const [note, setNote] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [pending, setPending] = useState<PendingOsRow[]>([]);
+  const [genBusy, setGenBusy] = useState<string | null>(null);
+  const [genMsg, setGenMsg] = useState('');
 
   const today = useMemo(() => mexicoTodayIso(), []);
 
@@ -184,6 +189,45 @@ export function EventosOrdenesServicio() {
       setLoading(false);
     }
   }, [year, query]);
+
+  async function generateOs(row: PendingOsRow) {
+    if (!canEdit || (!row.quote_id && !row.lead_id)) return;
+    setGenBusy(row.id);
+    setGenMsg('');
+    setError(null);
+    try {
+      const res = await fetch('/api/eventos/os', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          row.quote_id
+            ? { quote_id: row.quote_id }
+            : { lead_id: row.lead_id }
+        ),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(
+          [json.error, json.hint].filter(Boolean).join(' — ') ||
+            'No se pudo generar OS'
+        );
+        return;
+      }
+      setGenMsg(
+        json.created
+          ? `OS ${json.order?.os_number || ''} generada`
+          : `OS ${json.order?.os_number || ''} ya existía`
+      );
+      await load();
+      if (json.href) {
+        window.open(json.href, '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      setError('Error de red al generar OS');
+    } finally {
+      setGenBusy(null);
+    }
+  }
 
   useEffect(() => {
     const t = window.setTimeout(() => void load(), query ? 280 : 0);
@@ -386,6 +430,9 @@ export function EventosOrdenesServicio() {
       {error && (
         <p className="text-sm font-medium text-red-700">{error}</p>
       )}
+      {genMsg && (
+        <p className="text-sm font-medium text-emerald-700">{genMsg}</p>
+      )}
 
       <SuiteCard className="!p-0 overflow-hidden">
         <div className="overflow-x-auto">
@@ -458,17 +505,29 @@ export function EventosOrdenesServicio() {
                         </td>
                         <td className="px-4 py-2.5">
                           {p.quote_id || p.lead_id ? (
-                            <a
-                              href={
-                                p.quote_id
-                                  ? `/eventos/cotizacion/${p.quote_id}`
-                                  : '/eventos'
-                              }
-                              className="inline-flex rounded-lg bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-                              title="Abre la cotización y usa «Aceptar y generar OS»"
-                            >
-                              Generar OS
-                            </a>
+                            canEdit ? (
+                              <button
+                                type="button"
+                                disabled={genBusy === p.id}
+                                onClick={() => void generateOs(p)}
+                                className="inline-flex rounded-lg px-2 py-0.5 text-xs font-semibold text-white disabled:opacity-50"
+                                style={{ backgroundColor: SUITE.navy }}
+                                title="Crea OS digital, marca cotización aceptada y lead ganado"
+                              >
+                                {genBusy === p.id ? 'Generando…' : 'Generar OS'}
+                              </button>
+                            ) : (
+                              <a
+                                href={
+                                  p.quote_id
+                                    ? `/eventos/cotizacion/${p.quote_id}`
+                                    : '/eventos'
+                                }
+                                className="inline-flex rounded-lg bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                              >
+                                Ver cotización
+                              </a>
+                            )
                           ) : (
                             <span
                               className="inline-flex rounded-lg bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900"

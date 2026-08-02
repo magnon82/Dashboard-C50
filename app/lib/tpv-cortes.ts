@@ -563,6 +563,102 @@ export function parseTerminalNumber(raw: unknown): TpvTerminalNumber | null {
   return null;
 }
 
+/** Resumen de cierre RPT embebido en el reporte admin de cortes. */
+export interface TpvAdminReportRptSummary {
+  wi_amount: number;
+  eventos_amount: number;
+  propinas: number;
+  efectivo_tombola: number;
+  efectivo_contado: number | null;
+  efectivo_infocaja: number | null;
+  bancos_neto_tpv: number | null;
+  bancos_cobrado_tpv: number | null;
+  bancos_propina_tpv: number | null;
+  tpv_complete: boolean;
+  created_by: string;
+  updated_by: string | null;
+}
+
+export interface TpvAdminReportSlotSummary {
+  terminal: TpvTerminalNumber;
+  state: 'missing' | 'partial' | 'photo' | 'unused';
+  cobrado: number | null;
+  propina: number | null;
+  neto: number | null;
+  ventaUploader: string | null;
+  propinaUploader: string | null;
+  unusedUploader: string | null;
+}
+
+/** Día en el listado admin (Master → Cortes TPV). */
+export interface TpvAdminReportDay {
+  date: string;
+  complete: boolean;
+  accounted: number;
+  missing: TpvTerminalNumber[];
+  slots: TpvAdminReportSlotSummary[];
+  totals: { cobrado: number; propina: number; neto: number };
+  rpt: TpvAdminReportRptSummary | null;
+  hasRpt: boolean;
+  /** Terminales 3/3 + cierre RPT guardado */
+  corteCompleto: boolean;
+}
+
+export function buildAdminReportDay(
+  corteDate: string,
+  uploads: TpvCorteUpload[],
+  rpt: TpvAdminReportRptSummary | null
+): TpvAdminReportDay {
+  const day = buildDayCompleteness(uploads, corteDate);
+  let cobrado = 0;
+  let propina = 0;
+  let neto = 0;
+  const slots: TpvAdminReportSlotSummary[] = day.slots.map((s) => {
+    const tip =
+      s.propinaUpload?.propina != null
+        ? Number(s.propinaUpload.propina)
+        : s.venta?.propina != null
+          ? Number(s.venta.propina)
+          : null;
+    const cob =
+      s.venta?.total_cobrado != null ? Number(s.venta.total_cobrado) : null;
+    const n =
+      s.state === 'photo' ? computeNetoBanco(cob, tip) : null;
+    if (s.state === 'photo') {
+      cobrado += cob ?? 0;
+      propina += tip ?? 0;
+      neto += n ?? 0;
+    }
+    return {
+      terminal: s.terminal,
+      state: s.state,
+      cobrado: s.state === 'photo' || s.state === 'partial' ? cob : null,
+      propina: s.state === 'photo' || s.state === 'partial' ? tip : null,
+      neto: n,
+      ventaUploader: s.venta?.uploader_username || null,
+      propinaUploader: s.propinaUpload?.uploader_username || null,
+      unusedUploader:
+        s.state === 'unused' ? s.upload?.uploader_username || null : null,
+    };
+  });
+
+  return {
+    date: corteDate,
+    complete: day.complete,
+    accounted: day.accounted,
+    missing: day.missing,
+    slots,
+    totals: {
+      cobrado: Math.round(cobrado * 100) / 100,
+      propina: Math.round(propina * 100) / 100,
+      neto: Math.round(neto * 100) / 100,
+    },
+    rpt,
+    hasRpt: Boolean(rpt),
+    corteCompleto: day.complete && Boolean(rpt),
+  };
+}
+
 /** Normaliza fila DB → TpvCorteUpload */
 export function asTpvRow(r: Record<string, unknown>): TpvCorteUpload {
   const tn = Number(r.terminal_number);

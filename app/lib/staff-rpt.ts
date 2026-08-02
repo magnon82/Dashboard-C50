@@ -251,6 +251,23 @@ export function efectivoMismatch(
   };
 }
 
+/**
+ * Regla de piso: el efectivo contado debe ser el mismo depositado en tómbola.
+ * Centavos redondeados (parseMoneyInput).
+ */
+export function efectivoTombolaMustMatch(
+  contado: number,
+  tombola: number
+): { ok: true } | { ok: false; message: string } {
+  const c = Math.round(Number(contado) * 100) / 100;
+  const t = Math.round(Number(tombola) * 100) / 100;
+  if (c === t) return { ok: true };
+  return {
+    ok: false,
+    message: `El efectivo contado (${moneyMx(c)}) debe ser el mismo depositado en tómbola (${moneyMx(t)}).`,
+  };
+}
+
 export function parseMoneyInput(raw: unknown): number | null {
   if (raw == null || raw === '') return null;
   const n = Number(String(raw).replace(/,/g, '').trim());

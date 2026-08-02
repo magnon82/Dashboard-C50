@@ -678,10 +678,13 @@ export function EventosCotizador({
           : json.lead_error
             ? ` · Lead no creado: ${json.lead_error}`
             : '';
+      const checklistNote = json.follow_up_synced
+        ? ' · Checklist: alta cliente + cotización'
+        : '';
       setMsg(
         `Nueva cotización ${json.quote?.quote_number || ''} guardada · ${formatMxn(
           Number(json.quote?.total || totals.total)
-        )}${leadNote}${holdNote}. Puedes armar otra con otros platillos (no sobrescribe).`
+        )}${leadNote}${checklistNote}${holdNote}. Puedes armar otra con otros platillos (no sobrescribe).`
       );
       setLines([]);
       setNotes('');
@@ -763,17 +766,26 @@ export function EventosCotizador({
                 platillos = otra versión para el mismo cliente.
               </p>
             </div>
-            {canEdit && (
-              <button
-                type="button"
-                onClick={startNuevaCotizacion}
-                disabled={quoteLocked}
-                className="rounded-xl border px-3 py-2 text-xs font-bold disabled:opacity-50"
-                style={{ borderColor: SUITE.navy, color: SUITE.navy }}
+            <div className="flex flex-col items-end gap-1 pt-0.5">
+              <span
+                className="text-[11px] font-medium uppercase tracking-wide"
+                style={{ color: theme.muted }}
+                aria-live="polite"
               >
                 Nueva cotización
-              </button>
-            )}
+              </span>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={startNuevaCotizacion}
+                  disabled={quoteLocked}
+                  className="text-xs underline-offset-2 hover:underline disabled:opacity-40 disabled:no-underline"
+                  style={{ color: theme.muted }}
+                >
+                  Empezar otra
+                </button>
+              )}
+            </div>
           </div>
 
           {lockMsg && (
@@ -1114,7 +1126,14 @@ export function EventosCotizador({
           </div>
 
           {selectedMenu?.notes && (
-            <p className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+            <p
+              className="mt-2 rounded-lg border px-3 py-2 text-xs"
+              style={{
+                borderColor: SUITE.border,
+                backgroundColor: SUITE.orangeSoft,
+                color: SUITE.navySoft,
+              }}
+            >
               {selectedMenu.notes}
               {selectedMenu.requires_food
                 ? ' · Requiere alimentos en la misma cotización.'
@@ -1122,14 +1141,78 @@ export function EventosCotizador({
             </p>
           )}
 
-          <div className="mt-3 flex flex-wrap items-end gap-2">
-            <label className="min-w-[220px] flex-1 text-sm">
-              <span className="font-semibold text-slate-700">Ítem</span>
+          {(nextLineIsAlloc || paxAlloc.hasAllocLines) && (
+            <div
+              className="mt-3 rounded-xl border px-4 py-3"
+              style={
+                paxAlloc.remaining === 0 && paxAlloc.hasAllocLines
+                  ? {
+                      borderColor: '#C5E8E7',
+                      backgroundColor: '#F0FAFA',
+                      borderLeftWidth: 3,
+                      borderLeftColor: '#0F9F9C',
+                    }
+                  : paxAlloc.remaining < 0
+                    ? {
+                        borderColor: '#FECACA',
+                        backgroundColor: '#FEF2F2',
+                        borderLeftWidth: 3,
+                        borderLeftColor: '#DC2626',
+                      }
+                    : {
+                        borderColor: '#F0E0C0',
+                        backgroundColor: SUITE.orangeSoft,
+                        borderLeftWidth: 3,
+                        borderLeftColor: SUITE.orange,
+                      }
+              }
+              role="status"
+              aria-live="polite"
+            >
+              <p
+                className="text-sm font-bold"
+                style={{
+                  color:
+                    paxAlloc.remaining === 0 && paxAlloc.hasAllocLines
+                      ? '#0B6E6C'
+                      : paxAlloc.remaining < 0
+                        ? '#991B1B'
+                        : SUITE.navy,
+                }}
+              >
+                Asignados {paxAlloc.assigned} de {paxAlloc.total} personas
+                {paxAlloc.remaining > 0
+                  ? ` · faltan ${paxAlloc.remaining}`
+                  : paxAlloc.remaining < 0
+                    ? ` · sobran ${Math.abs(paxAlloc.remaining)}`
+                    : paxAlloc.hasAllocLines
+                      ? ' · completo'
+                      : ''}
+              </p>
+              <p className="mt-0.5 text-xs" style={{ color: SUITE.muted }}>
+                {nextLineIsAlloc
+                  ? 'Indica cuántas personas llevan este menú (Personas por línea). Bebidas no cuentan en esta asignación.'
+                  : 'Solo menús de alimentos por persona suman al pax. Ajusta cantidades en la tabla si hace falta.'}
+              </p>
+            </div>
+          )}
+
+          <div
+            className={`mt-3 grid grid-cols-1 items-end gap-3 ${
+              nextLineIsAlloc || selectedItem?.unit === 'persona'
+                ? 'sm:grid-cols-[minmax(0,1fr)_7.5rem_auto]'
+                : 'sm:grid-cols-[minmax(0,1fr)_auto]'
+            }`}
+          >
+            <label className="min-w-0 text-sm">
+              <span className="font-semibold" style={{ color: SUITE.navy }}>
+                Ítem
+              </span>
               <select
                 value={itemId}
                 onChange={(e) => setItemId(e.target.value)}
                 disabled={!items.length || quoteLocked}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
+                className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
               >
                 {!items.length ? (
                   <option value="">Sin ítems en este menú</option>
@@ -1147,20 +1230,37 @@ export function EventosCotizador({
               </select>
             </label>
             {(nextLineIsAlloc || selectedItem?.unit === 'persona') && (
-              <label className="w-[140px] text-sm">
-                <span className="font-semibold text-slate-700">
+              <label className="text-sm">
+                <span className="font-semibold" style={{ color: SUITE.navy }}>
                   {nextLineIsAlloc ? 'Personas (línea)' : 'Cantidad'}
                 </span>
                 <input
                   type="number"
                   min={1}
                   step={1}
+                  max={nextLineIsAlloc ? Math.max(1, paxAlloc.remaining) : undefined}
                   value={lineQty}
                   disabled={quoteLocked}
                   onChange={(e) =>
                     setLineQty(Math.max(0, Math.floor(Number(e.target.value) || 0)))
                   }
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
+                  className={`mt-1 h-10 w-full rounded-lg px-3 text-sm disabled:bg-slate-50 ${
+                    nextLineIsAlloc
+                      ? 'border font-semibold'
+                      : 'border border-slate-300'
+                  }`}
+                  style={
+                    nextLineIsAlloc
+                      ? {
+                          borderColor: SUITE.orange,
+                          backgroundColor: SUITE.orangeSoft,
+                          color: SUITE.navy,
+                        }
+                      : undefined
+                  }
+                  aria-describedby={
+                    nextLineIsAlloc ? 'line-qty-pax-hint' : undefined
+                  }
                 />
               </label>
             )}
@@ -1175,28 +1275,36 @@ export function EventosCotizador({
                 !!validateChoiceSelections(selectedItem, choices) ||
                 (nextLineIsAlloc && paxAlloc.remaining <= 0)
               }
-              className="rounded-xl px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+              className="h-10 w-full rounded-lg px-4 text-sm font-bold text-white disabled:opacity-50 sm:w-auto"
               style={{ backgroundColor: SUITE.navy }}
             >
               Agregar línea
             </button>
+            {nextLineIsAlloc && !quoteLocked ? (
+              <p
+                id="line-qty-pax-hint"
+                className="text-xs font-medium sm:col-start-2"
+                style={{ color: SUITE.muted }}
+              >
+                {paxAlloc.remaining > 0
+                  ? `De ${paxAlloc.remaining} por asignar`
+                  : 'Todos asignados'}
+              </p>
+            ) : null}
           </div>
 
-          {nextLineIsAlloc && !quoteLocked && (
-            <p className="mt-2 text-xs text-slate-600">
-              Asigna cuántas personas del evento llevan este menú
-              {paxAlloc.remaining > 0
-                ? ` · quedan ${paxAlloc.remaining} por asignar`
-                : paxAlloc.hasAllocLines
-                  ? ' · todos asignados'
-                  : ''}
-              .
-            </p>
-          )}
-
           {choiceGroups.length > 0 && selectedItem && (
-            <div className="mt-3 grid gap-3 rounded-xl border border-amber-100 bg-amber-50/60 p-3 md:grid-cols-2">
-              <p className="md:col-span-2 text-xs font-semibold text-amber-900">
+            <div
+              className="mt-3 grid gap-3 rounded-xl border p-3 md:grid-cols-2"
+              style={{
+                borderColor: SUITE.border,
+                backgroundColor: SUITE.pageBg,
+              }}
+            >
+              <p
+                className="text-xs font-semibold md:col-span-2"
+                style={{ color: SUITE.navy }}
+              >
                 Elige opciones del menú
                 {choiceGroups.some((g) => g.affects_price)
                   ? ` · Precio unitario: ${formatMxn(previewUnitPrice)}`
@@ -1204,7 +1312,7 @@ export function EventosCotizador({
               </p>
               {choiceGroups.map((g) => (
                 <label key={g.id} className="text-sm">
-                  <span className="font-semibold text-slate-700">
+                  <span className="font-semibold" style={{ color: SUITE.navy }}>
                     {g.label}
                     {g.required ? ' *' : ' (opcional)'}
                   </span>
@@ -1216,7 +1324,7 @@ export function EventosCotizador({
                         [g.id]: e.target.value,
                       }))
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-50"
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
                     disabled={quoteLocked}
                   >
                     <option value="">
@@ -1239,15 +1347,28 @@ export function EventosCotizador({
           )}
 
           {!items.length && selectedMenu && (
-            <p className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+            <p
+              className="mt-2 rounded-lg border px-3 py-2 text-xs"
+              style={{
+                borderColor: SUITE.border,
+                backgroundColor: SUITE.orangeSoft,
+                color: SUITE.navySoft,
+              }}
+            >
               Este menú no tiene ítems. Re-ejecuta el seed de{' '}
               <code className="text-[11px]">supabase/eventos_module.sql</code>.
             </p>
           )}
 
-          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-100">
+          <div
+            className="mt-4 overflow-x-auto rounded-xl border"
+            style={{ borderColor: SUITE.border }}
+          >
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <thead
+                className="text-left text-xs uppercase"
+                style={{ backgroundColor: SUITE.pageBg, color: SUITE.muted }}
+              >
                 <tr>
                   <th className="px-3 py-2">Descripción</th>
                   <th className="px-3 py-2">Cant.</th>
@@ -1357,31 +1478,67 @@ export function EventosCotizador({
           </div>
 
           {paxAlloc.hasAllocLines && (
-            <p
-              className={`mt-2 text-xs font-medium rounded-lg px-3 py-2 ${
+            <div
+              className="mt-2 rounded-xl border px-4 py-2.5"
+              style={
                 allocHint
-                  ? 'text-amber-900 bg-amber-50'
-                  : 'text-emerald-900 bg-emerald-50'
-              }`}
+                  ? paxAlloc.remaining < 0
+                    ? {
+                        borderColor: '#FECACA',
+                        backgroundColor: '#FEF2F2',
+                        borderLeftWidth: 3,
+                        borderLeftColor: '#DC2626',
+                      }
+                    : {
+                        borderColor: '#F0E0C0',
+                        backgroundColor: SUITE.orangeSoft,
+                        borderLeftWidth: 3,
+                        borderLeftColor: SUITE.orange,
+                      }
+                  : {
+                      borderColor: '#C5E8E7',
+                      backgroundColor: '#F0FAFA',
+                      borderLeftWidth: 3,
+                      borderLeftColor: '#0F9F9C',
+                    }
+              }
+              role="status"
             >
-              Asignados {paxAlloc.assigned} / Total {paxAlloc.total}
-              {paxAlloc.remaining > 0
-                ? ` · faltan ${paxAlloc.remaining}`
-                : paxAlloc.remaining < 0
-                  ? ` · sobran ${Math.abs(paxAlloc.remaining)}`
-                  : ' · completo'}
-            </p>
+              <p
+                className="text-sm font-bold"
+                style={{
+                  color: allocHint
+                    ? paxAlloc.remaining < 0
+                      ? '#991B1B'
+                      : SUITE.navy
+                    : '#0B6E6C',
+                }}
+              >
+                Asignados {paxAlloc.assigned} de {paxAlloc.total} personas
+                {paxAlloc.remaining > 0
+                  ? ` · faltan ${paxAlloc.remaining}`
+                  : paxAlloc.remaining < 0
+                    ? ` · sobran ${Math.abs(paxAlloc.remaining)}`
+                    : ' · completo'}
+              </p>
+              {allocHint && (
+                <p className="mt-0.5 text-xs" style={{ color: SUITE.muted }}>
+                  {allocHint}
+                </p>
+              )}
+            </div>
           )}
 
           {liveHint && (
-            <p className="mt-2 text-xs font-medium text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+            <p
+              className="mt-2 rounded-lg border px-3 py-2 text-xs font-medium"
+              style={{
+                borderColor: SUITE.border,
+                backgroundColor: SUITE.orangeSoft,
+                color: SUITE.navySoft,
+              }}
+            >
               {liveHint}
-            </p>
-          )}
-
-          {allocHint && !liveHint && (
-            <p className="mt-2 text-xs font-medium text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
-              {allocHint}
             </p>
           )}
 
@@ -1414,7 +1571,7 @@ export function EventosCotizador({
                 disabled={quoteLocked}
                 onChange={(e) => setPlaceHold(e.target.checked)}
               />
-              Reservar hold 72 h hábiles
+              Hold: bloquea la fecha por 72 h hábiles
             </label>
           </div>
           {holdBlocked && (

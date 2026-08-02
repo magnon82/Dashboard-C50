@@ -26,7 +26,8 @@ export const APP_MODULES: AppModule[] = [
     href: '/staff',
     label: 'Staff',
     short: 'Staff',
-    description: 'Herramientas operativas de piso · Cortes TPV y captura diaria',
+    description:
+      'Herramientas operativas de piso · Cortes TPV, captura diaria y propinas',
     status: 'activo',
   },
   {
@@ -54,20 +55,20 @@ export const APP_MODULES: AppModule[] = [
     status: 'activo',
   },
   {
-    id: 'rrhh',
-    href: '/rrhh',
-    label: 'Recursos Humanos',
-    short: 'RR.HH.',
-    description: 'Personal, nómina y gestión de equipo · próximamente',
-    status: 'próximo',
-  },
-  {
     id: 'eventos',
     href: '/eventos',
     label: 'Eventos',
     short: 'Eventos',
     description: 'CRM, cotizador, pipeline y operación de eventos',
     status: 'activo',
+  },
+  {
+    id: 'rrhh',
+    href: '/rrhh',
+    label: 'Recursos Humanos',
+    short: 'RR.HH.',
+    description: 'Personal, nómina y gestión de equipo · próximamente',
+    status: 'próximo',
   },
   {
     id: 'cocina',

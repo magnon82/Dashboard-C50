@@ -81,10 +81,9 @@ const PILL = '#6B7585';
 const PILL_ACCENT = SUITE.orangeDeep;
 
 /**
- * Mapa de orígenes — inventario canónico en app/lib/admin-resources.ts
- * (SOURCE_FILE_GROUPS, ADMIN_STORAGE_PLATFORMS). Actualizar allí al agregar
- * source_file / path Drive / ingest / ruta UI; este diagrama y la sección
- * «Inventario de datos» leen de ese módulo.
+ * Mapa de orígenes — arquitectura curada en código (admin-resources.ts).
+ * No se auto-genera: al cambiar el pipeline, actualiza SOURCE_FILE_GROUPS /
+ * nodos abajo. El «Inventario de datos» sí mezcla detección en vivo.
  */
 
 /** Simple Icons (v13) path data + brand hex — viewBox 0 0 24 24 */
@@ -1305,6 +1304,11 @@ export function AdminDataMap() {
           <p className="text-sm" style={{ color: theme.muted }}>
             Topología de plataformas, scripts y APIs: Google → GitHub Actions / PC → Supabase →
             Vercel → módulos. Haz clic en un nodo o en una conexión para resaltar el flujo.
+          </p>
+          <p className="mt-1.5 text-[11px]" style={{ color: theme.muted }}>
+            Mapa curado en código (
+            <code className="text-[10px]">app/lib/admin-resources.ts</code>
+            ); el inventario debajo fusiona detección en vivo.
           </p>
         </div>
         <button

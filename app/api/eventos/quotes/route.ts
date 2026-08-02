@@ -362,6 +362,7 @@ export async function POST(request: Request) {
         quote: full || quote,
         lead_id: leadResult.leadId,
         lead_created: leadResult.leadCreated,
+        follow_up_synced: leadResult.followUpSynced || false,
         lead_error: leadResult.error || null,
       },
       { status: 201 }

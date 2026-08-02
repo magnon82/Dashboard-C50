@@ -1,9 +1,11 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import {
   Cormorant_Garamond,
   Source_Sans_3,
 } from 'next/font/google';
+import { EventosDocActions } from '@/app/components/eventos/EventosDocActions';
 import {
   EVENTOS_CONTACT,
   formatEventDateEs,
@@ -37,45 +39,41 @@ export function EventosOrdenServicioDocument({
   doc,
   showActions = true,
   quoteHref,
+  actionsExtra,
 }: {
   doc: OrdenServicioDoc;
   showActions?: boolean;
   quoteHref?: string | null;
+  actionsExtra?: ReactNode;
 }) {
   return (
     <div
       className={`os-root mx-auto max-w-[820px] px-4 py-6 print:max-w-none print:px-0 print:py-0 ${body.className}`}
     >
       {showActions && (
-        <div className="mb-5 flex flex-wrap items-center gap-2 print:hidden">
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="rounded-lg px-4 py-2 text-sm font-bold text-white"
-            style={{ backgroundColor: SUITE.navy }}
-          >
-            Imprimir / guardar PDF
-          </button>
-          <button
-            type="button"
-            onClick={() => window.history.back()}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-          >
-            Volver
-          </button>
-          {quoteHref && (
-            <a
-              href={quoteHref}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold"
-              style={{ color: SUITE.orangeDeep }}
-            >
-              Ver cotización
-            </a>
-          )}
-          <p className="text-xs text-slate-500">
-            En el diálogo de impresión elige «Guardar como PDF».
-          </p>
-        </div>
+        <EventosDocActions
+          kind="os"
+          folio={doc.os_number}
+          clientName={doc.client_name || doc.contact_name}
+          celebration={doc.celebration}
+          eventDate={doc.event_date}
+          recipientEmail={doc.email}
+          recipientPhone={doc.phone}
+          extra={
+            <>
+              {quoteHref && (
+                <a
+                  href={quoteHref}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold"
+                  style={{ color: SUITE.orangeDeep }}
+                >
+                  Ver cotización
+                </a>
+              )}
+              {actionsExtra}
+            </>
+          }
+        />
       )}
 
       <article
@@ -151,6 +149,11 @@ export function EventosOrdenServicioDocument({
                 Contacto: {doc.contact_name}
               </p>
             )}
+            {(doc.phone || doc.email) && (
+              <p className="mt-1 text-sm" style={{ color: SUITE.muted }}>
+                {[doc.phone, doc.email].filter(Boolean).join(' · ')}
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Meta label="Celebración" value={doc.celebration || '—'} />
@@ -164,6 +167,36 @@ export function EventosOrdenServicioDocument({
               className="col-span-2"
             />
           </div>
+        </section>
+
+        <section className="border-b border-slate-100 px-8 py-5">
+          <h2
+            className="text-[11px] font-bold uppercase tracking-[0.16em]"
+            style={{ color: SUITE.orangeDeep }}
+          >
+            Checklist operativo
+          </h2>
+          <ul
+            className="mt-3 grid gap-2 text-sm sm:grid-cols-2"
+            style={{ color: SUITE.muted }}
+          >
+            {[
+              'Cocina: menú y tiempos confirmados',
+              'Barra: bebidas / barra libre según líneas',
+              'Piso: montaje y aforo (' +
+                (doc.pax ? `${doc.pax} pax` : 'pax por confirmar') +
+                ')',
+              'Anticipo / liquidación según política',
+            ].map((item) => (
+              <li key={item} className="flex gap-2">
+                <span
+                  className="mt-0.5 inline-block h-3.5 w-3.5 shrink-0 rounded border border-slate-300"
+                  aria-hidden
+                />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
         </section>
 
         <section className="px-8 py-6">

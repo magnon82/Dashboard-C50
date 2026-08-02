@@ -11,6 +11,7 @@ import {
   buildBancosFromTpv,
   buildStaffCorteStatus,
   efectivoMismatch,
+  efectivoTombolaMustMatch,
   parseMoneyInput,
   sumInfocajaDay,
 } from '@/app/lib/staff-rpt';
@@ -155,10 +156,11 @@ export async function GET(request: Request) {
 
 /**
  * PUT /api/staff-corte — Cerrar / actualizar cierre del día (upsert 1 fila).
- * Body JSON: { date?, wi_amount, eventos_amount, efectivo_tombola,
+ * Body JSON: { date?, wi_amount, eventos_amount, efectivo_tombola?,
  *              efectivo_contado, notes? }
  * Bancos y propinas se toman de TPV (obligatorio día completo + montos).
- * efectivo_contado es obligatorio; si hay Infocaja Efectivo, contado no puede ser menor.
+ * efectivo_contado es obligatorio (= tómbola); si se envía tómbola, debe coincidir.
+ * Si hay Infocaja Efectivo, contado no puede ser menor.
  */
 export async function PUT(request: Request) {
   const auth = await requireVentasSession();
@@ -175,7 +177,6 @@ export async function PUT(request: Request) {
 
     const wi = parseMoneyInput(body.wi_amount);
     const eventos = parseMoneyInput(body.eventos_amount);
-    const tombola = parseMoneyInput(body.efectivo_tombola);
     if (wi == null || wi < 0) {
       return NextResponse.json(
         { error: 'Indica el monto WI (puede ser 0)' },
@@ -188,12 +189,6 @@ export async function PUT(request: Request) {
         { status: 400 }
       );
     }
-    if (tombola == null || tombola < 0) {
-      return NextResponse.json(
-        { error: 'Indica el efectivo depositado en tómbola (puede ser 0)' },
-        { status: 400 }
-      );
-    }
 
     const efectivoContado = parseMoneyInput(body.efectivo_contado);
     if (efectivoContado == null || efectivoContado < 0) {
@@ -202,6 +197,30 @@ export async function PUT(request: Request) {
         { status: 400 }
       );
     }
+
+    /** Fuente de verdad: contado. Tómbola = mismo monto (depósito). */
+    const tombolaRaw = parseMoneyInput(body.efectivo_tombola);
+    if (tombolaRaw != null && tombolaRaw < 0) {
+      return NextResponse.json(
+        { error: 'El efectivo en tómbola no puede ser negativo' },
+        { status: 400 }
+      );
+    }
+    if (tombolaRaw != null) {
+      const match = efectivoTombolaMustMatch(efectivoContado, tombolaRaw);
+      if (!match.ok) {
+        return NextResponse.json(
+          {
+            error: match.message,
+            blockers: [
+              'El efectivo contado debe ser el mismo depositado en tómbola.',
+            ],
+          },
+          { status: 400 }
+        );
+      }
+    }
+    const tombola = efectivoContado;
 
     const notesRaw = body.notes;
     const notes =

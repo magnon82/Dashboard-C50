@@ -160,7 +160,7 @@ export default function EventosPage() {
               'Abre Supabase → SQL Editor',
               'Pega y ejecuta supabase/eventos_module.sql (tablas + seed: 3 tiempos, desayunos, parejas, barra libre, bebidas)',
               'Recarga /eventos → Cotizador',
-              'Opcional: CRM → Importar Excel seed para clientes',
+              'Opcional: CRM → Importar Excel clientes / Importar Seguimiento',
               'Precios con * aún requieren verificación operativa',
             ]}
           />

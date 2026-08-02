@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/eventos/holds
- * Stub Fase 2: hold 72 h hábiles → Google Calendar compartido.
- * Sin GCAL_CALENDAR_ID responde error amigable (requires_GCAL_CALENDAR_ID).
+ * Hold 72 h hábiles → Google Calendar (SA + opcional GCAL_IMPERSONATE_USER / DWD).
+ * Sin GCAL_* responde error amigable; 403/401 típico = falta DWD o ACL.
  */
 export async function POST(request: Request) {
   const auth = await requireEventosSession();
@@ -52,6 +52,9 @@ export async function POST(request: Request) {
     notes: body.notes || null,
   });
 
-  const status = result.error === 'hold_too_close' ? 400 : 200;
+  const badClient =
+    result.error === 'hold_too_close' ||
+    result.error === 'requires_event_date';
+  const status = badClient ? 400 : result.ok ? 200 : 502;
   return NextResponse.json(result, { status });
 }

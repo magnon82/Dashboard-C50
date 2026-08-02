@@ -1,11 +1,12 @@
 /**
- * Escaneo de rutas Drive para Inventario de datos (solo servidor / Node).
+ * Escaneo de rutas Drive + agregación source_file (solo servidor / Node).
  */
 
 import { existsSync } from 'fs';
 import { readdir, stat } from 'fs/promises';
 import path from 'path';
-import type { DrivePathStat } from '@/app/lib/storage-format';
+import type { DetectedSourceFile, DrivePathStat } from '@/app/lib/storage-format';
+import { getServiceSupabase } from '@/app/lib/users';
 
 export type DriveInventoryEntry = {
   /** Coincide con ResourceBranch.id en admin-resources. */
@@ -177,4 +178,221 @@ export async function scanDriveInventory(): Promise<{
     driveMessage: anyAvailable ? null : 'no disponible en este servidor',
     driveByPath,
   };
+}
+
+function normalizeDetectedRows(
+  rows: Array<{ source_file?: unknown; row_count?: unknown; last_date?: unknown }>,
+): DetectedSourceFile[] {
+  const out: DetectedSourceFile[] = [];
+  for (const row of rows) {
+    const sourceFile = String(row.source_file ?? '').trim();
+    if (!sourceFile) continue;
+    const rowCount = Number(row.row_count);
+    if (!Number.isFinite(rowCount) || rowCount < 0) continue;
+    let lastDate: string | null = null;
+    if (row.last_date != null) {
+      const raw = String(row.last_date);
+      lastDate = raw.slice(0, 10) || null;
+    }
+    out.push({ sourceFile, rowCount, lastDate });
+  }
+  out.sort((a, b) => a.sourceFile.localeCompare(b.sourceFile, 'es'));
+  return out;
+}
+
+/**
+ * Una sola agregación DISTINCT source_file (RPC).
+ * Fallback: lectura paginada solo de source_file + date (sin N+1).
+ */
+export async function fetchDetectedSourceFiles(): Promise<{
+  detectedSourceFiles: DetectedSourceFile[];
+  detectedSourceFilesError: string | null;
+}> {
+  try {
+    const sb = getServiceSupabase();
+    const rpc = await sb.rpc('admin_source_file_stats');
+    if (!rpc.error && Array.isArray(rpc.data)) {
+      return {
+        detectedSourceFiles: normalizeDetectedRows(
+          rpc.data as Array<{
+            source_file?: unknown;
+            row_count?: unknown;
+            last_date?: unknown;
+          }>,
+        ),
+        detectedSourceFilesError: null,
+      };
+    }
+
+    // Fallback sin RPC: agregar en memoria (columnas mínimas, una pasada).
+    const tallies = new Map<string, { rowCount: number; lastDate: string | null }>();
+    let from = 0;
+    const pageSize = 1000;
+    const maxRows = 80_000;
+    let truncated = false;
+
+    while (from < maxRows) {
+      const { data, error } = await sb
+        .from('financial_records')
+        .select('source_file, date')
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        return {
+          detectedSourceFiles: [],
+          detectedSourceFilesError: rpc.error
+            ? `RPC no disponible (${rpc.error.message}); fallback falló: ${error.message}`
+            : error.message,
+        };
+      }
+      if (!data?.length) break;
+
+      for (const row of data) {
+        const sourceFile = String(
+          (row as { source_file?: unknown }).source_file ?? '',
+        ).trim() || '(vacío)';
+        const dateRaw = (row as { date?: unknown }).date;
+        const dateStr =
+          dateRaw != null ? String(dateRaw).slice(0, 10) || null : null;
+        const prev = tallies.get(sourceFile);
+        if (!prev) {
+          tallies.set(sourceFile, { rowCount: 1, lastDate: dateStr });
+        } else {
+          prev.rowCount += 1;
+          if (dateStr && (!prev.lastDate || dateStr > prev.lastDate)) {
+            prev.lastDate = dateStr;
+          }
+        }
+      }
+
+      if (data.length < pageSize) break;
+      from += pageSize;
+      if (from >= maxRows) truncated = true;
+    }
+
+    const detectedSourceFiles = [...tallies.entries()]
+      .map(([sourceFile, v]) => ({
+        sourceFile,
+        rowCount: v.rowCount,
+        lastDate: v.lastDate,
+      }))
+      .sort((a, b) => a.sourceFile.localeCompare(b.sourceFile, 'es'));
+
+    return {
+      detectedSourceFiles,
+      detectedSourceFilesError: truncated
+        ? `Agregación parcial (límite ${maxRows.toLocaleString('es-MX')} filas). Ejecuta supabase/admin_source_file_stats.sql para el RPC exacto.`
+        : rpc.error
+          ? `RPC no disponible; agregación por lectura (${rpc.error.message}). Ejecuta supabase/admin_source_file_stats.sql.`
+          : null,
+    };
+  } catch (e) {
+    return {
+      detectedSourceFiles: [],
+      detectedSourceFilesError:
+        e instanceof Error ? e.message : 'Error detectando source_file',
+    };
+  }
+}
+
+/** Bytes estimados de payload JSON de una fila (aprox. tamaño útil). */
+function rowPayloadBytes(row: Record<string, unknown>): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(row), 'utf8');
+  } catch {
+    return 512;
+  }
+}
+
+/**
+ * Tamaño de financial_records:
+ * 1) RPC `admin_relation_size` → pg_total_relation_size
+ * 2) Si falta el RPC: count × promedio de muestra de filas
+ */
+export async function measureSupabase(): Promise<{
+  supabaseBytes: number | null;
+  supabaseMethod: 'rpc' | 'estimate' | null;
+  supabaseRowCount: number | null;
+  supabaseError: string | null;
+}> {
+  try {
+    const sb = getServiceSupabase();
+
+    const rpc = await sb.rpc('admin_relation_size', { rel: 'financial_records' });
+    if (!rpc.error && rpc.data != null) {
+      const n = typeof rpc.data === 'number' ? rpc.data : Number(rpc.data);
+      if (Number.isFinite(n) && n >= 0) {
+        const countRes = await sb
+          .from('financial_records')
+          .select('id', { count: 'exact', head: true });
+        return {
+          supabaseBytes: n,
+          supabaseMethod: 'rpc',
+          supabaseRowCount: countRes.count ?? null,
+          supabaseError: null,
+        };
+      }
+    }
+
+    const countRes = await sb
+      .from('financial_records')
+      .select('id', { count: 'exact', head: true });
+    if (countRes.error) {
+      return {
+        supabaseBytes: null,
+        supabaseMethod: null,
+        supabaseRowCount: null,
+        supabaseError: countRes.error.message,
+      };
+    }
+    const rowCount = countRes.count ?? 0;
+    if (rowCount === 0) {
+      return {
+        supabaseBytes: 0,
+        supabaseMethod: 'estimate',
+        supabaseRowCount: 0,
+        supabaseError: null,
+      };
+    }
+
+    const sampleSize = Math.min(80, rowCount);
+    const { data: sample, error: sampleError } = await sb
+      .from('financial_records')
+      .select('*')
+      .limit(sampleSize);
+
+    if (sampleError || !sample?.length) {
+      const avg = 1200;
+      return {
+        supabaseBytes: Math.round(rowCount * avg),
+        supabaseMethod: 'estimate',
+        supabaseRowCount: rowCount,
+        supabaseError: sampleError
+          ? `Estimación gruesa (${sampleError.message})`
+          : null,
+      };
+    }
+
+    const avg =
+      sample.reduce((sum, row) => sum + rowPayloadBytes(row as Record<string, unknown>), 0) /
+      sample.length;
+    const estimated = Math.round(rowCount * avg * 1.35);
+
+    return {
+      supabaseBytes: estimated,
+      supabaseMethod: 'estimate',
+      supabaseRowCount: rowCount,
+      supabaseError: rpc.error
+        ? `RPC no disponible; estimación por filas (${rpc.error.message})`
+        : null,
+    };
+  } catch (e) {
+    return {
+      supabaseBytes: null,
+      supabaseMethod: null,
+      supabaseRowCount: null,
+      supabaseError: e instanceof Error ? e.message : 'Error midiendo Supabase',
+    };
+  }
 }

@@ -4,19 +4,36 @@
  * + cadencia 15 días + holds + cierre.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { type EventLead, type LeadStage } from '@/app/lib/eventos';
 
 /**
  * Go-live de alertas CRM (civil America/Mexico_City).
  * Floor inclusivo: solo leads “nuevos” de esta fecha en adelante.
- * Imports Seguimiento (`source=sheets`) nunca alertan (aunque el seed
- * ponga created_at = día del import).
+ * Imports Seguimiento nunca alertan (aunque el seed ponga created_at =
+ * día del import y/o source quede null / default `manual`).
  */
 export const FOLLOW_UP_ALERTS_FLOOR_ISO = '2026-08-01';
 
 /** Texto de ayuda en la franja de alertas del CRM. */
 export const FOLLOW_UP_ALERTS_SCOPE_HINT =
-  'Alertas desde el 1 ago 2026 · historial y Seguimiento importado no se alertan';
+  'Solo leads nuevos del cotizador/CRM · import Seguimiento no alerta';
+
+/** Orígenes que sí generan alertas (estricto). */
+const FOLLOW_UP_ALERT_SOURCES = new Set([
+  'manual',
+  'cotizador',
+  'quote',
+]);
+
+/** Orígenes de import / seed — nunca alertan. */
+const FOLLOW_UP_IMPORT_SOURCES = new Set([
+  'sheets',
+  'seguimiento',
+  'sheet',
+  'import',
+  'excel_seed',
+]);
 
 export const FOLLOW_UP_STEP_IDS = [
   'captura',
@@ -85,7 +102,7 @@ export const FOLLOW_UP_STEPS: readonly FollowUpStep[] = [
   },
   {
     id: 'hold',
-    label: 'Hold 72 h (si aplica)',
+    label: 'Hold: bloquea la fecha por 72 h (si aplica)',
     dayOffset: null,
     optional: true,
   },
@@ -166,23 +183,56 @@ function mexicoCivilDate(iso: string | Date): string | null {
   return d.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
 }
 
-function isSheetsImportLead(
+/**
+ * Notas típicas del seed/import Seguimiento (Google Sheet).
+ * Los `nuevo` del seed a menudo NO traen "Status Sheet:" — solo
+ * "Atiende:" / "Solicitud:" — y created_at = día del import.
+ */
+export function looksLikeSeguimientoImportNotes(
+  notes: string | null | undefined
+): boolean {
+  const raw = (notes || '').trim();
+  if (!raw) return false;
+  if (/status\s*sheet\s*:/i.test(raw)) return true;
+  if (/solicitud\s*:\s*\d{4}-\d{2}-\d{2}/i.test(raw)) return true;
+  if (/primer\s+contacto\s*:/i.test(raw)) return true;
+  if (/[uú]ltimo\s+contacto\s*:/i.test(raw)) return true;
+  if (/monto\s+cotizado\s+sheet/i.test(raw)) return true;
+  if (/atiende\s*:/i.test(raw)) return true;
+  const lower = raw.toLowerCase();
+  if (lower.includes('seguimiento') && lower.includes('sheet')) return true;
+  return false;
+}
+
+/** Import Seguimiento / sheets / seed — no debe generar alertas. */
+export function isSheetsImportLead(
   lead: Pick<EventLead, 'source' | 'notes'>
 ): boolean {
   const src = (lead.source || '').trim().toLowerCase();
-  if (src === 'sheets' || src === 'seguimiento' || src === 'sheet') return true;
-  // Fallback si la columna source aún no existe / no se persistió
-  if ((lead.notes || '').includes('Status Sheet:')) return true;
+  if (FOLLOW_UP_IMPORT_SOURCES.has(src)) return true;
+  if (looksLikeSeguimientoImportNotes(lead.notes)) return true;
   return false;
 }
 
 /**
- * Cutoff de alertas CRM (agresivo):
+ * ¿Origen explícito del flujo vendedor (CRM manual / cotizador / quote)?
+ * Null/vacío/desconocido → no alerta (tratar como import o legacy).
+ */
+export function isFollowUpAlertAllowedSource(
+  source: string | null | undefined
+): boolean {
+  const src = (source || '').trim().toLowerCase();
+  return FOLLOW_UP_ALERT_SOURCES.has(src);
+}
+
+/**
+ * Cutoff de alertas CRM (agresivo — go-live):
  * 1) Sin created_at civil CDMX → fuera.
  * 2) created_at &lt; FOLLOW_UP_ALERTS_FLOOR_ISO → fuera (historial).
- * 3) source sheets / Seguimiento (o notes con Status Sheet) → fuera
- *    (el seed suele poner created_at = día del import = hoy).
- * 4) Si hay event_date civil &lt; floor → fuera (eventos ya pasados del historial).
+ * 3) Import Seguimiento (source sheets/… o notes tipo Status Sheet /
+ *    Atiende / Solicitud) → fuera (seed suele poner created_at = hoy).
+ * 4) source NO en (manual, cotizador, quote) → fuera (null = import).
+ * 5) Si hay event_date civil &lt; floor → fuera.
  * El checklist sigue en tarjetas; esto solo silencia alertas.
  */
 export function isLeadInFollowUpAlertScope(
@@ -193,6 +243,7 @@ export function isLeadInFollowUpAlertScope(
   _now = new Date()
 ): boolean {
   if (isSheetsImportLead(lead)) return false;
+  if (!isFollowUpAlertAllowedSource(lead.source)) return false;
 
   const createdDay = mexicoCivilDate(lead.created_at);
   if (!createdDay || createdDay < FOLLOW_UP_ALERTS_FLOOR_ISO) return false;
@@ -490,4 +541,91 @@ export function daysUntilNextFollowUp(
   const next = new Date(nextFollowUpAt);
   if (!Number.isFinite(next.getTime())) return null;
   return Math.round(daysBetween(now, next));
+}
+
+/**
+ * Pasos que se marcan al guardar una cotización (lead ya tiene cliente + PDF listo).
+ * No marca «enviar PDF» como hecho de envío humano — solo el paso de generar cotización.
+ */
+export const FOLLOW_UP_ON_QUOTE_SAVE: readonly FollowUpStepId[] = [
+  'alta_cliente',
+  'cotizacion',
+] as const;
+
+/**
+ * Fusiona pasos nuevos en follow_up_done (sin duplicar; respeta legacy).
+ */
+export function mergeFollowUpDone(
+  current: unknown,
+  add: readonly FollowUpStepId[]
+): FollowUpStepId[] {
+  const base = normalizeFollowUpDone(current);
+  const out = [...base];
+  for (const id of add) {
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+/**
+ * Checklist + próxima acción tras guardar cotización o generar OS.
+ * Idempotente: solo escribe si hay cambios.
+ */
+export async function syncLeadFollowUpAfterQuote(
+  sb: SupabaseClient,
+  leadId: string,
+  opts?: {
+    /** Pasos extra (p. ej. cierre al generar OS) */
+    extraSteps?: readonly FollowUpStepId[];
+  }
+): Promise<{ updated: boolean; error?: string }> {
+  const id = (leadId || '').trim();
+  if (!id) return { updated: false, error: 'lead_id vacío' };
+
+  const { data: lead, error } = await sb
+    .from('event_leads')
+    .select(
+      'id, created_at, stage, client_id, follow_up_done, next_follow_up_at'
+    )
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) return { updated: false, error: error.message };
+  if (!lead?.id) return { updated: false, error: 'Lead no encontrado' };
+
+  const add = [
+    ...FOLLOW_UP_ON_QUOTE_SAVE,
+    ...(opts?.extraSteps || []),
+  ] as FollowUpStepId[];
+  const done = mergeFollowUpDone(lead.follow_up_done, add);
+  const prevDone = normalizeFollowUpDone(lead.follow_up_done);
+  const sameDone =
+    done.length === prevDone.length && done.every((s) => prevDone.includes(s));
+
+  const nextAt = suggestNextFollowUpAt(
+    {
+      created_at: lead.created_at,
+      stage: lead.stage,
+      client_id: lead.client_id,
+    },
+    done
+  );
+
+  const prevNext = lead.next_follow_up_at || null;
+  const sameNext = (nextAt || null) === prevNext;
+
+  if (sameDone && sameNext) return { updated: false };
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await sb
+    .from('event_leads')
+    .update({
+      follow_up_done: done,
+      next_follow_up_at: nextAt,
+      updated_at: now,
+    })
+    .eq('id', id);
+
+  if (updErr) return { updated: false, error: updErr.message };
+  return { updated: true };
 }

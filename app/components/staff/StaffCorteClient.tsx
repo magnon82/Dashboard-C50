@@ -143,7 +143,7 @@ export function StaffCorteClient() {
 
   const [wi, setWi] = useState('');
   const [eventos, setEventos] = useState('');
-  const [tombola, setTombola] = useState('');
+  /** Fuente de verdad: contado = tómbola (mismo depósito). */
   const [efectivoContado, setEfectivoContado] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -166,9 +166,12 @@ export function StaffCorteClient() {
       if (rpt) {
         setWi(String(rpt.wi_amount ?? ''));
         setEventos(String(rpt.eventos_amount ?? ''));
-        setTombola(String(rpt.efectivo_tombola ?? ''));
         setEfectivoContado(
-          rpt.efectivo_contado != null ? String(rpt.efectivo_contado) : ''
+          rpt.efectivo_contado != null
+            ? String(rpt.efectivo_contado)
+            : rpt.efectivo_tombola != null
+              ? String(rpt.efectivo_tombola)
+              : ''
         );
         setNotes(rpt.notes || '');
       }
@@ -419,8 +422,9 @@ export function StaffCorteClient() {
           date: corteDate,
           wi_amount: wi,
           eventos_amount: eventos === '' ? '0' : eventos,
-          efectivo_tombola: tombola,
-          efectivo_contado: efectivoContado,
+          // Contado = tómbola (mismo monto depositado)
+          efectivo_tombola: String(contadoNum),
+          efectivo_contado: String(contadoNum),
           notes: notes || null,
         }),
       });
@@ -877,8 +881,8 @@ export function StaffCorteClient() {
           2 · Cierre del día
         </h3>
         <p className="text-xs text-slate-500">
-          WI y Eventos · efectivo vs Infocaja · tómbola. Sin cortesías (vienen de
-          Gmail). Propinas = suma de tickets TPV.
+          WI y Eventos · efectivo contado (= tómbola) vs Infocaja. Sin cortesías
+          (vienen de Gmail). Propinas = suma de tickets TPV.
         </p>
 
         <MoneyInput
@@ -930,8 +934,8 @@ export function StaffCorteClient() {
           required
           hint={
             infocaja?.hasEfectivo
-              ? 'Obligatorio. No puede ser menor que el efectivo de Infocaja.'
-              : 'Obligatorio. Sin Infocaja aún: solo registra el conteo físico.'
+              ? 'Obligatorio. Es el mismo monto que depositas en tómbola. No puede ser menor que Infocaja.'
+              : 'Obligatorio. Es el mismo monto que depositas en tómbola.'
           }
         />
         {liveCashDelta != null && liveCashDelta < 0 ? (
@@ -951,13 +955,18 @@ export function StaffCorteClient() {
           </p>
         ) : null}
 
-        <MoneyInput
-          label="Efectivo en tómbola de seguridad"
-          value={tombola}
-          onChange={setTombola}
-          required
-          hint="Lo depositado en la caja fuerte / tómbola"
-        />
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <p className="text-sm font-semibold text-slate-700">
+            Tómbola de seguridad
+          </p>
+          <p className="mt-1 text-lg font-bold" style={{ color: SUITE.navy }}>
+            {efectivoContadoOk ? moneyMx(efectivoContadoNum as number) : '—'}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Mismo monto que el efectivo contado (depósito en tómbola). No se
+            captura por separado.
+          </p>
+        </div>
 
         <label className="block">
           <span className="text-sm font-semibold text-slate-700">

@@ -1,8 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { syncLeadFollowUpAfterQuote } from '@/app/lib/eventos-follow-up';
 
 export type QuoteLeadResult = {
   leadId: string | null;
   leadCreated: boolean;
+  followUpSynced?: boolean;
   error?: string;
 };
 
@@ -102,6 +104,21 @@ export async function ensureLeadForQuote(
     return linkErr?.message;
   }
 
+  async function finishLead(
+    leadId: string,
+    leadCreated: boolean,
+    linkError?: string
+  ): Promise<QuoteLeadResult> {
+    const fu = await syncLeadFollowUpAfterQuote(sb, leadId);
+    const parts = [linkError, fu.error].filter(Boolean);
+    return {
+      leadId,
+      leadCreated,
+      followUpSynced: fu.updated,
+      error: parts.length ? parts.join(' · ') : undefined,
+    };
+  }
+
   // 1) lead_id ya presente → actualizar datos y (si aplica) subir a cotizado
   if (existing) {
     const { data: cur } = await sb
@@ -121,13 +138,13 @@ export async function ensureLeadForQuote(
         .update({ ...leadFields, stage })
         .eq('id', cur.id);
       const linkErr = await linkQuote(cur.id);
-      return {
-        leadId: cur.id,
-        leadCreated: false,
-        error: linkErr
+      return finishLead(
+        cur.id,
+        false,
+        linkErr
           ? `Lead existente pero no se pudo vincular: ${linkErr}`
-          : undefined,
-      };
+          : undefined
+      );
     }
   }
 
@@ -188,21 +205,22 @@ export async function ensureLeadForQuote(
       };
     }
     const linkErr = await linkQuote(matchId);
-    return {
-      leadId: matchId,
-      leadCreated: false,
-      error: linkErr
+    return finishLead(
+      matchId,
+      false,
+      linkErr
         ? `Lead reutilizado pero no se pudo vincular: ${linkErr}`
-        : undefined,
-    };
+        : undefined
+    );
   }
 
-  // 4) Nuevo lead en etapa Cotizado
+  // 4) Nuevo lead en etapa Cotizado (origen cotizador → alertas CRM)
   const { data: lead, error: leadErr } = await sb
     .from('event_leads')
     .insert({
       ...leadFields,
       stage: 'cotizado',
+      source: 'cotizador',
       hold_until: opts.holdUntil || null,
       created_at: now,
     })
@@ -218,13 +236,11 @@ export async function ensureLeadForQuote(
   }
 
   const linkErr = await linkQuote(lead.id);
-  if (linkErr) {
-    return {
-      leadId: lead.id,
-      leadCreated: true,
-      error: `Lead creado pero no se pudo vincular a la cotización: ${linkErr}`,
-    };
-  }
-
-  return { leadId: lead.id, leadCreated: true };
+  return finishLead(
+    lead.id,
+    true,
+    linkErr
+      ? `Lead creado pero no se pudo vincular a la cotización: ${linkErr}`
+      : undefined
+  );
 }

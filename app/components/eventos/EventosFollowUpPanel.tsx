@@ -109,7 +109,8 @@ export function EventosFollowUpAlertsStrip({
           </p>
           <p className="mt-0.5 text-xs" style={{ color: SUITE.muted }}>
             {FOLLOW_UP_ALERTS_SCOPE_HINT}. Cadencia del manual (captura &lt;1
-            h, cotización 24 h, días 3 / 5 / 15) + holds 72 h.
+            h, cotización 24 h, días 3 / 5 / 15) + holds que bloquean la fecha
+            72 h.
           </p>
         </div>
       </div>

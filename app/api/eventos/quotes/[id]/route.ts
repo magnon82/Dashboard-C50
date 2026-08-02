@@ -38,7 +38,7 @@ export async function GET(_request: Request, ctx: RouteCtx) {
     const { data, error } = await sb
       .from('event_quotes')
       .select(
-        '*, lines:event_quote_lines(*), client:event_clients(id, company_name, contact_name)'
+        '*, lines:event_quote_lines(*), client:event_clients(id, company_name, contact_name, phone, email)'
       )
       .eq('id', id)
       .maybeSingle();
@@ -59,6 +59,8 @@ export async function GET(_request: Request, ctx: RouteCtx) {
     const client = data.client as {
       company_name?: string;
       contact_name?: string | null;
+      phone?: string | null;
+      email?: string | null;
     } | null;
 
     const lines = (
@@ -84,6 +86,8 @@ export async function GET(_request: Request, ctx: RouteCtx) {
       status: data.status || null,
       client_name: client?.company_name || null,
       contact_name: client?.contact_name || null,
+      phone: client?.phone || null,
+      email: client?.email || null,
       celebration: data.celebration || null,
       event_date: data.event_date || null,
       pax: Number(data.pax || 0),

@@ -182,9 +182,14 @@ export async function POST() {
 
     const index = new Map<string, LeadRow>();
     for (const lead of (leadsQuery.data || []) as LeadRow[]) {
+      const notes = lead.notes || '';
       const fromSheets =
         lead.source === 'sheets' ||
-        (lead.notes || '').includes('Status Sheet:');
+        lead.source === 'seguimiento' ||
+        lead.source === 'sheet' ||
+        /status\s*sheet\s*:/i.test(notes) ||
+        /atiende\s*:/i.test(notes) ||
+        /solicitud\s*:\s*\d{4}-\d{2}-\d{2}/i.test(notes);
       const keys = matchKeys(lead);
       for (const k of keys) {
         if (!index.has(k) || fromSheets) index.set(k, lead);
@@ -223,6 +228,14 @@ export async function POST() {
 
       if (clientId) matchedClients += 1;
 
+      // Garantiza marcador detectable aunque el Sheet no traiga Status Sheet.
+      let notes = (r.notes || '').trim() || null;
+      if (notes && !/status\s*sheet\s*:/i.test(notes)) {
+        notes = `${notes} · Status Sheet: seed`;
+      } else if (!notes) {
+        notes = 'Status Sheet: seed · origen seguimiento';
+      }
+
       const payload: Record<string, unknown> = {
         title: title.slice(0, 200),
         celebration: (r.celebration || title).trim(),
@@ -234,7 +247,7 @@ export async function POST() {
         stage,
         event_date: r.event_date || null,
         pax: r.pax ?? null,
-        notes: (r.notes || '').trim() || null,
+        notes,
         owner_username: (r.owner_username || auth.username || 'seguimiento')
           .toString()
           .slice(0, 80),
@@ -260,9 +273,14 @@ export async function POST() {
       }
 
       if (existing) {
+        const existingNotes = existing.notes || '';
         const fromSheets =
           existing.source === 'sheets' ||
-          (existing.notes || '').includes('Status Sheet:');
+          existing.source === 'seguimiento' ||
+          existing.source === 'sheet' ||
+          /status\s*sheet\s*:/i.test(existingNotes) ||
+          /atiende\s*:/i.test(existingNotes) ||
+          /solicitud\s*:\s*\d{4}-\d{2}-\d{2}/i.test(existingNotes);
         if (fromSheets || OPEN_STAGES.has(existing.stage || '')) {
           const { error } = await sb
             .from('event_leads')

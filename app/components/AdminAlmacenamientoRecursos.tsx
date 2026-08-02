@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ADMIN_STORAGE_PLATFORMS,
+  ALL_SOURCE_FILES,
   resourceBranchSearchText,
   SOURCE_FILE_UPDATE,
   type ResourceBranch,
@@ -11,7 +12,14 @@ import {
   type ResourcePlatform,
   type ResourcePlatformId,
 } from '@/app/lib/admin-resources';
-import { formatBytesEs, type DrivePathStat, type StorageStatsResult } from '@/app/lib/storage-format';
+import {
+  formatBytesEs,
+  type DataInventoryResult,
+  type DetectedSourceFile,
+  type DrivePathStat,
+  type SourceFileMergeStatus,
+  type StorageStatsResult,
+} from '@/app/lib/storage-format';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -24,6 +32,63 @@ const KIND_LABEL: Record<ResourceItemKind, string> = {
   workflow: 'workflow',
   file: 'archivo',
 };
+
+const STATUS_LABEL: Record<SourceFileMergeStatus, string> = {
+  detectado: 'Detectado',
+  sin_datos: 'Sin datos aún',
+  no_documentado: 'Sin documentar',
+  desconocido: 'Sin medición',
+};
+
+function statusStyle(status: SourceFileMergeStatus): { background: string; color: string } {
+  switch (status) {
+    case 'detectado':
+      return { background: '#E7F6EE', color: '#1F6B45' };
+    case 'sin_datos':
+      return { background: '#F1F5F9', color: '#64748B' };
+    case 'no_documentado':
+      return { background: '#FFF3E0', color: '#B45309' };
+    case 'desconocido':
+      return { background: '#EEF2FF', color: '#4338CA' };
+  }
+}
+
+function mergeStatusFor(
+  sourceFile: string,
+  documented: Set<string>,
+  detected: Map<string, DetectedSourceFile>,
+  detectionReady: boolean,
+): SourceFileMergeStatus {
+  const hit = detected.get(sourceFile);
+  const isDoc = documented.has(sourceFile);
+  if (!detectionReady) return 'desconocido';
+  if (hit && hit.rowCount > 0) {
+    return isDoc ? 'detectado' : 'no_documentado';
+  }
+  if (isDoc) return 'sin_datos';
+  return 'no_documentado';
+}
+
+function StatusBadge({ status }: { status: SourceFileMergeStatus }) {
+  const style = statusStyle(status);
+  return (
+    <span
+      className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+      style={style}
+      title={
+        status === 'detectado'
+          ? 'Documentado y presente en Supabase'
+          : status === 'sin_datos'
+            ? 'Documentado en código, sin filas aún'
+            : status === 'no_documentado'
+              ? 'Presente en Supabase, falta documentar en admin-resources.ts'
+              : 'No se pudo medir detección'
+      }
+    >
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
 
 function PlatformIcon({ id, size = 18 }: { id: ResourcePlatformId; size?: number }) {
   const s = size;
@@ -174,18 +239,45 @@ function CopyChip({
   );
 }
 
+function DetectionMeta({
+  hit,
+  status,
+}: {
+  hit?: DetectedSourceFile;
+  status?: SourceFileMergeStatus;
+}) {
+  if (!status) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <StatusBadge status={status} />
+      {hit && hit.rowCount > 0 ? (
+        <span className="text-[10px] tabular-nums" style={{ color: theme.muted }}>
+          {hit.rowCount.toLocaleString('es-MX')} fila{hit.rowCount === 1 ? '' : 's'}
+          {hit.lastDate ? ` · últ. ${hit.lastDate}` : ''}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function ChipSection({
   title,
   items,
   kind,
   copied,
   onCopy,
+  documentedSet,
+  detectedMap,
+  detectionReady,
 }: {
   title: string;
   items: string[];
   kind: ResourceItemKind;
   copied: string | null;
   onCopy: (v: string) => void;
+  documentedSet?: Set<string>;
+  detectedMap?: Map<string, DetectedSourceFile>;
+  detectionReady?: boolean;
 }) {
   if (!items.length) return null;
   return (
@@ -196,9 +288,15 @@ function ChipSection({
       <div className="flex flex-wrap gap-1.5">
         {items.map((item) => {
           const freq = kind === 'source_file' ? SOURCE_FILE_UPDATE[item] : undefined;
+          const status =
+            kind === 'source_file' && documentedSet && detectedMap
+              ? mergeStatusFor(item, documentedSet, detectedMap, Boolean(detectionReady))
+              : undefined;
+          const hit = detectedMap?.get(item);
           return (
             <span key={`${kind}-${item}`} className="inline-flex max-w-full flex-wrap items-center gap-1">
               <CopyChip label={item} value={item} kind={kind} copied={copied} onCopy={onCopy} />
+              {status ? <DetectionMeta hit={hit} status={status} /> : null}
               {freq ? (
                 <span
                   className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
@@ -219,15 +317,32 @@ function LeafRow({
   leaf,
   copied,
   onCopy,
+  documentedSet,
+  detectedMap,
+  detectionReady,
 }: {
   leaf: ResourceLeaf;
   copied: string | null;
   onCopy: (v: string) => void;
+  documentedSet?: Set<string>;
+  detectedMap?: Map<string, DetectedSourceFile>;
+  detectionReady?: boolean;
 }) {
   const kind = leaf.kind ?? 'file';
   const value = leaf.copyValue ?? leaf.label;
+  const sourceKey = kind === 'source_file' ? value : null;
+  const status =
+    sourceKey && documentedSet && detectedMap
+      ? mergeStatusFor(sourceKey, documentedSet, detectedMap, Boolean(detectionReady))
+      : undefined;
+  const hit = sourceKey ? detectedMap?.get(sourceKey) : undefined;
+  const softEmpty = status === 'sin_datos';
+
   return (
-    <li className="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <li
+      className="flex flex-wrap items-center gap-x-2 gap-y-1"
+      style={{ opacity: softEmpty ? 0.72 : 1 }}
+    >
       <span
         className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
         style={{ background: SUITE.orangeSoft, color: SUITE.orangeDeep }}
@@ -235,6 +350,7 @@ function LeafRow({
         {KIND_LABEL[kind]}
       </span>
       <CopyChip label={leaf.label} value={value} kind={kind} copied={copied} onCopy={onCopy} />
+      {status ? <DetectionMeta hit={hit} status={status} /> : null}
       {leaf.updateFrequency ? (
         <span
           className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
@@ -261,6 +377,10 @@ function ResourceAccordion({
   copied,
   onCopy,
   driveStat,
+  documentedSet,
+  detectedMap,
+  detectionReady,
+  accentUndocumented,
 }: {
   branch: ResourceBranch;
   platform: ResourcePlatform;
@@ -269,6 +389,10 @@ function ResourceAccordion({
   copied: string | null;
   onCopy: (v: string) => void;
   driveStat?: DrivePathStat | null;
+  documentedSet?: Set<string>;
+  detectedMap?: Map<string, DetectedSourceFile>;
+  detectionReady?: boolean;
+  accentUndocumented?: boolean;
 }) {
   const [open, setOpen] = useState(Boolean(defaultOpen));
   const hasDetail =
@@ -291,7 +415,11 @@ function ResourceAccordion({
     <div
       className="overflow-hidden rounded-xl border bg-white transition-shadow duration-200 hover:shadow-sm"
       style={{
-        borderColor: open ? 'rgba(232, 163, 23, 0.45)' : SUITE.border,
+        borderColor: accentUndocumented
+          ? 'rgba(180, 83, 9, 0.45)'
+          : open
+            ? 'rgba(232, 163, 23, 0.45)'
+            : SUITE.border,
         boxShadow: open ? '0 4px 16px rgba(27, 42, 74, 0.06)' : undefined,
       }}
     >
@@ -299,7 +427,7 @@ function ResourceAccordion({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors duration-150"
-        style={{ background: open ? '#FFFBF3' : undefined }}
+        style={{ background: open ? (accentUndocumented ? '#FFF8F0' : '#FFFBF3') : undefined }}
         aria-expanded={open}
       >
         <span
@@ -313,6 +441,7 @@ function ResourceAccordion({
             <span className="text-sm font-bold" style={{ color: SUITE.navy }}>
               {branch.label}
             </span>
+            {accentUndocumented ? <StatusBadge status="no_documentado" /> : null}
             {sizeLabel ? (
               <span
                 className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
@@ -412,7 +541,15 @@ function ResourceAccordion({
               </p>
               <ul className="space-y-2">
                 {branch.leaves.map((leaf) => (
-                  <LeafRow key={leaf.label} leaf={leaf} copied={copied} onCopy={onCopy} />
+                  <LeafRow
+                    key={leaf.label}
+                    leaf={leaf}
+                    copied={copied}
+                    onCopy={onCopy}
+                    documentedSet={documentedSet}
+                    detectedMap={detectedMap}
+                    detectionReady={detectionReady}
+                  />
                 ))}
               </ul>
             </div>
@@ -424,6 +561,9 @@ function ResourceAccordion({
             kind="source_file"
             copied={copied}
             onCopy={onCopy}
+            documentedSet={documentedSet}
+            detectedMap={detectedMap}
+            detectionReady={detectionReady}
           />
           <ChipSection
             title="Scripts"
@@ -445,6 +585,21 @@ function ResourceAccordion({
   );
 }
 
+function inventoryToStorageStats(inv: DataInventoryResult): StorageStatsResult {
+  return {
+    supabaseBytes: inv.sizes.supabaseBytes,
+    supabaseMethod: inv.sizes.supabaseMethod,
+    supabaseRowCount: inv.sizes.supabaseRowCount,
+    supabaseError: inv.sizes.supabaseError,
+    driveBytes: inv.sizes.driveBytes,
+    driveAvailable: inv.sizes.driveAvailable,
+    driveMessage: inv.sizes.driveMessage,
+    driveByPath: inv.driveFolders,
+    detectedSourceFiles: inv.detectedSourceFiles,
+    detectedSourceFilesError: inv.detectedSourceFilesError,
+  };
+}
+
 export function AdminAlmacenamientoRecursos() {
   const [open, setOpen] = useState(false);
   const [platformId, setPlatformId] = useState<ResourcePlatformId>('supabase');
@@ -463,7 +618,7 @@ export function AdminAlmacenamientoRecursos() {
     setStorageLoading(true);
     setStorageError(null);
 
-    fetch('/api/admin/storage-stats')
+    fetch('/api/admin/data-inventory')
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -471,14 +626,14 @@ export function AdminAlmacenamientoRecursos() {
             typeof data?.error === 'string' ? data.error : `Error ${res.status}`,
           );
         }
-        return data as StorageStatsResult;
+        return data as DataInventoryResult;
       })
       .then((data) => {
-        if (!cancelled) setStorageStats(data);
+        if (!cancelled) setStorageStats(inventoryToStorageStats(data));
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setStorageError(err instanceof Error ? err.message : 'No se pudo cargar el peso');
+          setStorageError(err instanceof Error ? err.message : 'No se pudo cargar el inventario');
           fetchedRef.current = false;
         }
       })
@@ -490,6 +645,56 @@ export function AdminAlmacenamientoRecursos() {
       cancelled = true;
     };
   }, [open]);
+
+  const documentedSet = useMemo(() => new Set(ALL_SOURCE_FILES), []);
+
+  const detectedMap = useMemo(() => {
+    const map = new Map<string, DetectedSourceFile>();
+    for (const row of storageStats?.detectedSourceFiles ?? []) {
+      map.set(row.sourceFile, row);
+    }
+    return map;
+  }, [storageStats]);
+
+  /** true si ya hay agregación usable (RPC ok, vacío ok, o fallback con filas). */
+  const detectionReady = Boolean(
+    storageStats &&
+      ((storageStats.detectedSourceFiles?.length ?? 0) > 0 ||
+        !storageStats.detectedSourceFilesError),
+  );
+
+  const undocumentedSources = useMemo(() => {
+    const out: DetectedSourceFile[] = [];
+    for (const row of storageStats?.detectedSourceFiles ?? []) {
+      if (!documentedSet.has(row.sourceFile) && row.rowCount > 0) {
+        out.push(row);
+      }
+    }
+    return out;
+  }, [documentedSet, storageStats]);
+
+  const platforms = useMemo((): ResourcePlatform[] => {
+    return ADMIN_STORAGE_PLATFORMS.map((platform) => {
+      if (platform.id !== 'supabase' || undocumentedSources.length === 0) {
+        return platform;
+      }
+      const extraBranch: ResourceBranch = {
+        id: 'supabase-undocumented',
+        label: 'Detectados (sin documentar)',
+        role: 'source_file presentes en Supabase que aún no están en admin-resources.ts.',
+        updateFrequency: 'Detección en vivo · documentar al confirmar el ingest',
+        leaves: undocumentedSources.map((s) => ({
+          label: s.sourceFile,
+          kind: 'source_file' as const,
+          note: `${s.rowCount.toLocaleString('es-MX')} fila${s.rowCount === 1 ? '' : 's'}${
+            s.lastDate ? ` · últ. ${s.lastDate}` : ''
+          }`,
+        })),
+        sourceFiles: undocumentedSources.map((s) => s.sourceFile),
+      };
+      return { ...platform, branches: [...platform.branches, extraBranch] };
+    });
+  }, [undocumentedSources]);
 
   const driveStatById = useMemo(() => {
     const map = new Map<string, DrivePathStat>();
@@ -503,8 +708,8 @@ export function AdminAlmacenamientoRecursos() {
   const searching = q.length > 0;
 
   const activePlatform = useMemo(
-    () => ADMIN_STORAGE_PLATFORMS.find((p) => p.id === platformId) ?? ADMIN_STORAGE_PLATFORMS[0],
-    [platformId],
+    () => platforms.find((p) => p.id === platformId) ?? platforms[0],
+    [platformId, platforms],
   );
 
   const filteredByPlatform = useMemo(() => {
@@ -512,7 +717,7 @@ export function AdminAlmacenamientoRecursos() {
       return activePlatform.branches.map((branch) => ({ platform: activePlatform, branch }));
     }
     const hits: { platform: ResourcePlatform; branch: ResourceBranch }[] = [];
-    for (const platform of ADMIN_STORAGE_PLATFORMS) {
+    for (const platform of platforms) {
       for (const branch of platform.branches) {
         if (resourceBranchSearchText(branch).includes(q) || platform.title.toLowerCase().includes(q)) {
           hits.push({ platform, branch });
@@ -520,18 +725,18 @@ export function AdminAlmacenamientoRecursos() {
       }
     }
     return hits;
-  }, [activePlatform, q, searching]);
+  }, [activePlatform, platforms, q, searching]);
 
   const matchCountByPlatform = useMemo(() => {
     if (!searching) return null;
     const counts: Partial<Record<ResourcePlatformId, number>> = {};
-    for (const platform of ADMIN_STORAGE_PLATFORMS) {
+    for (const platform of platforms) {
       counts[platform.id] = platform.branches.filter(
         (b) => resourceBranchSearchText(b).includes(q) || platform.title.toLowerCase().includes(q),
       ).length;
     }
     return counts;
-  }, [q, searching]);
+  }, [platforms, q, searching]);
 
   function platformSizeHint(id: ResourcePlatformId): string | null {
     if (storageLoading) return '…';
@@ -553,6 +758,22 @@ export function AdminAlmacenamientoRecursos() {
 
   const headerSizeHint = !searching ? platformSizeHint(activePlatform.id) : null;
 
+  const detectSummary = useMemo(() => {
+    if (!storageStats) return null;
+    let detectado = 0;
+    let sinDatos = 0;
+    for (const sf of ALL_SOURCE_FILES) {
+      const st = mergeStatusFor(sf, documentedSet, detectedMap, detectionReady);
+      if (st === 'detectado') detectado += 1;
+      if (st === 'sin_datos') sinDatos += 1;
+    }
+    return {
+      detectado,
+      sinDatos,
+      noDocumentado: undocumentedSources.length,
+    };
+  }, [detectionReady, detectedMap, documentedSet, storageStats, undocumentedSources.length]);
+
   return (
     <section
       className="mb-8 overflow-hidden rounded-[20px] bg-white"
@@ -564,8 +785,8 @@ export function AdminAlmacenamientoRecursos() {
             Inventario de datos
           </h2>
           <p className="mt-1 max-w-2xl text-sm" style={{ color: theme.muted }}>
-            Dónde vive cada dato: Supabase, Drive/I:, Gmail, repo y rutas en Vercel. El mapa de
-            arriba muestra el flujo; aquí consultas y copias rutas o source_file.
+            Dónde vive cada dato: metadatos curados + detección en vivo (Supabase source_file y
+            carpetas Drive). El mapa de arriba es arquitectura; aquí consultas, estados y copias.
           </p>
         </div>
         <button
@@ -611,7 +832,7 @@ export function AdminAlmacenamientoRecursos() {
             role="tablist"
             aria-label="Plataforma"
           >
-            {ADMIN_STORAGE_PLATFORMS.map((p) => {
+            {platforms.map((p) => {
               const selected = !searching && p.id === platformId;
               const hitCount = matchCountByPlatform?.[p.id] ?? 0;
               const dimSearch = searching && hitCount === 0;
@@ -660,6 +881,31 @@ export function AdminAlmacenamientoRecursos() {
             })}
           </div>
 
+          {/* Leyenda de fusión documentado ↔ detectado */}
+          {!searching && activePlatform.id === 'supabase' ? (
+            <div
+              className="flex flex-wrap items-center gap-2 rounded-xl px-3.5 py-2.5 text-[11px]"
+              style={{ background: '#F8FAFC', color: theme.muted }}
+            >
+              <span className="font-semibold" style={{ color: SUITE.navy }}>
+                Estado source_file:
+              </span>
+              <StatusBadge status="detectado" />
+              <StatusBadge status="sin_datos" />
+              <StatusBadge status="no_documentado" />
+              {detectSummary ? (
+                <span className="ml-auto tabular-nums font-semibold" style={{ color: SUITE.navySoft }}>
+                  {detectSummary.detectado} con datos · {detectSummary.sinDatos} sin datos
+                  {detectSummary.noDocumentado > 0
+                    ? ` · ${detectSummary.noDocumentado} sin documentar`
+                    : ''}
+                </span>
+              ) : storageLoading ? (
+                <span className="ml-auto">Detectando…</span>
+              ) : null}
+            </div>
+          ) : null}
+
           {/* Active platform blurb (when not searching) */}
           {!searching ? (
             <div className="flex flex-wrap items-start gap-3 rounded-xl px-3.5 py-3" style={{ background: '#F8FAFC' }}>
@@ -681,7 +927,14 @@ export function AdminAlmacenamientoRecursos() {
                 </p>
                 {storageError && (activePlatform.id === 'supabase' || activePlatform.id === 'drive') ? (
                   <p className="mt-1 text-[11px]" style={{ color: '#B45309' }}>
-                    Peso: {storageError}
+                    Inventario: {storageError}
+                  </p>
+                ) : null}
+                {!storageError &&
+                activePlatform.id === 'supabase' &&
+                storageStats?.detectedSourceFilesError ? (
+                  <p className="mt-1 text-[11px]" style={{ color: '#B45309' }}>
+                    Detección source_file: {storageStats.detectedSourceFilesError}
                   </p>
                 ) : null}
                 {!storageError &&
@@ -740,19 +993,26 @@ export function AdminAlmacenamientoRecursos() {
                 key={`${platform.id}-${branch.id}-${searching ? 'q' : 'p'}`}
                 platform={platform}
                 branch={branch}
-                defaultOpen={searching}
+                defaultOpen={searching || branch.id === 'supabase-undocumented'}
                 showPlatformBadge={searching}
                 copied={copied}
                 onCopy={copy}
                 driveStat={platform.id === 'drive' ? driveStatById.get(branch.id) ?? null : null}
+                documentedSet={documentedSet}
+                detectedMap={detectedMap}
+                detectionReady={detectionReady}
+                accentUndocumented={branch.id === 'supabase-undocumented'}
               />
             ))}
           </div>
 
-          <p className="text-xs" style={{ color: theme.muted }}>
-            Fuente compartida:{' '}
+          <p className="text-xs leading-relaxed" style={{ color: theme.muted }}>
+            Metadatos curados en{' '}
             <code className="text-[11px]">app/lib/admin-resources.ts</code>
-            {' '}· actualiza ahí al agregar orígenes. Haz clic en un chip para copiar.
+            {' '}(labels, frecuencias, paths, scripts). Detección en vivo vía{' '}
+            <code className="text-[11px]">/api/admin/data-inventory</code>
+            {' '}(DISTINCT source_file + Drive). El mapa de orígenes sigue siendo manual; este
+            inventario fusiona documentado + detectado. Haz clic en un chip para copiar.
           </p>
         </div>
       ) : null}

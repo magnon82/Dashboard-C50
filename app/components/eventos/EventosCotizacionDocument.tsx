@@ -4,6 +4,7 @@ import {
   Cormorant_Garamond,
   Source_Sans_3,
 } from 'next/font/google';
+import { EventosDocActions } from '@/app/components/eventos/EventosDocActions';
 import {
   EVENTOS_CONTACT,
   buildCotizacionTotals,
@@ -44,26 +45,15 @@ export function EventosCotizacionDocument({
       className={`cotizacion-root mx-auto max-w-[820px] px-4 py-6 print:max-w-none print:px-0 print:py-0 ${body.className}`}
     >
       {showActions && (
-        <div className="mb-5 flex flex-wrap items-center gap-2 print:hidden">
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="rounded-lg px-4 py-2 text-sm font-bold text-white"
-            style={{ backgroundColor: SUITE.navy }}
-          >
-            Imprimir / guardar PDF
-          </button>
-          <button
-            type="button"
-            onClick={() => window.history.back()}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-          >
-            Volver
-          </button>
-          <p className="text-xs text-slate-500">
-            En el diálogo de impresión elige «Guardar como PDF».
-          </p>
-        </div>
+        <EventosDocActions
+          kind="cotizacion"
+          folio={doc.quote_number}
+          clientName={doc.client_name || doc.contact_name}
+          celebration={doc.celebration}
+          eventDate={doc.event_date}
+          recipientEmail={doc.email}
+          recipientPhone={doc.phone}
+        />
       )}
 
       <article
@@ -125,6 +115,11 @@ export function EventosCotizacionDocument({
             {doc.contact_name && (
               <p className="mt-1 text-sm" style={{ color: SUITE.muted }}>
                 Contacto: {doc.contact_name}
+              </p>
+            )}
+            {(doc.phone || doc.email) && (
+              <p className="mt-1 text-sm" style={{ color: SUITE.muted }}>
+                {[doc.phone, doc.email].filter(Boolean).join(' · ')}
               </p>
             )}
           </div>

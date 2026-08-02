@@ -12,6 +12,7 @@ import {
 } from '@/app/lib/eventos';
 import {
   isFollowUpStepId,
+  looksLikeSeguimientoImportNotes,
   normalizeFollowUpDone,
   suggestNextFollowUpAt,
   type FollowUpStepId,
@@ -25,6 +26,29 @@ function trimOrNull(v: unknown): string | null {
   if (v == null) return null;
   const s = String(v).trim();
   return s || null;
+}
+
+/**
+ * Marca imports Seguimiento aunque la columna source falte, sea null,
+ * o haya quedado en default `manual` tras el patch SQL.
+ */
+function normalizeLeadSource(row: {
+  source?: string | null;
+  notes?: string | null;
+}): string | null {
+  const notes = typeof row.notes === 'string' ? row.notes : '';
+  const raw = typeof row.source === 'string' ? row.source.trim() : '';
+  const src = raw.toLowerCase();
+  if (
+    src === 'sheets' ||
+    src === 'seguimiento' ||
+    src === 'sheet' ||
+    src === 'import'
+  ) {
+    return src === 'sheet' || src === 'seguimiento' ? 'sheets' : src;
+  }
+  if (looksLikeSeguimientoImportNotes(notes)) return 'sheets';
+  return raw || null;
 }
 
 export async function GET() {
@@ -44,13 +68,9 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Normaliza imports Seguimiento sin columna source / source null.
     const leads = (data || []).map((row) => {
-      const notes = typeof row.notes === 'string' ? row.notes : '';
-      if (!row.source && notes.includes('Status Sheet:')) {
-        return { ...row, source: 'sheets' };
-      }
-      return row;
+      const source = normalizeLeadSource(row);
+      return source === row.source ? row : { ...row, source };
     });
 
     return NextResponse.json({ leads, count: leads.length });

@@ -176,6 +176,71 @@ export function EventosCrm({
     }
   }
 
+  /** Leads desde seed_event_leads_seguimiento.json (Excel/Sheet Control → script). */
+  async function seedSeguimiento() {
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await fetch('/api/eventos/leads/seed-seguimiento', {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(
+          [json.error, json.hint].filter(Boolean).join(' — ') ||
+            'No se pudo importar Seguimiento'
+        );
+        return;
+      }
+      setMsg(
+        `Seguimiento: ${json.inserted ?? 0} nuevos, ${json.updated ?? 0} actualizados` +
+          (json.skipped != null ? ` · ${json.skipped} omitidos` : '') +
+          (json.totalSeed != null ? ` (de ${json.totalSeed})` : '')
+      );
+      await onRefresh();
+    } catch {
+      setErr('Error de red al importar Seguimiento');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateOsForLead(leadId: string) {
+    if (!canEdit) return;
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await fetch('/api/eventos/os', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: leadId }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(
+          [json.error, json.hint].filter(Boolean).join(' — ') ||
+            'No se pudo generar OS'
+        );
+        return;
+      }
+      setMsg(
+        json.created
+          ? `OS ${json.order?.os_number || ''} generada`
+          : `OS ${json.order?.os_number || ''} ya existía`
+      );
+      await onRefresh();
+      if (json.href) {
+        window.open(json.href, '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      setErr('Error de red al generar OS');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createClient(e: FormEvent) {
     e.preventDefault();
     if (!canEdit) return;
@@ -411,16 +476,48 @@ export function EventosCrm({
           />
         </label>
         {canEdit && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={seedClients}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-          >
-            Importar Excel seed
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void seedClients()}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              title="Clientes desde lista Excel (seed_event_clients.json)"
+            >
+              Importar Excel clientes
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void seedSeguimiento()}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              title="Leads desde Control/Seguimiento (seed_event_leads_seguimiento.json)"
+            >
+              Importar Seguimiento
+            </button>
+          </>
         )}
       </div>
+
+      {canEdit && (
+        <SuiteCard>
+          <h3 className="text-sm font-bold" style={{ color: theme.title }}>
+            Control Excel / Sheets
+          </h3>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">
+            1) Clientes: regenera el seed con{' '}
+            <code className="text-[11px]">
+              python scripts/import_event_clients_from_excel.py
+            </code>{' '}
+            (lista Excel en Drive) y pulsa «Importar Excel clientes». 2) Leads del
+            control Seguimiento:{' '}
+            <code className="text-[11px]">
+              python scripts/seed_event_leads_from_seguimiento.py --json-only
+            </code>{' '}
+            y luego «Importar Seguimiento». No borra filas existentes.
+          </p>
+        </SuiteCard>
+      )}
 
       {(err || msg) && (
         <p
@@ -439,7 +536,7 @@ export function EventosCrm({
           <p className="mt-1 text-sm text-slate-600">
             Ejecuta <code className="text-xs">supabase/eventos_module.sql</code>{' '}
             en el SQL Editor (crea CRM + catálogo + cotizaciones). Después usa
-            «Importar Excel seed» para cargar clientes desde la lista Excel.
+            «Importar Excel clientes» / «Importar Seguimiento» para cargar seeds.
           </p>
         </SuiteCard>
       )}
@@ -588,7 +685,7 @@ export function EventosCrm({
                       }))
                     }
                   />
-                  Hold 72 h
+                  Hold 72 h · bloquea la fecha
                 </label>
                 <button
                   type="submit"
@@ -697,6 +794,21 @@ export function EventosCrm({
                             }
                             onPatch={patchLeadFollowUp}
                           />
+                          {canEdit &&
+                            (lead.stage === 'ganado' ||
+                              lead.stage === 'negociacion' ||
+                              lead.stage === 'cotizado') && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void generateOsForLead(lead.id)}
+                                className="mt-2 w-full rounded-lg px-2 py-1.5 text-[11px] font-bold text-white disabled:opacity-50"
+                                style={{ backgroundColor: SUITE.navy }}
+                                title="Genera OS digital desde la mejor cotización del lead"
+                              >
+                                Generar OS
+                              </button>
+                            )}
                         </div>
                         );
                       })
@@ -952,7 +1064,7 @@ export function EventosCrm({
                               </li>
                               <li>
                                 Con sesión de edición: botón «Importar Excel
-                                seed» (lista Carranza 50).
+                                clientes» (lista Carranza 50).
                               </li>
                               <li>
                                 O agrega un cliente manualmente arriba.

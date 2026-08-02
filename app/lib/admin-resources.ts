@@ -1,7 +1,8 @@
 /**
- * Inventario de datos / orígenes — fuente única para el mapa de
- * orígenes (AdminDataMap) y la sección «Inventario de datos».
- * Actualizar aquí al agregar source_file, path Drive, ingest o ruta UI.
+ * Metadatos curados del inventario / mapa de orígenes.
+ * — AdminDataMap: arquitectura curada a mano (actualizar al cambiar el pipeline).
+ * — Inventario de datos: fusiona esto con detección en vivo (Supabase + Drive)
+ *   vía /api/admin/data-inventory. source_file nuevos aparecen aunque no estén aquí.
  */
 
 export type SourceFileGroup = {
@@ -200,7 +201,8 @@ const SOURCE_GROUP_META: Record<
 };
 
 /**
- * Inventario scaneable: dónde vive cada recurso (no es el grafo del mapa).
+ * Inventario documentado (metadatos): dónde vive cada recurso.
+ * La UI fusiona esto con detección en vivo; no es el grafo del mapa.
  */
 export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
   {

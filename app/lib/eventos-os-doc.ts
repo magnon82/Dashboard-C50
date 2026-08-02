@@ -18,6 +18,8 @@ export type OrdenServicioDoc = {
   status: string | null;
   client_name: string | null;
   contact_name: string | null;
+  phone: string | null;
+  email: string | null;
   celebration: string | null;
   event_date: string | null;
   pax: number;
@@ -39,6 +41,8 @@ export function serviceOrderToDoc(order: ServiceOrderRow): OrdenServicioDoc {
     status: order.status,
     client_name: order.client_name,
     contact_name: order.contact_name,
+    phone: order.phone || order.payload?.phone || null,
+    email: order.email || order.payload?.email || null,
     celebration: order.celebration,
     event_date: order.event_date,
     pax: Number(order.pax || 0),

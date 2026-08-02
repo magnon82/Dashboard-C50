@@ -88,7 +88,7 @@ export type EventLead = {
   follow_up_done?: string[] | null;
   /** Próxima acción de seguimiento; difiere alertas de cadencia hasta esa fecha. */
   next_follow_up_at?: string | null;
-  /** Origen: manual | sheets (Seguimiento) | import | cotizador */
+  /** Origen: manual | sheets (Seguimiento) | import | cotizador | quote */
   source?: string | null;
   created_at: string;
   updated_at: string;

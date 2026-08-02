@@ -24,6 +24,8 @@ export type CotizacionDoc = {
   status?: string | null;
   client_name: string | null;
   contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
   celebration: string | null;
   event_date: string | null;
   pax: number;

@@ -413,7 +413,7 @@ export default function AdminPage() {
       {/* 1. Financieros */}
       <AdminSection
         title="Financieros"
-        description="Caja (fotos TPV), saldos bancarios y ajustes ligados al presupuesto."
+        description="Cortes TPV (reporte y edición), saldos bancarios y ajustes ligados al presupuesto."
       >
         <AdminCajaTpv />
 

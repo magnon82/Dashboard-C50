@@ -7,6 +7,7 @@ import {
   TPV_MIN_LONG_SIDE,
   TPV_MIN_SHARPNESS,
   TPV_STORAGE_BUCKET,
+  buildAdminReportDay,
   buildDayCompleteness,
   computeNetoBanco,
   parsePhotoKind,
@@ -15,10 +16,16 @@ import {
   todayCdmxIso,
   validateTpvImageQuality,
   asTpvRow,
+  type TpvAdminReportDay,
+  type TpvAdminReportRptSummary,
   type TpvCorteUpload,
   type TpvPhotoKind,
   type TpvTerminalNumber,
 } from '@/app/lib/tpv-cortes';
+import {
+  STAFF_RPT_TABLE,
+  asStaffRptRow,
+} from '@/app/lib/staff-rpt';
 import {
   TPV_OCR_RETAKE_MSG,
   amountsFromOcr,
@@ -176,7 +183,29 @@ function mondaySundayCdmx(today = todayCdmxIso()): { mon: string; sun: string } 
   return { mon, sun: sunKey };
 }
 
-/** GET /api/tpv-cortes?date= | from=&to= | week=1 | recent=1 */
+function rptToSummary(
+  r: ReturnType<typeof asStaffRptRow>
+): TpvAdminReportRptSummary {
+  return {
+    wi_amount: r.wi_amount,
+    eventos_amount: r.eventos_amount,
+    propinas: r.propinas,
+    efectivo_tombola: r.efectivo_tombola,
+    efectivo_contado: r.efectivo_contado,
+    efectivo_infocaja: r.efectivo_infocaja,
+    bancos_neto_tpv: r.bancos_neto_tpv,
+    bancos_cobrado_tpv: r.bancos_cobrado_tpv,
+    bancos_propina_tpv: r.bancos_propina_tpv,
+    tpv_complete: r.tpv_complete,
+    created_by: r.created_by,
+    updated_by: r.updated_by,
+  };
+}
+
+/**
+ * GET /api/tpv-cortes?date= | from=&to= | week=1 | recent=1 | report=1
+ * report=1 → listado admin de días (fotos + cierre staff_rpt_diario), newest first.
+ */
 export async function GET(request: Request) {
   const auth = await requireVentasSession();
   if (auth instanceof NextResponse) return auth;
@@ -187,11 +216,114 @@ export async function GET(request: Request) {
   const to = url.searchParams.get('to')?.slice(0, 10) || null;
   const week = url.searchParams.get('week');
   const recent = url.searchParams.get('recent') === '1';
+  const report = url.searchParams.get('report') === '1';
   const withUrls = url.searchParams.get('urls') === '1';
   const withDay = url.searchParams.get('day') === '1';
+  const reportLimit = Math.min(
+    120,
+    Math.max(10, Number(url.searchParams.get('limit') || 60) || 60)
+  );
 
   try {
     const sb = getServiceSupabase();
+
+    // --- Admin report: días con uploads y/o cierre RPT ---
+    if (report) {
+      const { data: uploadRows, error: upErr } = await sb
+        .from('tpv_corte_uploads')
+        .select('*')
+        .order('corte_date', { ascending: false })
+        .order('terminal_number', { ascending: true })
+        .order('photo_kind', { ascending: true })
+        .limit(800);
+
+      if (upErr) {
+        return NextResponse.json(
+          {
+            error: upErr.message,
+            hint: '¿Ejecutaste supabase/tpv_cortes.sql en el SQL Editor?',
+          },
+          { status: 500 }
+        );
+      }
+
+      const uploads = (uploadRows || []).map((r) =>
+        asTpvRow(r as Record<string, unknown>)
+      );
+
+      let rptByDate = new Map<string, TpvAdminReportRptSummary>();
+      const { data: rptRows, error: rptErr } = await sb
+        .from(STAFF_RPT_TABLE)
+        .select('*')
+        .order('rpt_date', { ascending: false })
+        .limit(reportLimit);
+
+      if (!rptErr && rptRows) {
+        for (const raw of rptRows) {
+          const row = asStaffRptRow(raw as Record<string, unknown>);
+          rptByDate.set(row.rpt_date, rptToSummary(row));
+        }
+      }
+
+      const dateSet = new Set<string>();
+      for (const u of uploads) dateSet.add(u.corte_date);
+      for (const d of rptByDate.keys()) dateSet.add(d);
+      if (from && to) {
+        for (const d of [...dateSet]) {
+          if (d < from || d > to) dateSet.delete(d);
+        }
+      }
+
+      const dates = [...dateSet]
+        .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
+        .slice(0, reportLimit);
+
+      const byDate = new Map<string, TpvCorteUpload[]>();
+      for (const u of uploads) {
+        if (!dateSet.has(u.corte_date)) continue;
+        const list = byDate.get(u.corte_date) || [];
+        list.push(u);
+        byDate.set(u.corte_date, list);
+      }
+
+      const days: TpvAdminReportDay[] = dates.map((d) =>
+        buildAdminReportDay(d, byDate.get(d) || [], rptByDate.get(d) || null)
+      );
+
+      // Detalle de un día (fotos + URLs) si piden date= junto con report
+      let detailUploads: TpvCorteUpload[] | null = null;
+      let detailDay = null;
+      if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        detailUploads = byDate.get(date) || [];
+        if (withUrls) {
+          await Promise.all(
+            detailUploads.map(async (row) => {
+              if (!row.storage_path) {
+                row.image_url = null;
+                return;
+              }
+              const { data: signed } = await sb.storage
+                .from(TPV_STORAGE_BUCKET)
+                .createSignedUrl(row.storage_path, 60 * 30);
+              row.image_url = signed?.signedUrl || null;
+            })
+          );
+        }
+        detailDay = buildDayCompleteness(detailUploads, date);
+      }
+
+      return NextResponse.json({
+        days,
+        count: days.length,
+        rptError: rptErr
+          ? 'No se pudo leer staff_rpt_diario (¿ejecutaste supabase/staff_rpt_diario.sql?)'
+          : null,
+        uploads: detailUploads,
+        day: detailDay,
+        date: date || null,
+      });
+    }
+
     let q = sb
       .from('tpv_corte_uploads')
       .select('*')

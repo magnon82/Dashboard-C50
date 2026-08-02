@@ -92,7 +92,7 @@ export function EventosTablero({
             </li>
             <li>Recarga esta página.</li>
             <li>
-              En CRM → «Importar Excel seed» si aún no hay clientes (
+              En CRM → «Importar Excel clientes» si aún no hay clientes (
               <code className="text-xs">seed_event_clients.json</code>).
             </li>
           </ol>
@@ -229,9 +229,10 @@ export function EventosTablero({
           Reglas comerciales
         </p>
         <p className="mt-2 text-sm text-white/90">
-          Servicio 15% sobre subtotal · Hold 72 h hábiles (admin puede extender) ·
-          Sin hold si faltan &lt;15 días · Barra libre solo con alimentos · Grupos
-          desde 10 pax · Pack desayunos ≥50 = $30,000
+          Servicio 15% sobre subtotal · Hold: bloquea la fecha por 72 h hábiles
+          (admin puede extender) · Sin hold si faltan &lt;15 días · Barra libre
+          solo con alimentos · Grupos desde 10 pax · Pack desayunos ≥50 =
+          $30,000
         </p>
       </SuiteCard>
     </div>

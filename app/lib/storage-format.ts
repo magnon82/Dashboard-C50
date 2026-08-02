@@ -12,6 +12,21 @@ export type DrivePathStat = {
   message?: string;
 };
 
+/** Fila agregada: DISTINCT source_file desde financial_records. */
+export type DetectedSourceFile = {
+  sourceFile: string;
+  rowCount: number;
+  /** Última fecha de negocio (columna date), ISO yyyy-mm-dd si hay. */
+  lastDate: string | null;
+};
+
+/** Estado de fusión documentado ↔ detectado (UI Inventario). */
+export type SourceFileMergeStatus =
+  | 'detectado'
+  | 'sin_datos'
+  | 'no_documentado'
+  | 'desconocido';
+
 export type StorageStatsResult = {
   supabaseBytes: number | null;
   supabaseMethod: 'rpc' | 'estimate' | null;
@@ -21,6 +36,29 @@ export type StorageStatsResult = {
   driveAvailable: boolean;
   driveMessage: string | null;
   driveByPath: DrivePathStat[];
+  /** Opcional: presente si el endpoint también agregó source_file. */
+  detectedSourceFiles?: DetectedSourceFile[];
+  detectedSourceFilesError?: string | null;
+};
+
+/** Respuesta de GET /api/admin/data-inventory (híbrido documentado + detectado). */
+export type DataInventoryResult = {
+  documented: {
+    sourceFiles: string[];
+    groups: Array<{ id: string; label: string; sources: string[] }>;
+  };
+  detectedSourceFiles: DetectedSourceFile[];
+  detectedSourceFilesError: string | null;
+  driveFolders: DrivePathStat[];
+  sizes: {
+    supabaseBytes: number | null;
+    supabaseMethod: 'rpc' | 'estimate' | null;
+    supabaseRowCount: number | null;
+    supabaseError: string | null;
+    driveBytes: number | null;
+    driveAvailable: boolean;
+    driveMessage: string | null;
+  };
 };
 
 /** Formato legible: "345 MB" / "1.2 GB". */

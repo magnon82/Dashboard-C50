@@ -7,11 +7,15 @@ import {
   type SessionUser,
 } from '@/app/lib/auth';
 import {
+  ALL_SOURCE_FILES,
+  SOURCE_FILE_GROUPS,
+} from '@/app/lib/admin-resources';
+import {
   fetchDetectedSourceFiles,
   measureSupabase,
   scanDriveInventory,
 } from '@/app/lib/storage-stats';
-import type { StorageStatsResult } from '@/app/lib/storage-format';
+import type { DataInventoryResult } from '@/app/lib/storage-format';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,13 +34,18 @@ async function requireAdmin(): Promise<SessionUser | NextResponse> {
   }
   if (!canAccessAdmin(session)) {
     return NextResponse.json(
-      { error: 'Solo el administrador puede ver estadísticas de almacenamiento' },
+      { error: 'Solo el administrador puede ver el inventario de datos' },
       { status: 403 },
     );
   }
   return session;
 }
 
+/**
+ * Inventario híbrido: metadatos documentados (código) + detección en vivo
+ * (Supabase source_file + carpetas Drive). El mapa de orígenes sigue siendo
+ * curado a mano en admin-resources.ts.
+ */
 export async function GET() {
   const auth = await requireAdmin();
   if (auth instanceof NextResponse) return auth;
@@ -47,11 +56,27 @@ export async function GET() {
     fetchDetectedSourceFiles(),
   ]);
 
-  const body: StorageStatsResult = {
-    ...supabase,
-    ...drive,
+  const body: DataInventoryResult = {
+    documented: {
+      sourceFiles: ALL_SOURCE_FILES,
+      groups: SOURCE_FILE_GROUPS.map((g) => ({
+        id: g.id,
+        label: g.label,
+        sources: g.sources,
+      })),
+    },
     detectedSourceFiles: detected.detectedSourceFiles,
     detectedSourceFilesError: detected.detectedSourceFilesError,
+    driveFolders: drive.driveByPath,
+    sizes: {
+      supabaseBytes: supabase.supabaseBytes,
+      supabaseMethod: supabase.supabaseMethod,
+      supabaseRowCount: supabase.supabaseRowCount,
+      supabaseError: supabase.supabaseError,
+      driveBytes: drive.driveBytes,
+      driveAvailable: drive.driveAvailable,
+      driveMessage: drive.driveMessage,
+    },
   };
 
   return NextResponse.json(body);
