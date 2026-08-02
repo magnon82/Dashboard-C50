@@ -7,11 +7,9 @@ import {
   TPV_MIN_SHARPNESS,
   TPV_TERMINALS,
   computeNetoBanco,
-  estimateSharpnessFromImageData,
   moneyMx,
   defaultCorteDateCdmx,
   TPV_CORTE_DATE_HELP,
-  validateTpvImageQuality,
   photoKindLabel,
   type TpvCorteUpload,
   type TpvDayCompleteness,
@@ -21,41 +19,14 @@ import {
   buildDayCompleteness,
   buildTpvWeekVerify,
 } from '@/app/lib/tpv-cortes';
+import {
+  prepareTpvPhotoForUpload,
+  readTpvApiJson,
+} from '@/app/lib/tpv-upload-client';
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
 import { SUITE } from '@/app/lib/themes';
 
 type Tab = 'captura' | 'revisar';
-
-async function loadImageMetrics(file: File): Promise<{
-  width: number;
-  height: number;
-  sharpness: number;
-  previewUrl: string;
-}> {
-  const previewUrl = URL.createObjectURL(file);
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const el = new Image();
-    el.onload = () => resolve(el);
-    el.onerror = () => reject(new Error('No se pudo leer la imagen'));
-    el.src = previewUrl;
-  });
-
-  const maxProbe = 320;
-  const scale = Math.min(1, maxProbe / Math.max(img.width, img.height));
-  const w = Math.max(8, Math.round(img.width * scale));
-  const h = Math.max(8, Math.round(img.height * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return { width: img.width, height: img.height, sharpness: 999, previewUrl };
-  }
-  ctx.drawImage(img, 0, 0, w, h);
-  const data = ctx.getImageData(0, 0, w, h);
-  const sharpness = estimateSharpnessFromImageData(data);
-  return { width: img.width, height: img.height, sharpness, previewUrl };
-}
 
 function statusLabel(
   slot: {
@@ -145,7 +116,7 @@ export function TpvCorteClient() {
           cache: 'no-store',
         }),
       ]);
-      const tpvJson = await tpvRes.json();
+      const tpvJson = await readTpvApiJson(tpvRes);
       if (!tpvRes.ok) {
         const detail = [tpvJson.error, tpvJson.hint].filter(Boolean).join(' — ');
         setError(
@@ -159,23 +130,25 @@ export function TpvCorteClient() {
       const list = (tpvJson.uploads || []) as TpvCorteUpload[];
       setUploads(list);
       setDay(
-        tpvJson.day ||
+        (tpvJson.day as TpvDayCompleteness | undefined) ||
           buildDayCompleteness(list, date)
       );
 
       let records: FinancialRecord[] = [];
       if (finRes.ok) {
-        const finJson = await finRes.json();
-        records = finJson.records || [];
+        const finJson = await readTpvApiJson(finRes);
+        records = (finJson.records || []) as FinancialRecord[];
       }
 
       const weekRes = await fetch(`/api/tpv-cortes?week=1&urls=0`, {
         cache: 'no-store',
       });
-      const weekJson = weekRes.ok ? await weekRes.json() : { uploads: list };
+      const weekJson = weekRes.ok
+        ? await readTpvApiJson(weekRes)
+        : { uploads: list };
       setVerify(
         buildTpvWeekVerify(
-          (weekJson.uploads || list) as TpvCorteUpload[],
+          ((weekJson.uploads || list) as TpvCorteUpload[]),
           records,
           date
         )
@@ -205,29 +178,22 @@ export function TpvCorteClient() {
     setError(null);
     if (!file) return;
     try {
-      const metrics = await loadImageMetrics(file);
-      const quality = validateTpvImageQuality({
-        width: metrics.width,
-        height: metrics.height,
-        byteSize: file.size,
-        sharpness: metrics.sharpness,
-      });
-      if (!quality.ok) {
-        URL.revokeObjectURL(metrics.previewUrl);
-        setError(quality.errors[0]);
-        clearPending();
-        return;
-      }
+      const prepared = await prepareTpvPhotoForUpload(file);
       if (preview) URL.revokeObjectURL(preview);
-      setPreview(metrics.previewUrl);
+      setPreview(prepared.previewUrl);
       setPendingFile({
-        file,
-        width: metrics.width,
-        height: metrics.height,
-        sharpness: metrics.sharpness,
+        file: prepared.file,
+        width: prepared.width,
+        height: prepared.height,
+        sharpness: prepared.sharpness,
       });
-    } catch {
-      setError('No se pudo analizar la foto. Vuelve a tomar la foto.');
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'No se pudo analizar la foto. Vuelve a tomar la foto.'
+      );
+      clearPending();
     }
   }
 
@@ -259,29 +225,40 @@ export function TpvCorteClient() {
       }
 
       const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
-      const json = await res.json();
+      const json = await readTpvApiJson(res);
       if (!res.ok) {
         setError(
-          json.error ||
-            'No se pudo leer el ticket. Vuelve a tomar la foto.'
+          String(
+            json.error ||
+              'No se pudo leer el ticket. Vuelve a tomar la foto.'
+          )
         );
         return;
       }
       clearPending();
-      if (json.day) setDay(json.day);
+      const day = json.day as TpvDayCompleteness | undefined;
+      if (day) setDay(day);
+      const ocr = json.ocr as
+        | {
+            status?: string;
+            total_cobrado?: number | null;
+            propina?: number | null;
+          }
+        | undefined;
+      const upload = json.upload as TpvCorteUpload | undefined;
       const ocrBit =
-        json.ocr?.status === 'done'
+        ocr?.status === 'done'
           ? activeKind === 'venta'
-            ? ` · cobrado ${moneyMx(json.ocr.total_cobrado ?? json.upload?.total_cobrado)}`
-            : ` · propina ${moneyMx(json.ocr.propina ?? json.upload?.propina)}`
+            ? ` · cobrado ${moneyMx(ocr.total_cobrado ?? upload?.total_cobrado)}`
+            : ` · propina ${moneyMx(ocr.propina ?? upload?.propina)}`
           : '';
       setMsg(
-        json.day?.complete
-          ? 'Proceso concluido correctamente. Las 3 terminales ya están listas.'
+        day?.complete
+          ? 'Proceso concluido correctamente. Las 3 terminales ya estan listas.'
           : `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}.`
       );
-      const slotAfter = (json.day?.slots || []).find(
-        (s: { terminal: number }) => s.terminal === activeTerminal
+      const slotAfter = (day?.slots || []).find(
+        (s) => s.terminal === activeTerminal
       );
       if (slotAfter?.state === 'partial') {
         setActiveKind(activeKind === 'venta' ? 'propina' : 'venta');
@@ -317,15 +294,16 @@ export function TpvCorteClient() {
           corte_date: dateForUpload,
         }),
       });
-      const json = await res.json();
+      const json = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(json.error || 'No se pudo marcar como no utilizada');
+        setError(String(json.error || 'No se pudo marcar como no utilizada'));
         return;
       }
-      if (json.day) setDay(json.day);
+      const dayUnused = json.day as TpvDayCompleteness | undefined;
+      if (dayUnused) setDay(dayUnused);
       setMsg(
-        json.day?.complete
-          ? 'Proceso concluido correctamente. Las 3 terminales ya están listas.'
+        dayUnused?.complete
+          ? 'Proceso concluido correctamente. Las 3 terminales ya estan listas.'
           : `Terminal ${terminal}: marcada como no utilizada.`
       );
       await refresh(dateForUpload);
@@ -355,9 +333,9 @@ export function TpvCorteClient() {
             status: 'parsed',
           }),
         });
-        const json = await res.json();
+        const json = await readTpvApiJson(res);
         if (!res.ok) {
-          setError(json.error || 'No se guardaron montos');
+          setError(String(json.error || 'No se guardaron montos'));
           return;
         }
       } else {
@@ -371,9 +349,9 @@ export function TpvCorteClient() {
             status: 'parsed',
           }),
         });
-        const json = await res.json();
+        const json = await readTpvApiJson(res);
         if (!res.ok) {
-          setError(json.error || 'No se guardaron montos');
+          setError(String(json.error || 'No se guardaron montos'));
           return;
         }
       }
@@ -392,9 +370,9 @@ export function TpvCorteClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'verified' }),
       });
-      const json = await res.json();
+      const json = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(json.error || 'No se pudo verificar');
+        setError(String(json.error || 'No se pudo verificar'));
         return;
       }
       await refresh();

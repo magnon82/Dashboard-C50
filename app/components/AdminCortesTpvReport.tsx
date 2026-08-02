@@ -6,15 +6,17 @@ import {
   TPV_TERMINALS,
   buildDayCompleteness,
   computeNetoBanco,
-  estimateSharpnessFromImageData,
   moneyMx,
   photoKindLabel,
-  validateTpvImageQuality,
   type TpvAdminReportDay,
   type TpvCorteUpload,
   type TpvPhotoKind,
   type TpvTerminalNumber,
 } from '@/app/lib/tpv-cortes';
+import {
+  prepareTpvPhotoForUpload,
+  readTpvApiJson,
+} from '@/app/lib/tpv-upload-client';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -30,42 +32,6 @@ function formatCorteDateDisplay(iso: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
-}
-
-async function loadImageMetrics(file: File): Promise<{
-  width: number;
-  height: number;
-  sharpness: number;
-}> {
-  const previewUrl = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('No se pudo leer la imagen'));
-      el.src = previewUrl;
-    });
-    const maxProbe = 320;
-    const scale = Math.min(1, maxProbe / Math.max(img.width, img.height));
-    const w = Math.max(8, Math.round(img.width * scale));
-    const h = Math.max(8, Math.round(img.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      return { width: img.width, height: img.height, sharpness: 999 };
-    }
-    ctx.drawImage(img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h);
-    return {
-      width: img.width,
-      height: img.height,
-      sharpness: estimateSharpnessFromImageData(data),
-    };
-  } finally {
-    URL.revokeObjectURL(previewUrl);
-  }
 }
 
 function StatusBadge({
@@ -285,13 +251,13 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
       };
       if (!res.ok) {
         setError(
-          [json.error, json.hint].filter(Boolean).join(' ') ||
+          [json.error, json.hint].filter(Boolean).map(String).join(' ') ||
             'No se pudo cargar el reporte'
         );
         setDays([]);
         return;
       }
-      setDays(json.days || []);
+      setDays((json.days || []) as TpvAdminReportDay[]);
       setRptHint(json.rptError || null);
     } catch {
       setError('Error de red al cargar el reporte de cortes');
@@ -313,7 +279,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
         uploads?: TpvCorteUpload[];
       };
       if (!res.ok) {
-        setError(json.error || 'No se pudieron cargar las fotos del día');
+        setError(String(json.error || 'No se pudieron cargar las fotos del día'));
         setUploads([]);
         return;
       }
@@ -418,35 +384,29 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
     setError('');
     setMsg('');
     try {
-      const metrics = await loadImageMetrics(file);
-      const quality = validateTpvImageQuality({
-        width: metrics.width,
-        height: metrics.height,
-        byteSize: file.size,
-        sharpness: metrics.sharpness,
-      });
-      if (!quality.ok) {
-        setError(quality.errors[0] || 'La foto no pasó el control de calidad');
-        return;
+      const prepared = await prepareTpvPhotoForUpload(file);
+      try {
+        const fd = new FormData();
+        fd.set('file', prepared.file);
+        fd.set('terminal_number', String(terminal));
+        fd.set('photo_kind', kind);
+        fd.set('corte_date', date);
+        fd.set('width_px', String(prepared.width));
+        fd.set('height_px', String(prepared.height));
+        fd.set('sharpness', String(prepared.sharpness));
+        const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
+        const json = await readTpvApiJson(res);
+        if (!res.ok) {
+          setError(String(json.error || 'No se pudo subir la foto'));
+          return;
+        }
+        setMsg(
+          `T${terminal} · ${photoKindLabel(kind)} actualizada (${date}).`
+        );
+        await refreshExpanded();
+      } finally {
+        URL.revokeObjectURL(prepared.previewUrl);
       }
-      const fd = new FormData();
-      fd.set('file', file);
-      fd.set('terminal_number', String(terminal));
-      fd.set('photo_kind', kind);
-      fd.set('corte_date', date);
-      fd.set('width_px', String(metrics.width));
-      fd.set('height_px', String(metrics.height));
-      fd.set('sharpness', String(metrics.sharpness));
-      const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || 'No se pudo subir la foto');
-        return;
-      }
-      setMsg(
-        `T${terminal} · ${photoKindLabel(kind)} actualizada (${date}).`
-      );
-      await refreshExpanded();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al subir');
     } finally {
@@ -479,9 +439,9 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const json = await res.json();
+      const json = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(json.error || 'No se guardó el monto');
+        setError(String(json.error || 'No se guardó el monto'));
         return;
       }
       setMsg(`Monto actualizado · T${upload.terminal_number}.`);
@@ -511,9 +471,9 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
       const res = await fetch(`/api/tpv-cortes/${upload.id}`, {
         method: 'DELETE',
       });
-      const json = await res.json();
+      const json = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(json.error || 'No se pudo eliminar');
+        setError(String(json.error || 'No se pudo eliminar'));
         return;
       }
       setMsg(`Eliminado · T${upload.terminal_number}.`);
@@ -543,9 +503,9 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
           corte_date: date,
         }),
       });
-      const json = await res.json();
+      const json = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(json.error || 'No se pudo marcar como no utilizada');
+        setError(String(json.error || 'No se pudo marcar como no utilizada'));
         return;
       }
       setMsg(`T${terminal} marcada como no utilizada.`);

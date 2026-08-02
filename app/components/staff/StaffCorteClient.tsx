@@ -9,14 +9,16 @@ import {
   TPV_CORTE_DATE_HELP,
   computeNetoBanco,
   defaultCorteDateCdmx,
-  estimateSharpnessFromImageData,
   moneyMx,
   photoKindLabel,
-  validateTpvImageQuality,
   type TpvCorteUpload,
   type TpvPhotoKind,
   type TpvTerminalNumber,
 } from '@/app/lib/tpv-cortes';
+import {
+  prepareTpvPhotoForUpload,
+  readTpvApiJson,
+} from '@/app/lib/tpv-upload-client';
 import type {
   StaffRptBancosFromTpv,
   StaffRptInfocajaDay,
@@ -62,37 +64,6 @@ function formatCorteDateDisplay(iso: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
-}
-
-async function loadImageMetrics(file: File): Promise<{
-  width: number;
-  height: number;
-  sharpness: number;
-  previewUrl: string;
-}> {
-  const previewUrl = URL.createObjectURL(file);
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const el = new Image();
-    el.onload = () => resolve(el);
-    el.onerror = () => reject(new Error('No se pudo leer la imagen'));
-    el.src = previewUrl;
-  });
-
-  const maxProbe = 320;
-  const scale = Math.min(1, maxProbe / Math.max(img.width, img.height));
-  const w = Math.max(8, Math.round(img.width * scale));
-  const h = Math.max(8, Math.round(img.height * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return { width: img.width, height: img.height, sharpness: 999, previewUrl };
-  }
-  ctx.drawImage(img, 0, 0, w, h);
-  const data = ctx.getImageData(0, 0, w, h);
-  const sharpness = estimateSharpnessFromImageData(data);
-  return { width: img.width, height: img.height, sharpness, previewUrl };
 }
 
 function MoneyInput({
@@ -159,13 +130,15 @@ export function StaffCorteClient() {
         `/api/staff-corte?date=${encodeURIComponent(corteDate)}&recent=1`,
         { cache: 'no-store' }
       );
-      const data = await res.json();
+      const data = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(data.error || 'No se pudo cargar el corte');
+        setError(
+          String(data.error || data.hint || 'No se pudo cargar el corte')
+        );
         setPayload(null);
         return;
       }
-      setPayload(data as DayPayload);
+      setPayload(data as unknown as DayPayload);
       const rpt = data.rpt as StaffRptRow | null;
       if (rpt) {
         setWi(String(rpt.wi_amount ?? ''));
@@ -203,25 +176,14 @@ export function StaffCorteClient() {
     setError(null);
     setMsg(null);
     try {
-      const metrics = await loadImageMetrics(file);
-      const quality = validateTpvImageQuality({
-        width: metrics.width,
-        height: metrics.height,
-        byteSize: file.size,
-        sharpness: metrics.sharpness,
-      });
-      if (!quality.ok) {
-        URL.revokeObjectURL(metrics.previewUrl);
-        setError(quality.errors.join(' '));
-        return;
-      }
+      const prepared = await prepareTpvPhotoForUpload(file);
       if (pending?.previewUrl) URL.revokeObjectURL(pending.previewUrl);
       setPending({
-        file,
-        previewUrl: metrics.previewUrl,
-        width: metrics.width,
-        height: metrics.height,
-        sharpness: metrics.sharpness,
+        file: prepared.file,
+        previewUrl: prepared.previewUrl,
+        width: prepared.width,
+        height: prepared.height,
+        sharpness: prepared.sharpness,
       });
       setCobrado('');
       setPropina('');
@@ -258,29 +220,46 @@ export function StaffCorteClient() {
       }
 
       const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
-      const data = await res.json();
+      const data = await readTpvApiJson(res);
       if (!res.ok) {
         setError(
-          data.error ||
-            'No se pudo leer el ticket. Vuelve a tomar la foto.'
+          String(
+            data.error ||
+              data.hint ||
+              'No se pudo leer el ticket. Vuelve a tomar la foto.'
+          )
         );
         return;
       }
       clearPending();
+      const ocr = data.ocr as
+        | {
+            status?: string;
+            total_cobrado?: number | null;
+            propina?: number | null;
+          }
+        | undefined;
+      const upload = data.upload as TpvCorteUpload | undefined;
       const ocrBit =
-        data.ocr?.status === 'done'
+        ocr?.status === 'done'
           ? activeKind === 'venta'
-            ? ` · ${moneyMx(data.ocr.total_cobrado ?? data.upload?.total_cobrado)}`
-            : ` · propina ${moneyMx(data.ocr.propina ?? data.upload?.propina)}`
+            ? ` · ${moneyMx(ocr.total_cobrado ?? upload?.total_cobrado)}`
+            : ` · propina ${moneyMx(ocr.propina ?? upload?.propina)}`
           : '';
       setMsg(
         `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}`
       );
       await refresh();
-      const nextMissing = (data.day?.missing || []) as number[];
+      const day = data.day as
+        | {
+            missing?: number[];
+            slots?: { terminal: number; state?: string }[];
+          }
+        | undefined;
+      const nextMissing = (day?.missing || []) as number[];
       // Si falta la otra foto de esta terminal, cambiar a esa
-      const slotAfter = (data.day?.slots || []).find(
-        (s: { terminal: number }) => s.terminal === activeTerminal
+      const slotAfter = (day?.slots || []).find(
+        (s) => s.terminal === activeTerminal
       );
       if (slotAfter?.state === 'partial') {
         setActiveKind(activeKind === 'venta' ? 'propina' : 'venta');
@@ -315,9 +294,9 @@ export function StaffCorteClient() {
           corte_date: corteDate,
         }),
       });
-      const data = await res.json();
+      const data = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(data.error || 'No se pudo marcar');
+        setError(String(data.error || 'No se pudo marcar'));
         return;
       }
       setMsg(`Terminal ${terminal}: no usada`);
@@ -353,9 +332,9 @@ export function StaffCorteClient() {
             status: 'parsed',
           }),
         });
-        const data = await res.json();
+        const data = await readTpvApiJson(res);
         if (!res.ok) {
-          setError(data.error || 'No se pudo guardar el monto');
+          setError(String(data.error || 'No se pudo guardar el monto'));
           return;
         }
         setMsg(`Cobrado T${u.terminal_number} actualizado`);
@@ -388,9 +367,9 @@ export function StaffCorteClient() {
           status: 'parsed',
         }),
       });
-      const data = await res.json();
+      const data = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(data.error || 'No se pudo guardar el monto');
+        setError(String(data.error || 'No se pudo guardar el monto'));
         return;
       }
       setMsg(`Propina T${u.terminal_number} actualizada`);
@@ -432,12 +411,14 @@ export function StaffCorteClient() {
           notes: notes || null,
         }),
       });
-      const data = await res.json();
+      const data = await readTpvApiJson(res);
       if (!res.ok) {
         const blockers = Array.isArray(data.blockers)
-          ? data.blockers.join(' ')
+          ? (data.blockers as unknown[]).map(String).join(' ')
           : '';
-        setError([data.error, blockers].filter(Boolean).join(' — '));
+        setError(
+          [data.error, blockers].filter(Boolean).map(String).join(' — ')
+        );
         return;
       }
       setMsg('Corte del día cerrado correctamente');
