@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { BrandLogo } from '@/app/components/BrandLogo';
-import { APP_MODULES } from '@/app/lib/modules';
+import { InstallAppPrompt } from '@/app/components/InstallAppPrompt';
+import { APP_MODULES, isSingleSharedModule } from '@/app/lib/modules';
 import { PRODUCT_CLUSTER } from '@/app/lib/product';
 import { canSeeModule, canSeeAdmin, useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
@@ -195,6 +196,13 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
           </header>
 
           <div className="flex-1">{children}</div>
+
+          {/* Usuarios de un solo tablero no ven el hub; CTA de instalar app al pie */}
+          {!loading && user && isSingleSharedModule(user.modules) ? (
+            <div className="mt-8 max-w-xl">
+              <InstallAppPrompt />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

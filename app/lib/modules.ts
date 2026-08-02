@@ -107,6 +107,15 @@ export const APP_MODULES: AppModule[] = [
 ];
 
 /**
+ * Usuario con un solo módulo de lectura (p. ej. Reportes Socios / cocina / barra).
+ * Middleware y hub los mandan directo a ese tablero (sin Inicio).
+ */
+export function isSingleSharedModule(modules: string[] | null | undefined): boolean {
+  if (!modules || modules.includes('*')) return false;
+  return APP_MODULES.filter((m) => modules.includes(m.id)).length === 1;
+}
+
+/**
  * Home after login / visiting `/`.
  * Exactly one shared module → that route; admin (`*`), multiple, or zero → hub `/`.
  */
