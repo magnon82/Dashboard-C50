@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
+import { InstallAppPrompt } from '@/app/components/InstallAppPrompt';
 import { APP_MODULES, homePathForModules } from '@/app/lib/modules';
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from '@/app/lib/product';
 import { canSeeModule, canSeeAdmin, useSession } from '@/app/lib/useSession';
@@ -94,7 +95,8 @@ export default function HubPage() {
                   </span>
                 </div>
                 <p className="mt-3 text-sm" style={{ color: theme.muted }}>
-                  Usuarios, contraseñas y permisos por módulo.
+                  Usuarios, módulos y funciones (capabilities) del ERP · app
+                  instalable.
                 </p>
                 <p className="mt-5 text-sm font-bold" style={{ color: SUITE.orangeDeep }}>
                   Abrir administración →
@@ -104,6 +106,10 @@ export default function HubPage() {
           )}
         </div>
       )}
+
+      <div className="mt-8 max-w-xl">
+        <InstallAppPrompt />
+      </div>
     </SuiteShell>
   );
 }

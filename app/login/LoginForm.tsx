@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { InstallAppPrompt } from '@/app/components/InstallAppPrompt';
 import { homePathForModules } from '@/app/lib/modules';
 import { PRODUCT_NAME, PRODUCT_ORG, PRODUCT_TAGLINE } from '@/app/lib/product';
 import { getTheme, SUITE } from '@/app/lib/themes';
@@ -118,6 +119,10 @@ export default function LoginForm() {
             {loading ? 'Entrando…' : 'Entrar'}
           </button>
         </form>
+
+        <div className="border-t border-slate-100 px-6 pb-6 pt-2">
+          <InstallAppPrompt compact />
+        </div>
       </div>
     </main>
   );

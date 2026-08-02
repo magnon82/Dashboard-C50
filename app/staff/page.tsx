@@ -2,19 +2,12 @@
 
 import Link from 'next/link';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
-import { todayIsoCdmx } from '@/app/lib/hr';
 import { useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
 
-function isWeekendPreviewCdmx(): boolean {
-  const wd = new Date(todayIsoCdmx() + 'T12:00:00').getDay();
-  return wd === 5 || wd === 6 || wd === 0;
-}
-
 export default function StaffPage() {
-  const weekendPreview = isWeekendPreviewCdmx();
   const { user, loading } = useSession();
   const showCorte = Boolean(user?.canAccessStaffCorte);
 
@@ -106,16 +99,14 @@ export default function StaffPage() {
                   color: SUITE.navy,
                 }}
               >
-                {weekendPreview ? 'Vie–dom + próxima' : 'En curso'}
+                En curso + próxima
               </span>
             </div>
             <p
               className="mt-3 text-sm leading-relaxed"
               style={{ color: SUITE.muted }}
             >
-              {weekendPreview
-                ? 'Consulta: esta semana y la próxima si RH ya publicó'
-                : 'Consulta de horarios de todo el personal (semana en curso)'}
+              Semana de horario en curso y la próxima si RH ya la publicó
             </p>
             <p
               className="mt-5 text-sm font-bold"

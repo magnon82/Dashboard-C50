@@ -152,6 +152,44 @@ export function defaultCorteDateCdmx(at: Date = new Date()): string {
   return today;
 }
 
+/** Días hacia atrás que Master puede cargar/editar respecto al día operativo. */
+export const TPV_ADMIN_LOOKBACK_DAYS = 7;
+
+/** Resta N días a una fecha ISO `YYYY-MM-DD` (calendario UTC noon-safe). */
+export function shiftIsoDate(iso: string, deltaDays: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Ventana Master: día operativo ± lookback (sin fechas futuras ni >7 días atrás).
+ * `opDay` = defaultCorteDateCdmx (madrugada → día anterior).
+ */
+export function adminCorteDateWindow(at: Date = new Date()): {
+  opDay: string;
+  minDate: string;
+  maxDate: string;
+} {
+  const opDay = defaultCorteDateCdmx(at);
+  return {
+    opDay,
+    minDate: shiftIsoDate(opDay, -TPV_ADMIN_LOOKBACK_DAYS),
+    maxDate: opDay,
+  };
+}
+
+export function isAdminWritableCorteDate(
+  corteDate: string,
+  at: Date = new Date()
+): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) return false;
+  const { minDate, maxDate } = adminCorteDateWindow(at);
+  return corteDate >= minDate && corteDate <= maxDate;
+}
+
 export function moneyMx(v: number | null | undefined): string {
   if (v == null || Number.isNaN(Number(v))) return '—';
   return `$${Number(v).toLocaleString('es-MX', {
