@@ -37,6 +37,7 @@ export type CotizacionDoc = {
   issued_at?: string | null;
 };
 
+/** Browser localStorage key — must be localStorage (not sessionStorage) so preview in a new tab can read it. */
 export const COTIZACION_DRAFT_STORAGE_KEY = 'eventos_cotizacion_draft_v1';
 
 export function buildCotizacionTotals(doc: CotizacionDoc) {

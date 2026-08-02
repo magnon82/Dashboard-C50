@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import {
   indexActivityByName,
-  loadEventClientActivity,
   pickActivityForClient,
 } from '@/app/lib/eventos-activity';
+import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
   requireEventosSession,

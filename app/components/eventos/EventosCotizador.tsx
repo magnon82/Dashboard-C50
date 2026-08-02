@@ -731,7 +731,8 @@ export function EventosCotizador({
       return;
     }
     setErr('');
-    sessionStorage.setItem(
+    // localStorage: shared across tabs (sessionStorage would be empty in the preview tab).
+    localStorage.setItem(
       COTIZACION_DRAFT_STORAGE_KEY,
       JSON.stringify(buildDraftDoc())
     );

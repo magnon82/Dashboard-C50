@@ -1,8 +1,8 @@
 import { mexicoTodayIso } from '@/app/lib/eventos';
 import {
-  loadEventClientActivity,
   normalizeClientKey,
 } from '@/app/lib/eventos-activity';
+import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
 import { listEventOs, parseFolio } from '@/app/lib/eventos-os';
 import { getServiceSupabase } from '@/app/lib/users';
 import type {

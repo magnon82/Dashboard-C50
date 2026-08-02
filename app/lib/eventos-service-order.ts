@@ -6,9 +6,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   indexActivityByName,
-  loadEventClientActivity,
   pickActivityForClient,
 } from '@/app/lib/eventos-activity';
+import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
 import {
   EVENTOS_SERVICIO_PCT,
   checkOptionalMenuChoicesOnLines,
@@ -17,64 +17,24 @@ import {
 } from '@/app/lib/eventos';
 import { syncLeadFollowUpAfterQuote } from '@/app/lib/eventos-follow-up';
 
-export type ServiceOrderLine = {
-  description: string;
-  quantity: number;
-  unit_price: number;
-  line_total: number;
-  options: QuoteLineOptions;
-};
+import {
+  SERVICE_ORDER_STATUSES,
+  type ServiceOrderLine,
+  type ServiceOrderPayload,
+  type ServiceOrderRow,
+  type CreateOsResult,
+} from '@/app/lib/eventos-service-order-shared';
 
-export type ServiceOrderPayload = {
-  lines: ServiceOrderLine[];
-  quote_number?: string | null;
-  source?: string;
-  phone?: string | null;
-  email?: string | null;
-};
-
-export const SERVICE_ORDER_STATUSES = [
-  'borrador',
-  'emitida',
-  'en_curso',
-  'cerrada',
-] as const;
-
-export type ServiceOrderStatus = (typeof SERVICE_ORDER_STATUSES)[number];
-
-export type ServiceOrderRow = {
-  id: string;
-  os_number: string | null;
-  status: string;
-  quote_id: string | null;
-  lead_id: string | null;
-  client_id: string | null;
-  event_date: string | null;
-  pax: number | null;
-  celebration: string | null;
-  client_name: string | null;
-  contact_name: string | null;
-  /** Desde payload (snapshot al generar OS) */
-  phone: string | null;
-  email: string | null;
-  notes: string | null;
-  subtotal: number;
-  servicio_pct: number;
-  servicio_amount: number;
-  total: number;
-  apply_servicio: boolean;
-  owner_username: string | null;
-  payload: ServiceOrderPayload;
-  created_at?: string;
-  updated_at?: string;
-};
-
-export type CreateOsResult = {
-  order: ServiceOrderRow | null;
-  created: boolean;
-  error?: string;
-  hint?: string;
-};
+export {
+  SERVICE_ORDER_STATUSES,
+} from '@/app/lib/eventos-service-order-shared';
+export type {
+  ServiceOrderLine,
+  ServiceOrderPayload,
+  ServiceOrderStatus,
+  ServiceOrderRow,
+  CreateOsResult,
+} from '@/app/lib/eventos-service-order-shared';
 
 function trimOrNull(v: unknown): string | null {
   if (v == null) return null;

@@ -266,7 +266,7 @@ export function EventosTablero({
                 const goCrm = Boolean(ev.lead_id || ev.source === 'crm');
                 const anticipoSinOs = isAnticipoSinOs({
                   has_anticipo: Boolean(ev.has_anticipo),
-                  source_label: ev.source_label || null,
+                  source_label: ev.source_label || undefined,
                   has_os: Boolean(ev.has_os),
                   os_path: ev.os_path || null,
                   os_filename: ev.os_filename || null,

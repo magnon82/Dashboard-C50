@@ -14,7 +14,8 @@ export default function CotizacionPreviewPage() {
 
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem(COTIZACION_DRAFT_STORAGE_KEY);
+      // Same key as Cotizador; localStorage so a new preview tab can read the draft.
+      const raw = localStorage.getItem(COTIZACION_DRAFT_STORAGE_KEY);
       if (!raw) {
         setErr(
           'No hay borrador de cotización. Arma líneas en Cotizador y pulsa «Vista previa».'

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { loadEventClientActivity } from '@/app/lib/eventos-activity';
+import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
 import { requireEventosSession } from '@/app/lib/eventos-api';
 
 export const runtime = 'nodejs';

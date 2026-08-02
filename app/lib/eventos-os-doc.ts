@@ -10,7 +10,7 @@ import {
   optionEntries,
   type CotizacionDocLine,
 } from '@/app/lib/eventos-cotizacion-doc';
-import type { ServiceOrderRow } from '@/app/lib/eventos-service-order';
+import type { ServiceOrderRow } from '@/app/lib/eventos-service-order-shared';
 import { EVENTOS_SERVICIO_PCT } from '@/app/lib/eventos';
 
 export type OrdenServicioDoc = {

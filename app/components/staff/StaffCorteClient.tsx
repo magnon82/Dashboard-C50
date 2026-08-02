@@ -590,28 +590,13 @@ export function StaffCorteClient() {
 
   return (
     <div className="mx-auto max-w-lg space-y-4 pb-10">
-      {/* Fecha + progreso — siempre visible aunque falle staff_rpt_diario */}
-      <section className="rounded-2xl bg-white p-4 shadow-sm">
-        <p
-          className="text-[11px] font-bold uppercase tracking-[0.16em]"
-          style={{ color: SUITE.orange }}
-        >
-          {isPrevDay ? 'Corte del día anterior' : 'Corte del día'}
+            {/* Hoy | Ayer — first viewport control (visible even with schema errors) */}
+      <section className="rounded-2xl border-2 border-slate-900 bg-white p-3 shadow-sm">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+          Día del corte
         </p>
-        <h2
-          className="mt-1 text-xl font-bold capitalize"
-          style={{ color: SUITE.navy }}
-        >
-          {formatCorteDateDisplay(corteDate)}
-        </h2>
-        <p className="mt-1 text-xs text-slate-500">
-          {isPrevDay
-            ? 'Estás cargando el corte del día anterior respecto al día operativo (CDMX). El flujo de madrugada (00:00–05:59) sigue usando el día de operación nocturno.'
-            : TPV_CORTE_DATE_HELP}
-        </p>
-
         <div
-          className="mt-3 grid grid-cols-2 gap-2"
+          className="grid grid-cols-2 gap-2"
           role="tablist"
           aria-label="Fecha del corte"
         >
@@ -721,6 +706,28 @@ export function StaffCorteClient() {
             </span>
           </button>
         ) : null}
+
+      </section>
+
+{/* Fecha + progreso — siempre visible aunque falle staff_rpt_diario */}
+      <section className="rounded-2xl bg-white p-4 shadow-sm">
+        <p
+          className="text-[11px] font-bold uppercase tracking-[0.16em]"
+          style={{ color: SUITE.orange }}
+        >
+          {isPrevDay ? 'Corte del día anterior' : 'Corte del día'}
+        </p>
+        <h2
+          className="mt-1 text-xl font-bold capitalize"
+          style={{ color: SUITE.navy }}
+        >
+          {formatCorteDateDisplay(corteDate)}
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          {isPrevDay
+            ? 'Estás cargando el corte del día anterior respecto al día operativo (CDMX). El flujo de madrugada (00:00–05:59) sigue usando el día de operación nocturno.'
+            : TPV_CORTE_DATE_HELP}
+        </p>
 
         <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
           <div className="rounded-xl bg-slate-50 px-2 py-3">

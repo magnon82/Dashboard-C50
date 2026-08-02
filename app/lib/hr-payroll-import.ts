@@ -3,8 +3,9 @@
  * Fuente preferida: archivos locales (ver hr-payroll-local.ts).
  */
 
+import { readFileSync } from 'fs';
 import path from 'path';
-import * as XLSX from 'xlsx';
+import * as XLSXNS from 'xlsx';
 import {
   HR_BASE_DATOS_XLSX,
   emptyDiasSemana,
@@ -19,6 +20,10 @@ import {
   type HrPayrollDiasSemana,
   type HrPayrollLineInput,
 } from '@/app/lib/hr-payroll';
+
+/** xlsx CJS/ESM: en Node a veces las exports viven en `.default`. */
+const XLSX =
+  (XLSXNS as unknown as { default?: typeof XLSXNS }).default ?? XLSXNS;
 
 const SECTION_NAMES = new Set(
   [
@@ -112,14 +117,20 @@ function readDiasSemanaFromRow(row: unknown[]): HrPayrollDiasSemana {
   return out;
 }
 
-function readWorkbook(filePathOrBuffer: string | Buffer): XLSX.WorkBook {
+function readWorkbook(filePathOrBuffer: string | Buffer): XLSXNS.WorkBook {
   if (typeof filePathOrBuffer === 'string') {
-    return XLSX.readFile(filePathOrBuffer, { cellDates: false });
+    if (typeof XLSX.readFile === 'function') {
+      return XLSX.readFile(filePathOrBuffer, { cellDates: false });
+    }
+    return XLSX.read(readFileSync(filePathOrBuffer), {
+      type: 'buffer',
+      cellDates: false,
+    });
   }
   return XLSX.read(filePathOrBuffer, { type: 'buffer', cellDates: false });
 }
 
-function sheetMatrix(wb: XLSX.WorkBook, sheetName: string): unknown[][] {
+function sheetMatrix(wb: XLSXNS.WorkBook, sheetName: string): unknown[][] {
   const sheet = wb.Sheets[sheetName];
   if (!sheet) return [];
   return XLSX.utils.sheet_to_json(sheet, {
@@ -341,7 +352,9 @@ export function parseNominaSheetRows(
       'días restantes'
     ),
     dias: headerIndex(header, 'dias trabajados', 'días trabajados'),
-    sd: headerIndex(header, 'sueldo diario', 'sueldo semanal'),
+    // Solo «SUELDO DIARIO» (col ~17). Nunca «SUELDO SEMANAL» (col ~7):
+    // ese alias hacía que la ficha guardara 2205 / 1300 en vez de 315.04.
+    sd: headerIndex(header, 'sueldo diario'),
     he: headerIndex(header, 'horas extras', 'hora extra'),
     ret: headerIndex(header, 'retenciones'),
     bonos: headerIndex(header, 'bonos'),
@@ -384,10 +397,23 @@ export function parseNominaSheetRows(
     const diasSum =
       (dias != null ? dias : hasDayMarks ? diasFromMarks : 0) +
       (prev?.dias_trabajados ?? 0);
+    // Dual rol (p. ej. Mesero + Limpieza): conservar el SD más alto
+    // (Mesero 315.04 > Limpieza 185.71), no el de la última fila.
+    const prevSd =
+      prev?.sueldo_diario != null ? Number(prev.sueldo_diario) : NaN;
+    const curSd = sd != null ? Number(sd) : NaN;
+    const sdCandidates = [prevSd, curSd].filter(
+      (n) => Number.isFinite(n) && n > 0
+    );
+    const mergedSd =
+      sdCandidates.length > 0
+        ? Math.round(Math.max(...sdCandidates) * 100) / 100
+        : (sd ?? prev?.sueldo_diario ?? null);
     const line: HrPayrollLineInput = {
       full_name: full_name.replace(/\s+/g, ' '),
-      puesto: puesto || prev?.puesto || null,
-      sueldo_diario: sd ?? prev?.sueldo_diario ?? null,
+      // Primer puesto del sheet (piso/barra antes que limpieza)
+      puesto: prev?.puesto || puesto || null,
+      sueldo_diario: mergedSd,
       dias_trabajados: diasSum,
       dias_semana: mergedDays,
       horas_extra:

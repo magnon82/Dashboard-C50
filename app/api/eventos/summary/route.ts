@@ -7,7 +7,7 @@ import {
   countsInPipelineClosedRecuento,
   mexicoTodayIso,
 } from '@/app/lib/eventos';
-import { loadEventClientActivity } from '@/app/lib/eventos-activity';
+import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
 import {
   buildUpcomingCalendar,
   filterEnPuertaEvents,

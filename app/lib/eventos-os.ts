@@ -7,9 +7,9 @@ import { existsSync } from 'fs';
 import { readdir, stat } from 'fs/promises';
 import path from 'path';
 import {
-  loadEventClientActivity,
   normalizeClientKey,
 } from '@/app/lib/eventos-activity';
+import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
 import { localDriveFsEnabled } from '@/app/lib/local-fs';
 
 const MI_UNIDAD = process.env.DRIVE_MI_UNIDAD_PATH?.trim() || 'I:\\Mi unidad';

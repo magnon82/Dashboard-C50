@@ -10,7 +10,7 @@ import {
 import {
   SERVICE_ORDER_STATUSES,
   type ServiceOrderRow,
-} from '@/app/lib/eventos-service-order';
+} from '@/app/lib/eventos-service-order-shared';
 import { useSession } from '@/app/lib/useSession';
 import { SUITE } from '@/app/lib/themes';
 

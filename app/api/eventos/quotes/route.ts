@@ -6,9 +6,9 @@ import {
 } from '@/app/lib/eventos-api';
 import {
   indexActivityByName,
-  loadEventClientActivity,
   pickActivityForClient,
 } from '@/app/lib/eventos-activity';
+import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
 import {
   EVENTOS_QUOTE_LOCK_WITHIN_DAYS,
   EVENTOS_SERVICIO_PCT,
