@@ -1,16 +1,20 @@
 name: Sync Gmail diario
 
-# ~5:00 AM Ciudad de México = 11:00 UTC (CDMX sin DST desde 2022).
-# Minutos fuera de :00 para reducir drops del scheduler de GitHub.
+# CDMX sin DST desde 2022 (UTC-6).
+# Lun–sáb ~5:17 AM CDMX = 11:17 UTC (días 1–6).
+# Domingo 8:00 PM CDMX = lunes 02:00 UTC (cron weekday 1).
+# Minutos fuera de :00 en la mañana para reducir drops del scheduler de GitHub.
 # Infocaja (ventas) + CORTE (cancelaciones/descuentos/cortesías) → Supabase
 # Dashboard: Ventas
 
 on:
   schedule:
-    # Principal ~5:17 AM CDMX
-    - cron: "17 11 * * *"
-    # Respaldo ~6:47 AM CDMX por si el cron de :00 se pierde
-    - cron: "47 12 * * *"
+    # Lun–sáb ~5:17 AM CDMX
+    - cron: "17 11 * * 1-6"
+    # Lun–sáb respaldo ~6:47 AM CDMX
+    - cron: "47 12 * * 1-6"
+    # Domingo 8:00 PM CDMX (lunes 02:00 UTC)
+    - cron: "0 2 * * 1"
   workflow_dispatch:
 
 concurrency:
