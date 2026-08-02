@@ -332,12 +332,11 @@ export function EventosOrdenesServicio() {
         <h3 className="text-base font-bold" style={{ color: theme.title }}>
           Órdenes de servicio
         </h3>
-        {(note || (!rootExists && source === 'activity_seed')) && (
-          <p className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
-            {note ||
-              'Usando seed de actividad (carpeta Drive no disponible en este servidor).'}
+        {note && source !== 'activity_seed' ? (
+          <p className="mt-2 text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+            {note}
           </p>
-        )}
+        ) : null}
       </SuiteCard>
 
       <div className="flex flex-wrap gap-2">

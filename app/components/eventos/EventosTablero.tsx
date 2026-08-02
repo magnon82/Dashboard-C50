@@ -111,7 +111,10 @@ export function EventosTablero({
     },
   ];
 
-  const upcoming = summary?.upcomingEvents || [];
+  // Defensa UI: en puerta no incluye cancelados (el API ya filtra).
+  const upcoming = (summary?.upcomingEvents || []).filter(
+    (ev) => ev.status !== 'cancelado'
+  );
 
   return (
     <div className="space-y-5">

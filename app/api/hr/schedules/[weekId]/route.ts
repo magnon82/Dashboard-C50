@@ -13,6 +13,7 @@ import {
   type HrScheduleStatus,
   type HrScheduleWeek,
 } from '@/app/lib/hr';
+import { preparePayrollFromSchedule } from '@/app/lib/hr-payroll-sync';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -292,6 +293,32 @@ export async function PATCH(request: Request, ctx: Ctx) {
     }
 
     const w = week as HrScheduleWeek;
+    const finalStatus = String(w.status) as HrScheduleStatus;
+    // Publicar (o re-guardar turnos ya publicados) → prepara nómina borrador.
+    const shouldPrepPayroll =
+      finalStatus === 'publicado' &&
+      (patch.status === 'publicado' || Array.isArray(body.shifts));
+
+    let payrollPrep: Awaited<
+      ReturnType<typeof preparePayrollFromSchedule>
+    > | null = null;
+    if (shouldPrepPayroll) {
+      try {
+        payrollPrep = await preparePayrollFromSchedule(sb, {
+          weekId,
+          username: auth.username,
+        });
+      } catch (prepErr) {
+        payrollPrep = {
+          skipped: true,
+          reason:
+            prepErr instanceof Error
+              ? prepErr.message
+              : 'No se pudo preparar nómina',
+        };
+      }
+    }
+
     return NextResponse.json({
       ready: true,
       week: {
@@ -300,6 +327,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
         week_end: String(w.week_end).slice(0, 10),
       },
       shifts: shiftsOut,
+      payroll: payrollPrep,
     });
   } catch (e) {
     return NextResponse.json(

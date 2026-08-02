@@ -14,6 +14,37 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+let lastNacimientoFillAt = 0;
+const NACIMIENTO_FILL_TTL_MS = 5 * 60_000;
+
+async function maybeFillNacimientoFromBaseDatos(): Promise<{
+  filled: boolean;
+  message?: string;
+}> {
+  const now = Date.now();
+  if (now - lastNacimientoFillAt < NACIMIENTO_FILL_TTL_MS) {
+    return { filled: false, message: 'skipped_ttl' };
+  }
+  lastNacimientoFillAt = now;
+  try {
+    const { loadBaseDatosRows } = await import('@/app/lib/hr-payroll-drive');
+    const { enrichEmployeesFromBaseDatos } = await import(
+      '@/app/lib/hr-payroll-sync'
+    );
+    const { rows } = await loadBaseDatosRows();
+    if (!rows.length) return { filled: false, message: 'base_datos_empty' };
+    const sb = getServiceSupabase();
+    await enrichEmployeesFromBaseDatos(sb, rows);
+    invalidatePlantillaCache();
+    return { filled: true };
+  } catch (e) {
+    return {
+      filled: false,
+      message: e instanceof Error ? e.message : 'fill_error',
+    };
+  }
+}
+
 /**
  * GET /api/hr/employees
  * Plantilla vigente = unión de última nómina conciliada + personas con turnos
@@ -21,6 +52,7 @@ export const dynamic = 'force-dynamic';
  * Excluye baja / force_exclude / fecha_baja.
  * ?source=activos → fuerza lista de activos (Horarios / catálogo overrides).
  * ?seed=0 → no intenta seed local.
+ * ?fill_nacimiento=1 → soft-fill fecha_nacimiento desde BASE DATOS PERSONAL.
  */
 export async function GET(request: Request) {
   const auth = await requireRrhhSession();
@@ -29,6 +61,12 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const forceActivos = url.searchParams.get('source') === 'activos';
   const seedDisabled = url.searchParams.get('seed') === '0';
+  const fillNacimiento = url.searchParams.get('fill_nacimiento') === '1';
+
+  let nacimientoFill: { filled: boolean; message?: string } | null = null;
+  if (fillNacimiento) {
+    nacimientoFill = await maybeFillNacimientoFromBaseDatos();
+  }
 
   try {
     const sb = getServiceSupabase();
@@ -55,6 +93,7 @@ export async function GET(request: Request) {
           seeded: resolved.seeded,
           message: resolved.seedMessage,
           code: resolved.seedCode ?? 'ok',
+          nacimientoFill,
         });
       }
 
@@ -75,10 +114,13 @@ export async function GET(request: Request) {
           resolved.seedMessage ||
           'Abre Nómina (cierra/paga) o importa horarios con turnos reales',
         code: resolved.seedCode ?? 'empty',
+        nacimientoFill,
       });
     }
 
     const EMP_ACTIVOS =
+      'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+    const EMP_ACTIVOS_BAJA =
       'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
     const EMP_ACTIVOS_BASE =
       'id, full_name, status, puesto, area, fecha_ingreso, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
@@ -89,6 +131,20 @@ export async function GET(request: Request) {
       .eq('status', 'activo')
       .eq('force_exclude', false)
       .order('full_name', { ascending: true });
+
+    if (
+      fallback.error &&
+      /fecha_nacimiento|column .* does not exist|42703/i.test(
+        fallback.error.message
+      )
+    ) {
+      fallback = (await sb
+        .from('hr_employees')
+        .select(EMP_ACTIVOS_BAJA)
+        .eq('status', 'activo')
+        .eq('force_exclude', false)
+        .order('full_name', { ascending: true })) as typeof fallback;
+    }
 
     if (
       fallback.error &&
@@ -115,6 +171,7 @@ export async function GET(request: Request) {
           'Tablas RR.HH. no migradas. Ejecuta supabase/hr_module.sql en Supabase.',
         error: fallback.error.message,
         code: 'schema_missing',
+        nacimientoFill,
       });
     }
 
@@ -132,6 +189,7 @@ export async function GET(request: Request) {
           ? 'No hay empleados activos en catálogo.'
           : null,
       code: 'ok',
+      nacimientoFill,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error';
@@ -150,6 +208,7 @@ export async function GET(request: Request) {
           : 'Error al cargar plantilla',
         error: msg,
         code: missing ? 'schema_missing' : 'seed_error',
+        nacimientoFill,
       },
       { status: 200 }
     );
@@ -158,8 +217,9 @@ export async function GET(request: Request) {
 
 /**
  * PATCH /api/hr/employees
- * RH: force_include / force_exclude / suite_username (+ contacto ligero).
- * Body: { id, force_include?, force_exclude?, suite_username?, email?, phone?, puesto?, area? }
+ * RH: force_include / force_exclude / suite_username (+ contacto ligero / DOB).
+ * Body: { id, force_include?, force_exclude?, suite_username?, email?, phone?,
+ *         puesto?, area?, fecha_nacimiento? }
  */
 export async function PATCH(request: Request) {
   const auth = await requireRrhhSession();
@@ -206,6 +266,20 @@ export async function PATCH(request: Request) {
   if (body.area !== undefined) {
     patch.area = body.area == null ? null : String(body.area).trim() || null;
   }
+  if (body.fecha_nacimiento !== undefined) {
+    if (body.fecha_nacimiento == null || body.fecha_nacimiento === '') {
+      patch.fecha_nacimiento = null;
+    } else {
+      const iso = String(body.fecha_nacimiento).trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+        return NextResponse.json(
+          { error: 'fecha_nacimiento inválida (usa YYYY-MM-DD)' },
+          { status: 400 }
+        );
+      }
+      patch.fecha_nacimiento = iso;
+    }
+  }
 
   if (Object.keys(patch).length <= 1) {
     return NextResponse.json(
@@ -224,24 +298,29 @@ export async function PATCH(request: Request) {
       .update(patch)
       .eq('id', id)
       .select(
-        'id, full_name, status, puesto, area, fecha_ingreso, email, phone, drive_folder_path, suite_username, force_include, force_exclude'
+        'id, full_name, status, puesto, area, fecha_ingreso, fecha_nacimiento, email, phone, drive_folder_path, suite_username, force_include, force_exclude'
       )
       .maybeSingle();
 
     if (error) {
       const missing = hrSchemaMissing(error.message);
+      const missingDob = /fecha_nacimiento|column .* does not exist|42703/i.test(
+        error.message
+      );
       const dup = /unique|duplicate|hr_employees_suite_username/i.test(
         error.message
       );
       return NextResponse.json(
         {
-          error: missing
-            ? 'Ejecuta supabase/hr_module.sql en Supabase.'
-            : dup
-              ? 'Ese suite_username ya está vinculado a otro colaborador.'
-              : error.message,
+          error: missingDob
+            ? 'Ejecuta supabase/hr_employee_nacimiento.sql en Supabase.'
+            : missing
+              ? 'Ejecuta supabase/hr_module.sql en Supabase.'
+              : dup
+                ? 'Ese suite_username ya está vinculado a otro colaborador.'
+                : error.message,
         },
-        { status: missing ? 503 : dup ? 409 : 500 }
+        { status: missing || missingDob ? 503 : dup ? 409 : 500 }
       );
     }
     if (!data) {

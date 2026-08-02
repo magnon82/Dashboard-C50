@@ -630,7 +630,7 @@ const NODES: MapNode[] = [
       'app/staff/horario/page.tsx',
     ],
     detail:
-      'Módulo rrhh activo: Plantilla (incluye expedientes), Horarios, Nómina, Vacaciones, Biblioteca. Staff: /staff/horario (publicado) + /staff/vacaciones (solicitud propia). Prefs disponibilidad Staff = pendiente.',
+      'Módulo rrhh activo: Plantilla (incluye expedientes), Horarios, Nómina, Vacaciones, Biblioteca. Staff: /staff/horario (publicado). /staff/vacaciones oculto hasta usuarios por empleado. Prefs disponibilidad Staff = pendiente.',
   },
   {
     id: 'staff-horario',
@@ -667,7 +667,7 @@ const NODES: MapNode[] = [
       'app/api/hr/leave-balances/mine/route.ts',
     ],
     detail:
-      'Solicitud propia con calendario y saldo (suite_username). Queda pendiente hasta aprobación en /rrhh → Vacaciones.',
+      'Oculto hasta usuarios por empleado (redirect /staff). Cliente listo en StaffVacacionesClient; aprobación sigue en /rrhh → Vacaciones.',
   },
 ];
 

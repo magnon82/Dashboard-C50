@@ -3,7 +3,7 @@ import {
   loadEventClientActivity,
   normalizeClientKey,
 } from '@/app/lib/eventos-activity';
-import { listEventOs } from '@/app/lib/eventos-os';
+import { listEventOs, parseFolio } from '@/app/lib/eventos-os';
 import { getServiceSupabase } from '@/app/lib/users';
 
 export type CalendarSource = 'crm' | 'os' | 'activity';
@@ -80,7 +80,45 @@ function paxFromText(...parts: Array<string | null | undefined>): number | null 
   return null;
 }
 
-function dedupeKey(eventDate: string, title: string, client: string | null): string {
+/** Normaliza folio para clave (G7; 01 / 1 / 1-2027 → «1»). */
+function normalizeFolio(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const fromParse = parseFolio(s);
+  if (fromParse) return fromParse.toUpperCase();
+  if (/^G\d+(?:-\d+)?$/i.test(s)) return s.toUpperCase();
+  // Numérico con año opcional: «01», «1», «1-2027» → misma clave
+  const num = s.match(/^(\d{1,4})(?:-\d{4})?$/);
+  if (num) return String(Number(num[1]));
+  return null;
+}
+
+function resolveFolio(
+  folio: string | null | undefined,
+  ...texts: Array<string | null | undefined>
+): string | null {
+  const direct = normalizeFolio(folio);
+  if (direct) return direct;
+  for (const t of texts) {
+    const f = normalizeFolio(t) || (t ? parseFolio(String(t)) : null);
+    if (f) return f.toUpperCase();
+  }
+  return null;
+}
+
+/**
+ * Misma fecha + mismo folio → un evento (Anticipos C50 ↔ OS).
+ * Sin folio: cae a día + cliente/título normalizado.
+ */
+function dedupeKey(
+  eventDate: string,
+  title: string,
+  client: string | null,
+  folio?: string | null
+): string {
+  const f = resolveFolio(folio, title, client);
+  if (f) return `${eventDate}|folio:${f}`;
   const who =
     normalizeClientKey(client) ||
     normalizeClientKey(title) ||
@@ -92,11 +130,47 @@ function activitySourceLabel(source: string): string {
   return ACTIVITY_SOURCE_LABELS[source] || source || 'Actividad';
 }
 
+/** Prefiere nombre de celebración/anticipo sobre «OS G7». */
+function preferTitle(a: string, b: string): string {
+  const aOs = /^OS\b/i.test(a.trim());
+  const bOs = /^OS\b/i.test(b.trim());
+  if (aOs && !bOs) return b;
+  if (bOs && !aOs) return a;
+  if (a.length !== b.length) return a.length >= b.length ? a : b;
+  return a;
+}
+
+function mergeSourceLabels(a: string, b: string): string {
+  if (!a) return b;
+  if (!b || a === b) return a;
+  const parts = new Set<string>();
+  for (const s of [a, b]) {
+    for (const p of s.split(/\s*·\s*/)) {
+      const t = p.trim();
+      if (t) parts.add(t);
+    }
+  }
+  return [...parts].join(' · ');
+}
+
+/** Cliente «OS G7» no aporta; preferir nombre real del anticipo/CRM. */
+function preferClient(
+  a: string | null,
+  b: string | null
+): string | null {
+  const aOs = a && /^OS\b/i.test(a.trim());
+  const bOs = b && /^OS\b/i.test(b.trim());
+  if (aOs && b && !bOs) return b;
+  if (bOs && a && !aOs) return a;
+  return a || b;
+}
+
 function mergeItem(
   map: Map<string, CalendarEventItem>,
-  item: CalendarEventItem
+  item: CalendarEventItem,
+  folio?: string | null
 ): void {
-  const key = dedupeKey(item.event_date, item.title, item.client);
+  const key = dedupeKey(item.event_date, item.title, item.client, folio);
   const prev = map.get(key);
   if (!prev) {
     map.set(key, item);
@@ -110,8 +184,10 @@ function mergeItem(
   const other = preferNew ? prev : item;
   map.set(key, {
     ...base,
+    title: preferTitle(base.title, other.title),
+    source_label: mergeSourceLabels(base.source_label, other.source_label),
     pax: base.pax ?? other.pax,
-    client: base.client || other.client,
+    client: preferClient(base.client, other.client),
     detail: base.detail || other.detail,
     stage: base.stage || other.stage,
     status:
@@ -237,17 +313,22 @@ export async function buildUpcomingCalendar(
           const title =
             (t.label || client.company_name || 'Evento').trim() || 'Evento';
           const company = client.company_name?.trim() || null;
-          mergeItem(map, {
-            id: `act:${client.client_key}:${eventDate}:${t.source}:${t.folio || ''}`,
-            event_date: eventDate,
-            title,
-            client: company,
-            pax: paxFromText(t.detail, t.label),
-            source: 'activity',
-            source_label: activitySourceLabel(t.source),
-            detail: t.detail || null,
-            ...emptyLinks(),
-          });
+          const folio = resolveFolio(t.folio, t.label, title, company);
+          mergeItem(
+            map,
+            {
+              id: `act:${client.client_key}:${eventDate}:${t.source}:${t.folio || ''}`,
+              event_date: eventDate,
+              title,
+              client: company,
+              pax: paxFromText(t.detail, t.label),
+              source: 'activity',
+              source_label: activitySourceLabel(t.source),
+              detail: t.detail || null,
+              ...emptyLinks(),
+            },
+            folio
+          );
         }
       }
     }
@@ -277,9 +358,10 @@ export async function buildUpcomingCalendar(
         it.source === 'scan' && it.path ? it.path : null;
       const osFilename = it.filename || null;
       const client = it.matched_client_name || null;
-      // Índice para adjuntar OS a CRM/Anticipos del mismo día+cliente
+      const folio = resolveFolio(it.folio, label, client);
+      // Índice para adjuntar OS a CRM/Anticipos (día+folio o día+cliente)
       for (const who of [client, label]) {
-        const k = dedupeKey(eventDate, who || '', who);
+        const k = dedupeKey(eventDate, who || '', who, folio);
         const prev = osIndex.get(k);
         if (!prev?.path && osPath) {
           osIndex.set(k, { path: osPath, filename: osFilename });
@@ -287,19 +369,23 @@ export async function buildUpcomingCalendar(
           osIndex.set(k, { path: osPath, filename: osFilename });
         }
       }
-      mergeItem(map, {
-        id: `os:${it.id}`,
-        event_date: eventDate,
-        title: label,
-        client,
-        pax: null,
-        source: 'os',
-        source_label: it.source === 'scan' ? 'OS (Drive)' : 'OS (seed)',
-        detail: it.filename || it.rel_path || null,
-        ...emptyLinks(),
-        os_path: osPath,
-        os_filename: osFilename,
-      });
+      mergeItem(
+        map,
+        {
+          id: `os:${it.id}`,
+          event_date: eventDate,
+          title: label,
+          client,
+          pax: null,
+          source: 'os',
+          source_label: it.source === 'scan' ? 'OS (Drive)' : 'OS (seed)',
+          detail: it.filename || it.rel_path || null,
+          ...emptyLinks(),
+          os_path: osPath,
+          os_filename: osFilename,
+        },
+        folio
+      );
     }
   } catch (e) {
     errors.push(e instanceof Error ? e.message : 'Error al listar OS');
@@ -336,23 +422,28 @@ export async function buildUpcomingCalendar(
           (row.celebration || row.title || 'Lead').trim() || 'Lead';
         const company =
           (row.company || clientName || null)?.toString().trim() || null;
-        mergeItem(map, {
-          id: `crm:${row.id}`,
-          event_date: eventDate,
-          title,
-          client: company,
-          pax:
-            row.pax != null && Number.isFinite(Number(row.pax))
-              ? Number(row.pax)
-              : null,
-          source: 'crm',
-          source_label: 'CRM / lead',
-          detail: row.stage ? `Etapa: ${row.stage}` : null,
-          ...emptyLinks(),
-          stage: row.stage ? String(row.stage) : null,
-          lead_id: String(row.id),
-          client_id: row.client_id ? String(row.client_id) : null,
-        });
+        const folio = resolveFolio(null, title, company);
+        mergeItem(
+          map,
+          {
+            id: `crm:${row.id}`,
+            event_date: eventDate,
+            title,
+            client: company,
+            pax:
+              row.pax != null && Number.isFinite(Number(row.pax))
+                ? Number(row.pax)
+                : null,
+            source: 'crm',
+            source_label: 'CRM / lead',
+            detail: row.stage ? `Etapa: ${row.stage}` : null,
+            ...emptyLinks(),
+            stage: row.stage ? String(row.stage) : null,
+            lead_id: String(row.id),
+            client_id: row.client_id ? String(row.client_id) : null,
+          },
+          folio
+        );
       }
     }
   } catch (e) {
@@ -361,11 +452,16 @@ export async function buildUpcomingCalendar(
     );
   }
 
-  // Adjuntar OS PDF a filas CRM/Anticipos del mismo día+cliente
+  // Adjuntar OS PDF a filas CRM/Anticipos del mismo día+folio o día+cliente
   for (const [key, item] of map) {
     if (item.os_path) continue;
-    const k = dedupeKey(item.event_date, item.title, item.client);
-    const hit = osIndex.get(k) || osIndex.get(dedupeKey(item.event_date, item.client || '', item.client));
+    const folio = resolveFolio(null, item.title, item.client);
+    const k = dedupeKey(item.event_date, item.title, item.client, folio);
+    const hit =
+      osIndex.get(k) ||
+      osIndex.get(
+        dedupeKey(item.event_date, item.client || '', item.client, folio)
+      );
     if (hit?.path) {
       map.set(key, {
         ...item,
@@ -439,20 +535,26 @@ export async function buildUpcomingCalendar(
           const title =
             (q.celebration || company || 'Cotización').toString().trim() ||
             'Cotización';
-          mergeItem(map, {
-            id: `quote:${q.id}`,
-            event_date: eventDate,
-            title,
-            client: company?.toString().trim() || null,
-            pax: null,
-            source: 'crm',
-            source_label: 'Cotización',
-            detail: q.status ? `Estado: ${q.status}` : null,
-            ...emptyLinks(),
-            quote_id: String(q.id),
-            lead_id: q.lead_id ? String(q.lead_id) : null,
-            client_id: q.client_id ? String(q.client_id) : null,
-          });
+          const companyTrim = company?.toString().trim() || null;
+          const folio = resolveFolio(null, title, companyTrim);
+          mergeItem(
+            map,
+            {
+              id: `quote:${q.id}`,
+              event_date: eventDate,
+              title,
+              client: companyTrim,
+              pax: null,
+              source: 'crm',
+              source_label: 'Cotización',
+              detail: q.status ? `Estado: ${q.status}` : null,
+              ...emptyLinks(),
+              quote_id: String(q.id),
+              lead_id: q.lead_id ? String(q.lead_id) : null,
+              client_id: q.client_id ? String(q.client_id) : null,
+            },
+            folio
+          );
         }
       }
 
@@ -526,24 +628,29 @@ export async function buildUpcomingCalendar(
 
         const title =
           (o.celebration || o.client_name || o.os_number || 'OS digital').trim();
-        mergeItem(map, {
-          id: `dos:${oid}`,
-          event_date: eventDate || today,
-          title,
-          client: o.client_name || null,
-          pax:
-            o.pax != null && Number.isFinite(Number(o.pax))
-              ? Number(o.pax)
-              : null,
-          source: 'os',
-          source_label: 'OS digital',
-          detail: o.os_number || null,
-          ...emptyLinks(),
-          digital_os_id: oid,
-          quote_id: o.quote_id ? String(o.quote_id) : null,
-          lead_id: o.lead_id ? String(o.lead_id) : null,
-          client_id: o.client_id ? String(o.client_id) : null,
-        });
+        const folio = resolveFolio(o.os_number, title, o.client_name);
+        mergeItem(
+          map,
+          {
+            id: `dos:${oid}`,
+            event_date: eventDate || today,
+            title,
+            client: o.client_name || null,
+            pax:
+              o.pax != null && Number.isFinite(Number(o.pax))
+                ? Number(o.pax)
+                : null,
+            source: 'os',
+            source_label: 'OS digital',
+            detail: o.os_number || null,
+            ...emptyLinks(),
+            digital_os_id: oid,
+            quote_id: o.quote_id ? String(o.quote_id) : null,
+            lead_id: o.lead_id ? String(o.lead_id) : null,
+            client_id: o.client_id ? String(o.client_id) : null,
+          },
+          folio
+        );
       }
 
       for (const [key, item] of map) {
@@ -650,4 +757,11 @@ export async function buildUpcomingCalendar(
       'Vista local de próximas fechas (hoy CDMX en adelante). Sync con Google Calendar compartido: próximo — un calendario, hold 72 h hábiles.',
     error: errors.length ? errors.join(' · ') : undefined,
   };
+}
+
+/** «En puerta» = próximos activos (cancelados quedan en Calendario, no en el tablero). */
+export function filterEnPuertaEvents(
+  events: CalendarEventItem[]
+): CalendarEventItem[] {
+  return events.filter((e) => e.status !== 'cancelado');
 }

@@ -1,9 +1,9 @@
 -- =============================================================================
--- Patch: seed hr_doc_links — docs vigentes 2023 + categoría manuales
+-- Patch: seed hr_doc_links — Documentación vigente + categoría manuales
 -- =============================================================================
 -- Usar si ya corriste hr_module.sql y solo quieres añadir/actualizar la biblioteca.
 -- Idempotente (insert where not exists por category+title).
--- Paths = nombres exactos en I:\Mi unidad\RH\Documentación vigente 2023
+-- Paths = nombres exactos en disco (carpeta Drive aún: Documentación vigente 2023)
 -- (incl. «Reglamento C50 NO  FUMAR.docx» con doble espacio).
 -- =============================================================================
 
@@ -71,7 +71,7 @@ from (values
   ),
   (
     'politicas',
-    'Documentación',
+    'Documentación vigente',
     'Carpeta: políticas, reglamentos, formatos y antigüedad',
     'I:\Mi unidad\RH\Documentación vigente 2023',
     50
@@ -112,11 +112,11 @@ where not exists (
 
 -- Renombrar título de UI (path Drive sin cambios) si ya existía el seed viejo
 update public.hr_doc_links
-set title = 'Documentación',
+set title = 'Documentación vigente',
     description = 'Carpeta: políticas, reglamentos, formatos y antigüedad',
     sort_order = 50
 where category = 'politicas'
-  and title = 'Documentación vigente 2023';
+  and title in ('Documentación vigente 2023', 'Documentación');
 
 -- Ocultar carpetas con pestaña propia (Expedientes / Horarios / Nómina)
 update public.hr_doc_links

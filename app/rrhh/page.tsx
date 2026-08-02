@@ -9,6 +9,7 @@ import {
 import { RrhhPlantilla } from '@/app/components/rrhh/RrhhPlantilla';
 import { RrhhBiblioteca } from '@/app/components/rrhh/RrhhBiblioteca';
 import { RrhhVacaciones } from '@/app/components/rrhh/RrhhVacaciones';
+import { RrhhCumpleanos } from '@/app/components/rrhh/RrhhCumpleanos';
 import { RrhhHorarios } from '@/app/components/rrhh/RrhhHorarios';
 import { RrhhNomina } from '@/app/components/rrhh/RrhhNomina';
 import type { HrEmployee, HrDocLink } from '@/app/lib/hr';
@@ -98,6 +99,8 @@ export default function RrhhPage() {
       {section === 'nomina' && <RrhhNomina onChanged={refresh} />}
 
       {section === 'vacaciones' && <RrhhVacaciones />}
+
+      {section === 'cumpleanos' && <RrhhCumpleanos />}
 
       {section === 'biblioteca' && (
         <RrhhBiblioteca data={docs} loading={loading} />

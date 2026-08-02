@@ -1,15 +1,6 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { SuiteShell } from '@/app/components/SuiteShell';
-import { StaffVacacionesClient } from '@/app/components/staff/StaffVacacionesClient';
-
+/** Mis vacaciones — oculto hasta que cada empleado tenga usuario. Stub en StaffVacacionesClient. */
 export default function StaffVacacionesPage() {
-  return (
-    <SuiteShell
-      title="Mis vacaciones"
-      subtitle="Solicitud y seguimiento · sujeta a aprobación de RH"
-    >
-      <StaffVacacionesClient />
-    </SuiteShell>
-  );
+  redirect('/staff');
 }

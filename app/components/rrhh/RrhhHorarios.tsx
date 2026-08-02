@@ -83,6 +83,23 @@ function statusStyle(status: HrScheduleStatus): { bg: string; color: string } {
   }
 }
 
+type PayrollPrepToast = {
+  skipped?: boolean;
+  created?: boolean;
+  refreshed?: boolean;
+  lineCount?: number;
+  reason?: string;
+};
+
+/** Sufijo de toast cuando Publicar prepara nómina borrador. */
+function payrollPrepToast(prep: PayrollPrepToast | undefined): string {
+  if (!prep || prep.skipped) return '';
+  const n = prep.lineCount ?? 0;
+  if (prep.created) return ` · Nómina borrador lista (${n} líneas)`;
+  if (prep.refreshed) return ` · Nómina borrador actualizada (${n} líneas)`;
+  return '';
+}
+
 /** Badge: pasada → Publicado; en curso → En curso; futura → Borrador hasta Publicar. */
 function weekStatusBadge(
   status: HrScheduleStatus,
@@ -431,6 +448,12 @@ export function RrhhHorarios() {
   /** Semanas con week_end &lt; hoy CDMX: histórico solo lectura. */
   const pastLocked =
     weekDetail != null && isPastScheduleWeek(weekDetail.week_end);
+
+  /** Por columna: fecha civil &lt; hoy CDMX → Ent/Sal/DESCANSO solo lectura. */
+  const dayLocked = useMemo(() => {
+    const today = todayIsoCdmx();
+    return dates.map((d) => d.slice(0, 10) < today);
+  }, [dates]);
 
   const totalHours = useMemo(
     () =>
@@ -853,11 +876,14 @@ export function RrhhHorarios() {
       );
       setRows(next);
       setSavedSnapshot(serializeGrid(next));
+      const payrollNote = payrollPrepToast(
+        json.payroll as PayrollPrepToast | undefined
+      );
       setToast(
         json.week?.status === 'publicado'
           ? isCurrentScheduleWeek(weekDetail.week_start)
-            ? 'Horario guardado (en curso / publicado)'
-            : 'Horario guardado y publicado'
+            ? `Horario guardado (en curso / publicado)${payrollNote}`
+            : `Horario guardado y publicado${payrollNote}`
           : 'Horario guardado (borrador · usa Publicar para Staff)'
       );
       await refreshWeeks(year);
@@ -889,7 +915,10 @@ export function RrhhHorarios() {
         return;
       }
       setWeekDetail(json.week);
-      setToast('Publicado · visible en Staff → Mi horario');
+      const payrollNote = payrollPrepToast(
+        json.payroll as PayrollPrepToast | undefined
+      );
+      setToast(`Publicado · visible en Staff → Mi horario${payrollNote}`);
       await refreshWeeks(year);
     } catch {
       setToast('Error de red');
@@ -930,7 +959,7 @@ export function RrhhHorarios() {
     dayIndex: number,
     patch: Partial<DayCell>
   ) {
-    if (pastLocked) return;
+    if (pastLocked || dayLocked[dayIndex]) return;
     setRows((prev) =>
       prev.map((r) => {
         if (r.employee_id !== employeeId) return r;
@@ -954,7 +983,7 @@ export function RrhhHorarios() {
   }
 
   function toggleOff(employeeId: string, dayIndex: number) {
-    if (pastLocked) return;
+    if (pastLocked || dayLocked[dayIndex]) return;
     setRows((prev) =>
       prev.map((r) => {
         if (r.employee_id !== employeeId) return r;
@@ -1438,6 +1467,7 @@ export function RrhhHorarios() {
                           area={area}
                           people={people}
                           readOnly={pastLocked}
+                          dayLocked={dayLocked}
                           onCell={updateCell}
                           onToggleOff={toggleOff}
                           onRemove={removePerson}
@@ -1486,7 +1516,7 @@ export function RrhhHorarios() {
               <p className="text-xs" style={{ color: theme.muted }}>
                 {pastLocked
                   ? 'Semana pasada: solo consulta. No se pueden editar Ent./Sal. La columna h suma las horas de los turnos.'
-                  : 'Clic en DESCANSO o en una celda vacía para poner turno. Vaciar Ent./Sal. o el botón · marca descanso. La columna h suma las horas asignadas (Ent/Sal; DESCANSO = 0; nocturnos p. ej. 19:00–02:00 cuentan). Guardar publica si la semana aún no lo está.'}
+                  : 'Solo se editan hoy y días futuros (CDMX). Días pasados quedan bloqueados. Clic en DESCANSO o en una celda vacía para poner turno. Vaciar Ent./Sal. o el botón · marca descanso. La columna h suma las horas asignadas (Ent/Sal; DESCANSO = 0; nocturnos p. ej. 19:00–02:00 cuentan). Guardar publica si la semana aún no lo está.'}
               </p>
             </>
           )}
@@ -1513,6 +1543,7 @@ function AreaFragment({
   area,
   people,
   readOnly = false,
+  dayLocked = [],
   onCell,
   onToggleOff,
   onRemove,
@@ -1520,6 +1551,8 @@ function AreaFragment({
   area: string;
   people: PersonRow[];
   readOnly?: boolean;
+  /** true por índice Lun–Dom si la fecha civil ya pasó (CDMX). */
+  dayLocked?: boolean[];
   onCell: (id: string, day: number, patch: Partial<DayCell>) => void;
   onToggleOff: (id: string, day: number) => void;
   onRemove: (id: string) => void;
@@ -1563,20 +1596,28 @@ function AreaFragment({
               )}
             </div>
           </td>
-          {p.days.map((d, di) =>
-            d.off ? (
+          {p.days.map((d, di) => {
+            const cellLocked = readOnly || Boolean(dayLocked[di]);
+            return d.off ? (
               <td
                 key={di}
                 colSpan={2}
-                className="border-l border-slate-100 px-1 py-0.5 text-center"
+                className={`border-l border-slate-100 px-1 py-0.5 text-center${
+                  cellLocked && !readOnly ? ' bg-slate-50/70' : ''
+                }`}
               >
-                {readOnly ? (
+                {cellLocked ? (
                   <span
-                    className="inline-block w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide"
+                    className="inline-block w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide opacity-80"
                     style={{
                       backgroundColor: '#fef3c7',
                       color: '#92400e',
                     }}
+                    title={
+                      !readOnly && dayLocked[di]
+                        ? 'Día pasado: solo consulta'
+                        : undefined
+                    }
                   >
                     DESCANSO
                   </span>
@@ -1597,29 +1638,47 @@ function AreaFragment({
               </td>
             ) : (
               <Fragment key={`${p.employee_id}-${di}`}>
-                <td className="border-l border-slate-100 px-0.5 py-0.5">
+                <td
+                  className={`border-l border-slate-100 px-0.5 py-0.5${
+                    cellLocked && !readOnly ? ' bg-slate-50/70' : ''
+                  }`}
+                >
                   <input
                     type="time"
                     value={d.start}
-                    disabled={readOnly}
+                    disabled={cellLocked}
                     onChange={(e) =>
                       onCell(p.employee_id, di, { start: e.target.value })
                     }
-                    className="w-full min-w-[4.25rem] rounded border border-slate-200 px-0.5 py-1 text-xs tabular-nums disabled:bg-slate-50 disabled:text-slate-600"
+                    title={
+                      !readOnly && dayLocked[di]
+                        ? 'Día pasado: solo consulta'
+                        : undefined
+                    }
+                    className="w-full min-w-[4.25rem] rounded border border-slate-200 px-0.5 py-1 text-xs tabular-nums disabled:bg-slate-50 disabled:text-slate-500"
                   />
                 </td>
-                <td className="px-0.5 py-0.5">
+                <td
+                  className={`px-0.5 py-0.5${
+                    cellLocked && !readOnly ? ' bg-slate-50/70' : ''
+                  }`}
+                >
                   <div className="flex items-center gap-0.5">
                     <input
                       type="time"
                       value={d.end}
-                      disabled={readOnly}
+                      disabled={cellLocked}
                       onChange={(e) =>
                         onCell(p.employee_id, di, { end: e.target.value })
                       }
-                      className="w-full min-w-[4.25rem] rounded border border-slate-200 px-0.5 py-1 text-xs tabular-nums disabled:bg-slate-50 disabled:text-slate-600"
+                      title={
+                        !readOnly && dayLocked[di]
+                          ? 'Día pasado: solo consulta'
+                          : undefined
+                      }
+                      className="w-full min-w-[4.25rem] rounded border border-slate-200 px-0.5 py-1 text-xs tabular-nums disabled:bg-slate-50 disabled:text-slate-500"
                     />
-                    {!readOnly && (
+                    {!cellLocked && (
                       <button
                         type="button"
                         title="Marcar DESCANSO"
@@ -1632,8 +1691,8 @@ function AreaFragment({
                   </div>
                 </td>
               </Fragment>
-            )
-          )}
+            );
+          })}
           <td
             className="border-l border-slate-100 px-2 py-1 text-center text-xs font-semibold tabular-nums select-none"
             style={{ color: theme.muted }}

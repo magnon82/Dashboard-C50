@@ -26,6 +26,8 @@ create table if not exists public.hr_employees (
   puesto text,
   area text,
   fecha_ingreso date,
+  -- Cumpleaños Staff (patch hr_employee_nacimiento.sql si DB ya existía)
+  fecha_nacimiento date,
   sueldo_diario numeric(12, 2),
   email text,
   phone text,
@@ -65,6 +67,9 @@ comment on column public.hr_employees.force_exclude is
 
 comment on column public.hr_employees.fecha_baja is
   'Último día laborado / fecha de baja. Con status=baja queda fuera de plantilla.';
+
+comment on column public.hr_employees.fecha_nacimiento is
+  'Fecha de nacimiento (cumpleaños). Soft-fill desde BASE DATOS PERSONAL o captura RH.';
 
 -- ---------------------------------------------------------------------------
 -- Nómina
@@ -438,7 +443,7 @@ from (values
   ),
   (
     'politicas',
-    'Documentación',
+    'Documentación vigente',
     'Carpeta: políticas, reglamentos, formatos y antigüedad',
     'I:\Mi unidad\RH\Documentación vigente 2023',
     50
@@ -476,6 +481,14 @@ where not exists (
   select 1 from public.hr_doc_links d
   where d.category = v.category and d.title = v.title
 );
+
+-- Renombrar título de UI (path Drive sin cambios) si ya existía el seed viejo
+update public.hr_doc_links
+set title = 'Documentación vigente',
+    description = 'Carpeta: políticas, reglamentos, formatos y antigüedad',
+    sort_order = 50
+where category = 'politicas'
+  and title in ('Documentación vigente 2023', 'Documentación');
 
 -- Carpetas con pestaña propia (Expedientes / Horarios / Nómina) fuera de Biblioteca
 update public.hr_doc_links

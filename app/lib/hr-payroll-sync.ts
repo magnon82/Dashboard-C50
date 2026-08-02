@@ -2,11 +2,15 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  computePayrollImporte,
   emptyDiasSemana,
   normalizeDiasSemana,
   normalizePersonName,
+  payrollDayIndexFromIso,
+  payrollDayOnWeight,
   sumDiasSemana,
   todayIsoCdmxPayroll,
+  type HrPayrollDiasSemana,
   type HrPayrollLineInput,
 } from '@/app/lib/hr-payroll';
 import {
@@ -21,6 +25,7 @@ import {
   type BaseDatosRow,
 } from '@/app/lib/hr-payroll-import';
 import { listSheetsFromLocalFile } from '@/app/lib/hr-payroll-local';
+import { weekNumberForHorariosMonday } from '@/app/lib/hr-schedule-import';
 
 type EmpRow = {
   id: string;
@@ -28,6 +33,7 @@ type EmpRow = {
   puesto: string | null;
   area: string | null;
   fecha_ingreso: string | null;
+  fecha_nacimiento?: string | null;
   sueldo_diario: number | null;
   email: string | null;
   phone: string | null;
@@ -37,30 +43,31 @@ type EmpRow = {
   drive_folder_path?: string | null;
 };
 
+const EMP_MAP_SELECT_FULL =
+  'id, full_name, puesto, area, fecha_ingreso, fecha_nacimiento, sueldo_diario, email, phone, status, force_exclude, fecha_baja, drive_folder_path';
+const EMP_MAP_SELECT_NO_NAC =
+  'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, force_exclude, fecha_baja, drive_folder_path';
+const EMP_MAP_SELECT_MIN =
+  'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, force_exclude';
+
 export async function loadEmployeeNameMap(
   sb: SupabaseClient
 ): Promise<Map<string, EmpRow>> {
-  const withPath = await sb
-    .from('hr_employees')
-    .select(
-      'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, force_exclude, fecha_baja, drive_folder_path'
-    );
-  const withBaja =
-    withPath.error && /drive_folder_path|column/i.test(withPath.error.message)
-      ? await sb
-          .from('hr_employees')
-          .select(
-            'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, force_exclude, fecha_baja'
-          )
-      : withPath;
-  const { data, error } =
-    withBaja.error && /fecha_baja|column/i.test(withBaja.error.message)
-      ? await sb
-          .from('hr_employees')
-          .select(
-            'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, force_exclude'
-          )
-      : withBaja;
+  let res = await sb.from('hr_employees').select(EMP_MAP_SELECT_FULL);
+  if (res.error && /fecha_nacimiento|column/i.test(res.error.message)) {
+    res = await sb.from('hr_employees').select(EMP_MAP_SELECT_NO_NAC);
+  }
+  if (res.error && /drive_folder_path|column/i.test(res.error.message)) {
+    res = await sb
+      .from('hr_employees')
+      .select(
+        'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, force_exclude, fecha_baja'
+      );
+  }
+  if (res.error && /fecha_baja|column/i.test(res.error.message)) {
+    res = await sb.from('hr_employees').select(EMP_MAP_SELECT_MIN);
+  }
+  const { data, error } = res;
   if (error) throw new Error(error.message);
   const map = new Map<string, EmpRow>();
   for (const row of data || []) {
@@ -490,25 +497,42 @@ export async function enrichEmployeesFromBaseDatos(
     if (!found) {
       // Solo crea si está activo en base y queremos seed ligero
       if (row.status !== 'activo') continue;
-      const { data, error } = await sb
+      const insertRow: Record<string, unknown> = {
+        full_name: row.full_name,
+        status: 'activo',
+        puesto: row.puesto,
+        area: row.area,
+        fecha_ingreso: row.fecha_ingreso,
+        sueldo_diario: row.sueldo_diario,
+        phone: row.phone,
+        email: row.email,
+        source: 'xlsx',
+      };
+      if (row.fecha_nacimiento) {
+        insertRow.fecha_nacimiento = row.fecha_nacimiento;
+      }
+      let inserted = await sb
         .from('hr_employees')
-        .insert({
-          full_name: row.full_name,
-          status: 'activo',
-          puesto: row.puesto,
-          area: row.area,
-          fecha_ingreso: row.fecha_ingreso,
-          sueldo_diario: row.sueldo_diario,
-          phone: row.phone,
-          email: row.email,
-          source: 'xlsx',
-        })
+        .insert(insertRow)
         .select(
-          'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, drive_folder_path'
+          'id, full_name, puesto, area, fecha_ingreso, fecha_nacimiento, sueldo_diario, email, phone, status, drive_folder_path'
         )
         .single();
-      if (!error && data) {
-        const e = data as EmpRow;
+      if (
+        inserted.error &&
+        /fecha_nacimiento|column/i.test(inserted.error.message)
+      ) {
+        delete insertRow.fecha_nacimiento;
+        inserted = await sb
+          .from('hr_employees')
+          .insert(insertRow)
+          .select(
+            'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, drive_folder_path'
+          )
+          .single();
+      }
+      if (!inserted.error && inserted.data) {
+        const e = inserted.data as EmpRow;
         existing.set(key, e);
         allExisting.push(e);
         created += 1;
@@ -540,6 +564,10 @@ export async function enrichEmployeesFromBaseDatos(
     if (row.fecha_ingreso && !found.fecha_ingreso) {
       patch.fecha_ingreso = row.fecha_ingreso;
     }
+    if (row.fecha_nacimiento && !found.fecha_nacimiento) {
+      patch.fecha_nacimiento = row.fecha_nacimiento;
+      found.fecha_nacimiento = row.fecha_nacimiento;
+    }
     if (row.phone && !found.phone) patch.phone = row.phone;
     if (
       row.sueldo_diario != null &&
@@ -548,10 +576,21 @@ export async function enrichEmployeesFromBaseDatos(
       patch.sueldo_diario = row.sueldo_diario;
     }
     if (Object.keys(patch).length > 1) {
-      const { error } = await sb
+      let { error } = await sb
         .from('hr_employees')
         .update(patch)
         .eq('id', found.id);
+      if (error && /fecha_nacimiento|column/i.test(error.message)) {
+        delete patch.fecha_nacimiento;
+        if (Object.keys(patch).length > 1) {
+          ({ error } = await sb
+            .from('hr_employees')
+            .update(patch)
+            .eq('id', found.id));
+        } else {
+          error = null;
+        }
+      }
       if (!error) updated += 1;
     }
   }
@@ -727,11 +766,6 @@ export async function ensureYearPayrollFromLocal(
   year: number,
   opts?: { refreshExisting?: boolean; enrichBase?: boolean }
 ): Promise<EnsureYearPayrollResult> {
-  const listed = await listSheetsFromLocalFile(year);
-  const sheets = [...listed.sheets].sort(
-    (a, b) => weekNumFromSheetName(a.name) - weekNumFromSheetName(b.name)
-  );
-
   // Primero limpia duplicados históricos (mismo start / misma hoja).
   const dedupe = await dedupePayrollPeriodsForYear(sb, year);
 
@@ -742,6 +776,46 @@ export async function ensureYearPayrollFromLocal(
     )
     .gte('period_start', `${year}-01-01`)
     .lte('period_start', `${year}-12-31`);
+
+  let listed: Awaited<ReturnType<typeof listSheetsFromLocalFile>> | null =
+    null;
+  try {
+    listed = await listSheetsFromLocalFile(year);
+  } catch {
+    const existingCount = (existingRows || []).length;
+    if (existingCount > 0) {
+      let latestPaidId: string | null = null;
+      let latestPaidEnd = '';
+      for (const raw of existingRows || []) {
+        const r = raw as { id: string; status: string; period_end: string };
+        if (r.status !== 'pagado') continue;
+        const end = String(r.period_end).slice(0, 10);
+        if (end >= latestPaidEnd) {
+          latestPaidEnd = end;
+          latestPaidId = r.id;
+        }
+      }
+      return {
+        year,
+        created: 0,
+        skipped: existingCount,
+        refreshed: 0,
+        repaired: 0,
+        deduped: dedupe.removed,
+        sheetCount: 0,
+        latestPaidId,
+        balancesSynced: 0,
+        message: `Año ${year}: ${existingCount} semanas en servidor (xlsx local/Drive opcional para nuevas).`,
+      };
+    }
+    throw new Error(
+      `Sin xlsx local de nómina ${year} y sin periodos en servidor. Usa sync Drive API (HR_NOMINA_DRIVE_FOLDER_ID) o importa desde el PC de admin.`
+    );
+  }
+
+  const sheets = [...listed.sheets].sort(
+    (a, b) => weekNumFromSheetName(a.name) - weekNumFromSheetName(b.name)
+  );
 
   type Hit = {
     id: string;
@@ -1013,4 +1087,422 @@ export async function ensureYearPayrollFromLocal(
           ? `Año ${year}: historial listo (${sheets.length} semanas en archivo).`
           : `No hay hojas SEM en el archivo de ${year}.`,
   };
+}
+
+export type PreparePayrollFromScheduleResult = {
+  skipped: boolean;
+  reason?: string;
+  periodId?: string;
+  created?: boolean;
+  refreshed?: boolean;
+  lineCount?: number;
+  message?: string;
+};
+
+type PriorLineExtras = {
+  horas_extra: number;
+  bonos: number;
+  retenciones: number;
+  vacaciones_tomadas: number | null;
+  vacaciones_restantes: number | null;
+  sueldo_diario: number | null;
+  notes: string | null;
+};
+
+/**
+ * Al publicar un horario: crea/actualiza el periodo de nómina de esa semana
+ * como borrador editable. Días = turnos con Ent/Sal (no DESCANSO);
+ * Dom = 1.25 (prima). No pisa periodos pagado/cerrado.
+ */
+export async function preparePayrollFromSchedule(
+  sb: SupabaseClient,
+  opts: {
+    weekId: string;
+    username: string;
+  }
+): Promise<PreparePayrollFromScheduleResult> {
+  const weekId = String(opts.weekId || '').trim();
+  if (!weekId) {
+    return { skipped: true, reason: 'weekId requerido' };
+  }
+
+  const { data: week, error: weekErr } = await sb
+    .from('hr_schedule_weeks')
+    .select('id, week_start, week_end, status')
+    .eq('id', weekId)
+    .maybeSingle();
+
+  if (weekErr || !week) {
+    return {
+      skipped: true,
+      reason: weekErr?.message || 'Semana de horario no encontrada',
+    };
+  }
+
+  const weekStart = String(week.week_start).slice(0, 10);
+  const weekEnd = String(week.week_end).slice(0, 10);
+  const year = Number(weekStart.slice(0, 4));
+  const weekNum = weekNumberForHorariosMonday(weekStart);
+  const label =
+    weekNum != null
+      ? `Semana ${weekNum} · ${year}`
+      : `Semana ${weekStart} · ${year}`;
+
+  const { data: lockedPeriod, error: lockedErr } = await sb
+    .from('hr_payroll_periods')
+    .select('id, status')
+    .eq('period_start', weekStart)
+    .in('status', ['pagado', 'cerrado'])
+    .order('period_end', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lockedErr) {
+    return { skipped: true, reason: lockedErr.message };
+  }
+  if (lockedPeriod) {
+    const st = String(lockedPeriod.status);
+    return {
+      skipped: true,
+      reason: `Periodo ${st} — no se sobrescribe`,
+      periodId: String(lockedPeriod.id),
+      message: `Nómina ${label} ya está ${st}; se conserva.`,
+    };
+  }
+
+  const { data: existingPeriod, error: findErr } = await sb
+    .from('hr_payroll_periods')
+    .select(
+      'id, label, period_start, period_end, status, source_file, notes'
+    )
+    .eq('period_start', weekStart)
+    .eq('status', 'borrador')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (findErr) {
+    return { skipped: true, reason: findErr.message };
+  }
+
+  const { data: shifts, error: shiftErr } = await sb
+    .from('hr_schedule_shifts')
+    .select('employee_id, shift_date, start_time, end_time, area, role_label')
+    .eq('week_id', weekId);
+
+  if (shiftErr) {
+    return { skipped: true, reason: shiftErr.message };
+  }
+
+  // Día trabajado = Ent+Sal presentes (DESCANSO no tiene ambos).
+  const diasByEmp = new Map<string, HrPayrollDiasSemana>();
+  const areaByEmp = new Map<string, string>();
+  for (const raw of shifts || []) {
+    const s = raw as {
+      employee_id: string;
+      shift_date: string;
+      start_time: string | null;
+      end_time: string | null;
+      area?: string | null;
+      role_label?: string | null;
+    };
+    if (!s.start_time || !s.end_time) continue;
+    const empId = String(s.employee_id || '').trim();
+    if (!empId) continue;
+    const dayIdx = payrollDayIndexFromIso(String(s.shift_date).slice(0, 10));
+    if (dayIdx == null || dayIdx < 0 || dayIdx > 6) continue;
+    const days = diasByEmp.get(empId) ?? emptyDiasSemana();
+    days[dayIdx] = payrollDayOnWeight(dayIdx);
+    diasByEmp.set(empId, days);
+    if (s.area && !areaByEmp.has(empId)) {
+      areaByEmp.set(empId, String(s.area));
+    } else if (s.role_label && !areaByEmp.has(empId)) {
+      areaByEmp.set(empId, String(s.role_label));
+    }
+  }
+
+  const employeeIds = [...diasByEmp.keys()];
+  if (employeeIds.length === 0) {
+    // Semana publicada sin turnos reales: aún así asegura periodo borrador vacío.
+    const periodId = await upsertDraftPayrollPeriod(sb, {
+      existingId: existingPeriod ? String(existingPeriod.id) : null,
+      label,
+      period_start: weekStart,
+      period_end: weekEnd,
+      weekId,
+      username: opts.username,
+    });
+    if (existingPeriod) {
+      await sb.from('hr_payroll_lines').delete().eq('period_id', periodId);
+    }
+    return {
+      skipped: false,
+      created: !existingPeriod,
+      refreshed: Boolean(existingPeriod),
+      periodId,
+      lineCount: 0,
+      message: `${label}: borrador sin líneas (sin turnos Ent/Sal).`,
+    };
+  }
+
+  const { data: empRows, error: empErr } = await sb
+    .from('hr_employees')
+    .select('id, full_name, puesto, area, sueldo_diario, status')
+    .in('id', employeeIds);
+
+  if (empErr) {
+    return { skipped: true, reason: empErr.message };
+  }
+
+  const empById = new Map<
+    string,
+    {
+      id: string;
+      full_name: string;
+      puesto: string | null;
+      area: string | null;
+      sueldo_diario: number | null;
+      status: string;
+    }
+  >();
+  for (const row of empRows || []) {
+    const e = row as {
+      id: string;
+      full_name: string;
+      puesto: string | null;
+      area: string | null;
+      sueldo_diario: number | null;
+      status: string;
+    };
+    empById.set(String(e.id), {
+      ...e,
+      sueldo_diario:
+        e.sueldo_diario != null ? Number(e.sueldo_diario) : null,
+    });
+  }
+
+  // SD desde última nómina conciliada (pagado → cerrado).
+  const sdFromPayroll = new Map<string, number>();
+  const puestoFromPayroll = new Map<string, string>();
+  try {
+    const latestId = await findLatestConciliadaPeriodId(sb);
+    if (latestId) {
+      const { data: paidLines } = await sb
+        .from('hr_payroll_lines')
+        .select('employee_id, sueldo_diario, puesto_snapshot')
+        .eq('period_id', latestId)
+        .in('employee_id', employeeIds);
+      for (const raw of paidLines || []) {
+        const l = raw as {
+          employee_id: string;
+          sueldo_diario: number | null;
+          puesto_snapshot: string | null;
+        };
+        if (l.sueldo_diario != null && Number(l.sueldo_diario) > 0) {
+          sdFromPayroll.set(String(l.employee_id), Number(l.sueldo_diario));
+        }
+        if (l.puesto_snapshot) {
+          puestoFromPayroll.set(
+            String(l.employee_id),
+            String(l.puesto_snapshot)
+          );
+        }
+      }
+    }
+  } catch {
+    /* opcional */
+  }
+
+  // Extras previos del borrador (si se refresca).
+  const priorByEmp = new Map<string, PriorLineExtras>();
+  if (existingPeriod) {
+    const { data: priorLines } = await sb
+      .from('hr_payroll_lines')
+      .select(
+        'employee_id, sueldo_diario, horas_extra, bonos, retenciones, vacaciones_tomadas, vacaciones_restantes, notes'
+      )
+      .eq('period_id', String(existingPeriod.id));
+    for (const raw of priorLines || []) {
+      const l = raw as {
+        employee_id: string;
+        sueldo_diario: number | null;
+        horas_extra: number | null;
+        bonos: number | null;
+        retenciones: number | null;
+        vacaciones_tomadas: number | null;
+        vacaciones_restantes: number | null;
+        notes: string | null;
+      };
+      priorByEmp.set(String(l.employee_id), {
+        horas_extra: Number(l.horas_extra) || 0,
+        bonos: Number(l.bonos) || 0,
+        retenciones: Number(l.retenciones) || 0,
+        vacaciones_tomadas:
+          l.vacaciones_tomadas != null ? Number(l.vacaciones_tomadas) : null,
+        vacaciones_restantes:
+          l.vacaciones_restantes != null
+            ? Number(l.vacaciones_restantes)
+            : null,
+        sueldo_diario:
+          l.sueldo_diario != null ? Number(l.sueldo_diario) : null,
+        notes: l.notes,
+      });
+    }
+  }
+
+  const lines: HrPayrollLineInput[] = [];
+  for (const empId of employeeIds) {
+    const emp = empById.get(empId);
+    if (!emp) continue;
+    if (emp.status === 'baja') continue;
+
+    const dias = diasByEmp.get(empId) ?? emptyDiasSemana();
+    const diasTrabajados = sumDiasSemana(dias);
+    if (diasTrabajados <= 0) continue;
+
+    const prior = priorByEmp.get(empId);
+    const sueldo =
+      sdFromPayroll.get(empId) ??
+      (emp.sueldo_diario != null && emp.sueldo_diario > 0
+        ? emp.sueldo_diario
+        : null) ??
+      prior?.sueldo_diario ??
+      null;
+
+    const he = prior?.horas_extra ?? 0;
+    const bonos = prior?.bonos ?? 0;
+    const ret = prior?.retenciones ?? 0;
+    const importe = computePayrollImporte({
+      sueldo_diario: sueldo,
+      dias_trabajados: diasTrabajados,
+      horas_extra: he,
+      bonos,
+      retenciones: ret,
+    });
+
+    const puesto =
+      emp.puesto ||
+      puestoFromPayroll.get(empId) ||
+      areaByEmp.get(empId) ||
+      emp.area ||
+      null;
+
+    lines.push({
+      full_name: emp.full_name,
+      puesto,
+      area: emp.area,
+      sueldo_diario: sueldo,
+      dias_trabajados: diasTrabajados,
+      dias_semana: dias,
+      horas_extra: he,
+      bonos,
+      retenciones: ret,
+      importe_pagado: importe,
+      vacaciones_tomadas: prior?.vacaciones_tomadas ?? null,
+      vacaciones_restantes: prior?.vacaciones_restantes ?? null,
+      notes: null,
+    });
+  }
+
+  lines.sort((a, b) =>
+    a.full_name.localeCompare(b.full_name, 'es', { sensitivity: 'base' })
+  );
+
+  const periodId = await upsertDraftPayrollPeriod(sb, {
+    existingId: existingPeriod ? String(existingPeriod.id) : null,
+    label,
+    period_start: weekStart,
+    period_end: weekEnd,
+    weekId,
+    username: opts.username,
+  });
+
+  const stats = await replacePeriodLines(sb, periodId, lines, 'manual');
+
+  return {
+    skipped: false,
+    created: !existingPeriod,
+    refreshed: Boolean(existingPeriod),
+    periodId,
+    lineCount: stats.lineCount,
+    message: existingPeriod
+      ? `${label}: borrador actualizado desde horario (${stats.lineCount} líneas).`
+      : `${label}: borrador creado desde horario (${stats.lineCount} líneas).`,
+  };
+}
+
+/** Último periodo pagado con líneas; si no, cerrado con líneas. */
+async function findLatestConciliadaPeriodId(
+  sb: SupabaseClient
+): Promise<string | null> {
+  for (const status of ['pagado', 'cerrado'] as const) {
+    const { data, error } = await sb
+      .from('hr_payroll_periods')
+      .select('id')
+      .eq('status', status)
+      .order('period_end', { ascending: false })
+      .limit(8);
+    if (error || !data?.length) continue;
+    const ids = data.map((r) => String((r as { id: string }).id));
+    const withLines = await periodIdsWithPayrollLines(sb, ids);
+    for (const id of ids) {
+      if (withLines.has(id)) return id;
+    }
+  }
+  return null;
+}
+
+async function upsertDraftPayrollPeriod(
+  sb: SupabaseClient,
+  opts: {
+    existingId: string | null;
+    label: string;
+    period_start: string;
+    period_end: string;
+    weekId: string;
+    username: string;
+  }
+): Promise<string> {
+  const source_file = `Horario:${opts.weekId}`;
+  const notes =
+    'Calculada desde horario publicado (Dom = 1.25 prima dominical). Editable.';
+  const now = new Date().toISOString();
+
+  if (opts.existingId) {
+    const { error } = await sb
+      .from('hr_payroll_periods')
+      .update({
+        label: opts.label,
+        period_start: opts.period_start,
+        period_end: opts.period_end,
+        status: 'borrador',
+        source_file,
+        notes,
+        updated_by: opts.username,
+        updated_at: now,
+      })
+      .eq('id', opts.existingId);
+    if (error) throw new Error(error.message);
+    return opts.existingId;
+  }
+
+  const { data, error } = await sb
+    .from('hr_payroll_periods')
+    .insert({
+      label: opts.label,
+      period_start: opts.period_start,
+      period_end: opts.period_end,
+      status: 'borrador',
+      source_file,
+      notes,
+      created_by: opts.username,
+      updated_by: opts.username,
+    })
+    .select('id')
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || 'No se pudo crear periodo de nómina');
+  }
+  return String((data as { id: string }).id);
 }

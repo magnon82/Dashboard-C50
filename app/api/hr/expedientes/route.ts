@@ -16,6 +16,12 @@ import {
   listHrFolder,
 } from '@/app/lib/hr-biblioteca';
 import {
+  buildExpedientesFromEmployees,
+  formatSyncBanner,
+  upsertHrDriveSyncState,
+} from '@/app/lib/hr-drive-sync';
+import { localDriveFsEnabled } from '@/app/lib/local-fs';
+import {
   folderBasenameFromPath,
   linkStatusFromMatch,
   matchPerson,
@@ -357,26 +363,64 @@ export async function GET(request: Request) {
   const root = getHrRoot();
   const rootExists = hrRootExists();
   const expedientesPath = HR_EXPEDIENTES_DIR;
-  const expedientesExists = existsSync(expedientesPath);
+  const expedientesExists =
+    localDriveFsEnabled() && rootExists
+      ? existsSync(expedientesPath)
+      : false;
   const driveUrl = hrDriveFolderUrl(HR_EXPEDIENTES_DRIVE_FOLDER_ID);
   const allEmployees = await loadEmployees();
   const archivedFromDb = archivedOperational(allEmployees);
+  const dbIndex = buildExpedientesFromEmployees(allEmployees);
 
   if (!rootExists || !expedientesExists) {
+    let people = dbIndex.people;
+    if (bucketParam === 'altas' || bucketParam === 'bajas') {
+      people = people.filter((p) => p.bucket === bucketParam);
+    } else if (bucketParam === 'otros') {
+      people = people.filter((p) => p.bucket === 'otros');
+    } else if (listPath) {
+      const decoded = decodeURIComponent(listPath).toLowerCase();
+      if (decoded.includes('bajas')) {
+        people = people.filter((p) => p.bucket === 'bajas');
+      } else if (decoded.includes('altas')) {
+        people = people.filter((p) => p.bucket === 'altas');
+      }
+    }
+
+    const ready = dbIndex.linkedCount > 0 || archivedFromDb.length > 0;
+    const listing = Boolean(listPath || bucketParam);
+    const message = formatSyncBanner({
+      driveMounted: false,
+      source: ready ? 'supabase' : 'none',
+      linkedCount: dbIndex.linkedCount,
+      openBlocked: !driveUrl,
+      hideWhenOnline: ready,
+    });
+
     return NextResponse.json({
-      ready: false,
-      root,
+      ready,
+      source: 'supabase',
+      root: localDriveFsEnabled() ? root : null,
       rootExists,
-      path: expedientesPath,
+      localFsEnabled: localDriveFsEnabled(),
+      path: listing
+        ? bucketParam === 'bajas'
+          ? `${expedientesPath}\\Bajas`
+          : bucketParam === 'altas'
+            ? `${expedientesPath}\\Altas`
+            : listPath
+              ? decodeURIComponent(listPath)
+              : expedientesPath
+        : expedientesPath,
       exists: expedientesExists,
       driveUrl,
-      buckets: [],
-      people: [],
+      buckets: listing ? undefined : dbIndex.buckets,
+      people: listing ? people : [],
       archivedFromDb,
       pathsWritten: 0,
       namesUpdated: 0,
-      message:
-        'Drive RH no montado en este servidor. Monta File Stream (I:\\Mi unidad\\RH) o abre la carpeta en Drive.',
+      linkedCount: dbIndex.linkedCount,
+      message,
     });
   }
 
@@ -430,8 +474,17 @@ export async function GET(request: Request) {
         bucketParam === 'altas'
       );
 
+      void upsertHrDriveSyncState({
+        contentType: 'expedientes',
+        status: 'ok',
+        source: 'file_stream',
+        message: `Listado ${bucketParam || 'carpeta'}: ${people.length} carpetas`,
+        rowCount: people.length,
+      });
+
       return NextResponse.json({
         ready: true,
+        source: 'file_stream',
         root,
         rootExists: true,
         path: target,
@@ -443,6 +496,7 @@ export async function GET(request: Request) {
         archivedFromDb,
         pathsWritten,
         namesUpdated,
+        linkedCount: dbIndex.linkedCount + pathsWritten,
         files: listed.items.filter((it) => it.kind === 'file'),
         message: undefined,
       });
@@ -483,8 +537,18 @@ export async function GET(request: Request) {
       return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
     });
 
+    const totalFolders = buckets.reduce((n, b) => n + b.count, 0);
+    void upsertHrDriveSyncState({
+      contentType: 'expedientes',
+      status: 'ok',
+      source: 'file_stream',
+      message: `Índice File Stream: ${totalFolders} carpetas`,
+      rowCount: totalFolders,
+    });
+
     return NextResponse.json({
       ready: true,
+      source: 'file_stream',
       root,
       rootExists: true,
       path: expedientesPath,
@@ -495,23 +559,36 @@ export async function GET(request: Request) {
       archivedFromDb,
       pathsWritten: 0,
       namesUpdated: 0,
+      linkedCount: dbIndex.linkedCount,
       message: undefined,
     });
   } catch (e) {
+    const ready = dbIndex.linkedCount > 0 || archivedFromDb.length > 0;
     return NextResponse.json(
       {
-        ready: false,
+        ready,
+        source: ready ? 'supabase' : 'none',
         root,
         rootExists,
         path: expedientesPath,
         exists: expedientesExists,
         driveUrl,
-        buckets: [],
+        buckets: ready ? dbIndex.buckets : [],
         people: [],
         archivedFromDb,
         pathsWritten: 0,
         namesUpdated: 0,
+        linkedCount: dbIndex.linkedCount,
         error: e instanceof Error ? e.message : 'No se pudo listar expedientes',
+        message: ready
+          ? formatSyncBanner({
+              driveMounted: rootExists,
+              source: 'supabase',
+              linkedCount: dbIndex.linkedCount,
+              openBlocked: !driveUrl,
+              hideWhenOnline: true,
+            })
+          : undefined,
       },
       { status: 200 }
     );

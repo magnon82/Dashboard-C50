@@ -10,6 +10,7 @@ import {
   loadEventClientActivity,
   normalizeClientKey,
 } from '@/app/lib/eventos-activity';
+import { localDriveFsEnabled } from '@/app/lib/local-fs';
 
 const MI_UNIDAD = process.env.DRIVE_MI_UNIDAD_PATH?.trim() || 'I:\\Mi unidad';
 
@@ -103,11 +104,12 @@ function cleanOsLabel(stem: string): string | null {
   return label;
 }
 
-function parseFolio(stem: string): string | null {
+/** Folio numérico («FOLIO 12») o G («G7», «G1-26») desde nombre/etiqueta. */
+export function parseFolio(stem: string): string | null {
   const folioM = stem.match(/FOLIO\s*(\d+)/i);
   if (folioM) return folioM[1];
   const gM = stem.match(/\bG\s*[-]?\s*(\d+(?:-\d+)?)\b/i);
-  if (gM) return `G${gM[1]}`;
+  if (gM) return `G${gM[1]}`.toUpperCase();
   return null;
 }
 
@@ -567,7 +569,7 @@ export async function listEventOs(opts?: {
   source: 'scan' | 'activity_seed' | 'none';
 }> {
   const root = getEventosOsRoot();
-  const rootExists = existsSync(root);
+  const rootExists = localDriveFsEnabled() && existsSync(root);
   let items: EventOsItem[] = [];
   let source: 'scan' | 'activity_seed' | 'none' = 'none';
 
@@ -579,6 +581,33 @@ export async function listEventOs(opts?: {
   if (!items.length) {
     items = await fromActivitySeed();
     if (items.length) source = 'activity_seed';
+  } else {
+    // Complementar con seed: p. ej. G7 2026 en actividad cuando el scan solo trae G7 2024.
+    // El calendario fusiona por fecha+folio con Anticipos C50.
+    const seed = await fromActivitySeed();
+    const covered = new Set<string>();
+    for (const it of items) {
+      if (it.event_date && it.folio) {
+        covered.add(`${it.event_date}|${String(it.folio).toUpperCase()}`);
+      }
+      if (it.rel_path) {
+        covered.add(`rel:${it.rel_path.replace(/\\/g, '/')}`);
+      }
+    }
+    for (const s of seed) {
+      if (!s.event_date) continue;
+      const folioKey = s.folio
+        ? `${s.event_date}|${String(s.folio).toUpperCase()}`
+        : null;
+      const relKey = s.rel_path
+        ? `rel:${s.rel_path.replace(/\\/g, '/')}`
+        : null;
+      if (folioKey && covered.has(folioKey)) continue;
+      if (relKey && covered.has(relKey)) continue;
+      items.push(s);
+      if (folioKey) covered.add(folioKey);
+      if (relKey) covered.add(relKey);
+    }
   }
 
   const clientNames = opts?.clientNames || [];

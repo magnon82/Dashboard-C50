@@ -35,7 +35,7 @@ type LinkedEmployee = {
 };
 
 const inputClass =
-  'mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400';
+  'min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400';
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
@@ -566,11 +566,11 @@ export function StaffVacacionesClient() {
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="block">
+            <label className="flex h-full flex-col gap-1.5">
               <span className="text-sm font-semibold text-slate-700">Desde</span>
               <input
                 type="date"
-                className={inputClass}
+                className={`${inputClass} mt-auto`}
                 value={desde}
                 min={today}
                 onChange={(e) => {
@@ -581,11 +581,11 @@ export function StaffVacacionesClient() {
                 }}
               />
             </label>
-            <label className="block">
+            <label className="flex h-full flex-col gap-1.5">
               <span className="text-sm font-semibold text-slate-700">Hasta</span>
               <input
                 type="date"
-                className={inputClass}
+                className={`${inputClass} mt-auto`}
                 value={hasta}
                 min={desde || today}
                 onChange={(e) => {
@@ -620,7 +620,7 @@ export function StaffVacacionesClient() {
             )}
           </p>
 
-          <label className="mt-4 block">
+          <label className="mt-4 flex flex-col gap-1.5">
             <span className="text-sm font-semibold text-slate-700">
               Observaciones
             </span>

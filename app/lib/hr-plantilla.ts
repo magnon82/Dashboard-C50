@@ -46,7 +46,8 @@ const WEEK_SELECT = 'id, week_start, week_end, status, notes';
 const EMP_SELECT_BASE =
   'id, full_name, status, puesto, area, fecha_ingreso, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
 
-const EMP_SELECT = `${EMP_SELECT_BASE}, fecha_baja`;
+const EMP_SELECT_BAJA = `${EMP_SELECT_BASE}, fecha_baja`;
+const EMP_SELECT = `${EMP_SELECT_BAJA}, fecha_nacimiento`;
 
 /** Elegible: no baja, no force_exclude, no fecha_baja antes de hoy. */
 export function isEligibleForPlantilla(
@@ -69,6 +70,10 @@ function filterEligible(
 
 function missingFechaBajaColumn(message: string): boolean {
   return /fecha_baja|column .* does not exist|42703/i.test(message);
+}
+
+function missingFechaNacimientoColumn(message: string): boolean {
+  return /fecha_nacimiento|column .* does not exist|42703/i.test(message);
 }
 
 export type HrPlantillaPeriod = {
@@ -144,6 +149,9 @@ async function selectEmployees(
   };
 
   let res = await run(EMP_SELECT);
+  if (res.error && missingFechaNacimientoColumn(res.error.message)) {
+    res = await run(EMP_SELECT_BAJA);
+  }
   if (res.error && missingFechaBajaColumn(res.error.message)) {
     res = await run(EMP_SELECT_BASE);
   }
@@ -484,28 +492,36 @@ export async function buildPlantillaFromPeriod(
 async function readViewPlantilla(
   sb: SupabaseClient
 ): Promise<HrEmployee[] | null> {
-  const withBaja = await sb
+  const extras =
+    'plantilla_origen, payroll_period_label, payroll_period_end, payroll_paid_at';
+  const full = await sb
     .from('hr_plantilla_vigente')
-    .select(
-      `${EMP_SELECT}, plantilla_origen, payroll_period_label, payroll_period_end, payroll_paid_at`
-    )
+    .select(`${EMP_SELECT}, ${extras}`)
     .order('full_name', { ascending: true });
 
-  if (withBaja.error && missingFechaBajaColumn(withBaja.error.message)) {
-    const fallback = await sb
-      .from('hr_plantilla_vigente')
-      .select(
-        `${EMP_SELECT_BASE}, plantilla_origen, payroll_period_label, payroll_period_end, payroll_paid_at`
-      )
-      .order('full_name', { ascending: true });
-    if (fallback.error) return null;
-    return filterEligible(
-      (fallback.data || []) as unknown as HrEmployee[]
-    );
+  if (!full.error) {
+    return filterEligible((full.data || []) as unknown as HrEmployee[]);
   }
 
-  if (withBaja.error) return null;
-  return filterEligible((withBaja.data || []) as unknown as HrEmployee[]);
+  if (missingFechaNacimientoColumn(full.error.message)) {
+    const mid = await sb
+      .from('hr_plantilla_vigente')
+      .select(`${EMP_SELECT_BAJA}, ${extras}`)
+      .order('full_name', { ascending: true });
+    if (!mid.error) {
+      return filterEligible((mid.data || []) as unknown as HrEmployee[]);
+    }
+    if (!missingFechaBajaColumn(mid.error.message)) return null;
+  } else if (!missingFechaBajaColumn(full.error.message)) {
+    return null;
+  }
+
+  const fallback = await sb
+    .from('hr_plantilla_vigente')
+    .select(`${EMP_SELECT_BASE}, ${extras}`)
+    .order('full_name', { ascending: true });
+  if (fallback.error) return null;
+  return filterEligible((fallback.data || []) as unknown as HrEmployee[]);
 }
 
 function classifySeedError(message: string): HrPlantillaSeedCode {

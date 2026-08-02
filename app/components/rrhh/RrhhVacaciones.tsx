@@ -66,7 +66,7 @@ function formatDays(n: number | null): string {
 }
 
 const inputClass =
-  'mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400';
+  'min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400';
 
 function Field({
   label,
@@ -80,13 +80,17 @@ function Field({
   children: ReactNode;
 }) {
   return (
-    <label className="block">
-      <span className="text-sm font-semibold text-slate-700">
-        {label}
-        {required ? ' *' : ''}
-      </span>
-      {hint ? <p className="mt-0.5 text-xs text-slate-500">{hint}</p> : null}
-      {children}
+    <label className="flex h-full flex-col gap-1.5">
+      <div>
+        <span className="text-sm font-semibold text-slate-700">
+          {label}
+          {required ? ' *' : ''}
+        </span>
+        {hint ? (
+          <p className="mt-0.5 text-xs leading-snug text-slate-500">{hint}</p>
+        ) : null}
+      </div>
+      <div className="mt-auto min-w-0">{children}</div>
     </label>
   );
 }

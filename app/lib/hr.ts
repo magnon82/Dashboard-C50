@@ -47,6 +47,8 @@ export type HrEmployee = {
   fecha_ingreso: string | null;
   /** Último día laborado / fecha de baja (patch `hr_employee_baja.sql`). */
   fecha_baja?: string | null;
+  /** Cumpleaños (patch `hr_employee_nacimiento.sql`). */
+  fecha_nacimiento?: string | null;
   email: string | null;
   phone: string | null;
   drive_folder_path: string | null;
@@ -59,6 +61,17 @@ export type HrEmployee = {
   payroll_period_label?: string | null;
   payroll_period_end?: string | null;
   payroll_paid_at?: string | null;
+};
+
+/** Próximo cumpleaños en el ciclo anual (hoy → +365, Dec envuelve a ene). */
+export type HrBirthdayUpcoming = {
+  employee_id: string;
+  full_name: string;
+  puesto: string | null;
+  area: string | null;
+  fecha_nacimiento: string;
+  next_date: string;
+  days_until: number;
 };
 
 export type HrDocLink = {
@@ -306,7 +319,7 @@ export type HrLeaveBalanceRow = {
   updated_at: string | null;
 };
 
-/** Carpeta Drive File Stream · Documentación vigente 2023 (nombres exactos en disco). */
+/** Carpeta Drive File Stream · Documentación vigente (nombre en disco aún incluye 2023). */
 export const HR_DOCS_VIGENTE_DIR =
   'I:\\Mi unidad\\RH\\Documentación vigente 2023';
 
@@ -493,7 +506,7 @@ export const HR_DOC_LINK_DEFAULTS: Omit<HrDocLink, 'id' | 'active'>[] = [
   },
   {
     category: 'politicas',
-    title: 'Documentación',
+    title: 'Documentación vigente',
     description: 'Carpeta: políticas, reglamentos, formatos y antigüedad',
     local_path: HR_DOCS_VIGENTE_DIR,
     drive_url: hrDriveFolderUrl(HR_DOCS_VIGENTE_DRIVE_FOLDER_ID),
@@ -540,6 +553,81 @@ export function formatHrDate(iso: string | null | undefined): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/** Fecha de calendario válida YYYY-MM-DD (ajusta 29-feb en no bisiesto → 28-feb). */
+function calendarDateIso(year: number, month: number, day: number): string {
+  const lastDay = new Date(year, month, 0).getDate();
+  const d = Math.min(day, lastDay);
+  return `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/**
+ * Próxima ocurrencia de cumpleaños a partir de hoy (CDMX).
+ * Si ya pasó este año, envuelve al siguiente.
+ */
+export function nextBirthdayIso(
+  fechaNacimiento: string,
+  today: string = todayIsoCdmx()
+): string | null {
+  const dob = String(fechaNacimiento || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) return null;
+  const month = Number(dob.slice(5, 7));
+  const day = Number(dob.slice(8, 10));
+  if (!month || !day || month > 12 || day > 31) return null;
+  const y = Number(today.slice(0, 4));
+  let next = calendarDateIso(y, month, day);
+  if (next < today.slice(0, 10)) {
+    next = calendarDateIso(y + 1, month, day);
+  }
+  return next;
+}
+
+/** Días enteros desde `from` hasta `to` (ISO fechas, mediodía local). */
+export function daysBetweenIso(from: string, to: string): number {
+  const a = new Date(`${from.slice(0, 10)}T12:00:00`);
+  const b = new Date(`${to.slice(0, 10)}T12:00:00`);
+  return Math.round((b.getTime() - a.getTime()) / 86_400_000);
+}
+
+/** Etiqueta relativa: «Hoy», «Mañana», «En 3 días». */
+export function formatBirthdayCountdown(daysUntil: number): string {
+  if (daysUntil <= 0) return 'Hoy';
+  if (daysUntil === 1) return 'Mañana';
+  return `En ${daysUntil} días`;
+}
+
+/**
+ * Plantilla con fecha_nacimiento → lista ordenada próximo → más lejano (ciclo anual).
+ */
+export function upcomingBirthdays(
+  employees: Pick<
+    HrEmployee,
+    'id' | 'full_name' | 'puesto' | 'area' | 'fecha_nacimiento'
+  >[],
+  today: string = todayIsoCdmx()
+): HrBirthdayUpcoming[] {
+  const out: HrBirthdayUpcoming[] = [];
+  for (const e of employees) {
+    const dob = e.fecha_nacimiento ? String(e.fecha_nacimiento).slice(0, 10) : '';
+    if (!dob) continue;
+    const next = nextBirthdayIso(dob, today);
+    if (!next) continue;
+    out.push({
+      employee_id: e.id,
+      full_name: e.full_name,
+      puesto: e.puesto ?? null,
+      area: e.area ?? null,
+      fecha_nacimiento: dob,
+      next_date: next,
+      days_until: daysBetweenIso(today, next),
+    });
+  }
+  out.sort((a, b) => {
+    if (a.days_until !== b.days_until) return a.days_until - b.days_until;
+    return a.full_name.localeCompare(b.full_name, 'es');
+  });
+  return out;
 }
 
 /** Antigüedad legible: «2 años 3 meses» / «5 meses» / «12 días». */

@@ -7,6 +7,7 @@ export type RrhhSection =
   | 'horarios'
   | 'nomina'
   | 'vacaciones'
+  | 'cumpleanos'
   | 'biblioteca';
 
 const SECTIONS: { id: RrhhSection; label: string }[] = [
@@ -14,6 +15,7 @@ const SECTIONS: { id: RrhhSection; label: string }[] = [
   { id: 'horarios', label: 'Horarios' },
   { id: 'nomina', label: 'Nómina' },
   { id: 'vacaciones', label: 'Vacaciones' },
+  { id: 'cumpleanos', label: 'Cumpleaños' },
   { id: 'biblioteca', label: 'Biblioteca' },
 ];
 

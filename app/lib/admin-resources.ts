@@ -216,6 +216,7 @@ export const HR_TABLES: string[] = [
   'hr_leave_requests',
   'hr_doc_links',
   'hr_resguardo_requests',
+  'hr_drive_sync_state',
 ];
 
 export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
@@ -252,7 +253,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           kind: 'file' as const,
           note:
             t === 'hr_employees'
-              ? 'Plantilla vigente · suite_username'
+              ? 'Plantilla vigente · suite_username · drive_folder_path (índice expedientes)'
               : t === 'hr_payroll_periods' || t === 'hr_payroll_lines'
                 ? 'Nómina borrador → cerrado → pagado'
                 : t === 'hr_schedule_weeks' || t === 'hr_schedule_shifts'
@@ -261,7 +262,9 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
                     ? 'Biblioteca · seed / defaults'
                     : t === 'hr_resguardo_requests'
                       ? 'Resguardos (/rrhh → Plantilla)'
-                      : undefined,
+                      : t === 'hr_drive_sync_state'
+                        ? 'Última sync Drive→DB por tipo · hr_drive_sync.sql'
+                        : undefined,
           copyValue: t,
           updateFrequency: 'Solo Suite (/rrhh · /api/hr/*)',
         })),
@@ -276,6 +279,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           '/api/hr/leave-balances/mine',
           '/api/hr/docs',
           '/api/hr/resguardo',
+          '/api/hr/expedientes',
+          '/api/hr/sync',
         ],
       },
     ],
@@ -395,66 +400,76 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
       {
         id: 'drive-rh',
         label: 'Recursos Humanos (RH)',
-        role: 'Módulo /rrhh activo: plantilla (incluye expedientes), horarios, nómina, vacaciones, biblioteca. Drive File Stream = bóveda; import operativo desde Descargas.',
+        role: 'Módulo /rrhh: datos operativos en Supabase; File Stream/Drive API solo para refrescar o abrir binarios. GET/POST /api/hr/sync.',
         note: 'I:\\Mi unidad\\RH',
         updateFrequency:
-          'Operativo en Suite · consulta File Stream; nómina también Drive API (HR_NOMINA_DRIVE_FOLDER_ID)',
+          'Frecuencia por tipo — pendiente definir (ver /api/hr/sync contentTypes). Vercel no necesita File Stream.',
         leaves: [
           {
             label: 'Nóminas',
             kind: 'path',
-            note: 'Carpeta Drive · plantilla = nómina conciliada ∪ última semana de horarios',
+            note: 'Persistido: hr_payroll_* · plantilla = nómina ∪ horarios',
             copyValue: 'I:\\Mi unidad\\RH\\Nóminas',
-            updateFrequency: 'Import /rrhh → Nómina (local o Drive)',
+            updateFrequency: 'Pendiente usuario · Import /rrhh → Nómina',
           },
           {
             label: 'Nóminas · Drive folder ID',
             kind: 'path',
-            note: 'https://drive.google.com/drive/folders/1qIZq7O2lcvs5zxG6p5jjzh4wRMXoFK3J · env HR_NOMINA_DRIVE_FOLDER_ID',
+            note: 'Drive API (sin File Stream) · HR_NOMINA_DRIVE_FOLDER_ID',
             copyValue: '1qIZq7O2lcvs5zxG6p5jjzh4wRMXoFK3J',
           },
           {
             label: 'Horarios',
             kind: 'path',
-            note: 'Histórico en Drive; import operativo desde Descargas (HORARIOS C50 2026.xlsx)',
+            note: 'Persistido: hr_schedule_* · import Descargas',
             copyValue: 'I:\\Mi unidad\\RH\\Horarios',
-            updateFrequency: 'Import /rrhh → Horarios',
+            updateFrequency: 'Pendiente usuario · Import /rrhh → Horarios',
           },
           {
             label: 'Expedientes personal C50',
             kind: 'path',
-            note: 'Altas/Bajas · índice /rrhh → Plantilla · opcional HR_EXPEDIENTES_DRIVE_FOLDER_ID',
+            note: 'Índice en hr_employees.drive_folder_path · fallback sin File Stream',
             copyValue: 'I:\\Mi unidad\\RH\\Expedientes personal C50',
+            updateFrequency: 'Pendiente usuario · en alta/baja',
           },
           {
-            label: 'Documentación',
+            label: 'Documentación vigente',
             kind: 'path',
-            note: 'Políticas, RIT, manuales · hr_doc_links · opcional HR_DOCS_VIGENTE_DRIVE_FOLDER_ID',
+            note: 'Metadatos hr_doc_links · Abrir local = File Stream',
             copyValue: 'I:\\Mi unidad\\RH\\Documentación vigente 2023',
+            updateFrequency: 'Pendiente usuario · raro',
           },
           {
             label: 'Cultura Organizacional',
             kind: 'path',
-            note: 'Biblioteca /rrhh · categoría cultura',
+            note: 'Textos en app/lib/hr-cultura.ts (+ hr_doc_links)',
             copyValue: 'I:\\Mi unidad\\RH\\Cultura Organizacional',
+            updateFrequency: 'Pendiente usuario · muy raro / deploy',
           },
           {
             label: 'Perfiles por posición',
             kind: 'path',
-            note: 'Biblioteca /rrhh · categoría perfiles',
+            note: 'Biblioteca · categoría perfiles',
             copyValue: 'I:\\Mi unidad\\RH\\Perfiles por posición',
           },
           {
             label: 'Exámenes piso',
             kind: 'path',
-            note: 'Biblioteca /rrhh · categoría examenes',
+            note: 'Biblioteca · categoría examenes',
             copyValue: 'I:\\Mi unidad\\RH\\Exámenes piso',
           },
           {
             label: 'BASE DATOS PERSONAL C50.xlsx',
             kind: 'file',
-            note: 'Legacy / fallback plantilla (HR_BASE_DATOS_XLSX)',
+            note: 'Enrich → hr_employees (HR_BASE_DATOS_XLSX)',
             copyValue: 'I:\\Mi unidad\\RH\\BASE DATOS PERSONAL C50.xlsx',
+            updateFrequency: 'Pendiente usuario',
+          },
+          {
+            label: 'Estado sync RH',
+            kind: 'file',
+            note: 'hr_drive_sync_state · SQL supabase/hr_drive_sync.sql · GET /api/hr/sync',
+            copyValue: 'hr_drive_sync_state',
           },
         ],
         routes: [
@@ -464,6 +479,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           '/api/hr/schedules',
           '/api/hr/docs',
           '/api/hr/expedientes',
+          '/api/hr/sync',
         ],
       },
       {
@@ -876,7 +892,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           {
             label: '/staff/vacaciones',
             kind: 'route',
-            note: 'Staff · solicitud propia + saldo (suite_username)',
+            note: 'oculto hasta usuarios por empleado · redirect /staff',
           },
           {
             label: '/staff/perfil',

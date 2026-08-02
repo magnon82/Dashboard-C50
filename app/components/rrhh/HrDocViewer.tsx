@@ -104,7 +104,11 @@ export function HrDocViewer({
       );
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error || `Error ${res.status}`);
+        setError(
+          json.code === 'local_fs_unavailable'
+            ? 'Carpeta local no disponible en línea. Usa «Abrir en Drive».'
+            : json.error || `Error ${res.status}`
+        );
         setBrowseItems([]);
         return;
       }
@@ -129,7 +133,11 @@ export function HrDocViewer({
       );
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error || `Error ${res.status}`);
+        setError(
+          json.code === 'local_fs_unavailable'
+            ? 'Documento local no disponible en línea. Usa «Abrir en Drive».'
+            : json.error || `Error ${res.status}`
+        );
         setDocxText(null);
         return;
       }

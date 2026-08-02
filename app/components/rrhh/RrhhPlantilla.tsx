@@ -71,12 +71,14 @@ type ArchivedDb = {
 
 type ExpedienteIndex = {
   ready: boolean;
+  source?: 'file_stream' | 'supabase' | 'none' | string;
   path?: string;
   exists?: boolean;
   rootExists?: boolean;
   driveUrl?: string | null;
   buckets?: { id: string; kind: 'altas' | 'bajas' | 'otros'; name: string; path: string }[];
   archivedFromDb?: ArchivedDb[];
+  linkedCount?: number;
   message?: string;
   error?: string;
 };
@@ -488,8 +490,13 @@ export function RrhhPlantilla({
     }
   }
 
-  const driveMissing =
-    expIndex?.rootExists === false || expIndex?.exists === false;
+  const dbBacked =
+    expIndex?.source === 'supabase' ||
+    (expIndex?.ready === true && (expIndex.linkedCount ?? 0) > 0) ||
+    (expIndex?.archivedFromDb?.length ?? 0) > 0;
+  const syncBanner = expIndex?.message || expIndex?.error;
+  // Online: no banner de «Drive no montado» si ya hay índice/plantilla en servidor.
+  const showSyncBanner = Boolean(syncBanner) && !dbBacked;
 
   return (
     <div className="space-y-4">
@@ -559,13 +566,12 @@ export function RrhhPlantilla({
         </p>
       )}
 
-      {(driveMissing || expIndex?.message || expIndex?.error) && (
-        <p className="text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2 max-w-3xl">
-          {expIndex?.message ||
-            expIndex?.error ||
-            'Drive RH no montado: los botones de expediente pueden no abrir carpetas locales.'}
+      {showSyncBanner ? (
+        <p className="text-sm rounded-lg px-3 py-2 max-w-3xl text-amber-800 bg-amber-50">
+          {syncBanner ||
+            'Sin índice de expedientes aún. Los datos de plantilla viven en Supabase; opcional: configura HR_EXPEDIENTES_DRIVE_FOLDER_ID para Abrir en Drive.'}
         </p>
-      )}
+      ) : null}
 
       {loading || catalogLoading ? (
         <p className="text-sm" style={{ color: theme.muted }}>

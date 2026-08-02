@@ -86,7 +86,8 @@ function extBadge(doc: DocEnriched) {
 
 function previewHint(doc: DocEnriched): string {
   if (isHrCulturaConsultDoc(doc)) return 'Consulta en pantalla';
-  if (!doc.exists) return 'Ruta no encontrada';
+  if (!doc.exists && doc.drive_url) return 'Abrir en Drive';
+  if (!doc.exists) return 'Solo metadatos en servidor';
   switch (doc.preview) {
     case 'pdf':
       return 'Vista previa en pantalla';
@@ -230,11 +231,18 @@ export function RrhhBiblioteca({
 
   return (
     <div className="space-y-5">
-      {(data?.message || data?.error) && (
-        <p className="text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
-          {data.message || data.error}
+      {data?.error ||
+      (data?.message && data?.source !== 'supabase' && !data?.ready) ? (
+        <p
+          className={`text-xs rounded-lg px-3 py-2 ${
+            data?.ready
+              ? 'text-slate-600 bg-slate-50 border border-slate-100'
+              : 'text-amber-800 bg-amber-50'
+          }`}
+        >
+          {data.error || data.message}
         </p>
-      )}
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         {tabs.map((t) => {
@@ -319,17 +327,20 @@ export function RrhhBiblioteca({
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {group.items.map((doc) => {
                   const isCultura = isHrCulturaConsultDoc(doc);
-                  const canConsult =
-                    isCultura ||
-                    (Boolean(doc.local_path) &&
-                      doc.exists !== false &&
-                      (doc.openable ||
-                        doc.preview === 'folder' ||
-                        doc.preview === 'pdf' ||
-                        doc.preview === 'docx' ||
-                        doc.preview === 'download'));
-                  const missing =
-                    !isCultura && doc.local_path && doc.exists === false;
+                  const canConsultLocal =
+                    Boolean(doc.local_path) &&
+                    doc.exists !== false &&
+                    (doc.openable ||
+                      doc.preview === 'folder' ||
+                      doc.preview === 'pdf' ||
+                      doc.preview === 'docx' ||
+                      doc.preview === 'download');
+                  const canConsult = isCultura || canConsultLocal;
+                  const missingLocal =
+                    !isCultura &&
+                    !doc.drive_url &&
+                    Boolean(doc.local_path) &&
+                    doc.exists === false;
                   const updated = formatMtime(doc.mtimeMs);
                   const size = formatBytes(doc.sizeBytes);
                   const canExploreFolder =
@@ -402,22 +413,34 @@ export function RrhhBiblioteca({
                             Abrir carpeta
                           </button>
                         ) : null}
-                        {missing ? (
-                          <span className="text-xs font-semibold text-amber-700">
-                            No en disco
-                          </span>
-                        ) : null}
                         {doc.drive_url ? (
                           <a
                             href={doc.drive_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            className={
+                              canConsult
+                                ? 'rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50'
+                                : 'rounded-lg px-3 py-1.5 text-xs font-bold text-white'
+                            }
+                            style={
+                              canConsult
+                                ? undefined
+                                : { backgroundColor: SUITE.orangeDeep }
+                            }
                           >
-                            Drive
+                            Abrir en Drive
                           </a>
                         ) : null}
-                        {doc.local_path && !canConsult && !isCultura ? (
+                        {missingLocal ? (
+                          <span className="text-xs font-semibold text-slate-500">
+                            Solo metadatos
+                          </span>
+                        ) : null}
+                        {doc.local_path &&
+                        !canConsult &&
+                        !isCultura &&
+                        !doc.drive_url ? (
                           <button
                             type="button"
                             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"

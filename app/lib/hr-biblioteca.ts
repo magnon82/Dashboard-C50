@@ -12,6 +12,7 @@ import {
   type HrDocCategory,
   type HrDocLink,
 } from '@/app/lib/hr';
+import { localDriveFsEnabled } from '@/app/lib/local-fs';
 
 const MI_UNIDAD = process.env.DRIVE_MI_UNIDAD_PATH?.trim() || 'I:\\Mi unidad';
 
@@ -96,7 +97,12 @@ export function getHrRoot(): string {
 }
 
 export function hrRootExists(): boolean {
-  return existsSync(getHrRoot());
+  if (!localDriveFsEnabled()) return false;
+  try {
+    return existsSync(getHrRoot());
+  } catch {
+    return false;
+  }
 }
 
 /** Permite la raíz RH o cualquier ruta debajo. */
@@ -187,6 +193,17 @@ async function probePath(localPath: string | null): Promise<{
       sizeBytes: null,
     };
   }
+  if (!localDriveFsEnabled()) {
+    const ext = path.extname(localPath).toLowerCase() || null;
+    const looksFolder = !ext;
+    return {
+      kind: looksFolder ? 'folder' : 'missing',
+      ext,
+      exists: false,
+      mtimeMs: null,
+      sizeBytes: null,
+    };
+  }
   try {
     const st = await stat(localPath);
     if (st.isDirectory()) {
@@ -225,15 +242,29 @@ export async function enrichHrDocLink(
   doc: HrDocLink
 ): Promise<HrDocLinkEnriched> {
   const probe = await probePath(doc.local_path);
-  const preview = previewModeForPath(doc.local_path || '', probe.kind);
-  const openable =
+  let kind = probe.kind;
+  // Online: carpeta con URL Drive se trata como carpeta (no "missing").
+  if (
+    !probe.exists &&
+    doc.drive_url &&
+    (kind === 'missing' || kind === 'unknown')
+  ) {
+    const ext = doc.local_path
+      ? path.extname(doc.local_path).toLowerCase()
+      : '';
+    if (!ext) kind = 'folder';
+  }
+  const preview = previewModeForPath(doc.local_path || '', kind);
+  const openableLocal =
     probe.exists &&
-    ((probe.kind === 'file' &&
+    ((kind === 'file' &&
       Boolean(doc.local_path && isHrBibliotecaOpenable(doc.local_path))) ||
-      probe.kind === 'folder');
+      kind === 'folder');
+  const openable = openableLocal || Boolean(doc.drive_url);
   return {
     ...doc,
     ...probe,
+    kind,
     preview,
     openable,
   };

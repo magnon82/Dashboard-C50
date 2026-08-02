@@ -152,6 +152,35 @@ export function sumDiasSemana(days: HrPayrollDiasSemana): number {
   return Math.round(s * 100) / 100;
 }
 
+/** Importe base: SD × días (+ extras/bonos − retenciones). HE se trata como monto. */
+export function computePayrollImporte(opts: {
+  sueldo_diario: number | null | undefined;
+  dias_trabajados: number;
+  horas_extra?: number | null;
+  bonos?: number | null;
+  retenciones?: number | null;
+}): number {
+  const sd = Number(opts.sueldo_diario) || 0;
+  const dias = Number(opts.dias_trabajados) || 0;
+  const he = Number(opts.horas_extra) || 0;
+  const bonos = Number(opts.bonos) || 0;
+  const ret = Number(opts.retenciones) || 0;
+  return Math.round((sd * dias + he + bonos - ret) * 100) / 100;
+}
+
+/**
+ * Índice Lun=0 … Dom=6 a partir de YYYY-MM-DD (mediodía local-friendly).
+ * Alineado con `dias_semana` / prima dominical.
+ */
+export function payrollDayIndexFromIso(iso: string): number | null {
+  const s = String(iso || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(s + 'T12:00:00');
+  if (Number.isNaN(d.getTime())) return null;
+  // JS: 0=Dom … 6=Sáb → Lun=0 … Dom=6
+  return (d.getDay() + 6) % 7;
+}
+
 export function mergeDiasSemana(
   a: HrPayrollDiasSemana | null | undefined,
   b: HrPayrollDiasSemana | null | undefined

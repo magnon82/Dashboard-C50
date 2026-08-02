@@ -86,10 +86,10 @@ export async function GET(request: Request) {
       count: items.length,
       note:
         source === 'seed'
-          ? 'Carpeta Drive no montada o vacía: listando nombres conocidos (sin Abrir). Monta I:\\Mi unidad\\Eventos para abrir PDFs.'
+          ? null
           : source === 'scan'
             ? null
-            : 'Sin documentos. Monta I:\\Mi unidad\\Eventos\\Menús\\Menús eventos vigentes.',
+            : 'Sin documentos en catálogo. Manual y políticas siguen disponibles in-app.',
     });
   } catch (e) {
     const root = getEventosRoot();

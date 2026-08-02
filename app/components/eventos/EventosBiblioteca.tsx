@@ -205,25 +205,17 @@ export function EventosBiblioteca() {
           políticas se abren en pantalla; menús y PDFs usan Abrir.
         </p>
         <p className="mt-1 text-xs text-slate-500">
-          Menús:{' '}
-          <code className="text-[11px]">
-            {menusRoot ||
-              'I:\\Mi unidad\\Eventos\\Menús\\Menús eventos vigentes'}
-          </code>
+          {rootExists
+            ? `Fuente local: ${menusRoot || 'Eventos/Menús'}`
+            : source === 'seed'
+              ? 'Catálogo en servidor (manual y políticas in-app)'
+              : 'Biblioteca Eventos'}
         </p>
-        <p className="mt-0.5 text-xs text-slate-500">
-          Eventos:{' '}
-          <code className="text-[11px]">
-            {root || 'I:\\Mi unidad\\Eventos'}
-          </code>
-          {rootExists ? ' · montada' : ' · no montada en este servidor'}
-        </p>
-        {(note || (!rootExists && source === 'seed')) && (
-          <p className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
-            {note ||
-              'Drive no montado: catálogo seed. Manual y políticas siguen abriendo en pantalla; menús/PDFs sin Abrir hasta montar I:\\Mi unidad.'}
+        {note && source !== 'seed' ? (
+          <p className="mt-2 text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+            {note}
           </p>
-        )}
+        ) : null}
       </SuiteCard>
 
       <div className="flex flex-wrap gap-2">

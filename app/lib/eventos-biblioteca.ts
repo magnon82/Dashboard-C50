@@ -6,6 +6,7 @@
 import { existsSync } from 'fs';
 import { readdir, stat } from 'fs/promises';
 import path from 'path';
+import { localDriveFsEnabled } from '@/app/lib/local-fs';
 import { getEventosRoot, isPathUnderRoot } from '@/app/lib/eventos-paths';
 
 const MI_UNIDAD = process.env.DRIVE_MI_UNIDAD_PATH?.trim() || 'I:\\Mi unidad';
@@ -496,13 +497,14 @@ export async function listBiblioteca(opts?: {
 }> {
   const root = getEventosRoot();
   const menusRoot = getMenusVigentesRoot();
-  const rootExists = existsSync(root);
-  const menusRootExists = existsSync(menusRoot);
+  const canScan = localDriveFsEnabled();
+  const rootExists = canScan && existsSync(root);
+  const menusRootExists = canScan && existsSync(menusRoot);
 
   let items: BibliotecaItem[] = [];
   let source: 'scan' | 'seed' | 'none' = 'none';
 
-  if (rootExists || existsSync(getMenuC50Root())) {
+  if (rootExists || (canScan && existsSync(getMenuC50Root()))) {
     const seen = new Set<string>();
     for (const target of buildScanTargets(root)) {
       const chunk = await collectFromDir(target, root, seen);

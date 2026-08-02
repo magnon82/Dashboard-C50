@@ -3,7 +3,10 @@ import { getServiceSupabase } from '@/app/lib/users';
 import { requireEventosSession } from '@/app/lib/eventos-api';
 import { LEAD_STAGES, mexicoTodayIso } from '@/app/lib/eventos';
 import { loadEventClientActivity } from '@/app/lib/eventos-activity';
-import { buildUpcomingCalendar } from '@/app/lib/eventos-calendario';
+import {
+  buildUpcomingCalendar,
+  filterEnPuertaEvents,
+} from '@/app/lib/eventos-calendario';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -53,7 +56,8 @@ export async function GET() {
       clients.error || leads.error || quotes.error || bookings.error;
     if (err) {
       // Tablas aún no migradas → KPIs en cero con aviso; aún así mostrar en puerta
-      const upcomingEvents = (calendar.events || [])
+      const enPuerta = filterEnPuertaEvents(calendar.events || []);
+      const upcomingEvents = enPuerta
         .slice(0, UPCOMING_LIMIT)
         .map(mapUpcomingRow);
       return NextResponse.json({
@@ -61,7 +65,7 @@ export async function GET() {
         error: err.message,
         kpis: {
           ...emptyKpis,
-          upcoming: calendar.count || upcomingEvents.length,
+          upcoming: enPuerta.length,
           activityClients,
           activityEvents,
         },
@@ -90,8 +94,9 @@ export async function GET() {
 
     const quotesDraft = quoteRows.filter((q) => q.status === 'borrador').length;
 
-    // En puerta = mismos orígenes que Calendario (CRM + OS + activity + cotizaciones)
-    const upcomingEvents = (calendar.events || [])
+    // En puerta = Calendario sin cancelados (CRM + OS + activity + cotizaciones)
+    const enPuerta = filterEnPuertaEvents(calendar.events || []);
+    const upcomingEvents = enPuerta
       .slice(0, UPCOMING_LIMIT)
       .map(mapUpcomingRow);
 
@@ -115,7 +120,7 @@ export async function GET() {
         leadsOpen,
         quotesDraft,
         quotesTotal: quoteRows.length,
-        upcoming: calendar.count || upcomingEvents.length,
+        upcoming: enPuerta.length,
         pipelineValue,
         activityClients,
         activityEvents,

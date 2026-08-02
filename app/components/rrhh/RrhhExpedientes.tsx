@@ -15,10 +15,12 @@ const theme = getTheme('suite');
 
 type IndexPayload = {
   ready: boolean;
+  source?: string;
   path?: string;
   exists?: boolean;
   rootExists?: boolean;
   driveUrl?: string | null;
+  linkedCount?: number;
   message?: string;
   error?: string;
 };
@@ -62,7 +64,12 @@ export function RrhhExpedientes({
     };
   }, []);
 
-  const driveMissing = index?.rootExists === false || index?.exists === false;
+  const dbBacked =
+    index?.source === 'supabase' ||
+    index?.ready === true ||
+    (index?.linkedCount ?? 0) > 0;
+  const localMounted =
+    index?.rootExists === true && index?.exists === true;
 
   return (
     <div className="space-y-5">
@@ -81,12 +88,21 @@ export function RrhhExpedientes({
           (botón Expediente) o en Bajas del año. Aquí solo el acceso a Drive.
         </p>
         <p className="mt-2 font-mono text-[11px] text-slate-400">
-          {loading ? '…' : index?.path || HR_EXPEDIENTES_DIR}
-          {!loading && index?.rootExists === true && index?.exists === true
-            ? ' · montada'
-            : !loading && driveMissing
-              ? ' · Drive no montado'
+          {loading
+            ? '…'
+            : index?.driveUrl
+              ? 'drive.google.com · Expedientes'
+              : dbBacked
+                ? 'Índice en servidor (Supabase)'
+                : index?.path || HR_EXPEDIENTES_DIR}
+          {!loading && localMounted
+            ? ' · local'
+            : !loading && dbBacked
+              ? ' · online'
               : ''}
+          {!loading && index?.linkedCount
+            ? ` · ${index.linkedCount} vinculados`
+            : ''}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {index?.driveUrl ? (
@@ -117,11 +133,11 @@ export function RrhhExpedientes({
             {showResguardos ? 'Ocultar resguardos' : 'Ver resguardos'}
           </button>
         </div>
-        {(index?.message || index?.error) && (
-          <p className="mt-3 text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+        {!dbBacked && (index?.message || index?.error) ? (
+          <p className="mt-3 text-sm rounded-lg px-3 py-2 text-amber-800 bg-amber-50">
             {index.message || index.error}
           </p>
-        )}
+        ) : null}
       </SuiteCard>
 
       {showResguardos ? <RrhhResguardosPanel /> : null}

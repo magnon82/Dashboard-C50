@@ -107,10 +107,10 @@ export async function GET(request: Request) {
       rootExists = listed.rootExists || rootExists;
       pdfNote =
         listed.source === 'activity_seed'
-          ? 'Carpeta Drive no montada o vacía: listando PDFs desde seed_event_client_activity.json (sin abrir PDF).'
+          ? null
           : listed.source === 'scan'
             ? null
-            : 'Sin PDFs de OS. Monta I:\\Mi unidad\\Eventos\\Ordenes de servicio o regenera el seed de actividad.';
+            : 'Sin PDFs de OS en índice. Las OS digitales del CRM siguen disponibles.';
     } catch (e) {
       pdfNote = e instanceof Error ? e.message : 'Error al listar OS PDF';
     }

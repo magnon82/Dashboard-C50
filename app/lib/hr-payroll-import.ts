@@ -477,6 +477,7 @@ export type BaseDatosRow = {
   puesto: string | null;
   area: string | null;
   fecha_ingreso: string | null;
+  fecha_nacimiento: string | null;
   sueldo_diario: number | null;
   phone: string | null;
   email: string | null;
@@ -499,6 +500,11 @@ export function parseBaseDatosPersonal(
   const iPuesto = headerIndex(header, 'puesto');
   const iDepto = headerIndex(header, 'departamento');
   const iIngreso = headerIndex(header, 'fecha de ingreso');
+  const iNacimiento = headerIndex(
+    header,
+    'fecha de nacimiento',
+    'fecha nacimiento'
+  );
   const iSd = headerIndex(header, 's.d.', 'sd', 'sueldo diario');
   // Teléfono suele estar en columnas variables; buscar header
   const iPhone = headerIndex(header, 'telefono', 'teléfono', 'celular');
@@ -515,6 +521,8 @@ export function parseBaseDatosPersonal(
       puesto: cellStr(row[iPuesto]) || null,
       area: cellStr(row[iDepto]) || null,
       fecha_ingreso: isoFromUnknownDate(row[iIngreso]),
+      fecha_nacimiento:
+        iNacimiento >= 0 ? isoFromUnknownDate(row[iNacimiento]) : null,
       sueldo_diario: parseLooseNumber(row[iSd]),
       phone: iPhone >= 0 ? cellStr(row[iPhone]) || null : guessPhone(row),
       email: null,

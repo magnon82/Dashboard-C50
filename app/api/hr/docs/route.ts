@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createReadStream, existsSync } from 'fs';
+import { createReadStream } from 'fs';
 import { access, stat } from 'fs/promises';
 import path from 'path';
 import { Readable } from 'stream';
@@ -20,6 +20,11 @@ import {
   isUnderHrRoot,
   listHrFolder,
 } from '@/app/lib/hr-biblioteca';
+import {
+  formatSyncBanner,
+  upsertHrDriveSyncState,
+} from '@/app/lib/hr-drive-sync';
+import { localDriveFsEnabled } from '@/app/lib/local-fs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,6 +35,41 @@ function seedDocs(): HrDocLink[] {
     id: `seed-${i}`,
     active: true,
   }));
+}
+
+/** Normaliza título legacy «Documentación vigente 2023» → sin año. */
+function normalizeDocTitles(docs: HrDocLink[]): HrDocLink[] {
+  return docs.map((d) => {
+    if (
+      d.category === 'politicas' &&
+      (d.title === 'Documentación vigente 2023' || d.title === 'Documentación')
+    ) {
+      return {
+        ...d,
+        title: 'Documentación vigente',
+        description:
+          d.description ||
+          'Carpeta: políticas, reglamentos, formatos y antigüedad',
+      };
+    }
+    return d;
+  });
+}
+
+async function patchLegacyDocTitles(): Promise<void> {
+  try {
+    const sb = getServiceSupabase();
+    await sb
+      .from('hr_doc_links')
+      .update({
+        title: 'Documentación vigente',
+        description: 'Carpeta: políticas, reglamentos, formatos y antigüedad',
+      })
+      .eq('category', 'politicas')
+      .in('title', ['Documentación vigente 2023', 'Documentación']);
+  } catch {
+    /* best-effort */
+  }
 }
 
 /**
@@ -49,6 +89,16 @@ export async function GET(request: Request) {
   const textPath = url.searchParams.get('text') || '';
 
   if (openPath) {
+    if (!localDriveFsEnabled()) {
+      return NextResponse.json(
+        {
+          error:
+            'Archivos locales no disponibles en este servidor. Usa «Abrir en Drive» si hay enlace.',
+          code: 'local_fs_unavailable',
+        },
+        { status: 404 }
+      );
+    }
     const decoded = decodeURIComponent(openPath);
     if (!isUnderHrRoot(decoded)) {
       return NextResponse.json(
@@ -90,6 +140,19 @@ export async function GET(request: Request) {
   }
 
   if (browsePath) {
+    if (!localDriveFsEnabled() || !hrRootExists()) {
+      return NextResponse.json(
+        {
+          error:
+            'Explorar carpeta local no disponible en línea. Usa «Abrir en Drive».',
+          code: 'local_fs_unavailable',
+          ready: false,
+          items: [],
+          rootExists: false,
+        },
+        { status: 404 }
+      );
+    }
     const decoded = decodeURIComponent(browsePath);
     if (!isUnderHrRoot(decoded)) {
       return NextResponse.json(
@@ -117,6 +180,16 @@ export async function GET(request: Request) {
   }
 
   if (textPath) {
+    if (!localDriveFsEnabled()) {
+      return NextResponse.json(
+        {
+          error:
+            'Vista de texto local no disponible en línea. Usa «Abrir en Drive».',
+          code: 'local_fs_unavailable',
+        },
+        { status: 404 }
+      );
+    }
     const decoded = decodeURIComponent(textPath);
     if (!isUnderHrRoot(decoded)) {
       return NextResponse.json(
@@ -179,50 +252,78 @@ export async function GET(request: Request) {
       ready = false;
       error = res.error.message;
       message =
-        'Usando rutas por defecto. Ejecuta supabase/hr_module.sql para persistir hr_doc_links.';
+        'Usando catálogo por defecto. Ejecuta supabase/hr_module.sql para persistir hr_doc_links.';
     } else if (!res.data || res.data.length === 0) {
       docs = seedDocs();
       source = 'defaults';
       ready = true;
-      message =
-        'Sin filas en hr_doc_links; mostrando rutas conocidas de Drive RH.';
+      message = undefined;
     } else {
       docs = res.data as HrDocLink[];
       source = 'supabase';
       ready = true;
+      void patchLegacyDocTitles();
     }
 
-    docs = docs.filter((d) => !isHrBibliotecaHiddenDoc(d));
+    docs = normalizeDocTitles(docs).filter((d) => !isHrBibliotecaHiddenDoc(d));
     const enriched = await enrichHrDocLinks(docs);
     const root = getHrRoot();
-    const rootExists = existsSync(root);
-    const missingCount = enriched.filter((d) => d.local_path && !d.exists).length;
+    const rootExists = hrRootExists();
+    const driveLinked = enriched.filter((d) => d.drive_url).length;
+    const localOpenable = enriched.filter((d) => d.openable && d.exists).length;
+
+    if (source === 'supabase') {
+      void upsertHrDriveSyncState({
+        contentType: 'biblioteca',
+        status: 'ok',
+        source: rootExists ? 'file_stream' : 'supabase',
+        message: rootExists
+          ? `Catálogo ${enriched.length} docs · ${localOpenable} en disco`
+          : `Catálogo ${enriched.length} docs en servidor · ${driveLinked} con enlace Drive`,
+        rowCount: enriched.length,
+      });
+    }
+
+    const syncMsg = formatSyncBanner({
+      driveMounted: rootExists,
+      source,
+      linkedCount: enriched.length,
+      openBlocked: !rootExists,
+      countLabel: 'docs en catálogo',
+      hideWhenOnline: true,
+    });
 
     return NextResponse.json({
       ready,
       source,
       docs: enriched,
-      root,
+      root: localDriveFsEnabled() ? root : null,
       rootExists,
-      message:
-        message ||
-        (!rootExists
-          ? 'Drive RH no montado en este servidor: catálogo visible, sin consulta/abrir hasta montar la unidad.'
-          : missingCount > 0
-            ? `${missingCount} ruta(s) no encontradas en disco (revisa nombres exactos en Drive).`
-            : undefined),
+      localFsEnabled: localDriveFsEnabled(),
+      message: message || syncMsg,
       error,
     });
   } catch (e) {
-    const docs = seedDocs().filter((d) => !isHrBibliotecaHiddenDoc(d));
+    const docs = normalizeDocTitles(
+      seedDocs().filter((d) => !isHrBibliotecaHiddenDoc(d))
+    );
     const enriched = await enrichHrDocLinks(docs);
     return NextResponse.json({
       ready: false,
       source: 'defaults',
       docs: enriched,
-      root: getHrRoot(),
+      root: localDriveFsEnabled() ? getHrRoot() : null,
       rootExists: hrRootExists(),
+      localFsEnabled: localDriveFsEnabled(),
       error: e instanceof Error ? e.message : 'Error',
+      message: formatSyncBanner({
+        driveMounted: hrRootExists(),
+        source: 'defaults',
+        linkedCount: enriched.length,
+        hideWhenOnline: true,
+        refreshHint:
+          ' Ejecuta supabase/hr_module.sql para persistir hr_doc_links.',
+      }),
     });
   }
 }
