@@ -57,6 +57,7 @@ type Summary = {
     quotesDraft: number;
     quotesTotal: number;
     upcoming: number;
+    anticipoSinOs?: number;
     pipelineValue: number;
     activityClients?: number;
     activityEvents?: number;

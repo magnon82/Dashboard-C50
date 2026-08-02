@@ -31,6 +31,7 @@ type SummaryPayload = {
     quotesDraft: number;
     quotesTotal: number;
     upcoming: number;
+    anticipoSinOs?: number;
     pipelineValue: number;
     activityClients?: number;
     activityEvents?: number;
@@ -115,6 +116,7 @@ export default function EventosPage() {
           quotesDraft: 0,
           quotesTotal: 0,
           upcoming: 0,
+          anticipoSinOs: 0,
           pipelineValue: 0,
           activityClients: 0,
           activityEvents: 0,

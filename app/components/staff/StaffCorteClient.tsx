@@ -11,6 +11,7 @@ import {
   defaultCorteDateCdmx,
   moneyMx,
   photoKindLabel,
+  staffCorteDateWindow,
   type TpvCorteUpload,
   type TpvPhotoKind,
   type TpvTerminalNumber,
@@ -36,6 +37,21 @@ type PendingFile = {
   sharpness: number;
 };
 
+type DayWindowSummary = {
+  date: string;
+  closeSaved: boolean;
+  corteCompleto: boolean;
+  terminalsReady: boolean;
+  unknown: boolean;
+};
+
+type DateWindowPayload = {
+  opDay: string;
+  prevDay: string;
+  op: DayWindowSummary;
+  prev: DayWindowSummary;
+};
+
 type DayPayload = {
   date: string;
   uploads: TpvCorteUpload[];
@@ -52,7 +68,18 @@ type DayPayload = {
     message: string | null;
   };
   recent: StaffRptRow[];
+  dateWindow?: DateWindowPayload;
+  staffPrevDate?: string;
+  defaultDate?: string;
 };
+
+function corteStatusLabel(summary: DayWindowSummary | null | undefined): string {
+  if (!summary || summary.unknown) return '—';
+  if (summary.corteCompleto) return 'Cerrado';
+  if (summary.closeSaved) return 'Cierre guardado';
+  if (summary.terminalsReady) return 'Sin cerrar';
+  return 'Pendiente';
+}
 
 function formatCorteDateDisplay(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
@@ -102,7 +129,29 @@ function MoneyInput({
 }
 
 export function StaffCorteClient() {
-  const corteDate = defaultCorteDateCdmx();
+  const localWindow = staffCorteDateWindow();
+  const [corteDate, setCorteDate] = useState(defaultCorteDateCdmx);
+  const [dateWindow, setDateWindow] = useState<DateWindowPayload>(() => ({
+    opDay: localWindow.opDay,
+    prevDay: localWindow.prevDay,
+    op: {
+      date: localWindow.opDay,
+      closeSaved: false,
+      corteCompleto: false,
+      terminalsReady: false,
+      unknown: true,
+    },
+    prev: {
+      date: localWindow.prevDay,
+      closeSaved: false,
+      corteCompleto: false,
+      terminalsReady: false,
+      unknown: true,
+    },
+  }));
+  const opDay = dateWindow.opDay;
+  const prevDay = dateWindow.prevDay;
+  const isPrevDay = corteDate === prevDay;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +171,41 @@ export function StaffCorteClient() {
   const [efectivoContado, setEfectivoContado] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Mantener selección dentro de hoy / ayer si cruza la ventana CDMX.
+  useEffect(() => {
+    function syncWritableDate() {
+      const { opDay: nextOp, prevDay: nextPrev } = staffCorteDateWindow();
+      setDateWindow((prev) =>
+        prev.opDay === nextOp && prev.prevDay === nextPrev
+          ? prev
+          : {
+              opDay: nextOp,
+              prevDay: nextPrev,
+              op: {
+                date: nextOp,
+                closeSaved: false,
+                corteCompleto: false,
+                terminalsReady: false,
+                unknown: true,
+              },
+              prev: {
+                date: nextPrev,
+                closeSaved: false,
+                corteCompleto: false,
+                terminalsReady: false,
+                unknown: true,
+              },
+            }
+      );
+      setCorteDate((prev) =>
+        prev === nextOp || prev === nextPrev ? prev : nextOp
+      );
+    }
+    syncWritableDate();
+    window.addEventListener('focus', syncWritableDate);
+    return () => window.removeEventListener('focus', syncWritableDate);
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -131,6 +215,24 @@ export function StaffCorteClient() {
         { cache: 'no-store' }
       );
       const data = await readTpvApiJson(res);
+      const dw = data.dateWindow as DateWindowPayload | undefined;
+      if (dw?.opDay && dw?.prevDay) {
+        setDateWindow(dw);
+      } else {
+        const fallbackOp =
+          typeof data.defaultDate === 'string'
+            ? data.defaultDate
+            : staffCorteDateWindow().opDay;
+        const fallbackPrev =
+          typeof data.staffPrevDate === 'string'
+            ? data.staffPrevDate
+            : staffCorteDateWindow().prevDay;
+        setDateWindow((prev) => ({
+          ...prev,
+          opDay: fallbackOp,
+          prevDay: fallbackPrev,
+        }));
+      }
       if (!res.ok) {
         setError(
           String(data.error || data.hint || 'No se pudo cargar el corte')
@@ -151,6 +253,11 @@ export function StaffCorteClient() {
               : ''
         );
         setNotes(rpt.notes || '');
+      } else {
+        setWi('');
+        setEventos('');
+        setEfectivoContado('');
+        setNotes('');
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error de red');
@@ -169,6 +276,21 @@ export function StaffCorteClient() {
     setCobrado('');
     setPropina('');
     if (fileRef.current) fileRef.current.value = '';
+  }
+
+  function selectCorteDate(next: string) {
+    if (next === corteDate) return;
+    clearPending();
+    setMsg(null);
+    setError(null);
+    setPayload(null);
+    setWi('');
+    setEventos('');
+    setEfectivoContado('');
+    setNotes('');
+    setActiveTerminal(1);
+    setActiveKind('venta');
+    setCorteDate(next);
   }
 
   async function onPickFile(file: File | null) {
@@ -460,20 +582,145 @@ export function StaffCorteClient() {
     efectivoContadoOk &&
     !efectivoBelowInfocaja;
 
+  const prevIncomplete =
+    !dateWindow.prev.unknown && !dateWindow.prev.corteCompleto;
+  const showPrevCatchUpBanner = !isPrevDay && prevIncomplete;
+  const opStatusLabel = corteStatusLabel(dateWindow.op);
+  const prevStatusLabel = corteStatusLabel(dateWindow.prev);
+
   return (
     <div className="mx-auto max-w-lg space-y-4 pb-10">
-      {/* Fecha + progreso */}
+      {/* Fecha + progreso — siempre visible aunque falle staff_rpt_diario */}
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <p
           className="text-[11px] font-bold uppercase tracking-[0.16em]"
           style={{ color: SUITE.orange }}
         >
-          Corte del día
+          {isPrevDay ? 'Corte del día anterior' : 'Corte del día'}
         </p>
-        <h2 className="mt-1 text-xl font-bold capitalize" style={{ color: SUITE.navy }}>
+        <h2
+          className="mt-1 text-xl font-bold capitalize"
+          style={{ color: SUITE.navy }}
+        >
           {formatCorteDateDisplay(corteDate)}
         </h2>
-        <p className="mt-1 text-xs text-slate-500">{TPV_CORTE_DATE_HELP}</p>
+        <p className="mt-1 text-xs text-slate-500">
+          {isPrevDay
+            ? 'Estás cargando el corte del día anterior respecto al día operativo (CDMX). El flujo de madrugada (00:00–05:59) sigue usando el día de operación nocturno.'
+            : TPV_CORTE_DATE_HELP}
+        </p>
+
+        <div
+          className="mt-3 grid grid-cols-2 gap-2"
+          role="tablist"
+          aria-label="Fecha del corte"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!isPrevDay}
+            onClick={() => selectCorteDate(opDay)}
+            className={`rounded-xl px-3 py-2.5 text-left text-sm transition ${
+              !isPrevDay
+                ? 'bg-slate-900 font-semibold text-white'
+                : 'bg-slate-50 font-medium text-slate-700 ring-1 ring-slate-200'
+            }`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              Hoy
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  !isPrevDay
+                    ? 'bg-white/15 text-slate-100'
+                    : dateWindow.op.corteCompleto
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-amber-100 text-amber-900'
+                }`}
+              >
+                {opStatusLabel}
+              </span>
+            </span>
+            <span
+              className={`mt-0.5 block text-xs capitalize ${
+                !isPrevDay ? 'text-slate-300' : 'text-slate-500'
+              }`}
+            >
+              {formatCorteDateDisplay(opDay)}
+            </span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isPrevDay}
+            onClick={() => selectCorteDate(prevDay)}
+            className={`rounded-xl px-3 py-2.5 text-left text-sm transition ${
+              isPrevDay
+                ? 'bg-slate-900 font-semibold text-white'
+                : prevIncomplete
+                  ? 'bg-amber-50 font-semibold text-amber-950 ring-2 ring-amber-400'
+                  : 'bg-slate-50 font-medium text-slate-700 ring-1 ring-slate-200'
+            }`}
+          >
+            <span className="flex items-center justify-between gap-2">
+              Ayer
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  isPrevDay
+                    ? 'bg-white/15 text-slate-100'
+                    : dateWindow.prev.corteCompleto
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-amber-100 text-amber-900'
+                }`}
+              >
+                {prevStatusLabel}
+              </span>
+            </span>
+            <span
+              className={`mt-0.5 block text-xs capitalize ${
+                isPrevDay ? 'text-slate-300' : 'text-slate-500'
+              }`}
+            >
+              {formatCorteDateDisplay(prevDay)}
+            </span>
+          </button>
+        </div>
+
+        {showPrevCatchUpBanner ? (
+          <button
+            type="button"
+            onClick={() => selectCorteDate(prevDay)}
+            className="mt-3 flex w-full items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-left transition hover:bg-amber-100"
+          >
+            <span>
+              <span className="block text-sm font-bold text-amber-950">
+                El corte de ayer no se concluyó
+              </span>
+              <span className="mt-0.5 block text-xs text-amber-900">
+                {formatCorteDateDisplay(prevDay)} ·{' '}
+                {prevStatusLabel.toLowerCase()}
+              </span>
+            </span>
+            <span
+              className="shrink-0 rounded-lg px-3 py-2 text-xs font-bold text-white"
+              style={{ backgroundColor: SUITE.orange }}
+            >
+              Continuar
+            </span>
+          </button>
+        ) : null}
+
+        {!isPrevDay && dateWindow.prev.unknown ? (
+          <button
+            type="button"
+            onClick={() => selectCorteDate(prevDay)}
+            className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+          >
+            ¿Falta el corte de ayer?{' '}
+            <span className="font-semibold" style={{ color: SUITE.orange }}>
+              Ir al día anterior
+            </span>
+          </button>
+        ) : null}
 
         <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
           <div className="rounded-xl bg-slate-50 px-2 py-3">
@@ -514,7 +761,12 @@ export function StaffCorteClient() {
 
       {error ? (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          {error}
+          <p>{error}</p>
+          <p className="mt-1 text-xs text-amber-900/80">
+            Puedes cambiar entre Hoy y Ayer arriba aunque falte alguna tabla.
+            Si el error menciona staff_rpt_diario, ejecuta en Supabase SQL
+            Editor: supabase/staff_corte_prod_fix.sql (o staff_rpt_diario.sql).
+          </p>
         </div>
       ) : null}
       {msg ? (
@@ -524,7 +776,14 @@ export function StaffCorteClient() {
       ) : null}
       {payload?.rptError ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-          {payload.rptError}
+          <p>{payload.rptError}</p>
+          <p className="mt-1 text-xs text-rose-800/90">
+            Sin esa tabla no se puede cerrar el corte. En Supabase → SQL Editor
+            ejecuta <code className="font-mono">supabase/staff_rpt_diario.sql</code>{' '}
+            o el fix completo{' '}
+            <code className="font-mono">supabase/staff_corte_prod_fix.sql</code>.
+            La selección Hoy / Ayer sigue disponible.
+          </p>
         </div>
       ) : null}
 
@@ -964,8 +1223,12 @@ export function StaffCorteClient() {
           {busy === 'close'
             ? 'Guardando…'
             : status?.closeSaved
-              ? 'Actualizar cierre del día'
-              : 'Cerrar corte del día'}
+              ? isPrevDay
+                ? 'Actualizar cierre del día anterior'
+                : 'Actualizar cierre del día'
+              : isPrevDay
+                ? 'Cerrar corte del día anterior'
+                : 'Cerrar corte del día'}
         </button>
         {!bancos?.canSaveRpt ? (
           <p className="text-center text-xs text-slate-500">

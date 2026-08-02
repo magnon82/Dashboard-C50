@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
-import { requireVentasSession } from '@/app/lib/tpv-api';
+import {
+  assertWritableCorteDate,
+  requireVentasSession,
+} from '@/app/lib/tpv-api';
 import {
   asTpvRow,
   defaultCorteDateCdmx,
+  staffCorteDateWindow,
 } from '@/app/lib/tpv-cortes';
 import {
   STAFF_RPT_TABLE,
@@ -90,6 +94,49 @@ async function loadRpt(
   };
 }
 
+type DayWindowSummary = {
+  date: string;
+  closeSaved: boolean;
+  corteCompleto: boolean;
+  terminalsReady: boolean;
+  /** true si no se pudo leer (tabla TPV ausente, etc.) */
+  unknown: boolean;
+};
+
+function summaryFromStatus(
+  date: string,
+  status: ReturnType<typeof buildStaffCorteStatus>,
+  unknown = false
+): DayWindowSummary {
+  return {
+    date,
+    closeSaved: status.closeSaved,
+    corteCompleto: status.corteCompleto,
+    terminalsReady: status.terminalsReady,
+    unknown,
+  };
+}
+
+/** Resumen liviano (sin URLs firmadas) para Hoy / Ayer. */
+async function loadDayWindowSummary(
+  sb: ReturnType<typeof getServiceSupabase>,
+  date: string
+): Promise<DayWindowSummary> {
+  try {
+    const uploads = await loadTpvUploads(sb, date);
+    const { rpt } = await loadRpt(sb, date);
+    return summaryFromStatus(date, buildStaffCorteStatus(date, uploads, rpt));
+  } catch {
+    return {
+      date,
+      closeSaved: false,
+      corteCompleto: false,
+      terminalsReady: false,
+      unknown: true,
+    };
+  }
+}
+
 /** GET /api/staff-corte?date=YYYY-MM-DD&recent=1 */
 export async function GET(request: Request) {
   const auth = await requireVentasSession();
@@ -99,6 +146,7 @@ export async function GET(request: Request) {
   const date =
     url.searchParams.get('date')?.slice(0, 10) || defaultCorteDateCdmx();
   const wantRecent = url.searchParams.get('recent') === '1';
+  const { opDay, prevDay } = staffCorteDateWindow();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return NextResponse.json({ error: 'Fecha inválida' }, { status: 400 });
@@ -112,6 +160,16 @@ export async function GET(request: Request) {
     const { infocaja, infocajaError } = await loadInfocajaDay(sb, date);
     const status = buildStaffCorteStatus(date, uploads, rpt);
     const bancos = status.bancos;
+
+    const selectedSummary = summaryFromStatus(date, status);
+    const [opSummary, prevSummary] = await Promise.all([
+      date === opDay
+        ? Promise.resolve(selectedSummary)
+        : loadDayWindowSummary(sb, opDay),
+      date === prevDay
+        ? Promise.resolve(selectedSummary)
+        : loadDayWindowSummary(sb, prevDay),
+    ]);
 
     let recent: ReturnType<typeof asStaffRptRow>[] = [];
     if (wantRecent) {
@@ -132,7 +190,14 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       date,
-      defaultDate: defaultCorteDateCdmx(),
+      defaultDate: opDay,
+      staffPrevDate: prevDay,
+      dateWindow: {
+        opDay,
+        prevDay,
+        op: opSummary,
+        prev: prevSummary,
+      },
       uploads,
       bancos,
       infocaja,
@@ -147,7 +212,28 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: e instanceof Error ? e.message : 'Error al cargar corte',
-        hint: '¿Ejecutaste supabase/tpv_cortes.sql y staff_rpt_diario.sql?',
+        hint:
+          '¿Ejecutaste supabase/staff_corte_prod_fix.sql (o tpv_cortes.sql + staff_rpt_diario.sql)?',
+        defaultDate: opDay,
+        staffPrevDate: prevDay,
+        dateWindow: {
+          opDay,
+          prevDay,
+          op: {
+            date: opDay,
+            closeSaved: false,
+            corteCompleto: false,
+            terminalsReady: false,
+            unknown: true,
+          },
+          prev: {
+            date: prevDay,
+            closeSaved: false,
+            corteCompleto: false,
+            terminalsReady: false,
+            unknown: true,
+          },
+        },
       },
       { status: 500 }
     );
@@ -174,6 +260,8 @@ export async function PUT(request: Request) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json({ error: 'Fecha inválida' }, { status: 400 });
     }
+    const dateGate = assertWritableCorteDate(auth, date);
+    if (dateGate) return dateGate;
 
     const wi = parseMoneyInput(body.wi_amount);
     const eventos = parseMoneyInput(body.eventos_amount);

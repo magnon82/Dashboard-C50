@@ -23,12 +23,37 @@ import {
 
 const theme = getTheme('suite');
 
+const METRIC_TITLE: Record<PersonasHistoricoMetric, string> = {
+  cheque: 'Cheque promedio mensual',
+  personas: 'Flujo de personas mensual',
+};
+
+const METRIC_SUBTITLE: Record<PersonasHistoricoMetric, string> = {
+  cheque: 'Infocaja · Cheque promedio = Venta Total ÷ Personas',
+  personas: 'Infocaja · Flujo de personas (comensales) por mes',
+};
+
+const METRIC_CHART_SUBTITLE: Record<PersonasHistoricoMetric, string> = {
+  cheque: 'Cheque promedio = Venta Total ÷ Personas',
+  personas: 'Flujo de personas (Infocaja)',
+};
+
 function money(v: number) {
   return `$${v.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function pax(v: number) {
   return Math.round(v).toLocaleString('es-MX');
+}
+
+function varPctLabel(pct: number | null | undefined) {
+  if (pct == null) return '—';
+  return `${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(1)}%`;
+}
+
+function varPctClass(pct: number | null | undefined) {
+  if (pct == null) return 'text-slate-400';
+  return pct >= 0 ? 'text-emerald-700' : 'text-rose-700';
 }
 
 export type ChequePromedioMensualCardProps = {
@@ -38,7 +63,7 @@ export type ChequePromedioMensualCardProps = {
   className?: string;
 };
 
-/** Cheque promedio mensual · gráfica multi-año (Ver: cheque | personas). */
+/** Cheque / flujo de personas mensual · gráfica multi-año (Ver: cheque | personas). */
 export function ChequePromedioMensualCard({
   records,
   years,
@@ -113,6 +138,34 @@ export function ChequePromedioMensualCard({
   if (personasHistorico.rows.length === 0) return null;
 
   const cardClass = 'rounded-[24px] border-0 p-5 md:p-6';
+  const primaryYear = personasHistorico.years[0];
+  const compareYear = personasHistorico.years[1];
+  const showVar = compareYear != null;
+  const ytdChangePct =
+    personasMetric === 'cheque'
+      ? personasHistorico.ytdChequeChangePct
+      : personasHistorico.ytdPersonasChangePct;
+  const lastMesLabel = personasHistorico.rows.at(-1)?.mes ?? 'hoy';
+
+  function formatMetricCell(
+    cell: { personas: number; chequePromedio: number | null } | undefined
+  ): { label: string; hasValue: boolean } {
+    if (!cell) return { label: '—', hasValue: false };
+    if (personasMetric === 'cheque') {
+      return cell.chequePromedio != null
+        ? { label: money(cell.chequePromedio), hasValue: true }
+        : { label: '—', hasValue: false };
+    }
+    return cell.personas > 0
+      ? { label: pax(cell.personas), hasValue: true }
+      : { label: '—', hasValue: false };
+  }
+
+  const hasChartData = chartRows.some((r) =>
+    personasHistorico.years.some(
+      (y) => r[String(y)] != null && Number(r[String(y)]) > 0
+    )
+  );
 
   return (
     <Card
@@ -123,7 +176,7 @@ export function ChequePromedioMensualCard({
         borderTop: `4px solid ${SUITE.orange}`,
       }}
     >
-      <SectionHeader title="Cheque promedio mensual">
+      <SectionHeader title={METRIC_TITLE[personasMetric]}>
         <label className={filterControlClass}>
           <span className="text-slate-500">Ver</span>
           <select
@@ -163,16 +216,10 @@ export function ChequePromedioMensualCard({
         })}
       </SectionHeader>
       <Text className="-mt-2 mb-4 text-sm text-slate-500">
-        {personasMetric === 'cheque'
-          ? 'Infocaja · Cheque promedio = Venta Total ÷ Personas'
-          : 'Infocaja · Número de personas por mes'}
+        {METRIC_SUBTITLE[personasMetric]}
       </Text>
 
-      {chartRows.some((r) =>
-        personasHistorico.years.some(
-          (y) => r[String(y)] != null && Number(r[String(y)]) > 0
-        )
-      ) && (
+      {hasChartData && (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
             {personasHistorico.years.map((y) => {
@@ -207,16 +254,121 @@ export function ChequePromedioMensualCard({
           <MonthlyComparisonChart
             rows={chartRows}
             years={personasHistorico.years}
-            subtitle={
-              personasMetric === 'cheque'
-                ? 'Cheque promedio = Venta Total ÷ Personas'
-                : 'Número de personas (Infocaja)'
-            }
+            subtitle={METRIC_CHART_SUBTITLE[personasMetric]}
             valueDecimals={personasMetric === 'cheque' ? 2 : 0}
             valueKind={personasMetric === 'cheque' ? 'money' : 'count'}
             yFromZero
           />
         </>
+      )}
+
+      <div className={`${hasChartData ? 'mt-5' : ''} overflow-x-auto rounded-lg border border-slate-200`}>
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr
+              className="text-xs font-bold uppercase tracking-wide text-white"
+              style={{ backgroundColor: theme.tableHead }}
+            >
+              <th className="px-4 py-2.5 text-left">Mes</th>
+              {personasHistorico.years.map((y) => (
+                <th
+                  key={y}
+                  className="border-l border-l-white/25 px-3 py-2.5 text-right"
+                >
+                  {y}
+                </th>
+              ))}
+              {showVar && (
+                <th className="border-l border-l-white/25 px-3 py-2.5 text-right">
+                  Var. vs {compareYear}
+                </th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {personasHistorico.rows.map((row, i) => {
+              const pct =
+                personasMetric === 'cheque'
+                  ? row.chequeChangePct
+                  : row.personasChangePct;
+              return (
+                <tr
+                  key={row.month}
+                  className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}
+                >
+                  <td className="px-4 py-2 text-slate-700">{row.mes}</td>
+                  {personasHistorico.years.map((y) => {
+                    const formatted = formatMetricCell(row.byYear[y]);
+                    return (
+                      <td
+                        key={y}
+                        className="border-l border-slate-200 px-3 py-2 text-right font-semibold tabular-nums"
+                        style={{
+                          color: formatted.hasValue
+                            ? theme.tableTotal
+                            : '#94a3b8',
+                        }}
+                      >
+                        {formatted.label}
+                      </td>
+                    );
+                  })}
+                  {showVar && (
+                    <td
+                      className={`border-l border-slate-200 px-3 py-2 text-right font-semibold tabular-nums ${varPctClass(
+                        pct
+                      )}`}
+                    >
+                      {varPctLabel(pct)}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr
+              className="font-bold text-white"
+              style={{ backgroundColor: theme.tableFoot }}
+            >
+              <td className="px-4 py-2.5">
+                Acumulado (Ene–{lastMesLabel})
+              </td>
+              {personasHistorico.years.map((y) => {
+                const formatted = formatMetricCell(
+                  personasHistorico.ytdByYear[y]
+                );
+                return (
+                  <td
+                    key={y}
+                    className="border-l border-white/20 px-3 py-2.5 text-right tabular-nums"
+                  >
+                    {formatted.label}
+                  </td>
+                );
+              })}
+              {showVar && (
+                <td
+                  className={`border-l border-white/20 px-3 py-2.5 text-right tabular-nums ${
+                    ytdChangePct == null
+                      ? 'text-slate-300'
+                      : ytdChangePct >= 0
+                        ? 'text-emerald-200'
+                        : 'text-rose-200'
+                  }`}
+                >
+                  {varPctLabel(ytdChangePct)}
+                </td>
+              )}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {showVar && primaryYear != null && (
+        <Text className="mt-2 text-xs text-slate-500">
+          Var. % = {primaryYear} vs {compareYear} (mismo mes). Acumulado hasta el
+          mes en curso.
+        </Text>
       )}
     </Card>
   );

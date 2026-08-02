@@ -12,6 +12,7 @@ import {
   buildUpcomingCalendar,
   filterEnPuertaEvents,
 } from '@/app/lib/eventos-calendario';
+import { isAnticipoSinOs } from '@/app/lib/eventos-calendario-shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,8 @@ const emptyKpis = {
   quotesDraft: 0,
   quotesTotal: 0,
   upcoming: 0,
+  /** Eventos en puerta con anticipo y sin OS (PDF/digital). */
+  anticipoSinOs: 0,
   pipelineValue: 0,
   activityClients: 0,
   activityEvents: 0,
@@ -62,6 +65,7 @@ export async function GET() {
     if (err) {
       // Tablas aún no migradas → KPIs en cero con aviso; aún así mostrar en puerta
       const enPuerta = filterEnPuertaEvents(calendar.events || []);
+      const anticipoSinOs = enPuerta.filter(isAnticipoSinOs).length;
       const upcomingEvents = enPuerta
         .slice(0, UPCOMING_LIMIT)
         .map(mapUpcomingRow);
@@ -71,6 +75,7 @@ export async function GET() {
         kpis: {
           ...emptyKpis,
           upcoming: enPuerta.length,
+          anticipoSinOs,
           activityClients,
           activityEvents,
         },
@@ -108,6 +113,7 @@ export async function GET() {
 
     // En puerta = Calendario sin cancelados (CRM + OS + activity + cotizaciones)
     const enPuerta = filterEnPuertaEvents(calendar.events || []);
+    const anticipoSinOs = enPuerta.filter(isAnticipoSinOs).length;
     const upcomingEvents = enPuerta
       .slice(0, UPCOMING_LIMIT)
       .map(mapUpcomingRow);
@@ -133,6 +139,7 @@ export async function GET() {
         quotesDraft,
         quotesTotal: quoteRows.length,
         upcoming: enPuerta.length,
+        anticipoSinOs,
         pipelineValue,
         activityClients,
         activityEvents,

@@ -1,10 +1,18 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
 import { InstallAppPrompt } from '@/app/components/InstallAppPrompt';
+import {
+  calmNoAlert,
+  formatAnticipoSinOsAlert,
+  isHubAlertModule,
+  pickRrhhHubAlert,
+  type HubAlertModuleId,
+  type HubModuleAlert,
+} from '@/app/lib/hub-alerts';
 import { APP_MODULES, homePathForModules } from '@/app/lib/modules';
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from '@/app/lib/product';
 import { canSeeModule, canSeeAdmin, useSession } from '@/app/lib/useSession';
@@ -12,9 +20,27 @@ import { SUITE, getTheme } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
 
+type AlertMap = Partial<Record<HubAlertModuleId, HubModuleAlert>>;
+
+function alertLineStyle(
+  alert: HubModuleAlert | undefined,
+  loading: boolean,
+  dark: boolean
+): { color: string } {
+  if (loading || !alert) {
+    return { color: dark ? 'rgba(255,255,255,0.55)' : theme.muted };
+  }
+  if (alert.severity === 'warn') {
+    return { color: dark ? '#FBBF24' : '#92400e' };
+  }
+  return { color: dark ? 'rgba(255,255,255,0.65)' : theme.muted };
+}
+
 export default function HubPage() {
   const router = useRouter();
   const { user, loading } = useSession();
+  const [alerts, setAlerts] = useState<AlertMap>({});
+  const [alertsLoading, setAlertsLoading] = useState(false);
   const hoy = new Date().toLocaleDateString('es-MX', {
     day: 'numeric',
     month: 'long',
@@ -29,6 +55,110 @@ export default function HubPage() {
     const home = homePathForModules(user.modules);
     if (home !== '/') router.replace(home);
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (loading || !user) return;
+
+    const wantEventos = canSeeModule(user, 'eventos');
+    const wantRrhh = canSeeModule(user, 'rrhh');
+    const calmIds = (
+      ['reportes-socios', 'staff', 'ventas', 'finanzas'] as const
+    ).filter((id) => canSeeModule(user, id));
+
+    const seed: AlertMap = {};
+    for (const id of calmIds) seed[id] = calmNoAlert();
+    setAlerts(seed);
+
+    if (!wantEventos && !wantRrhh) {
+      setAlertsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAlertsLoading(true);
+
+    (async () => {
+      const next: AlertMap = { ...seed };
+
+      try {
+        const fetches: Promise<void>[] = [];
+
+        if (wantEventos) {
+          fetches.push(
+            (async () => {
+              try {
+                const res = await fetch('/api/eventos/summary', {
+                  cache: 'no-store',
+                });
+                if (!res.ok) {
+                  next.eventos = calmNoAlert();
+                  return;
+                }
+                const json = (await res.json()) as {
+                  kpis?: { anticipoSinOs?: number };
+                };
+                const n = Number(json.kpis?.anticipoSinOs ?? 0);
+                next.eventos = formatAnticipoSinOsAlert(
+                  Number.isFinite(n) ? n : 0
+                );
+              } catch {
+                next.eventos = calmNoAlert();
+              }
+            })()
+          );
+        }
+
+        if (wantRrhh) {
+          fetches.push(
+            (async () => {
+              try {
+                const [docsRes, sumRes] = await Promise.all([
+                  fetch('/api/hr/employees/doc-alerts', { cache: 'no-store' }),
+                  fetch('/api/hr/summary', { cache: 'no-store' }),
+                ]);
+                let withMissing: number | null = null;
+                if (docsRes.ok) {
+                  const docs = (await docsRes.json()) as {
+                    withMissing?: number;
+                    ready?: boolean;
+                  };
+                  if (
+                    docs.ready !== false &&
+                    typeof docs.withMissing === 'number'
+                  ) {
+                    withMissing = docs.withMissing;
+                  }
+                }
+                let summaryAlerts:
+                  | { severity: string; message: string }[]
+                  | null = null;
+                if (sumRes.ok) {
+                  const sum = (await sumRes.json()) as {
+                    alerts?: { severity: string; message: string }[];
+                  };
+                  summaryAlerts = sum.alerts ?? null;
+                }
+                next.rrhh = pickRrhhHubAlert({ withMissing, summaryAlerts });
+              } catch {
+                next.rrhh = calmNoAlert();
+              }
+            })()
+          );
+        }
+
+        await Promise.all(fetches);
+      } finally {
+        if (!cancelled) {
+          setAlerts(next);
+          setAlertsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user]);
 
   return (
     <SuiteShell
@@ -46,11 +176,28 @@ export default function HubPage() {
           {visibleModules.map((m) => {
             const isActive = m.status === 'activo';
             const dark = isActive;
+            const hubId = isHubAlertModule(m.id) ? m.id : null;
+            const useLiveAlert = isActive && hubId != null;
+            const alert = hubId ? alerts[hubId] : undefined;
+            const line = useLiveAlert
+              ? alertsLoading && !alert
+                ? '…'
+                : alert?.text || 'Sin alertas'
+              : m.description;
+            const lineStyle = useLiveAlert
+              ? alertLineStyle(alert, alertsLoading && !alert, dark)
+              : { color: dark ? 'rgba(255,255,255,0.75)' : theme.muted };
+
             return (
               <Link key={m.id} href={m.href} className="group block">
-                <SuiteCard dark={dark} className="h-full transition-transform group-hover:-translate-y-0.5">
+                <SuiteCard
+                  dark={dark}
+                  className="h-full transition-transform group-hover:-translate-y-0.5"
+                >
                   <div className="flex items-start justify-between gap-3">
-                    <h2 className={`text-lg font-bold ${dark ? 'text-white' : ''}`}>
+                    <h2
+                      className={`text-lg font-bold ${dark ? 'text-white' : ''}`}
+                    >
                       {m.label}
                     </h2>
                     <span
@@ -66,10 +213,27 @@ export default function HubPage() {
                     </span>
                   </div>
                   <p
-                    className="mt-3 text-sm leading-relaxed"
-                    style={{ color: dark ? 'rgba(255,255,255,0.75)' : theme.muted }}
+                    className={`mt-3 text-sm leading-relaxed ${
+                      useLiveAlert && alert?.severity === 'warn'
+                        ? 'font-medium'
+                        : ''
+                    }`}
+                    style={lineStyle}
                   >
-                    {m.description}
+                    {useLiveAlert && alert?.severity === 'warn' ? (
+                      <span className="inline-flex items-start gap-2">
+                        <span
+                          className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: dark ? '#FBBF24' : SUITE.orangeDeep,
+                          }}
+                          aria-hidden
+                        />
+                        <span>{line}</span>
+                      </span>
+                    ) : (
+                      line
+                    )}
                   </p>
                   <p
                     className="mt-5 text-sm font-bold"
@@ -84,12 +248,18 @@ export default function HubPage() {
 
           {canSeeAdmin(user) && (
             <Link href="/admin" className="group block">
-              <SuiteCard accent className="h-full transition-transform group-hover:-translate-y-0.5">
+              <SuiteCard
+                accent
+                className="h-full transition-transform group-hover:-translate-y-0.5"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="text-lg font-bold">Master Panel</h2>
                   <span
                     className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-                    style={{ backgroundColor: SUITE.orangeSoft, color: SUITE.orangeDeep }}
+                    style={{
+                      backgroundColor: SUITE.orangeSoft,
+                      color: SUITE.orangeDeep,
+                    }}
                   >
                     Admin
                   </span>
@@ -98,7 +268,10 @@ export default function HubPage() {
                   Usuarios, módulos y funciones (capabilities) del ERP · app
                   instalable.
                 </p>
-                <p className="mt-5 text-sm font-bold" style={{ color: SUITE.orangeDeep }}>
+                <p
+                  className="mt-5 text-sm font-bold"
+                  style={{ color: SUITE.orangeDeep }}
+                >
                   Abrir administración →
                 </p>
               </SuiteCard>

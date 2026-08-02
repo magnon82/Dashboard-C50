@@ -190,6 +190,27 @@ export function isAdminWritableCorteDate(
   return corteDate >= minDate && corteDate <= maxDate;
 }
 
+/**
+ * Ventana Staff: día operativo CDMX y el día anterior (catch-up del corte).
+ * Madrugada 00:00–05:59: opDay ya es el día de operación nocturno.
+ */
+export function staffCorteDateWindow(at: Date = new Date()): {
+  opDay: string;
+  prevDay: string;
+} {
+  const opDay = defaultCorteDateCdmx(at);
+  return { opDay, prevDay: shiftIsoDate(opDay, -1) };
+}
+
+export function isStaffWritableCorteDate(
+  corteDate: string,
+  at: Date = new Date()
+): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) return false;
+  const { opDay, prevDay } = staffCorteDateWindow(at);
+  return corteDate === opDay || corteDate === prevDay;
+}
+
 export function moneyMx(v: number | null | undefined): string {
   if (v == null || Number.isNaN(Number(v))) return '—';
   return `$${Number(v).toLocaleString('es-MX', {
