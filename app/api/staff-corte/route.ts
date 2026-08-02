@@ -159,8 +159,8 @@ export async function GET(request: Request) {
  * Body JSON: { date?, wi_amount, eventos_amount, efectivo_tombola?,
  *              efectivo_contado, notes? }
  * Bancos y propinas se toman de TPV (obligatorio día completo + montos).
- * efectivo_contado es obligatorio (= tómbola); si se envía tómbola, debe coincidir.
- * Si hay Infocaja Efectivo, contado no puede ser menor.
+ * efectivo_contado obligatorio (= tómbola / «Efectivo en Tómbola»); si se envía
+ * tómbola, debe coincidir. Si hay Infocaja Efectivo, no puede ser menor.
  */
 export async function PUT(request: Request) {
   const auth = await requireVentasSession();
@@ -193,12 +193,12 @@ export async function PUT(request: Request) {
     const efectivoContado = parseMoneyInput(body.efectivo_contado);
     if (efectivoContado == null || efectivoContado < 0) {
       return NextResponse.json(
-        { error: 'Indica el efectivo contado (obligatorio)' },
+        { error: 'Indica el efectivo en tómbola (obligatorio)' },
         { status: 400 }
       );
     }
 
-    /** Fuente de verdad: contado. Tómbola = mismo monto (depósito). */
+    /** Un solo monto UI «Efectivo en Tómbola» → ambas columnas. */
     const tombolaRaw = parseMoneyInput(body.efectivo_tombola);
     if (tombolaRaw != null && tombolaRaw < 0) {
       return NextResponse.json(
@@ -213,7 +213,7 @@ export async function PUT(request: Request) {
           {
             error: match.message,
             blockers: [
-              'El efectivo contado debe ser el mismo depositado en tómbola.',
+              'El efectivo en tómbola debe coincidir en contado y tómbola.',
             ],
           },
           { status: 400 }
@@ -251,10 +251,10 @@ export async function PUT(request: Request) {
     if (cashCheck.belowInfocaja) {
       return NextResponse.json(
         {
-          error: cashCheck.message || 'Efectivo contado menor que Infocaja',
+          error: cashCheck.message || 'Efectivo en tómbola menor que Infocaja',
           cashCheck,
           blockers: [
-            'El efectivo contado no puede ser menor que el efectivo de Infocaja.',
+            'El efectivo en tómbola no puede ser menor que el efectivo de Infocaja.',
           ],
         },
         { status: 409 }

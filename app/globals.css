@@ -28,3 +28,271 @@ body {
   background: #fff;
   box-shadow: 0 10px 30px rgba(27, 42, 74, 0.08);
 }
+
+/* Plantilla vigente — sectioned roster (not Excel grid) */
+.rrhh-plantilla {
+  --pp-teal: #0f766e;
+  --pp-teal-soft: #ecf7f5;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(27, 42, 74, 0.08);
+}
+
+.rrhh-plantilla__cols {
+  display: grid;
+  grid-template-columns:
+    minmax(8.5rem, 1.45fr)
+    minmax(6rem, 1fr)
+    minmax(5.25rem, 0.85fr)
+    minmax(4.5rem, 0.7fr)
+    minmax(4.5rem, auto);
+  column-gap: 0.75rem;
+  align-items: center;
+}
+
+.rrhh-plantilla__head {
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7a90;
+}
+
+.rrhh-plantilla__team {
+  border-top: 1px solid #e2e8f0;
+}
+
+.rrhh-plantilla__team:first-of-type {
+  border-top: none;
+}
+
+.rrhh-plantilla__team-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.5rem 0.85rem;
+  border-left: 3px solid var(--pp-accent, #e8a317);
+  background: linear-gradient(
+    90deg,
+    var(--pp-wash, #fff4de) 0%,
+    #ffffff 72%
+  );
+}
+
+.rrhh-plantilla__team-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #1b2a4a;
+}
+
+.rrhh-plantilla__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.2rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: rgba(27, 42, 74, 0.08);
+  color: #1b2a4a;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.rrhh-plantilla__family {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 1rem 0.25rem;
+}
+
+.rrhh-plantilla__family-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.4rem;
+  border-radius: 0.35rem;
+  border-left: 2px solid var(--pp-accent, #e8a317);
+  background: #f4f6f9;
+  color: #4a5a72;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rrhh-plantilla__row {
+  padding: 0.45rem 1rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+  transition: background-color 0.12s ease;
+}
+
+.rrhh-plantilla__row:last-child {
+  border-bottom: none;
+}
+
+.rrhh-plantilla__row--alt {
+  background: rgba(27, 42, 74, 0.025);
+}
+
+.rrhh-plantilla__row:hover {
+  background: rgba(232, 163, 23, 0.07);
+}
+
+.rrhh-plantilla__name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #1b2a4a;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.rrhh-plantilla__badge {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.12rem 0.45rem;
+  border-radius: 0.3rem;
+  background: #eef2f7;
+  color: #3d4f6f;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rrhh-plantilla__date {
+  font-size: 0.72rem;
+  color: #6b7a90;
+  font-variant-numeric: tabular-nums;
+}
+
+.rrhh-plantilla__tenure {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #1b2a4a;
+  font-variant-numeric: tabular-nums;
+}
+
+.rrhh-plantilla__externos {
+  margin-top: 0.15rem;
+  border-top: 1px dashed #cbd5e1;
+  background: linear-gradient(180deg, #f1f5f9 0%, #f8fafc 100%);
+}
+
+.rrhh-plantilla__externos-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 1rem 0.3rem;
+}
+
+.rrhh-plantilla__externos-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 0.3rem;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rrhh-plantilla__externos .rrhh-plantilla__row {
+  border-bottom-color: rgba(203, 213, 225, 0.65);
+}
+
+.rrhh-plantilla__externos .rrhh-plantilla__row--alt {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.rrhh-plantilla__foot {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid #e2e8f0;
+  background: #f7f9fc;
+  font-size: 0.7rem;
+  color: #6b7a90;
+}
+
+.rrhh-plantilla__meta {
+  display: contents;
+}
+
+.rrhh-plantilla__exp {
+  justify-self: end;
+  text-align: right;
+}
+
+.rrhh-plantilla__exp-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #c2410c;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+}
+
+.rrhh-plantilla__exp-btn:hover {
+  text-decoration: underline;
+}
+
+.rrhh-plantilla__exp-miss {
+  font-size: 0.7rem;
+  color: #cbd5e1;
+}
+
+@media (max-width: 640px) {
+  .rrhh-plantilla__cols {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 0.2rem;
+  }
+
+  .rrhh-plantilla__head {
+    display: none;
+  }
+
+  .rrhh-plantilla__cols > :nth-child(2) {
+    grid-column: 1 / -1;
+  }
+
+  .rrhh-plantilla__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.85rem;
+    grid-column: 1 / -1;
+  }
+
+  .rrhh-plantilla__exp {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+  }
+
+  .rrhh-plantilla__meta::before {
+    content: none;
+  }
+
+  .rrhh-plantilla__date::before {
+    content: 'Inicio · ';
+    font-weight: 600;
+    color: #94a3b8;
+  }
+
+  .rrhh-plantilla__tenure::before {
+    content: 'Ant. · ';
+    font-weight: 600;
+    color: #94a3b8;
+  }
+}

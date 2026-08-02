@@ -19,6 +19,10 @@ export type CalendarEventItem = {
   detail: string | null;
   /** Etapa CRM (lead) si aplica */
   stage: string | null;
+  /** Reserva / fecha: tentativo | confirmado | cancelado | completado */
+  status: string | null;
+  /** Nota operativa (p. ej. reembolso de anticipo en cancelados) */
+  notes: string | null;
   /** PDF en disco (scan). Vacío si solo hay seed / Anticipos. */
   os_path: string | null;
   os_filename: string | null;
@@ -110,6 +114,11 @@ function mergeItem(
     client: base.client || other.client,
     detail: base.detail || other.detail,
     stage: base.stage || other.stage,
+    status:
+      base.status === 'cancelado' || other.status === 'cancelado'
+        ? 'cancelado'
+        : base.status || other.status,
+    notes: base.notes || other.notes,
     os_path: base.os_path || other.os_path,
     os_filename: base.os_filename || other.os_filename,
     digital_os_id: base.digital_os_id || other.digital_os_id,
@@ -122,6 +131,8 @@ function mergeItem(
 function emptyLinks(): Pick<
   CalendarEventItem,
   | 'stage'
+  | 'status'
+  | 'notes'
   | 'os_path'
   | 'os_filename'
   | 'digital_os_id'
@@ -131,6 +142,8 @@ function emptyLinks(): Pick<
 > {
   return {
     stage: null,
+    status: null,
+    notes: null,
     os_path: null,
     os_filename: null,
     digital_os_id: null,
@@ -138,6 +151,46 @@ function emptyLinks(): Pick<
     lead_id: null,
     client_id: null,
   };
+}
+
+type CancelOverlay = {
+  event_date: string;
+  lead_id: string | null;
+  client_id: string | null;
+  notes: string | null;
+  keys: string[];
+};
+
+/** Aplica reservas canceladas (event_bookings) sobre filas OS/actividad/CRM del mismo día. */
+function applyCancelledBookings(
+  map: Map<string, CalendarEventItem>,
+  overlays: CancelOverlay[]
+): void {
+  if (!overlays.length) return;
+  for (const [key, item] of map) {
+    for (const ov of overlays) {
+      if (ov.event_date !== item.event_date) continue;
+      const sameLead = ov.lead_id && item.lead_id && ov.lead_id === item.lead_id;
+      const sameClient =
+        ov.client_id && item.client_id && ov.client_id === item.client_id;
+      const nameHit = ov.keys.some(
+        (k) =>
+          k &&
+          (k === normalizeClientKey(item.title) ||
+            k === normalizeClientKey(item.client || ''))
+      );
+      if (!sameLead && !sameClient && !nameHit) continue;
+      map.set(key, {
+        ...item,
+        status: 'cancelado',
+        notes: ov.notes || item.notes,
+        lead_id: item.lead_id || ov.lead_id,
+        client_id: item.client_id || ov.client_id,
+        stage: item.stage || 'perdido',
+      });
+      break;
+    }
+  }
 }
 
 /** Prefer accepted → enviada → borrador for the same event. */
@@ -518,6 +571,63 @@ export async function buildUpcomingCalendar(
   } catch (e) {
     errors.push(
       e instanceof Error ? e.message : 'Supabase no disponible para OS digitales'
+    );
+  }
+
+  // 6) Reservas canceladas → marcar filas visibles (OS Drive / anticipos / CRM)
+  try {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb
+      .from('event_bookings')
+      .select(
+        'id, event_date, notes, lead_id, client_id, status, lead:event_leads(title, celebration, company)'
+      )
+      .eq('status', 'cancelado')
+      .gte('event_date', today)
+      .limit(200);
+
+    if (error) {
+      if (!/does not exist|schema cache|PGRST205/i.test(error.message)) {
+        errors.push(error.message);
+      }
+    } else if (data?.length) {
+      const overlays: CancelOverlay[] = [];
+      for (const row of data) {
+        const eventDate = isoDay(row.event_date);
+        if (!eventDate) continue;
+        const leadRow = row.lead as
+          | {
+              title?: string | null;
+              celebration?: string | null;
+              company?: string | null;
+            }
+          | {
+              title?: string | null;
+              celebration?: string | null;
+              company?: string | null;
+            }[]
+          | null;
+        const lead = Array.isArray(leadRow) ? leadRow[0] : leadRow;
+        const keys = [
+          normalizeClientKey(lead?.title || ''),
+          normalizeClientKey(lead?.celebration || ''),
+          normalizeClientKey(lead?.company || ''),
+        ].filter(Boolean);
+        overlays.push({
+          event_date: eventDate,
+          lead_id: row.lead_id ? String(row.lead_id) : null,
+          client_id: row.client_id ? String(row.client_id) : null,
+          notes: row.notes ? String(row.notes) : null,
+          keys: [...new Set(keys)],
+        });
+      }
+      applyCancelledBookings(map, overlays);
+    }
+  } catch (e) {
+    errors.push(
+      e instanceof Error
+        ? e.message
+        : 'Supabase no disponible para reservas canceladas'
     );
   }
 

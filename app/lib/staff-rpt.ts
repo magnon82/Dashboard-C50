@@ -218,8 +218,8 @@ export function sumInfocajaDay(
 }
 
 /**
- * Alerta / bloqueo cuando efectivo contado es estrictamente menor que Infocaja.
- * Si falta contado o Infocaja (null), no hay alerta.
+ * Alerta / bloqueo cuando efectivo en tómbola es estrictamente menor que Infocaja.
+ * Si falta monto o Infocaja (null), no hay alerta.
  */
 export function efectivoMismatch(
   contado: number | null | undefined,
@@ -248,7 +248,7 @@ export function efectivoMismatch(
     };
   }
   const faltante = Math.abs(delta);
-  const message = `Efectivo contado (${moneyMx(contado)}) es menor que Infocaja (${moneyMx(infocaja)}). Faltan ${moneyMx(faltante)}. Corrige el conteo antes de cerrar.`;
+  const message = `Efectivo en tómbola (${moneyMx(contado)}) es menor que Infocaja (${moneyMx(infocaja)}). Faltan ${moneyMx(faltante)}. Corrige el monto antes de cerrar.`;
   return {
     mismatch: true,
     belowInfocaja: true,
@@ -258,7 +258,8 @@ export function efectivoMismatch(
 }
 
 /**
- * Regla de piso: el efectivo contado debe ser el mismo depositado en tómbola.
+ * Regla de piso: efectivo_contado y efectivo_tombola deben coincidir
+ * (un solo monto capturado como «Efectivo en Tómbola»).
  * Centavos redondeados (parseMoneyInput).
  */
 export function efectivoTombolaMustMatch(
@@ -270,7 +271,7 @@ export function efectivoTombolaMustMatch(
   if (c === t) return { ok: true };
   return {
     ok: false,
-    message: `El efectivo contado (${moneyMx(c)}) debe ser el mismo depositado en tómbola (${moneyMx(t)}).`,
+    message: `El efectivo en tómbola no coincide (${moneyMx(c)} vs ${moneyMx(t)}).`,
   };
 }
 

@@ -273,6 +273,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           '/api/hr/schedules',
           '/api/hr/leave-requests',
           '/api/hr/leave-balances',
+          '/api/hr/leave-balances/mine',
           '/api/hr/docs',
           '/api/hr/resguardo',
         ],
@@ -804,6 +805,11 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             note: 'Saldos · plantilla + soft-sync nómina',
           },
           {
+            label: '/api/hr/leave-balances/mine',
+            kind: 'route',
+            note: 'Saldo del colaborador vinculado (Staff)',
+          },
+          {
             label: '/api/hr/docs',
             kind: 'route',
             note: 'Biblioteca · hr_doc_links',
@@ -834,6 +840,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           '/api/hr/availability',
           '/api/hr/leave-requests',
           '/api/hr/leave-balances',
+          '/api/hr/leave-balances/mine',
           '/api/hr/docs',
           '/api/hr/expedientes',
           '/api/hr/resguardo',
@@ -869,7 +876,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           {
             label: '/staff/vacaciones',
             kind: 'route',
-            note: 'oculto hasta usuarios por empleado · redirect /staff',
+            note: 'Staff · solicitud propia + saldo (suite_username)',
           },
           {
             label: '/staff/perfil',

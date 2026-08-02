@@ -406,12 +406,12 @@ export function StaffCorteClient() {
       const info = payload?.infocaja;
       const contadoNum = parseMoneyInput(efectivoContado);
       if (contadoNum == null || contadoNum < 0) {
-        setError('Indica el efectivo contado (obligatorio)');
+        setError('Indica el efectivo en tómbola (obligatorio)');
         return;
       }
       if (info?.hasEfectivo && contadoNum < info.efectivo) {
         setError(
-          `Efectivo contado (${moneyMx(contadoNum)}) es menor que Infocaja (${moneyMx(info.efectivo)}). Corrige el conteo antes de cerrar.`
+          `Efectivo en tómbola (${moneyMx(contadoNum)}) es menor que Infocaja (${moneyMx(info.efectivo)}). Corrige el monto antes de cerrar.`
         );
         return;
       }
@@ -637,8 +637,8 @@ export function StaffCorteClient() {
 
               <Link
                 href="/ventas/corte-tpv/guia"
-                className="mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl text-base font-bold text-white shadow-sm transition-opacity hover:opacity-95"
-                style={{ backgroundColor: '#0F9F9C' }}
+                className="mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 bg-white text-base font-bold shadow-sm transition-opacity hover:opacity-95"
+                style={{ borderColor: SUITE.navy, color: SUITE.navy }}
               >
                 Guía de fotografía
               </Link>
@@ -881,8 +881,8 @@ export function StaffCorteClient() {
           2 · Cierre del día
         </h3>
         <p className="text-xs text-slate-500">
-          WI y Eventos · efectivo contado (= tómbola) vs Infocaja. Sin cortesías
-          (vienen de Gmail). Propinas = suma de tickets TPV.
+          WI y Eventos · efectivo en tómbola vs Infocaja. Sin cortesías (vienen
+          de Gmail). Propinas = suma de tickets TPV.
         </p>
 
         <MoneyInput
@@ -928,14 +928,14 @@ export function StaffCorteClient() {
         </div>
 
         <MoneyInput
-          label="Efectivo contado"
+          label="Efectivo en Tómbola"
           value={efectivoContado}
           onChange={setEfectivoContado}
           required
           hint={
             infocaja?.hasEfectivo
-              ? 'Obligatorio. Es el mismo monto que depositas en tómbola. No puede ser menor que Infocaja.'
-              : 'Obligatorio. Es el mismo monto que depositas en tómbola.'
+              ? 'Obligatorio. Monto que depositas en tómbola. No puede ser menor que Infocaja.'
+              : 'Obligatorio. Monto que depositas en tómbola.'
           }
         />
         {liveCashDelta != null && liveCashDelta < 0 ? (
@@ -943,30 +943,17 @@ export function StaffCorteClient() {
             role="alert"
             className="rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-950"
           >
-            Alerta: el efectivo contado ({moneyMx(efectivoContadoNum ?? 0)}) es
-            menor que Infocaja ({moneyMx(infocaja?.efectivo ?? 0)}). Faltan{' '}
-            {moneyMx(Math.abs(liveCashDelta))}. Corrige el conteo para poder
+            Alerta: el efectivo en tómbola ({moneyMx(efectivoContadoNum ?? 0)}){' '}
+            es menor que Infocaja ({moneyMx(infocaja?.efectivo ?? 0)}). Faltan{' '}
+            {moneyMx(Math.abs(liveCashDelta))}. Corrige el monto para poder
             cerrar el corte.
           </p>
         ) : null}
         {efectivoContado.trim() !== '' && !efectivoContadoOk ? (
           <p role="alert" className="text-sm text-red-700">
-            Indica un monto válido de efectivo contado.
+            Indica un monto válido de efectivo en tómbola.
           </p>
         ) : null}
-
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-          <p className="text-sm font-semibold text-slate-700">
-            Tómbola de seguridad
-          </p>
-          <p className="mt-1 text-lg font-bold" style={{ color: SUITE.navy }}>
-            {efectivoContadoOk ? moneyMx(efectivoContadoNum as number) : '—'}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Mismo monto que el efectivo contado (depósito en tómbola). No se
-            captura por separado.
-          </p>
-        </div>
 
         <label className="block">
           <span className="text-sm font-semibold text-slate-700">
@@ -1000,11 +987,11 @@ export function StaffCorteClient() {
           </p>
         ) : !efectivoContadoOk ? (
           <p className="text-center text-xs text-slate-500">
-            Indica el efectivo contado para poder cerrar
+            Indica el efectivo en tómbola para poder cerrar
           </p>
         ) : efectivoBelowInfocaja ? (
           <p className="text-center text-xs text-red-700">
-            El efectivo contado es menor que Infocaja — no se puede cerrar
+            El efectivo en tómbola es menor que Infocaja — no se puede cerrar
           </p>
         ) : null}
       </section>

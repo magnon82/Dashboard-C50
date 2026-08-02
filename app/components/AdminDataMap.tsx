@@ -500,12 +500,13 @@ const NODES: MapNode[] = [
       'app/api/hr/schedules/route.ts',
       'app/api/hr/leave-requests/route.ts',
       'app/api/hr/leave-balances/route.ts',
+      'app/api/hr/leave-balances/mine/route.ts',
       'app/api/hr/docs/route.ts',
       'app/api/hr/expedientes/route.ts',
       'app/api/hr/summary/route.ts',
     ],
     detail:
-      'CRUD e import RR.HH.: empleados, nómina, horarios (propose/import/mine), vacaciones, docs, expedientes, resguardo, summary. Módulo rrhh; Staff lee /schedules/mine publicado.',
+      'CRUD e import RR.HH.: empleados, nómina, horarios (propose/import/mine), vacaciones, docs, expedientes, resguardo, summary. Módulo rrhh; Staff lee /schedules/mine, /leave-balances/mine y leave-requests propias.',
   },
   {
     id: 'hub',
@@ -629,7 +630,7 @@ const NODES: MapNode[] = [
       'app/staff/horario/page.tsx',
     ],
     detail:
-      'Módulo rrhh activo: Plantilla (incluye expedientes), Horarios, Nómina, Vacaciones, Biblioteca. Staff /staff/horario ve solo publicado. Prefs disponibilidad Staff = pendiente.',
+      'Módulo rrhh activo: Plantilla (incluye expedientes), Horarios, Nómina, Vacaciones, Biblioteca. Staff: /staff/horario (publicado) + /staff/vacaciones (solicitud propia). Prefs disponibilidad Staff = pendiente.',
   },
   {
     id: 'staff-horario',
@@ -646,6 +647,27 @@ const NODES: MapNode[] = [
     files: ['app/staff/horario/page.tsx', 'app/api/hr/schedules/mine/route.ts'],
     detail:
       'Vista publicada al personal (vínculo suite_username / nombre). No gestiona borradores; eso vive en /rrhh → Horarios.',
+  },
+  {
+    id: 'staff-vacaciones',
+    label: 'Staff vacaciones',
+    sub: '/staff/vacaciones',
+    x: 1680,
+    y: 700,
+    w: 140,
+    h: 88,
+    kind: 'ui',
+    icon: 'rrhh',
+    stack: true,
+    sources: ['hr_leave_requests', 'hr_leave_balances'],
+    files: [
+      'app/staff/vacaciones/page.tsx',
+      'app/components/staff/StaffVacacionesClient.tsx',
+      'app/api/hr/leave-requests/route.ts',
+      'app/api/hr/leave-balances/mine/route.ts',
+    ],
+    detail:
+      'Solicitud propia con calendario y saldo (suite_username). Queda pendiente hasta aprobación en /rrhh → Vacaciones.',
   },
 ];
 
@@ -973,6 +995,17 @@ const EDGES: MapEdge[] = [
       [1475, 744],
     ],
     labelAt: [1475, 692],
+  },
+  {
+    id: 'e-api-hr-staff-vac',
+    from: 'api-hr',
+    to: 'staff-vacaciones',
+    label: 'solicitud',
+    via: [
+      [1550, 640],
+      [1550, 744],
+    ],
+    labelAt: [1550, 692],
   },
 ];
 

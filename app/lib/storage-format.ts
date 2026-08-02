@@ -46,6 +46,8 @@ export type DataInventoryResult = {
   documented: {
     sourceFiles: string[];
     groups: Array<{ id: string; label: string; sources: string[] }>;
+    /** Tablas RR.HH. (no son source_file de financial_records). */
+    hrTables?: string[];
   };
   detectedSourceFiles: DetectedSourceFile[];
   detectedSourceFilesError: string | null;

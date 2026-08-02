@@ -171,14 +171,18 @@ function formatFechaBaja(iso: string | null | undefined): string | null {
   }
 }
 
-/** Periodo trabajado: ingreso → baja (sin ambigüedad si falta una fecha). */
+/** Periodo trabajado: ingreso → baja + duración (p. ej. «2 años 6 meses»). */
 function formatPeriodoTrabajado(
   ingreso: string | null | undefined,
   baja: string | null | undefined
 ): string {
   const desde = formatFechaBaja(ingreso);
   const hasta = formatFechaBaja(baja);
-  if (desde && hasta) return `${desde} – ${hasta}`;
+  const duracion =
+    ingreso && baja ? formatAntiguedad(ingreso, baja) : null;
+  const tenure =
+    duracion && duracion !== '—' ? ` · ${duracion}` : '';
+  if (desde && hasta) return `${desde} – ${hasta}${tenure}`;
   if (hasta) return `hasta ${hasta}`;
   if (desde) return `desde ${desde} · sin fecha de baja`;
   return 'sin fechas';

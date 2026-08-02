@@ -152,6 +152,8 @@ function mapUpcomingRow(ev: {
   source_label: string;
   detail: string | null;
   stage: string | null;
+  status?: string | null;
+  notes?: string | null;
   lead_id: string | null;
   digital_os_id: string | null;
   quote_id: string | null;
@@ -163,6 +165,8 @@ function mapUpcomingRow(ev: {
     company: ev.client,
     event_date: ev.event_date,
     stage: ev.stage || '',
+    status: ev.status || null,
+    notes: ev.notes || null,
     pax: ev.pax,
     estimated_amount: null as number | null,
     source: ev.source,

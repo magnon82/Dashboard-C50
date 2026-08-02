@@ -584,8 +584,8 @@ export function TpvCorteClient() {
 
             <Link
               href="/ventas/corte-tpv/guia"
-              className="mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl text-base font-bold text-white shadow-sm"
-              style={{ backgroundColor: '#0F9F9C' }}
+              className="mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 bg-white text-base font-bold shadow-sm"
+              style={{ borderColor: SUITE.navy, color: SUITE.navy }}
             >
               Guía de fotos · ver ejemplos
             </Link>

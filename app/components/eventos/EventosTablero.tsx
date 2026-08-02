@@ -14,6 +14,8 @@ type UpcomingEvent = {
   company?: string | null;
   event_date: string | null;
   stage: string;
+  status?: string | null;
+  notes?: string | null;
   pax?: number | null;
   estimated_amount?: number | null;
   source?: string;
@@ -70,6 +72,7 @@ function daysUntilLabel(iso: string | null | undefined): string {
 }
 
 function stageOrSourceLabel(ev: UpcomingEvent): string {
+  if (ev.status === 'cancelado') return 'Cancelado';
   if (ev.stage && LEAD_STAGE_LABELS[ev.stage as LeadStage]) {
     return LEAD_STAGE_LABELS[ev.stage as LeadStage];
   }
@@ -105,16 +108,6 @@ export function EventosTablero({
       label: 'Pipeline estimado',
       value: k ? formatMxn(k.pipelineValue) : '—',
       border: '#C47B0A',
-    },
-    {
-      label: 'Historial (clientes c/act.)',
-      value: k?.activityClients ?? '—',
-      border: SUITE.navy,
-    },
-    {
-      label: 'Eventos indexados',
-      value: k?.activityEvents ?? '—',
-      border: SUITE.orange,
     },
   ];
 
@@ -239,18 +232,35 @@ export function EventosTablero({
                 return (
                   <li
                     key={ev.id}
-                    className="rounded-xl border border-slate-100 px-3 py-2 text-sm"
+                    className={`rounded-xl border px-3 py-2 text-sm ${
+                      ev.status === 'cancelado'
+                        ? 'border-rose-200 bg-rose-50/60'
+                        : 'border-slate-100'
+                    }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-slate-800">
-                          {ev.celebration || ev.title || 'Evento'}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div
+                            className={`font-semibold ${
+                              ev.status === 'cancelado'
+                                ? 'text-slate-500 line-through'
+                                : 'text-slate-800'
+                            }`}
+                          >
+                            {ev.celebration || ev.title || 'Evento'}
+                          </div>
+                          {ev.status === 'cancelado' && (
+                            <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-800">
+                              Cancelado
+                            </span>
+                          )}
                         </div>
                         <div className="mt-0.5 text-xs text-slate-500">
                           <span className="font-semibold text-slate-700">
                             {formatEventDate(ev.event_date)}
                           </span>
-                          {when ? ` · ${when}` : ''}
+                          {when && ev.status !== 'cancelado' ? ` · ${when}` : ''}
                           {showCompany ? ` · ${ev.company}` : ''}
                           {' · '}
                           {stageOrSourceLabel(ev)}
@@ -259,6 +269,9 @@ export function EventosTablero({
                             ? ` · Presupuesto/pax ${formatMxn(Number(ev.estimated_amount))}`
                             : ''}
                         </div>
+                        {ev.status === 'cancelado' && ev.notes && (
+                          <p className="mt-1 text-xs text-rose-900/80">{ev.notes}</p>
+                        )}
                       </div>
                       <div className="flex shrink-0 flex-wrap gap-1">
                         {goCrm && (
@@ -332,18 +345,6 @@ export function EventosTablero({
           </div>
         </SuiteCard>
       </div>
-
-      <SuiteCard dark>
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">
-          Reglas comerciales
-        </p>
-        <p className="mt-2 text-sm text-white/90">
-          Servicio 15% sobre subtotal · Hold: bloquea la fecha por 72 h hábiles
-          (admin puede extender) · Sin hold si faltan &lt;15 días · Barra libre
-          solo con alimentos · Grupos desde 10 pax · Pack desayunos ≥50 =
-          $30,000
-        </p>
-      </SuiteCard>
     </div>
   );
 }

@@ -21,9 +21,9 @@ export default function StaffPage() {
       subtitle="Operación de piso · Carranza 50"
     >
       <p className="mb-6 max-w-2xl text-sm" style={{ color: theme.muted }}>
-        Herramientas de piso: cierre diario, propinas, y lo que RH publica para
-        el personal (horario). La gestión de horarios, nómina, vacaciones y
-        resguardos está en Recursos Humanos, no aquí.
+        Herramientas de piso: cierre diario, propinas, horario publicado y
+        solicitud de vacaciones. La gestión de nómina, aprobación de vacaciones
+        y resguardos está en Recursos Humanos.
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2 max-w-3xl">
@@ -118,6 +118,40 @@ export default function StaffPage() {
               style={{ color: SUITE.orangeDeep }}
             >
               Ver horario →
+            </p>
+          </SuiteCard>
+        </Link>
+
+        <Link href="/staff/vacaciones" className="group block">
+          <SuiteCard
+            className="h-full transition-transform group-hover:-translate-y-0.5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-lg font-bold" style={{ color: SUITE.navy }}>
+                Mis vacaciones
+              </h2>
+              <span
+                className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                style={{
+                  backgroundColor: SUITE.orangeSoft,
+                  color: SUITE.navy,
+                }}
+              >
+                Solicitar
+              </span>
+            </div>
+            <p
+              className="mt-3 text-sm leading-relaxed"
+              style={{ color: SUITE.muted }}
+            >
+              Saldo disponible, calendario y seguimiento (pendiente / aprobada /
+              rechazada / tomadas)
+            </p>
+            <p
+              className="mt-5 text-sm font-bold"
+              style={{ color: SUITE.orangeDeep }}
+            >
+              Abrir vacaciones →
             </p>
           </SuiteCard>
         </Link>

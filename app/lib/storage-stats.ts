@@ -70,6 +70,31 @@ export function getDriveInventoryEntries(): DriveInventoryEntry[] {
         process.env.EVENTOS_PATH?.trim() || path.join(MI_UNIDAD, 'Eventos'),
       ],
     },
+    {
+      id: 'drive-rh',
+      label: 'Recursos Humanos (RH)',
+      paths: [path.join(MI_UNIDAD, 'RH')],
+    },
+    {
+      id: 'local-hr-downloads',
+      label: 'Descargas · import RR.HH.',
+      /** Solo archivos conocidos (no escanea toda la carpeta Descargas). */
+      paths: (() => {
+        const dir =
+          process.env.HR_NOMINA_LOCAL_DIR?.trim() ||
+          process.env.HR_HORARIOS_LOCAL_DIR?.trim() ||
+          path.join(process.env.USERPROFILE || process.env.HOME || '', 'Downloads');
+        return [
+          path.join(dir, 'NOMINA C50 2026 .xlsx'),
+          path.join(dir, 'NOMINA C50 2026.xlsx'),
+          path.join(dir, 'NOMINA C50 2025.xlsx'),
+          path.join(dir, 'NOMINAS C50 2024.xlsx'),
+          path.join(dir, 'NOMINA C50 2024.xlsx'),
+          path.join(dir, 'HORARIOS C50 2026.xlsx'),
+          path.join(dir, 'Horarios C50 2026.xlsx'),
+        ];
+      })(),
+    },
   ];
 }
 

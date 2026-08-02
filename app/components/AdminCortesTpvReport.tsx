@@ -823,12 +823,12 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                                 [
                                   ['WI', day.rpt.wi_amount],
                                   ['Eventos', day.rpt.eventos_amount],
-                                  ['Efectivo contado', day.rpt.efectivo_contado],
-                                  ['Infocaja', day.rpt.efectivo_infocaja],
                                   [
-                                    'Tómbola (= contado)',
-                                    day.rpt.efectivo_tombola,
+                                    'Efectivo en tómbola',
+                                    day.rpt.efectivo_tombola ??
+                                      day.rpt.efectivo_contado,
                                   ],
+                                  ['Infocaja', day.rpt.efectivo_infocaja],
                                   ['Bancos neto TPV', day.rpt.bancos_neto_tpv],
                                 ] as const
                               ).map(([lab, val]) => (

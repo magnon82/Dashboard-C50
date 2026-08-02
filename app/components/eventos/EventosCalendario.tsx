@@ -85,13 +85,6 @@ export function EventosCalendario() {
   const [events, setEvents] = useState<CalendarEventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
-  const [today, setToday] = useState<string>('');
-  const [sources, setSources] = useState({
-    activity: false,
-    os: false,
-    crm: false,
-  });
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<'all' | CalendarSource>(
     'all'
@@ -110,11 +103,6 @@ export function EventosCalendario() {
         return;
       }
       setEvents(json.events || []);
-      setToday(json.today || '');
-      setSources(
-        json.sources || { activity: false, os: false, crm: false }
-      );
-      setNote(json.note || null);
       if (json.error) setError(json.error);
     } catch {
       setError('No se pudo cargar el calendario local');
@@ -173,37 +161,6 @@ export function EventosCalendario() {
 
   return (
     <div className="space-y-5">
-      <SuiteCard accent>
-        <h3 className="text-xl font-bold" style={{ color: theme.title }}>
-          Calendario compartido
-        </h3>
-        <p
-          className="mt-2 text-xs font-bold uppercase tracking-[0.16em]"
-          style={{ color: SUITE.orangeDeep }}
-        >
-          Horario local CDMX
-        </p>
-        <p className="mt-3 text-sm leading-relaxed" style={{ color: theme.muted }}>
-          Próximas fechas desde actividad (Sheets/seed), órdenes de servicio y
-          leads CRM. No se muestran eventos pasados.
-        </p>
-        <p className="mt-2 text-xs text-amber-900 bg-amber-50 rounded-lg px-3 py-2">
-          {note ||
-            'Google Calendar sync: próximo — un calendario compartido, hold 72 h hábiles (sin hold si faltan &lt;15 días).'}
-        </p>
-        <p className="mt-2 text-xs text-slate-500">
-          Fuentes:{' '}
-          {[
-            sources.activity ? 'seed actividad' : null,
-            sources.os ? 'OS' : null,
-            sources.crm ? 'CRM' : null,
-          ]
-            .filter(Boolean)
-            .join(' · ') || 'ninguna aún'}
-          {today ? ` · hoy ${today}` : ''}
-        </p>
-      </SuiteCard>
-
       <div className="flex flex-wrap gap-2">
         {sourceTabs.map((t) => {
           const active = sourceFilter === t.id;
@@ -300,8 +257,13 @@ export function EventosCalendario() {
                   style={{
                     boxShadow: SUITE.shadow,
                     borderLeft: `4px solid ${
-                      ev.source === 'crm' ? SUITE.orange : SUITE.navy
+                      ev.status === 'cancelado'
+                        ? '#BE123C'
+                        : ev.source === 'crm'
+                          ? SUITE.orange
+                          : SUITE.navy
                     }`,
+                    opacity: ev.status === 'cancelado' ? 0.92 : 1,
                   }}
                 >
                   <div
@@ -322,11 +284,18 @@ export function EventosCalendario() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h4
-                        className="text-base font-bold"
+                        className={`text-base font-bold ${
+                          ev.status === 'cancelado' ? 'line-through opacity-70' : ''
+                        }`}
                         style={{ color: theme.title }}
                       >
                         {ev.title}
                       </h4>
+                      {ev.status === 'cancelado' && (
+                        <span className="rounded-lg bg-rose-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-rose-800">
+                          Cancelado
+                        </span>
+                      )}
                       <span
                         className="rounded-lg px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide"
                         style={{
@@ -340,6 +309,9 @@ export function EventosCalendario() {
                     </div>
                     {showClient && (
                       <p className="mt-1 text-sm text-slate-600">{ev.client}</p>
+                    )}
+                    {ev.status === 'cancelado' && ev.notes && (
+                      <p className="mt-1 text-xs text-rose-900/80">{ev.notes}</p>
                     )}
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                       {ev.pax != null && (

@@ -8,11 +8,16 @@ import {
 } from '@/app/lib/hr-api';
 import {
   leaveInclusiveDays,
+  todayIsoCdmx,
   type HrLeavePago,
   type HrLeaveRequest,
   type HrLeaveRequestPayload,
   type HrLeaveStatus,
 } from '@/app/lib/hr';
+import {
+  findNominaEnCursoPeriod,
+  syncLeaveBalancesFromPeriod,
+} from '@/app/lib/hr-payroll-sync';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -266,12 +271,73 @@ export async function POST(request: Request) {
           ? linked?.id ?? null
           : null;
 
-    // Staff no puede atribuir a otro empleado
+    // Staff no puede atribuir a otro empleado; exige vínculo a plantilla
     if (!isRrhh) {
-      if (linked?.id) {
-        employeeId = linked.id;
-      } else {
-        employeeId = null;
+      if (!linked?.id) {
+        return NextResponse.json(
+          {
+            error:
+              'Tu usuario no está vinculado a un colaborador. Pide a RH que asigne tu suite_username en Plantilla.',
+          },
+          { status: 400 }
+        );
+      }
+      employeeId = linked.id;
+      payload.nombre_empleado = linked.full_name;
+      if (linked.puesto) payload.puesto = linked.puesto;
+
+      // Hard block: días solicitados ≤ disponibles (nómina − pendientes/aprobadas vigentes)
+      const year = Number(todayIsoCdmx().slice(0, 4));
+      const today = todayIsoCdmx();
+      const period = await findNominaEnCursoPeriod(sb);
+      if (period) {
+        try {
+          await syncLeaveBalancesFromPeriod(sb, period.id, year);
+        } catch {
+          // soft
+        }
+      }
+      const { data: balRow } = await sb
+        .from('hr_leave_balances')
+        .select('days_remaining')
+        .eq('year', year)
+        .eq('employee_id', employeeId)
+        .maybeSingle();
+      const remaining =
+        balRow?.days_remaining != null ? Number(balRow.days_remaining) : null;
+
+      if (remaining == null || !Number.isFinite(remaining)) {
+        return NextResponse.json(
+          {
+            error:
+              'No hay saldo de vacaciones disponible en nómina. Consulta a RH antes de solicitar.',
+          },
+          { status: 400 }
+        );
+      }
+
+      const { data: openRows } = await sb
+        .from('hr_leave_requests')
+        .select('days, status, date_to')
+        .eq('employee_id', employeeId)
+        .in('status', ['pendiente', 'aprobada']);
+
+      let reserved = 0;
+      for (const r of openRows || []) {
+        const st = String((r as { status: string }).status);
+        const to = String((r as { date_to: string }).date_to).slice(0, 10);
+        if (st === 'pendiente' || (st === 'aprobada' && to >= today)) {
+          reserved += Number((r as { days: number }).days) || 0;
+        }
+      }
+      const available = Math.max(0, remaining - reserved);
+      if (days > available) {
+        return NextResponse.json(
+          {
+            error: `Solo tienes ${available} día${available === 1 ? '' : 's'} disponible${available === 1 ? '' : 's'} (pediste ${days}). Reduce el rango o espera la aprobación de RH.`,
+          },
+          { status: 400 }
+        );
       }
     } else if (employeeId) {
       // Validar que el empleado exista (evita IDs inventados)
