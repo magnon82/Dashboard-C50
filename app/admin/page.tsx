@@ -258,19 +258,6 @@ export default function AdminPage() {
     }
   }
 
-  function applyStaffTemplate() {
-    setForm((f) => ({
-      ...f,
-      modules: ['staff'],
-      capabilities: f.capabilities.includes('staff.corte')
-        ? f.capabilities
-        : [...f.capabilities, 'staff.corte'],
-      password: f.password || generateClientPassword(),
-    }));
-    setOkMsg('');
-    setError('');
-  }
-
   function toggleCapability(id: string) {
     setForm((f) => ({
       ...f,
@@ -448,7 +435,7 @@ export default function AdminPage() {
       {/* 2. Usuarios */}
       <AdminSection
         title="Usuarios"
-        description="Solo tú gestionas cuentas. Asigna módulos: Staff = solo Cortes TPV; Ventas/Finanzas/etc. según necesidad."
+        description="Cada cuenta del ERP tiene módulos (qué ve) y funciones (palomitas, p. ej. corte). Al instalar la app en el celular, el usuario entra con su sesión y solo ve lo asignado aquí."
       >
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -515,19 +502,6 @@ export default function AdminPage() {
             <h3 className="text-lg font-bold text-slate-900">Nuevo usuario</h3>
             <p className="mt-1 text-sm text-slate-500">
               Solo lectura en los módulos que les asignes. Solo tú gestionas cuentas.
-            </p>
-
-            <button
-              type="button"
-              onClick={applyStaffTemplate}
-              className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
-            >
-              Plantilla Staff · con permiso de corte
-            </button>
-            <p className="mt-1 text-xs text-slate-500">
-              Marca módulo Staff + palomita «Puede hacer el corte», genera
-              contraseña y al iniciar sesión van a{' '}
-              <span className="font-mono">/staff</span>.
             </p>
 
             <label className="mt-4 block text-sm font-semibold text-slate-700">

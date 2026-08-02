@@ -1,7 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ALL_SOURCE_FILES } from '@/app/lib/admin-resources';
+import {
+  lastUpdateForMapNode,
+  type AreaLastUpdate,
+} from '@/app/lib/admin-last-updates';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -151,7 +155,7 @@ const NODES: MapNode[] = [
     x: 64,
     y: 96,
     w: 154,
-    h: 108,
+    h: 122,
     kind: 'system',
     icon: 'gmail',
     stack: true,
@@ -162,7 +166,7 @@ const NODES: MapNode[] = [
       'ingest_facturas_gmail.py',
     ],
     detail:
-      'Infocaja Fin de Día, CORTE CARRANZA (XLS) y facturas CFDI (XML/PDF → factura_cfdi; adjuntos en FACTURAS CFDI).',
+      'Función: ventas diarias (Infocaja + CORTE → /ventas) y CFDI → financial_records (ERP). Cloud: lun–sáb 4:00 AM · dom 8:00 PM CDMX (mismo workflow; CFDI best-effort).',
   },
   {
     id: 'drive',
@@ -171,7 +175,7 @@ const NODES: MapNode[] = [
     x: 64,
     y: 250,
     w: 154,
-    h: 108,
+    h: 122,
     kind: 'system',
     icon: 'drive',
     stack: true,
@@ -196,7 +200,7 @@ const NODES: MapNode[] = [
       'HR_NOMINA_DRIVE_FOLDER_ID',
     ],
     detail:
-      'Finanzas: PRESUPUESTOS, FLUJO, estados, comprobantes, ventas_semana. RR.HH.: I:\\Mi unidad\\RH (Nóminas, Horarios, Expedientes, Documentación vigente, Cultura, Perfiles, Exámenes) · nóminas Drive folder 1qIZq7O2lcvs5zxG6p5jjzh4wRMXoFK3J.',
+      'Finanzas: PRESUPUESTOS (manual · TODO automatizar), FLUJO → Saldos al día (cada hora Actions), estados/comprobantes (manual · TODO), ventas_semana (manual · TODO). RR.HH.: soft-sync Actions diario 12:00 PM CDMX; File Stream opcional.',
   },
   {
     id: 'sheets',
@@ -205,14 +209,14 @@ const NODES: MapNode[] = [
     x: 64,
     y: 404,
     w: 154,
-    h: 108,
+    h: 122,
     kind: 'system',
     icon: 'sheets',
     stack: true,
     sources: ['cxp_por_pagar', 'cxp', 'cxp_saldos'],
     files: ['ingest_cxp_por_pagar.py', 'ingest_cxp.py'],
     detail:
-      'Sheet CXP: saldos por pagar (Actions cada 5 min → cxp_por_pagar) y líneas pagadas / retornos (manual → cxp + cxp_saldos).',
+      'Función: CxP. Saldos por pagar (Actions cada hora → cxp_por_pagar · Saldos al día) y líneas pagadas / retornos (manual → cxp + cxp_saldos).',
   },
   {
     id: 'eventos',
@@ -221,7 +225,7 @@ const NODES: MapNode[] = [
     x: 64,
     y: 558,
     w: 154,
-    h: 108,
+    h: 118,
     kind: 'system',
     icon: 'eventos',
     stack: true,
@@ -232,30 +236,48 @@ const NODES: MapNode[] = [
   {
     id: 'wf-gmail',
     label: 'sync-gmail.yml',
-    sub: '~5:00 AM CDMX',
+    sub: 'L–S 4:00 AM · Dom 20:00',
     x: 388,
     y: 96,
     w: 196,
-    h: 72,
+    h: 84,
     kind: 'runner',
     icon: 'github',
-    files: ['.github/workflows/sync-gmail.yml', 'sync_gmail_diario.py'],
+    files: [
+      '.github/workflows/sync-gmail.yml',
+      'sync_gmail_diario.py',
+      'ingest_facturas_gmail.py',
+    ],
     detail:
-      'Actions diario (11:00 UTC): Infocaja + CORTE. Facturas CFDI van en local (Actions usa --skip-facturas).',
+      'Función: ventas diarias (Infocaja + CORTE) + CFDI → financial_records. Lun–sáb 4:00 AM CDMX (0 10 UTC) + respaldo ~5:17 AM; domingo 8:00 PM CDMX (lun 02:00 UTC). CFDI = paso aparte continue-on-error.',
   },
   {
     id: 'wf-saldos',
     label: 'sync-saldos.yml',
-    sub: 'cada 5 min',
+    sub: 'cada hora',
     x: 388,
     y: 210,
     w: 196,
-    h: 72,
+    h: 84,
     kind: 'runner',
     icon: 'github',
     files: ['.github/workflows/sync-saldos.yml', 'sync_saldos_al_dia.py'],
     detail:
-      'Actions cada 5 min: flujo_efectivo_saldo/semana/mov (Drive) + cxp_por_pagar (Sheets). No corre ingest_cxp (líneas).',
+      'Función: Saldos al día → flujo_efectivo_saldo/semana/mov (Drive) + cxp_por_pagar (Sheets). Cron 7 * * * * (:07 CDMX/UTC). No corre ingest_cxp (líneas).',
+  },
+  {
+    id: 'wf-hr',
+    label: 'sync-hr-drive.yml',
+    sub: 'diario 12:00 PM',
+    x: 388,
+    y: 396,
+    w: 196,
+    h: 78,
+    kind: 'runner',
+    icon: 'github',
+    files: ['.github/workflows/sync-hr-drive.yml', 'sync_hr_drive_cloud.py'],
+    detail:
+      'Soft-sync RR.HH.: inventario hr_* + hr_drive_sync_state. Diario 12:00 PM CDMX (0 18 UTC). Sin File Stream; import xlsx / carpetas nuevas = PC admin o POST /api/hr/sync.',
   },
   {
     id: 'ingestor-cloud',
@@ -264,10 +286,16 @@ const NODES: MapNode[] = [
     x: 388,
     y: 324,
     w: 196,
-    h: 72,
+    h: 56,
     kind: 'runner',
     icon: 'python',
-    files: ['google_auth.py', 'requirements.txt', 'sync_gmail_diario.py', 'sync_saldos_al_dia.py'],
+    files: [
+      'google_auth.py',
+      'requirements.txt',
+      'sync_gmail_diario.py',
+      'sync_saldos_al_dia.py',
+      'sync_hr_drive_cloud.py',
+    ],
     detail: 'Scripts Python en el runner ubuntu-latest con secrets del repo.',
   },
   {
@@ -277,13 +305,13 @@ const NODES: MapNode[] = [
     x: 388,
     y: 488,
     w: 196,
-    h: 64,
+    h: 78,
     kind: 'runner',
     icon: 'python',
     sources: ['estado_mifel', 'estado_bbva', 'estado_pdf_index', 'estado_cuenta_pdf_index'],
     files: ['ingest_estados_cuenta.py'],
     detail:
-      'Estados Excel MIFEL/BBVA; índice PDFs pagos (COMPROBANTES BANCARIOS → estado_pdf_index); índice PDFs estados (Administración\\Bancos → estado_cuenta_pdf_index).',
+      'Estados Excel MIFEL/BBVA; índice PDFs. Manual por ahora · TODO(automate) Actions.',
   },
   {
     id: 'ingest-prep',
@@ -292,7 +320,7 @@ const NODES: MapNode[] = [
     x: 388,
     y: 568,
     w: 196,
-    h: 64,
+    h: 78,
     kind: 'runner',
     icon: 'python',
     sources: [
@@ -305,22 +333,22 @@ const NODES: MapNode[] = [
     ],
     files: ['ingest_presupuesto.py'],
     detail:
-      'Excel PRESUPUESTOS: rubros, saldos, semanas, desglose SEM (presupuesto_sem_detalle) e ingresos Mifel/BBVA (ventas / entre_cuentas → presupuesto_ingreso).',
+      'Excel PRESUPUESTOS: rubros, saldos, semanas, ingresos Mifel/BBVA. Manual · TODO(automate) Actions.',
   },
   {
     id: 'ingest-facturas',
     label: 'ingest_facturas',
-    sub: 'Gmail CFDI · local',
+    sub: 'Gmail CFDI · cloud',
     x: 388,
     y: 648,
     w: 196,
-    h: 64,
+    h: 78,
     kind: 'runner',
     icon: 'python',
     sources: ['factura_cfdi'],
     files: ['ingest_facturas_gmail.py', 'sync_gmail_diario.py'],
     detail:
-      'Indexa XML/PDF de Gmail → factura_cfdi; guarda adjuntos en FACTURAS CFDI. UI: /finanzas/facturas.',
+      'CFDI → factura_cfdi en financial_records (ERP). Cloud vía sync-gmail.yml (best-effort). Adjuntos: FACTURAS_PATH o ingestor/data/facturas en CI. UI: /finanzas/facturas.',
   },
   {
     id: 'ingest-cxp',
@@ -329,7 +357,7 @@ const NODES: MapNode[] = [
     x: 388,
     y: 728,
     w: 196,
-    h: 56,
+    h: 72,
     kind: 'runner',
     icon: 'python',
     sources: ['cxp', 'cxp_saldos'],
@@ -344,7 +372,7 @@ const NODES: MapNode[] = [
     x: 388,
     y: 808,
     w: 196,
-    h: 64,
+    h: 78,
     kind: 'runner',
     icon: 'windows',
     sources: ['hr_*'],
@@ -364,7 +392,7 @@ const NODES: MapNode[] = [
     x: 820,
     y: 140,
     w: 200,
-    h: 120,
+    h: 134,
     kind: 'db',
     icon: 'db',
     stack: true,
@@ -392,7 +420,7 @@ const NODES: MapNode[] = [
     x: 820,
     y: 440,
     w: 200,
-    h: 120,
+    h: 134,
     kind: 'db',
     icon: 'db',
     stack: true,
@@ -529,7 +557,7 @@ const NODES: MapNode[] = [
     x: 1528,
     y: 200,
     w: 132,
-    h: 88,
+    h: 102,
     kind: 'ui',
     icon: 'ventas',
     stack: true,
@@ -617,7 +645,7 @@ const NODES: MapNode[] = [
     x: 1528,
     y: 560,
     w: 132,
-    h: 100,
+    h: 102,
     kind: 'ui',
     icon: 'rrhh',
     stack: true,
@@ -679,7 +707,7 @@ const EDGES: MapEdge[] = [
     id: 'e-gmail-wf',
     from: 'gmail',
     to: 'wf-gmail',
-    label: 'Gmail API',
+    label: 'ventas diarias',
     via: [
       [310, 150],
       [310, 132],
@@ -689,21 +717,34 @@ const EDGES: MapEdge[] = [
   {
     id: 'e-gmail-facturas',
     from: 'gmail',
-    to: 'ingest-facturas',
-    label: 'CFDI local',
-    dashed: true,
+    to: 'wf-gmail',
+    label: 'CFDI → ERP',
     labelHover: true,
     via: [
       [250, 170],
-      [250, 680],
+      [250, 120],
+      [388, 120],
     ],
-    labelAt: [250, 420],
+    labelAt: [250, 145],
+  },
+  {
+    id: 'e-drive-hr',
+    from: 'drive',
+    to: 'wf-hr',
+    label: 'RH soft-sync',
+    labelHover: true,
+    via: [
+      [300, 320],
+      [300, 428],
+      [388, 428],
+    ],
+    labelAt: [300, 370],
   },
   {
     id: 'e-drive-wf',
     from: 'drive',
     to: 'wf-saldos',
-    label: 'Drive API',
+    label: 'saldos al día',
     via: [
       [330, 304],
       [330, 246],
@@ -714,7 +755,7 @@ const EDGES: MapEdge[] = [
     id: 'e-sheets-wf',
     from: 'sheets',
     to: 'wf-saldos',
-    label: 'cxp_por_pagar',
+    label: 'CxP saldo vivo',
     labelHover: true,
     via: [
       [280, 458],
@@ -727,7 +768,7 @@ const EDGES: MapEdge[] = [
     id: 'e-sheets-cxp',
     from: 'sheets',
     to: 'ingest-cxp',
-    label: 'cxp líneas',
+    label: 'CxP líneas',
     dashed: true,
     labelHover: true,
     via: [
@@ -761,10 +802,47 @@ const EDGES: MapEdge[] = [
     labelAt: [252, 510],
   },
   {
+    id: 'e-wf-gmail-ing',
+    from: 'wf-gmail',
+    to: 'ingestor-cloud',
+    label: 'Python',
+    labelHover: true,
+    via: [
+      [486, 168],
+      [486, 340],
+    ],
+    labelAt: [500, 250],
+  },
+  {
+    id: 'e-wf-saldos-ing',
+    from: 'wf-saldos',
+    to: 'ingestor-cloud',
+    label: 'Python',
+    labelHover: true,
+    via: [
+      [486, 246],
+      [486, 340],
+    ],
+    labelAt: [510, 295],
+  },
+  {
+    id: 'e-wf-hr-db',
+    from: 'wf-hr',
+    to: 'hr-db',
+    label: 'soft-sync',
+    labelHover: true,
+    via: [
+      [640, 428],
+      [820, 500],
+    ],
+    labelAt: [720, 450],
+    accent: true,
+  },
+  {
     id: 'e-ing-fr',
     from: 'ingestor-cloud',
     to: 'fr',
-    label: 'upsert',
+    label: 'upsert ventas/saldos/CFDI',
     labelHover: true,
     via: [
       [640, 360],
@@ -1229,11 +1307,14 @@ function NodeBox({
   node,
   selected,
   dimmed,
+  lastAct,
   onSelect,
 }: {
   node: MapNode;
   selected: boolean;
   dimmed?: boolean;
+  /** Texto corto CDMX o «Sin registro» / «Manual / sin sync cloud». */
+  lastAct?: string | null;
   onSelect: (id: string) => void;
 }) {
   const fill =
@@ -1246,6 +1327,9 @@ function NodeBox({
   const strokeW = selected ? 2.4 : node.kind === 'db' ? 1.8 : 1.2;
   const iconSize = node.stack ? (node.kind === 'db' ? 36 : 32) : 20;
   const font = { fontFamily: 'ui-sans-serif, system-ui, sans-serif' };
+  const showLast = Boolean(lastAct);
+  const subYStack = node.y + 14 + iconSize + 34;
+  const lastYStack = subYStack + (node.sub ? 14 : 0);
 
   return (
     <g
@@ -1296,13 +1380,26 @@ function NodeBox({
           {node.sub ? (
             <text
               x={node.x + node.w / 2}
-              y={node.y + 14 + iconSize + 34}
+              y={subYStack}
               textAnchor="middle"
               fill={SUITE.muted}
               fontSize={10}
               style={font}
             >
               {node.sub}
+            </text>
+          ) : null}
+          {showLast ? (
+            <text
+              x={node.x + node.w / 2}
+              y={lastYStack}
+              textAnchor="middle"
+              fill={SUITE.orangeDeep}
+              fontSize={9}
+              fontWeight={600}
+              style={font}
+            >
+              {lastAct}
             </text>
           ) : null}
         </>
@@ -1316,7 +1413,12 @@ function NodeBox({
           />
           <text
             x={node.x + 44}
-            y={node.y + (node.sub ? node.h / 2 - 4 : node.h / 2 + 4)}
+            y={
+              node.y +
+              (node.sub || showLast
+                ? node.h / 2 - (showLast && node.sub ? 10 : 4)
+                : node.h / 2 + 4)
+            }
             textAnchor="start"
             fill={SUITE.navy}
             fontSize={12}
@@ -1328,13 +1430,26 @@ function NodeBox({
           {node.sub ? (
             <text
               x={node.x + 44}
-              y={node.y + node.h / 2 + 14}
+              y={node.y + node.h / 2 + (showLast ? 6 : 14)}
               textAnchor="start"
               fill={SUITE.muted}
               fontSize={10}
               style={font}
             >
               {node.sub}
+            </text>
+          ) : null}
+          {showLast ? (
+            <text
+              x={node.x + 44}
+              y={node.y + node.h / 2 + (node.sub ? 20 : 14)}
+              textAnchor="start"
+              fill={SUITE.orangeDeep}
+              fontSize={9}
+              fontWeight={600}
+              style={font}
+            >
+              {lastAct}
             </text>
           ) : null}
         </>
@@ -1458,6 +1573,9 @@ export function AdminDataMap() {
   const [selectedId, setSelectedId] = useState<string | null>('fr');
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  const [areas, setAreas] = useState<AreaLastUpdate[]>([]);
+  const [lastUpdatesError, setLastUpdatesError] = useState<string | null>(null);
+  const fetchedRef = useRef(false);
   const byId = useMemo(() => new Map(NODES.map((n) => [n.id, n])), []);
   const edgeById = useMemo(() => new Map(EDGES.map((e) => [e.id, e])), []);
   const selected = selectedId ? byId.get(selectedId) : undefined;
@@ -1465,6 +1583,40 @@ export function AdminDataMap() {
   const edgeEndpoints = selectedEdge
     ? new Set([selectedEdge.from, selectedEdge.to])
     : null;
+  const selectedLast = selectedId ? lastUpdateForMapNode(selectedId, areas) : null;
+
+  useEffect(() => {
+    if (!open || fetchedRef.current) return;
+    let cancelled = false;
+    fetchedRef.current = true;
+    fetch('/api/admin/last-updates')
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(
+            typeof data?.error === 'string' ? data.error : `Error ${res.status}`,
+          );
+        }
+        return data as { areas?: AreaLastUpdate[] };
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setAreas(Array.isArray(data.areas) ? data.areas : []);
+          setLastUpdatesError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setLastUpdatesError(
+            err instanceof Error ? err.message : 'No se pudo cargar últimas act.',
+          );
+          fetchedRef.current = false;
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const selectNode = (id: string) => {
     setSelectedEdgeId(null);
@@ -1640,12 +1792,14 @@ export function AdminDataMap() {
                 selectedId === node.id || (!!edgeEndpoints && edgeEndpoints.has(node.id));
               // Only dim nodes when an edge is selected (keep the rest readable when browsing nodes).
               const nodeDimmed = !!selectedEdgeId && !edgeEndpoints?.has(node.id);
+              const lu = lastUpdateForMapNode(node.id, areas);
               return (
                 <NodeBox
                   key={node.id}
                   node={node}
                   selected={nodeSelected}
                   dimmed={nodeDimmed}
+                  lastAct={lu ? lu.shortDisplay : null}
                   onSelect={selectNode}
                 />
               );
@@ -1708,6 +1862,15 @@ export function AdminDataMap() {
                 {selected.detail ? (
                   <p className="mt-1 text-sm" style={{ color: theme.muted }}>
                     {selected.detail}
+                  </p>
+                ) : null}
+                {selectedLast ? (
+                  <p className="mt-1.5 text-sm font-semibold" style={{ color: SUITE.orangeDeep }}>
+                    {selectedLast.display}
+                  </p>
+                ) : lastUpdatesError ? (
+                  <p className="mt-1.5 text-xs" style={{ color: theme.muted }}>
+                    {lastUpdatesError}
                   </p>
                 ) : null}
               </div>

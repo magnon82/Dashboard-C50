@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { APP_MODULES } from '@/app/lib/modules';
+import { PRODUCT_ORG } from '@/app/lib/product';
 import { canSeeModule, canSeeAdmin, useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
 
@@ -157,7 +158,7 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
                 className="text-[11px] font-semibold uppercase tracking-[0.18em]"
                 style={{ color: theme.muted }}
               >
-                Cluster Culinario · Carranza 50
+                {PRODUCT_ORG}
               </p>
               <h1
                 className="mt-1 text-2xl font-bold tracking-tight md:text-3xl"

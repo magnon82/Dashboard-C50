@@ -4,11 +4,13 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   TPV_TERMINALS,
+  adminCorteDateWindow,
   buildDayCompleteness,
   computeNetoBanco,
   defaultCorteDateCdmx,
   moneyMx,
   photoKindLabel,
+  shiftIsoDate,
   todayCdmxIso,
   type TpvAdminReportDay,
   type TpvCorteUpload,
@@ -242,8 +244,20 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
-  /** Fecha elegida para subir/revisar (admin puede cualquier día). */
+  /** Fecha elegida: día operativo o hasta 7 días atrás. */
   const [jumpDate, setJumpDate] = useState(() => defaultCorteDateCdmx());
+  const dateWindow = useMemo(() => adminCorteDateWindow(), []);
+
+  function setJumpDateClamped(next: string) {
+    if (!next) {
+      setJumpDate('');
+      return;
+    }
+    const { minDate, maxDate } = adminCorteDateWindow();
+    if (next < minDate) setJumpDate(minDate);
+    else if (next > maxDate) setJumpDate(maxDate);
+    else setJumpDate(next);
+  }
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -558,9 +572,8 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
               Cortes TPV · reporte y carga
             </h3>
             <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-              Elige cualquier fecha y sube Venta (Totalización) + Propinas por
-              terminal (misma compresión/OCR que Staff). Útil para días pasados
-              o para probar el fix de subida.
+              Día operativo del corte (madrugada 00:00–05:59 → día anterior) y
+              hasta 7 días atrás. Misma compresión/OCR que Staff.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -606,32 +619,44 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
             Cargar / revisar por fecha
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Admin puede cualquier día. Staff solo usa la ventana del día
-            (madrugada → día anterior). Hoy CDMX: {todayCdmxIso()}.
+            Master: día operativo ({dateWindow.opDay}) o desde{' '}
+            {dateWindow.minDate}. Staff solo usa la ventana del momento. Hoy
+            calendario CDMX: {todayCdmxIso()}.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="block text-xs font-semibold text-slate-600">
               Fecha del corte
               <input
                 type="date"
-                value={jumpDate}
-                onChange={(e) => setJumpDate(e.target.value)}
+                value={jumpDate || dateWindow.opDay}
+                min={dateWindow.minDate}
+                max={dateWindow.maxDate}
+                onChange={(e) => setJumpDateClamped(e.target.value)}
                 className="mt-1 block min-h-11 w-full min-w-[11rem] rounded-xl border border-slate-200 bg-white px-3 text-sm"
               />
             </label>
             <button
               type="button"
-              onClick={() => setJumpDate(defaultCorteDateCdmx())}
+              onClick={() => setJumpDateClamped(defaultCorteDateCdmx())}
               className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Ventana staff
+              Día operativo
             </button>
             <button
               type="button"
-              onClick={() => setJumpDate(todayCdmxIso())}
+              onClick={() =>
+                setJumpDateClamped(shiftIsoDate(defaultCorteDateCdmx(), -7))
+              }
               className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Hoy
+              Hace 7 días
+            </button>
+            <button
+              type="button"
+              onClick={() => setJumpDateClamped(todayCdmxIso())}
+              className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Hoy calendario
             </button>
             {jumpDate ? (
               <button

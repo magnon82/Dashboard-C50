@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="C50 Suite">
+  <rect width="512" height="512" rx="96" fill="#0B1F3A"/>
+  <rect x="48" y="48" width="416" height="416" rx="72" fill="#122a4a"/>
+  <text x="256" y="290" text-anchor="middle" font-family="Georgia, serif" font-size="168" font-weight="700" fill="#F4A261">C50</text>
+  <text x="256" y="360" text-anchor="middle" font-family="system-ui, sans-serif" font-size="36" font-weight="600" letter-spacing="4" fill="#E8EEF8">SUITE</text>
+</svg>

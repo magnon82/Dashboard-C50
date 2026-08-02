@@ -55,15 +55,13 @@ export function AdminSaldosBancos() {
       }
       setManual(json.manual ?? null);
       setPresupuesto(json.presupuesto ?? null);
-      const seed = json.manual ?? json.presupuesto;
-      if (seed) {
-        setMifel(seed.mifel != null ? String(seed.mifel) : '');
-        setBbva(seed.bbva != null ? String(seed.bbva) : '');
-      }
-      if (json.manual?.date) {
-        setDate(json.manual.date);
-      } else if (json.today) {
+      // Campos de captura vacíos por defecto; el resumen arriba muestra el saldo activo.
+      setMifel('');
+      setBbva('');
+      if (json.today) {
         setDate(json.today);
+      } else if (json.manual?.date) {
+        setDate(json.manual.date);
       }
     } catch {
       setError('Error de red al cargar saldos');

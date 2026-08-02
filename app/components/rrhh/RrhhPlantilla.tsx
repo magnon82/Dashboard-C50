@@ -56,6 +56,8 @@ type ExpedienteFolder = {
   linkStatus?: string;
   archiveStatus?: string | null;
   fechaBaja?: string | null;
+  /** Desajuste Drive↔DB, p.ej. baja con carpeta aún en Altas. */
+  archiveNote?: string | null;
 };
 
 type ArchivedDb = {
@@ -208,7 +210,7 @@ function PlantillaPersonRow({
   folderPath,
   busy,
   onOpenExpediente,
-  onBaja,
+  onEdit,
 }: {
   employee: HrEmployee;
   asOf: string | null;
@@ -216,7 +218,7 @@ function PlantillaPersonRow({
   folderPath: string | null;
   busy: boolean;
   onOpenExpediente: (employee: HrEmployee, path: string) => void;
-  onBaja: (employee: HrEmployee) => void;
+  onEdit: (employee: HrEmployee) => void;
 }) {
   const puesto =
     formatHrPuesto(
@@ -262,12 +264,26 @@ function PlantillaPersonRow({
       <div className="rrhh-plantilla__actions">
         <button
           type="button"
-          className="rrhh-plantilla__baja-btn"
+          className="rrhh-plantilla__edit-btn"
           disabled={busy}
-          onClick={() => onBaja(employee)}
-          title="Dar de baja"
+          onClick={() => onEdit(employee)}
+          title="Editar colaborador"
+          aria-label={`Editar ${formatHrListName(employee.full_name)}`}
         >
-          Baja
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
         </button>
       </div>
     </div>
@@ -317,7 +333,11 @@ export function RrhhPlantilla({
       return '';
     }
   });
-  const [bajaTarget, setBajaTarget] = useState<HrEmployee | null>(null);
+  /** Panel de ficha: editar / dar de baja (no botón rojo en la lista). */
+  const [editTarget, setEditTarget] = useState<HrEmployee | null>(null);
+  const [showBajaForm, setShowBajaForm] = useState(false);
+  /** Archivo de bajas: fuera de la plantilla vigente (no como alerta). */
+  const [showArchivoBajas, setShowArchivoBajas] = useState(false);
   const [bajaFecha, setBajaFecha] = useState(() => {
     try {
       return new Intl.DateTimeFormat('en-CA', {
@@ -484,6 +504,15 @@ export function RrhhPlantilla({
     });
   }, [expIndex?.archivedFromDb, year, resolveFolderPath]);
 
+  /** Carpetas en Altas cuyo empleado ya está baja en sistema. */
+  const expedienteMismatches = useMemo(() => {
+    return folders.filter(
+      (f) =>
+        f.archiveStatus === 'baja' &&
+        (f.archiveNote || '').toLowerCase().includes('altas')
+    );
+  }, [folders]);
+
   const openExpediente = useCallback(
     (
       emp: {
@@ -576,17 +605,18 @@ export function RrhhPlantilla({
   }
 
   async function submitBaja() {
-    if (!bajaTarget) return;
+    if (!editTarget) return;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(bajaFecha)) {
       setToast('Indica la fecha de baja (YYYY-MM-DD)');
       return;
     }
-    const ok = await patchEmployee(bajaTarget.id, {
+    const ok = await patchEmployee(editTarget.id, {
       action: 'baja',
       fecha_baja: bajaFecha,
     });
     if (ok) {
-      setBajaTarget(null);
+      setEditTarget(null);
+      setShowBajaForm(false);
       void loadExpedientes();
     }
   }
@@ -714,7 +744,8 @@ export function RrhhPlantilla({
           style={{ backgroundColor: SUITE.orangeDeep }}
           onClick={() => {
             setShowAlta((v) => !v);
-            setBajaTarget(null);
+            setEditTarget(null);
+            setShowBajaForm(false);
           }}
         >
           {showAlta ? 'Cerrar alta' : 'Alta empleado'}
@@ -726,6 +757,27 @@ export function RrhhPlantilla({
           onClick={() => setShowCatalog((v) => !v)}
         >
           {showCatalog ? 'Ver plantilla' : 'Overrides'}
+        </button>
+        <button
+          type="button"
+          className="rounded-full px-3 py-1 text-xs font-semibold border border-slate-200"
+          style={{ color: theme.title }}
+          onClick={() => setShowArchivoBajas((v) => !v)}
+          title="Bajas y desajustes de expediente — fuera de la plantilla vigente"
+        >
+          {showArchivoBajas
+            ? 'Ocultar archivo'
+            : `Archivo / Bajas${
+                bajasDelAno.length || expedienteMismatches.length
+                  ? ` (${bajasDelAno.length}${
+                      expedienteMismatches.length
+                        ? ` · ${expedienteMismatches.length} desajuste${
+                            expedienteMismatches.length === 1 ? '' : 's'
+                          }`
+                        : ''
+                    })`
+                  : ''
+              }`}
         </button>
         <button
           type="button"
@@ -785,7 +837,10 @@ export function RrhhPlantilla({
           </p>
           <p className="text-xs" style={{ color: theme.muted }}>
             Se agrega a la plantilla vigente (force_include). El usuario Suite se
-            puede crear después en Overrides.
+            puede crear después en Overrides. Futuro: checklist de documentos
+            (INE, contrato, etc.) subidos a la base —{' '}
+            <code className="text-[10px]">supabase/hr_employee_documents.sql</code>
+            .
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block sm:col-span-2">
@@ -845,49 +900,115 @@ export function RrhhPlantilla({
         </div>
       ) : null}
 
-      {bajaTarget ? (
+      {editTarget ? (
         <div
-          className="rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-3 max-w-2xl space-y-3"
+          className="rounded-xl border border-slate-200 bg-white px-4 py-3 max-w-2xl space-y-3"
           role="dialog"
-          aria-label="Dar de baja"
+          aria-label="Ficha de colaborador"
+          style={{ boxShadow: SUITE.shadow }}
         >
-          <p className="text-sm font-semibold text-rose-900">
-            Baja · {formatHrListName(bajaTarget.full_name)}
-          </p>
-          <p className="text-xs text-rose-800/90">
-            Sale de la plantilla vigente y queda en Bajas del año. El expediente
-            se conserva.
-          </p>
-          <label className="block max-w-xs">
-            <span className="text-xs font-semibold text-rose-900">
-              Último día laborado *
-            </span>
-            <input
-              type="date"
-              className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm"
-              value={bajaFecha}
-              onChange={(e) => setBajaFecha(e.target.value)}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: theme.title }}>
+                {formatHrListName(editTarget.full_name)}
+              </p>
+              <p className="text-xs text-slate-500">
+                {[
+                  formatHrPuesto(
+                    plantillaPositionKey(editTarget) ||
+                      editTarget.puesto ||
+                      editTarget.area
+                  ),
+                  formatHrDate(editTarget.fecha_ingreso),
+                  formatAntiguedad(editTarget.fecha_ingreso, asOf),
+                ]
+                  .filter((x) => x && x !== '—')
+                  .join(' · ') || 'Ficha de colaborador'}
+              </p>
+            </div>
             <button
               type="button"
-              disabled={busyId === bajaTarget.id}
-              className="rounded-full px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-              style={{ backgroundColor: '#be123c' }}
-              onClick={() => void submitBaja()}
-            >
-              {busyId === bajaTarget.id ? 'Guardando…' : 'Confirmar baja'}
-            </button>
-            <button
-              type="button"
-              className="rounded-full px-4 py-1.5 text-xs font-semibold border border-rose-200 bg-white"
+              className="rounded-full px-3 py-1 text-xs font-semibold border border-slate-200"
               style={{ color: theme.muted }}
-              onClick={() => setBajaTarget(null)}
+              onClick={() => {
+                setEditTarget(null);
+                setShowBajaForm(false);
+              }}
             >
-              Cancelar
+              Cerrar
             </button>
           </div>
+
+          <div className="flex flex-wrap gap-2">
+            {resolveFolderPath(editTarget) ? (
+              <button
+                type="button"
+                className="rounded-full px-3 py-1.5 text-xs font-semibold text-white"
+                style={{ backgroundColor: SUITE.orangeDeep }}
+                onClick={() => {
+                  const path = resolveFolderPath(editTarget);
+                  if (path) openExpediente(editTarget, path);
+                }}
+              >
+                Abrir expediente
+              </button>
+            ) : (
+              <span className="text-xs text-slate-400 self-center">
+                Sin carpeta de expediente vinculada
+              </span>
+            )}
+            {!showBajaForm ? (
+              <button
+                type="button"
+                className="rounded-full px-3 py-1.5 text-xs font-semibold border border-rose-200 bg-rose-50 text-rose-900"
+                onClick={() => {
+                  setShowBajaForm(true);
+                  setBajaFecha((prev) => prev || altaIngreso);
+                }}
+              >
+                Dar de baja…
+              </button>
+            ) : null}
+          </div>
+
+          {showBajaForm ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50/70 px-3 py-3 space-y-3">
+              <p className="text-xs text-rose-800/90">
+                Sale de la plantilla vigente y pasa a Archivo / Bajas. El
+                expediente se conserva.
+              </p>
+              <label className="block max-w-xs">
+                <span className="text-xs font-semibold text-rose-900">
+                  Último día laborado *
+                </span>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm"
+                  value={bajaFecha}
+                  onChange={(e) => setBajaFecha(e.target.value)}
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={busyId === editTarget.id}
+                  className="rounded-full px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                  style={{ backgroundColor: '#be123c' }}
+                  onClick={() => void submitBaja()}
+                >
+                  {busyId === editTarget.id ? 'Guardando…' : 'Confirmar baja'}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full px-4 py-1.5 text-xs font-semibold border border-rose-200 bg-white"
+                  style={{ color: theme.muted }}
+                  onClick={() => setShowBajaForm(false)}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1147,10 +1268,10 @@ export function RrhhPlantilla({
                     onOpenExpediente={(emp, path) =>
                       openExpediente(emp, path)
                     }
-                    onBaja={(emp) => {
+                    onEdit={(emp) => {
                       setShowAlta(false);
-                      setBajaTarget(emp);
-                      setBajaFecha((prev) => prev || altaIngreso);
+                      setShowBajaForm(false);
+                      setEditTarget(emp);
                     }}
                   />
                 ))}
@@ -1176,10 +1297,10 @@ export function RrhhPlantilla({
                         onOpenExpediente={(emp, path) =>
                           openExpediente(emp, path)
                         }
-                        onBaja={(emp) => {
+                        onEdit={(emp) => {
                           setShowAlta(false);
-                          setBajaTarget(emp);
-                          setBajaFecha((prev) => prev || altaIngreso);
+                          setShowBajaForm(false);
+                          setEditTarget(emp);
                         }}
                       />
                     ))}
@@ -1197,71 +1318,54 @@ export function RrhhPlantilla({
         </div>
       )}
 
-      {!showCatalog && bajasDelAno.length > 0 ? (
-        <section className="space-y-3 pt-2">
+      {showArchivoBajas && !showCatalog ? (
+        <section className="space-y-3 border-t border-slate-100 pt-4">
           <div className="flex flex-wrap items-baseline gap-2">
             <h3 className="text-lg font-bold" style={{ color: theme.title }}>
-              Bajas del año
+              Archivo / Bajas
             </h3>
             <span className="text-xs text-slate-500">
-              {year} · {bajasDelAno.length} persona
-              {bajasDelAno.length === 1 ? '' : 's'}
+              No forma parte de la plantilla vigente · {year}
             </span>
           </div>
-          <ul
-            className="overflow-hidden rounded-2xl bg-white"
-            style={{ boxShadow: SUITE.shadow }}
-          >
-            {bajasDelAno.map((a, i) => {
-              const path = resolveFolderPath(a);
-              const periodo = formatPeriodoTrabajado(
-                a.fecha_ingreso,
-                a.fecha_baja
-              );
-              const periodoMuted = periodo === 'sin fechas';
-              return (
-                <li
-                  key={a.id}
-                  className={`flex flex-wrap items-center gap-2 px-4 py-2.5 ${
-                    i > 0 ? 'border-t border-rose-50' : ''
-                  }`}
-                  style={{
-                    background:
-                      i % 2 === 1 ? 'rgba(190, 24, 93, 0.03)' : undefined,
-                  }}
-                >
-                  <span className="rounded-md bg-rose-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-900">
-                    Baja
-                  </span>
-                  <span
-                    className="min-w-0 flex-1 text-sm font-semibold"
-                    style={{ color: theme.title }}
+          <p className="text-xs text-slate-500">
+            Altas = vigentes; Bajas = archivo. Si una carpeta sigue en Altas con
+            status baja en el sistema, aparece abajo como desajuste (mover
+            carpeta en Drive o reactivar).
+          </p>
+
+          {expedienteMismatches.length > 0 ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-900">
+                Reconciliar · mal marcados · {expedienteMismatches.length}{' '}
+                desajuste
+                {expedienteMismatches.length === 1 ? '' : 's'}
+              </p>
+              <p className="mt-1 text-[11px] text-amber-900/80">
+                En sistema figuran como baja pero su carpeta sigue en Altas. Si
+                siguen activos, usa «Corregir (reactivar)».
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {expedienteMismatches.map((f) => (
+                  <li
+                    key={f.path}
+                    className="flex flex-wrap items-center gap-2 text-sm text-amber-950"
                   >
-                    {formatHrListName(a.full_name)}
-                  </span>
-                  {a.puesto ? (
-                    <span className="text-[11px] text-slate-500">
-                      {a.puesto}
+                    <span className="font-semibold">
+                      {formatHrListName(f.matchedName || f.name)}
                     </span>
-                  ) : null}
-                  <span
-                    className={`text-[11px] ${
-                      periodoMuted ? 'text-slate-400' : 'text-rose-800'
-                    }`}
-                  >
-                    {periodo}
-                  </span>
-                  {path ? (
+                    <span className="text-[11px] text-amber-800/80">
+                      {f.archiveNote || 'Baja con carpeta en Altas'}
+                    </span>
                     <button
                       type="button"
                       onClick={() =>
                         openExpediente(
                           {
-                            full_name: a.full_name,
-                            fecha_ingreso: a.fecha_ingreso,
-                            fecha_baja: a.fecha_baja,
+                            full_name: f.matchedName || f.name,
+                            fecha_baja: f.fechaBaja,
                           },
-                          path,
+                          f.path,
                           { baja: true }
                         )
                       }
@@ -1270,25 +1374,137 @@ export function RrhhPlantilla({
                     >
                       Abrir carpeta
                     </button>
-                  ) : (
-                    <span className="text-[11px] text-slate-400">
-                      Sin carpeta
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    disabled={busyId === a.id}
-                    onClick={() => void reactivarBaja(a)}
-                    className="text-xs font-semibold disabled:opacity-50"
-                    style={{ color: SUITE.navy }}
-                    title="Volver a plantilla vigente"
-                  >
-                    Reactivar
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                    {f.employeeId ? (
+                      <button
+                        type="button"
+                        disabled={busyId === f.employeeId}
+                        onClick={() =>
+                          void reactivarBaja({
+                            id: f.employeeId!,
+                            full_name: f.matchedName || f.name,
+                            status: 'baja',
+                            fecha_baja: f.fechaBaja ?? null,
+                            puesto: null,
+                            force_exclude: true,
+                          })
+                        }
+                        className="text-xs font-semibold disabled:opacity-50"
+                        style={{ color: SUITE.navy }}
+                      >
+                        Corregir (reactivar)
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Sin desajustes Altas↔baja detectados en el índice actual.
+            </p>
+          )}
+
+          {bajasDelAno.length > 0 ? (
+            <>
+              <div className="flex flex-wrap items-baseline gap-2 pt-1">
+                <h4
+                  className="text-sm font-bold"
+                  style={{ color: theme.title }}
+                >
+                  Bajas del año
+                </h4>
+                <span className="text-xs text-slate-500">
+                  {bajasDelAno.length} persona
+                  {bajasDelAno.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <ul
+                className="overflow-hidden rounded-2xl bg-white"
+                style={{ boxShadow: SUITE.shadow }}
+              >
+                {bajasDelAno.map((a, i) => {
+                  const path = resolveFolderPath(a);
+                  const periodo = formatPeriodoTrabajado(
+                    a.fecha_ingreso,
+                    a.fecha_baja
+                  );
+                  const periodoMuted = periodo === 'sin fechas';
+                  return (
+                    <li
+                      key={a.id}
+                      className={`flex flex-wrap items-center gap-2 px-4 py-2.5 ${
+                        i > 0 ? 'border-t border-slate-100' : ''
+                      }`}
+                      style={{
+                        background:
+                          i % 2 === 1 ? 'rgba(15, 23, 42, 0.03)' : undefined,
+                      }}
+                    >
+                      <span className="rounded-md bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-700">
+                        Baja
+                      </span>
+                      <span
+                        className="min-w-0 flex-1 text-sm font-semibold"
+                        style={{ color: theme.title }}
+                      >
+                        {formatHrListName(a.full_name)}
+                      </span>
+                      {a.puesto ? (
+                        <span className="text-[11px] text-slate-500">
+                          {a.puesto}
+                        </span>
+                      ) : null}
+                      <span
+                        className={`text-[11px] ${
+                          periodoMuted ? 'text-slate-400' : 'text-slate-600'
+                        }`}
+                      >
+                        {periodo}
+                      </span>
+                      {path ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openExpediente(
+                              {
+                                full_name: a.full_name,
+                                fecha_ingreso: a.fecha_ingreso,
+                                fecha_baja: a.fecha_baja,
+                              },
+                              path,
+                              { baja: true }
+                            )
+                          }
+                          className="text-xs font-semibold"
+                          style={{ color: SUITE.orangeDeep }}
+                        >
+                          Abrir carpeta
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">
+                          Sin carpeta
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        disabled={busyId === a.id}
+                        onClick={() => void reactivarBaja(a)}
+                        className="text-xs font-semibold disabled:opacity-50"
+                        style={{ color: SUITE.navy }}
+                        title="Volver a plantilla vigente"
+                      >
+                        Reactivar
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">
+              No hay bajas registradas en {year}.
+            </p>
+          )}
         </section>
       ) : null}
 

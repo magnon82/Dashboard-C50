@@ -18,8 +18,10 @@ export const dynamic = 'force-dynamic';
 const VALID = new Set(HR_DRIVE_SYNC_CONTENT_TYPES.map((d) => d.id));
 
 /**
- * GET /api/hr/sync — estado de sync + catálogo de tipos (frecuencia la define el usuario).
+ * GET /api/hr/sync — estado de sync + catálogo de tipos.
  * POST /api/hr/sync — { contentType } Actualizar desde Drive (solo si File Stream / fuente local).
+ * Soft-sync cloud (inventario + hr_drive_sync_state): Actions diario 12:00 PM CDMX
+ *   (.github/workflows/sync-hr-drive.yml → sync_hr_drive_cloud.py).
  */
 export async function GET() {
   const auth = await requireRrhhSession();
@@ -71,12 +73,12 @@ export async function GET() {
     },
     contentTypes: HR_DRIVE_SYNC_CONTENT_TYPES.map((d) => ({
       ...d,
-      /** null = pendiente de que el usuario defina frecuencia */
-      syncFrequency: null as string | null,
+      /** Soft-sync cloud documentado; POST local sigue siendo refresh opcional. */
+      syncFrequency: 'Diario 12:00 PM CDMX (Actions soft-sync)' as string | null,
     })),
     state: state.rows,
     note:
-      'Operación diaria en Supabase (Vercel). Sync opcional desde Drive API o PC de admin cuando haya xlsx nuevos; no requiere File Stream en producción.',
+      'Operación diaria en Supabase (Vercel). Soft-sync Actions 12:00 PM CDMX actualiza hr_drive_sync_state. Refresh Drive/xlsx opcional desde PC admin o POST aquí; no requiere File Stream en producción.',
   });
 }
 

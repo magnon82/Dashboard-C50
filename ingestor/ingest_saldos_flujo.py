@@ -16,7 +16,7 @@ CLI:
   python ingest_saldos_flujo.py              # todos los años
   python ingest_saldos_flujo.py --year 2026
   python ingest_saldos_flujo.py --dry-run
-  python sync_saldos_al_dia.py              # wrapper (Actions cada 5 min)
+  python sync_saldos_al_dia.py              # wrapper (Actions cada hora)
 """
 
 from __future__ import annotations

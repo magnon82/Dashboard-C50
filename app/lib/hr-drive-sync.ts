@@ -1,6 +1,7 @@
 /**
- * Sync Drive RH → Supabase: tipos de contenido + estado (sin inventar frecuencias).
- * File Stream / Drive API refrescan; producción Vercel lee filas ya persistidas.
+ * Sync Drive RH → Supabase: tipos de contenido + estado.
+ * Soft-sync cloud: Actions diario 12:00 PM CDMX (sync-hr-drive.yml → sync_hr_drive_cloud.py).
+ * File Stream / Drive API / POST /api/hr/sync refrescan; Vercel lee filas ya persistidas.
  */
 
 import { getServiceSupabase } from '@/app/lib/users';
@@ -33,7 +34,7 @@ export type HrDriveSyncContentDef = {
   persistsIn: string;
   /** Qué sigue necesitando Drive (API o File Stream) para abrir/refrescar. */
   stillNeedsDrive: string;
-  /** Pista de cadencia — NO es frecuencia fijada; el usuario decide. */
+  /** Cadencia documentada (cloud soft-sync diario; tipos individuales pueden diferir). */
   cadenceHint: string;
   /** Cómo se refresca hoy. */
   refreshHow: string;
@@ -47,7 +48,7 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
     persistsIn: 'hr_payroll_periods + hr_payroll_lines (+ plantilla vía unión)',
     stillNeedsDrive:
       'Import xlsx nuevos opcional: Drive API (HR_NOMINA_DRIVE_FOLDER_ID) o PC de admin',
-    cadenceHint: 'Suele cambiar cada semana de pago',
+    cadenceHint: 'Diario 12:00 PM CDMX (Actions soft-sync); import xlsx al publicar/semana',
     refreshHow: '/rrhh → Nómina (datos en Supabase; sync opcional)',
   },
   {
@@ -56,7 +57,7 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
     persistsIn: 'hr_schedule_weeks + hr_schedule_shifts (+ disponibilidad)',
     stillNeedsDrive:
       'Import histórico xlsx opcional (Descargas / PC de admin)',
-    cadenceHint: 'Suele publicarse cada semana',
+    cadenceHint: 'Diario 12:00 PM CDMX (Actions soft-sync); publicar semana en /rrhh',
     refreshHow: '/rrhh → Horarios (publicado en Supabase; Importar 2026 opcional)',
   },
   {
@@ -66,7 +67,7 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
       'hr_employees.drive_folder_path + status/fecha_baja (índice en DB)',
     stillNeedsDrive:
       'Abrir binarios: HR_EXPEDIENTES_DRIVE_FOLDER_ID; detectar carpetas nuevas = PC admin',
-    cadenceHint: 'En alta / baja / cambio de carpeta',
+    cadenceHint: 'Diario 12:00 PM CDMX (Actions soft-sync); alta/baja en Suite',
     refreshHow: 'Índice en Supabase; sync local opcional',
   },
   {
@@ -75,7 +76,7 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
     persistsIn: 'hr_doc_links (metadatos/rutas); Cultura también en código',
     stillNeedsDrive:
       'Abrir PDF/docx: drive_url o HR_DOCS_VIGENTE_DRIVE_FOLDER_ID',
-    cadenceHint: 'Rara vez (cambio de política o manual)',
+    cadenceHint: 'Diario 12:00 PM CDMX (Actions soft-sync); docs cambian raro',
     refreshHow: 'Seed SQL + POST /api/hr/sync content_type=biblioteca',
   },
   {
@@ -83,7 +84,7 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
     label: 'Cultura organizacional',
     persistsIn: 'app/lib/hr-cultura.ts (textos Suite) + hr_doc_links',
     stillNeedsDrive: 'Carpeta Drive solo como respaldo opcional',
-    cadenceHint: 'Muy rara (cambio de misión/valores)',
+    cadenceHint: 'Muy rara (cambio de misión/valores); soft-sync no la pisa',
     refreshHow: 'Edición en código / deploy',
   },
   {
@@ -116,7 +117,7 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
     label: 'BASE DATOS PERSONAL C50.xlsx',
     persistsIn: 'Enrich hacia hr_employees (fechas/puesto) vía import',
     stillNeedsDrive: 'Drive API / Descargas en PC de admin (opcional)',
-    cadenceHint: 'Cuando RH actualiza la base maestra',
+    cadenceHint: 'Diario 12:00 PM CDMX (Actions soft-sync); enrich al actualizar base',
     refreshHow: '/rrhh → Nómina · enrich_base_datos',
   },
 ];

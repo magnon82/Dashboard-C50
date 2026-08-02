@@ -259,6 +259,29 @@ body {
   text-align: right;
 }
 
+.rrhh-plantilla__edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #0b1f3a;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.rrhh-plantilla__edit-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.rrhh-plantilla__edit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .rrhh-plantilla__baja-btn {
   border: 1px solid #fecdd3;
   background: #fff1f2;

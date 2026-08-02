@@ -1,7 +1,10 @@
 # Sync en la nube (GitHub Actions)
 
-Las ventas (Gmail 5:00 AM CDMX) y los **Saldos al día** (cada 5 min) corren en GitHub Actions.
+Las ventas (Gmail), **Facturas CFDI** (mismo workflow), los **Saldos al día** (cada hora)
+y el **soft-sync RR.HH.** (diario 12:00 PM CDMX) corren en GitHub Actions.
 Ya no dependen de que tu PC esté encendido ni abren ventanas de PowerShell.
+
+CDMX sin DST desde 2022 → UTC-6 year-round.
 
 ## Secrets del repo (Settings → Secrets and variables → Actions)
 
@@ -12,10 +15,15 @@ Ya no dependen de que tu PC esté encendido ni abren ventanas de PowerShell.
 | `GOOGLE_OAUTH_CLIENT_JSON` | Contenido completo de `ingestor/credentials.json` |
 | `GOOGLE_OAUTH_TOKEN_JSON` | Contenido completo de `ingestor/token.json` (debe incluir `refresh_token`) |
 
+`GOOGLE_*` hace falta para Gmail y Saldos (Drive/Sheets). El soft-sync RH solo usa Supabase.
+
 ## Workflows
 
-- `.github/workflows/sync-saldos.yml` — cada ~15 min (`7,22,37,52`) + manual
-- `.github/workflows/sync-gmail.yml` — lun–sáb 4:00 AM CDMX (+ respaldo ~5:17 AM); domingo 8:00 PM CDMX; + manual
+| Workflow | Cadencia (CDMX) | Cron UTC | Qué hace |
+|----------|-----------------|----------|----------|
+| `sync-gmail.yml` | Lun–sáb 4:00 AM (+ respaldo ~5:17 AM); Dom 8:00 PM | `0 10 * * 1-6`, `17 11 * * 1-6`, `0 2 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
+| `sync-saldos.yml` | Cada hora (:07) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
+| `sync-hr-drive.yml` | Diario 12:00 PM | `0 18 * * *` | Soft-check `hr_*` + `hr_drive_sync_state` |
 
 Tras agregar o cambiar secrets, dispara **Run workflow** una vez en Actions (el cron de GitHub es best-effort y puede saltarse el primer día).
 
@@ -65,6 +73,9 @@ Fuente: `source_file=presupuesto_ingreso` (una fila por componente con monto > 0
 Tras editar el Excel, vuelve a correr `ingest_presupuesto.py` para ese mes.
 Para refrescar etiquetas de efectivo: `python ingest_saldos_flujo.py --year 2026`.
 
+<!-- TODO(automate): presupuesto / ventas_semana / estados de cuenta siguen MANUAL.
+     Automatizar con Actions (cron + Drive API) cuando se priorice; no inventar jobs aún. -->
+
 ## CLI local — Infocaja (Gmail → efectivo / tarjetas / comensales)
 
 Mismo OAuth (`credentials.json` + `token.json`). Cada correo «Fin de Día»
@@ -91,29 +102,35 @@ python ingest_infocaja_gmail.py --after 2023/01/01
 python ingest_infocaja_gmail.py --after 2022/01/01   # opcional, años previos
 ```
 
-Actions: `.github/workflows/sync-gmail.yml` → `sync_gmail_diario.py --newer-than 7 --skip-facturas`
-(lun–sáb 4:00 AM / respaldo ~5:17 AM CDMX; domingo 8:00 PM CDMX). Requiere los 4 secrets de la tabla arriba.
+Actions: `.github/workflows/sync-gmail.yml`
+1. `sync_gmail_diario.py --newer-than 7 --skip-facturas` (Infocaja + CORTE; debe pasar)
+2. `ingest_facturas_gmail.py --newer-than 7` (CFDI → `factura_cfdi` en Supabase; **continue-on-error**)
+
+Horario: lun–sáb 4:00 AM / respaldo ~5:17 AM CDMX; domingo 8:00 PM CDMX.
+Requiere los 4 secrets de la tabla arriba.
 
 Sin el backfill, años como 2023 muestran WI/Eventos (Acumulado) pero
 «Sin datos de efectivo/tarjetas».
 
-## CLI local — facturas CFDI (Gmail)
+## CLI local — facturas CFDI (Gmail → ERP / financial_records)
 
 Mismo OAuth que Infocaja (`credentials.json` + `token.json`). Indexa PDF/XML
-hacia `source_file=factura_cfdi` y guarda adjuntos en `FACTURAS_PATH`
-(default `I:\Mi unidad\FACTURAS CFDI`).
+hacia `source_file=factura_cfdi` (hub ERP = Supabase `financial_records`) y guarda
+adjuntos en `FACTURAS_PATH` (default `I:\Mi unidad\FACTURAS CFDI`; en CI →
+`ingestor/data/facturas`).
 
 ```bash
 # Solo facturas (últimos 90 días)
 python ingest_facturas_gmail.py
 python ingest_facturas_gmail.py --newer-than 30 --dry-run
 
-# Junto con Infocaja + CORTE
+# Junto con Infocaja + CORTE (local completo)
 python sync_gmail_diario.py --newer-than 7
-python sync_gmail_diario.py --skip-facturas   # no tocar facturas
+python sync_gmail_diario.py --skip-facturas   # solo ventas, sin CFDI
 ```
 
 UI: Finanzas → **Facturas** (`/finanzas/facturas`) — lista + descarga + faltantes.
+Cloud: el workflow Gmail **sí** ingiere CFDI al ERP; el paso es best-effort para no tumbar ventas.
 
 ## CLI local — comprobantes (índice PDF)
 
@@ -123,6 +140,25 @@ python ingest_estados_cuenta.py --index-pdfs --pdf-only
 
 Tras reindexar, la columna **Concepto** sale del nombre del archivo
 (`mifel-NominaMeserosSem28(26)-$4,410.56.pdf` → `Nomina Meseros Sem 28`).
+
+<!-- TODO(automate): ingest_estados_cuenta / ventas_semana — mismo backlog que presupuesto. -->
+
+## Soft-sync RR.HH. (Actions)
+
+`.github/workflows/sync-hr-drive.yml` → `python sync_hr_drive_cloud.py`
+
+- **Cadencia:** diario 12:00 PM CDMX (`0 18 * * *` UTC).
+- Cuenta filas en `hr_payroll_periods`, `hr_schedule_weeks`, `hr_employees` (paths),
+  `hr_doc_links` y actualiza `hr_drive_sync_state` (`last_source=github_actions`).
+- **No** monta File Stream ni importa xlsx nuevos. Para refrescar carpetas/import:
+  PC admin, botones en `/rrhh`, o `POST /api/hr/sync` con sesión RH.
+- SQL previo: `supabase/hr_drive_sync.sql` (tabla de estado).
+- Secrets: solo `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
+
+```bash
+python sync_hr_drive_cloud.py
+python sync_hr_drive_cloud.py --dry-run
+```
 
 ## Cortes TPV (foto celular · local MVP)
 

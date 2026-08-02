@@ -7,7 +7,11 @@ import {
   verifySessionToken,
   type SessionUser,
 } from '@/app/lib/auth';
-import { defaultCorteDateCdmx } from '@/app/lib/tpv-cortes';
+import {
+  adminCorteDateWindow,
+  defaultCorteDateCdmx,
+  isAdminWritableCorteDate,
+} from '@/app/lib/tpv-cortes';
 
 /**
  * Sesión con acceso a Cortes TPV (Ventas, Staff o admin).
@@ -41,8 +45,8 @@ export function isTpvAdminWriter(session: SessionUser): boolean {
 }
 
 /**
- * Staff/Ventas: solo la fecha de la ventana nocturna (defaultCorteDateCdmx).
- * Admin: cualquier `corte_date` válida (re-subidas / pruebas de días pasados).
+ * Staff/Ventas: solo la fecha operativa (defaultCorteDateCdmx).
+ * Master/admin: día operativo y hasta 7 días atrás (sin futuro).
  */
 export function assertWritableCorteDate(
   session: SessionUser,
@@ -51,8 +55,20 @@ export function assertWritableCorteDate(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) {
     return NextResponse.json({ error: 'Fecha de corte inválida' }, { status: 400 });
   }
-  if (isTpvAdminWriter(session)) return null;
   const staffWindow = defaultCorteDateCdmx();
+  if (isTpvAdminWriter(session)) {
+    if (isAdminWritableCorteDate(corteDate)) return null;
+    const { minDate, maxDate, opDay } = adminCorteDateWindow();
+    return NextResponse.json(
+      {
+        error: `Master solo puede cargar el día operativo (${opDay}) o hasta 7 días atrás (${minDate}–${maxDate}). La fecha del corte es la del día de operación (00:00–05:59 → día anterior).`,
+        min_date: minDate,
+        max_date: maxDate,
+        staff_window_date: staffWindow,
+      },
+      { status: 403 }
+    );
+  }
   if (corteDate === staffWindow) return null;
   return NextResponse.json(
     {

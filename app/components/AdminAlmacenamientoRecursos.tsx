@@ -20,6 +20,11 @@ import {
   type SourceFileMergeStatus,
   type StorageStatsResult,
 } from '@/app/lib/storage-format';
+import {
+  formatTimestampCdmxShort,
+  lastUpdateForInventoryBranch,
+  type AreaLastUpdate,
+} from '@/app/lib/admin-last-updates';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -247,13 +252,20 @@ function DetectionMeta({
   status?: SourceFileMergeStatus;
 }) {
   if (!status) return null;
+  const ingestLabel = hit?.lastIngestedAt
+    ? formatTimestampCdmxShort(hit.lastIngestedAt)
+    : null;
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       <StatusBadge status={status} />
       {hit && hit.rowCount > 0 ? (
         <span className="text-[10px] tabular-nums" style={{ color: theme.muted }}>
           {hit.rowCount.toLocaleString('es-MX')} fila{hit.rowCount === 1 ? '' : 's'}
-          {hit.lastDate ? ` · últ. ${hit.lastDate}` : ''}
+          {ingestLabel
+            ? ` · últ. act. ${ingestLabel}`
+            : hit.lastDate
+              ? ` · dato ${hit.lastDate}`
+              : ''}
         </span>
       ) : null}
     </span>
@@ -381,6 +393,7 @@ function ResourceAccordion({
   detectedMap,
   detectionReady,
   accentUndocumented,
+  areaLast,
 }: {
   branch: ResourceBranch;
   platform: ResourcePlatform;
@@ -393,11 +406,13 @@ function ResourceAccordion({
   detectedMap?: Map<string, DetectedSourceFile>;
   detectionReady?: boolean;
   accentUndocumented?: boolean;
+  areaLast?: AreaLastUpdate | null;
 }) {
   const [open, setOpen] = useState(Boolean(defaultOpen));
   const hasDetail =
     Boolean(branch.note) ||
     Boolean(branch.updateFrequency) ||
+    Boolean(areaLast) ||
     Boolean(branch.leaves?.length) ||
     Boolean(branch.sourceFiles?.length) ||
     Boolean(branch.scripts?.length) ||
@@ -475,6 +490,11 @@ function ResourceAccordion({
               <span style={{ color: SUITE.orangeDeep }}>{branch.updateFrequency}</span>
             </span>
           ) : null}
+          {areaLast ? (
+            <span className="mt-0.5 block text-[11px] leading-snug font-semibold" style={{ color: SUITE.orangeDeep }}>
+              {areaLast.display}
+            </span>
+          ) : null}
         </span>
         <span className="mt-1" style={{ color: open ? SUITE.orangeDeep : theme.muted }}>
           <Chevron open={open} />
@@ -491,6 +511,11 @@ function ResourceAccordion({
               <span className="font-semibold" style={{ color: SUITE.orangeDeep }}>
                 {branch.updateFrequency}
               </span>
+            </p>
+          ) : null}
+          {areaLast ? (
+            <p className="text-xs font-semibold" style={{ color: SUITE.orangeDeep }}>
+              {areaLast.display}
             </p>
           ) : null}
 
@@ -607,6 +632,7 @@ export function AdminAlmacenamientoRecursos() {
   const { copied, copy } = useCopyFeedback();
 
   const [storageStats, setStorageStats] = useState<StorageStatsResult | null>(null);
+  const [areaLastUpdates, setAreaLastUpdates] = useState<AreaLastUpdate[]>([]);
   const [storageLoading, setStorageLoading] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
   const fetchedRef = useRef(false);
@@ -629,7 +655,12 @@ export function AdminAlmacenamientoRecursos() {
         return data as DataInventoryResult;
       })
       .then((data) => {
-        if (!cancelled) setStorageStats(inventoryToStorageStats(data));
+        if (!cancelled) {
+          setStorageStats(inventoryToStorageStats(data));
+          setAreaLastUpdates(
+            Array.isArray(data.areaLastUpdates) ? data.areaLastUpdates : [],
+          );
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -687,7 +718,11 @@ export function AdminAlmacenamientoRecursos() {
           label: s.sourceFile,
           kind: 'source_file' as const,
           note: `${s.rowCount.toLocaleString('es-MX')} fila${s.rowCount === 1 ? '' : 's'}${
-            s.lastDate ? ` · últ. ${s.lastDate}` : ''
+            s.lastIngestedAt
+              ? ` · últ. act. ${formatTimestampCdmxShort(s.lastIngestedAt)}`
+              : s.lastDate
+                ? ` · dato ${s.lastDate}`
+                : ''
           }`,
         })),
         sourceFiles: undocumentedSources.map((s) => s.sourceFile),
@@ -1002,6 +1037,7 @@ export function AdminAlmacenamientoRecursos() {
                 detectedMap={detectedMap}
                 detectionReady={detectionReady}
                 accentUndocumented={branch.id === 'supabase-undocumented'}
+                areaLast={lastUpdateForInventoryBranch(branch.id, areaLastUpdates)}
               />
             ))}
           </div>
