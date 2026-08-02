@@ -11,6 +11,7 @@ import {
 import { hashPassword, verifyPassword } from '@/app/lib/password';
 import {
   createUser,
+  ensureStaffCorteCapabilitySeed,
   findUserByUsername,
   toPublicUser,
 } from '@/app/lib/users';
@@ -52,6 +53,11 @@ export async function POST(request: Request) {
   }
 
   await ensureBootstrapAdmin();
+  try {
+    await ensureStaffCorteCapabilitySeed();
+  } catch {
+    // seed best-effort
+  }
 
   let session: SessionUser | null = null;
 
@@ -63,6 +69,7 @@ export async function POST(request: Request) {
         username: pub.username,
         role: pub.role,
         modules: pub.modules,
+        capabilities: pub.capabilities,
         canEdit: pub.canEdit,
       };
     }
@@ -76,6 +83,7 @@ export async function POST(request: Request) {
         username,
         role: 'admin',
         modules: ['*'],
+        capabilities: [],
         canEdit: true,
       };
     }
@@ -92,8 +100,13 @@ export async function POST(request: Request) {
       username: session.username,
       role: session.role,
       modules: session.modules,
+      capabilities: session.capabilities,
       canEdit: session.canEdit,
       canAccessAdmin: canAccessAdmin(session),
+      canAccessStaffCorte:
+        session.role === 'admin' ||
+        session.modules.includes('*') ||
+        session.capabilities.includes('staff.corte'),
     },
   });
   response.cookies.set(SESSION_COOKIE, token, {

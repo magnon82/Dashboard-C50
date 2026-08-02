@@ -1,4 +1,9 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  STAFF_CORTE_SEED_USERNAMES,
+  normalizeCapabilities,
+  type CapabilityId,
+} from '@/app/lib/capabilities';
 
 export type UserRole = 'admin' | 'viewer';
 
@@ -15,6 +20,8 @@ export interface DashboardUserRow {
   password: string | null;
   role: UserRole;
   modules: string[];
+  /** Permisos granulares (p. ej. staff.corte). Admin implícito = todos. */
+  capabilities: CapabilityId[];
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -26,6 +33,7 @@ export interface PublicUser {
   displayName: string | null;
   role: UserRole;
   modules: string[];
+  capabilities: CapabilityId[];
   active: boolean;
   canEdit: boolean;
 }
@@ -38,6 +46,8 @@ interface UserPayload {
   password?: string;
   role: UserRole;
   modules: string[];
+  /** Opcional en filas antiguas → []. */
+  capabilities?: string[];
   active: boolean;
   updated_at: string;
 }
@@ -65,6 +75,7 @@ export function toPublicUser(row: DashboardUserRow): PublicUser {
     displayName: row.display_name,
     role: row.role,
     modules: row.role === 'admin' ? ['*'] : row.modules || [],
+    capabilities: row.role === 'admin' ? [] : row.capabilities || [],
     active: row.active,
     canEdit,
   };
@@ -95,6 +106,7 @@ function recordToUser(r: {
     password: typeof p.password === 'string' && p.password ? p.password : null,
     role: p.role === 'admin' ? 'admin' : 'viewer',
     modules: Array.isArray(p.modules) ? p.modules : [],
+    capabilities: normalizeCapabilities(p.capabilities),
     active: p.active !== false,
     created_at: r.date || p.updated_at,
     updated_at: p.updated_at || r.date || new Date().toISOString(),
@@ -142,6 +154,7 @@ export async function createUser(input: {
   password?: string;
   role: UserRole;
   modules: string[];
+  capabilities?: CapabilityId[];
   active?: boolean;
 }): Promise<DashboardUserRow> {
   const username = input.username.trim().toLowerCase();
@@ -150,6 +163,10 @@ export async function createUser(input: {
 
   const now = new Date().toISOString();
   const plain = input.password?.trim() || undefined;
+  const capabilities =
+    input.role === 'admin'
+      ? []
+      : normalizeCapabilities(input.capabilities ?? []);
   const payload: UserPayload = {
     username,
     display_name: input.displayName?.trim() || null,
@@ -157,6 +174,7 @@ export async function createUser(input: {
     ...(plain ? { password: plain } : {}),
     role: input.role,
     modules: input.role === 'admin' ? ['*'] : input.modules,
+    capabilities,
     active: input.active !== false,
     updated_at: now,
   };
@@ -190,6 +208,7 @@ export async function updateUser(
     password?: string;
     role?: UserRole;
     modules?: string[];
+    capabilities?: CapabilityId[];
     active?: boolean;
   }
 ): Promise<DashboardUserRow> {
@@ -233,6 +252,13 @@ export async function updateUser(
     throw new Error('Asigna al menos un módulo');
   }
 
+  const capabilities =
+    role === 'admin'
+      ? []
+      : patch.capabilities !== undefined
+        ? normalizeCapabilities(patch.capabilities)
+        : current.capabilities;
+
   const plain =
     patch.password !== undefined
       ? patch.password.trim() || undefined
@@ -248,6 +274,7 @@ export async function updateUser(
     ...(plain ? { password: plain } : {}),
     role,
     modules,
+    capabilities,
     active: patch.active !== undefined ? patch.active : current.active,
     updated_at: new Date().toISOString(),
   };
@@ -275,6 +302,71 @@ export async function findUserById(id: string): Promise<DashboardUserRow | null>
   if (error) throw new Error(error.message);
   if (!row) return null;
   return recordToUser(row);
+}
+
+/**
+ * Migración suave: marca staff.corte en roman/roberto y vincula
+ * hr_employees.suite_username si aún está vacío. Idempotente.
+ */
+export async function ensureStaffCorteCapabilitySeed(): Promise<void> {
+  const users = await listUsers();
+  for (const uname of STAFF_CORTE_SEED_USERNAMES) {
+    const row = users.find((u) => u.username === uname);
+    if (!row || row.role === 'admin') continue;
+    if (!row.capabilities.includes('staff.corte')) {
+      await updateUser(row.id, {
+        capabilities: [...row.capabilities, 'staff.corte'],
+      });
+    }
+  }
+
+  try {
+    const sb = getServiceSupabase();
+    // Juan Roman Sanchez / Juan Roberto Ramirez (plantilla C50)
+    const links: {
+      username: string;
+      match: (name: string) => boolean;
+    }[] = [
+      {
+        username: 'roman',
+        match: (n) => /\broman\b/i.test(n) && /\bsanchez\b/i.test(n),
+      },
+      {
+        username: 'roberto',
+        match: (n) => /\broberto\b/i.test(n) && /\bramirez\b/i.test(n),
+      },
+    ];
+    const { data: emps } = await sb
+      .from('hr_employees')
+      .select('id, full_name, suite_username, status')
+      .eq('status', 'activo');
+    for (const link of links) {
+      const taken = (emps || []).some(
+        (e) =>
+          String(e.suite_username || '')
+            .trim()
+            .toLowerCase() === link.username
+      );
+      if (taken) continue;
+      const candidates = (emps || [])
+        .filter(
+          (e) => !e.suite_username && link.match(String(e.full_name || ''))
+        )
+        .sort(
+          (a, b) =>
+            String(b.full_name || '').length - String(a.full_name || '').length
+        );
+      const target = candidates[0];
+      if (!target) continue;
+      await sb
+        .from('hr_employees')
+        .update({ suite_username: link.username })
+        .eq('id', target.id)
+        .is('suite_username', null);
+    }
+  } catch {
+    // HR schema optional in some envs
+  }
 }
 
 /** Elimina permanentemente la fila dashboard_auth en financial_records. */

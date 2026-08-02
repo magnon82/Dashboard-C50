@@ -6,8 +6,10 @@ export interface ClientSession {
   username: string;
   role: 'admin' | 'viewer';
   modules: string[];
+  capabilities?: string[];
   canEdit: boolean;
   canAccessAdmin: boolean;
+  canAccessStaffCorte?: boolean;
 }
 
 export function useSession() {

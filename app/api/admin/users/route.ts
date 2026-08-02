@@ -9,8 +9,19 @@ import {
   type SessionUser,
 } from '@/app/lib/auth';
 import { hashPassword, verifyPassword } from '@/app/lib/password';
-import { createUser, listUsers, toPublicUser, type UserRole } from '@/app/lib/users';
+import {
+  createUser,
+  ensureStaffCorteCapabilitySeed,
+  listUsers,
+  toPublicUser,
+  type UserRole,
+} from '@/app/lib/users';
 import { APP_MODULES } from '@/app/lib/modules';
+import {
+  CAPABILITY_IDS,
+  normalizeCapabilities,
+  type CapabilityId,
+} from '@/app/lib/capabilities';
 
 export const runtime = 'nodejs';
 
@@ -40,6 +51,11 @@ export async function GET() {
   if (auth instanceof NextResponse) return auth;
 
   try {
+    try {
+      await ensureStaffCorteCapabilitySeed();
+    } catch {
+      // seed best-effort
+    }
     const rows = await listUsers();
     const bootstrapUser = getDashboardUser();
     const bootstrapPass = getDashboardPassword();
@@ -62,6 +78,7 @@ export async function GET() {
           displayName: pub.displayName,
           role: pub.role,
           modules: r.modules || [],
+          capabilities: pub.capabilities,
           active: pub.active,
           canEdit: pub.canEdit,
           createdAt: r.created_at,
@@ -88,6 +105,7 @@ export async function POST(request: Request) {
     password?: string;
     role?: UserRole;
     modules?: string[];
+    capabilities?: string[];
     active?: boolean;
   };
   try {
@@ -103,6 +121,9 @@ export async function POST(request: Request) {
   const modules = (body.modules || []).filter((m) =>
     MODULE_IDS.has(m as (typeof APP_MODULES)[number]['id'])
   );
+  const capabilities = normalizeCapabilities(
+    (body.capabilities || []).filter((c) => CAPABILITY_IDS.has(c))
+  ) as CapabilityId[];
 
   if (!username || username.length < 2) {
     return NextResponse.json({ error: 'Usuario inválido' }, { status: 400 });
@@ -128,6 +149,7 @@ export async function POST(request: Request) {
       password,
       role,
       modules,
+      capabilities,
       active: body.active !== false,
     });
     const pub = toPublicUser(user);
@@ -138,6 +160,7 @@ export async function POST(request: Request) {
         displayName: pub.displayName,
         role: pub.role,
         modules: user.modules || [],
+        capabilities: pub.capabilities,
         active: pub.active,
         canEdit: pub.canEdit,
         password: user.password,

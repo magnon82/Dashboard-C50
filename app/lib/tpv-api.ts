@@ -23,7 +23,10 @@ export async function requireVentasSession(): Promise<SessionUser | NextResponse
   }
   if (!canAccessCorteTpv(session)) {
     return NextResponse.json(
-      { error: 'Sin acceso a Cortes TPV (módulo Ventas o Staff)' },
+      {
+        error:
+          'Sin acceso a Cortes TPV (permiso «Puede hacer el corte» o módulo Ventas)',
+      },
       { status: 403 }
     );
   }

@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { SESSION_COOKIE, verifySessionToken, canAccessAdmin } from '@/app/lib/auth';
+import {
+  SESSION_COOKIE,
+  verifySessionToken,
+  canAccessAdmin,
+  canAccessStaffCorte,
+} from '@/app/lib/auth';
 
 export async function GET() {
   const jar = await cookies();
@@ -17,8 +22,10 @@ export async function GET() {
       username: session.username,
       role: session.role,
       modules: session.modules,
+      capabilities: session.capabilities,
       canEdit: session.canEdit,
       canAccessAdmin: canAccessAdmin(session),
+      canAccessStaffCorte: canAccessStaffCorte(session),
     },
   });
 }

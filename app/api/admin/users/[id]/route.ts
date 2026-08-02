@@ -17,6 +17,11 @@ import {
   toPublicUser,
 } from '@/app/lib/users';
 import { APP_MODULES } from '@/app/lib/modules';
+import {
+  CAPABILITY_IDS,
+  normalizeCapabilities,
+  type CapabilityId,
+} from '@/app/lib/capabilities';
 
 export const runtime = 'nodejs';
 
@@ -48,6 +53,7 @@ export async function PATCH(
     password?: string;
     role?: UserRole;
     modules?: string[];
+    capabilities?: string[];
     active?: boolean;
   };
   try {
@@ -106,6 +112,13 @@ export async function PATCH(
       ? body.modules.filter((m) => MODULE_IDS.has(m as (typeof APP_MODULES)[number]['id']))
       : undefined;
 
+  const capabilities: CapabilityId[] | undefined =
+    body.capabilities !== undefined
+      ? normalizeCapabilities(
+          body.capabilities.filter((c) => CAPABILITY_IDS.has(c))
+        )
+      : undefined;
+
   try {
     const user = await updateUser(id, {
       username,
@@ -114,6 +127,7 @@ export async function PATCH(
       password: body.password || undefined,
       role,
       modules,
+      capabilities,
       active: body.active,
     });
     const pub = toPublicUser(user);
@@ -124,6 +138,7 @@ export async function PATCH(
         displayName: pub.displayName,
         role: pub.role,
         modules: user.modules || [],
+        capabilities: pub.capabilities,
         active: pub.active,
         canEdit: pub.canEdit,
         password: user.password,

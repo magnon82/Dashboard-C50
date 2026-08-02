@@ -1,3 +1,9 @@
+import type { CapabilityId } from '@/app/lib/capabilities';
+import {
+  STAFF_CORTE_SEED_USERNAMES,
+  hasCapability,
+  normalizeCapabilities,
+} from '@/app/lib/capabilities';
 import type { UserRole } from '@/app/lib/users';
 
 export const SESSION_COOKIE = 'c50_dashboard_session';
@@ -8,6 +14,8 @@ export interface SessionUser {
   role: UserRole;
   /** '*' = todos (admin); o ids de módulo */
   modules: string[];
+  /** Permisos granulares (staff.corte, …). Admin → todos vía hasCapability. */
+  capabilities: CapabilityId[];
   canEdit: boolean;
 }
 
@@ -57,10 +65,24 @@ function decodeModules(raw: string): string[] {
   return raw.split('+').filter(Boolean);
 }
 
+function encodeCapabilities(capabilities: string[]): string {
+  if (!capabilities.length) return '-';
+  return capabilities.filter(Boolean).join('+');
+}
+
+function decodeCapabilities(raw: string): CapabilityId[] {
+  if (!raw || raw === '-') return [];
+  return normalizeCapabilities(raw.split('+'));
+}
+
 export async function createSessionToken(user: SessionUser): Promise<string> {
   const exp = Date.now() + SESSION_MAX_AGE * 1000;
   const mods = encodeModules(user.role === 'admin' ? ['*'] : user.modules);
-  const payload = `v2:${user.username}:${user.role}:${mods}:${exp}`;
+  const caps = encodeCapabilities(
+    user.role === 'admin' ? [] : user.capabilities || []
+  );
+  // v3: username:role:modules:capabilities:exp
+  const payload = `v3:${user.username}:${user.role}:${mods}:${caps}:${exp}`;
   const sig = await hmacSign(payload, getAuthSecret());
   return `${payload}:${sig}`;
 }
@@ -75,6 +97,23 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
   if (!safeEqual(sig, expected)) return null;
 
   const parts = payload.split(':');
+
+  if (parts[0] === 'v3' && parts.length === 6) {
+    const [, username, role, mods, caps, expRaw] = parts;
+    const exp = Number(expRaw);
+    if (!username || !exp || Date.now() > exp) return null;
+    if (role !== 'admin' && role !== 'viewer') return null;
+    const modules = role === 'admin' ? ['*'] : decodeModules(mods);
+    return {
+      username,
+      role,
+      modules,
+      capabilities: role === 'admin' ? [] : decodeCapabilities(caps),
+      canEdit: role === 'admin',
+    };
+  }
+
+  // Compat v2 (sin capabilities) → capabilities vacías
   if (parts[0] === 'v2' && parts.length === 5) {
     const [, username, role, mods, expRaw] = parts;
     const exp = Number(expRaw);
@@ -85,6 +124,7 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
       username,
       role,
       modules,
+      capabilities: [],
       canEdit: role === 'admin',
     };
   }
@@ -99,6 +139,7 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
       username,
       role: 'admin',
       modules: ['*'],
+      capabilities: [],
       canEdit: true,
     };
   }
@@ -111,13 +152,50 @@ export function canAccessModule(session: SessionUser, moduleId: string): boolean
   return session.modules.includes(moduleId);
 }
 
-/** Cortes TPV: módulo Ventas o Staff (piso operativo). */
+export function sessionHasCapability(
+  session: SessionUser,
+  id: CapabilityId
+): boolean {
+  return hasCapability(session.capabilities, id, {
+    role: session.role,
+    modules: session.modules,
+  });
+}
+
+/** Sesiones v2 sin capabilities: roman/roberto hasta re-login tras el seed. */
+function legacySeedStaffCorte(session: SessionUser): boolean {
+  if (session.capabilities?.length) return false;
+  const u = session.username.trim().toLowerCase();
+  return (STAFF_CORTE_SEED_USERNAMES as readonly string[]).includes(u);
+}
+
+/**
+ * Cortes TPV (operar / API):
+ * - Admin → sí
+ * - Capability `staff.corte` → sí (palomita Master)
+ * - Módulo Ventas → sí (gerencia / reportes en /ventas/corte-tpv)
+ * Staff sin palomita → no (aunque tenga módulo staff).
+ */
 export function canAccessCorteTpv(session: SessionUser): boolean {
-  return canAccessModule(session, 'ventas') || canAccessModule(session, 'staff');
+  if (session.role === 'admin' || session.modules.includes('*')) return true;
+  if (sessionHasCapability(session, 'staff.corte')) return true;
+  if (legacySeedStaffCorte(session)) return true;
+  return canAccessModule(session, 'ventas');
+}
+
+/** Card /staff/corte: solo quien tiene la palomita (o admin). */
+export function canAccessStaffCorte(session: SessionUser): boolean {
+  if (session.role === 'admin' || session.modules.includes('*')) return true;
+  if (sessionHasCapability(session, 'staff.corte')) return true;
+  return legacySeedStaffCorte(session);
 }
 
 export function isCorteTpvPath(pathname: string): boolean {
   return pathname === '/ventas/corte-tpv' || pathname.startsWith('/ventas/corte-tpv/');
+}
+
+export function isStaffCortePath(pathname: string): boolean {
+  return pathname === '/staff/corte' || pathname.startsWith('/staff/corte/');
 }
 
 /** Solo el admin bootstrap (DASHBOARD_USER) ve y usa /admin */

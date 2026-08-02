@@ -24,6 +24,7 @@ import {
   type PlantillaTeamGroup,
 } from '@/app/lib/hr';
 import { formatHrListName } from '@/app/lib/hr-person-match';
+import { suggestSuiteUsername } from '@/app/lib/hr-suite-user';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -274,6 +275,11 @@ export function RrhhPlantilla({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [editUser, setEditUser] = useState<Record<string, string>>({});
+  const [createdCreds, setCreatedCreds] = useState<{
+    username: string;
+    password: string;
+    displayName: string;
+  } | null>(null);
   const [showCatalog, setShowCatalog] = useState(false);
   const [catalog, setCatalog] = useState<HrEmployee[] | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -490,6 +496,91 @@ export function RrhhPlantilla({
     }
   }
 
+  async function createSuiteUser(emp: HrEmployee) {
+    setBusyId(emp.id);
+    setToast(null);
+    setCreatedCreds(null);
+    const suggested =
+      (editUser[emp.id] ?? '').trim() ||
+      emp.suite_username ||
+      suggestSuiteUsername(emp.full_name);
+    try {
+      const res = await fetch('/api/hr/employees/suite-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId: emp.id,
+          username: suggested,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setToast(json.error || 'No se pudo crear el usuario');
+        return;
+      }
+      setToast(json.message || 'Usuario listo');
+      if (json.username && json.password) {
+        setCreatedCreds({
+          username: json.username,
+          password: json.password,
+          displayName: json.displayName || formatHrListName(emp.full_name),
+        });
+      }
+      if (json.username) {
+        setEditUser((m) => ({ ...m, [emp.id]: json.username }));
+      }
+      onChanged?.();
+      if (showCatalog) {
+        setCatalog((prev) =>
+          prev
+            ? prev.map((row) =>
+                row.id === emp.id
+                  ? { ...row, suite_username: json.username || row.suite_username }
+                  : row
+              )
+            : prev
+        );
+      }
+    } catch {
+      setToast('Error de red al crear usuario');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function resetSuitePassword(emp: HrEmployee) {
+    setBusyId(emp.id);
+    setToast(null);
+    setCreatedCreds(null);
+    try {
+      const res = await fetch('/api/hr/employees/suite-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId: emp.id,
+          action: 'reset_password',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setToast(json.error || 'No se pudo restablecer');
+        return;
+      }
+      setToast(json.message || 'Contraseña restablecida');
+      if (json.username && json.password) {
+        setCreatedCreds({
+          username: json.username,
+          password: json.password,
+          displayName: json.displayName || formatHrListName(emp.full_name),
+        });
+      }
+    } catch {
+      setToast('Error de red al restablecer');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const dbBacked =
     expIndex?.source === 'supabase' ||
     (expIndex?.ready === true && (expIndex.linkedCount ?? 0) > 0) ||
@@ -573,6 +664,35 @@ export function RrhhPlantilla({
         </p>
       ) : null}
 
+      {createdCreds ? (
+        <div
+          className="rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 max-w-3xl"
+          role="status"
+        >
+          <p className="text-sm font-semibold text-emerald-900">
+            Credenciales · {createdCreds.displayName}
+          </p>
+          <p className="mt-1 text-sm text-emerald-900">
+            Usuario:{' '}
+            <span className="font-mono font-bold">{createdCreds.username}</span>
+            {' · '}
+            Contraseña:{' '}
+            <span className="font-mono font-bold">{createdCreds.password}</span>
+          </p>
+          <p className="mt-1 text-xs text-emerald-800/80">
+            Contraseña inicial = día+mes de ingreso (DDMM). Cópialas ahora; también
+            quedan en Master → Editar usuario.
+          </p>
+          <button
+            type="button"
+            className="mt-2 text-xs font-semibold text-emerald-900 underline"
+            onClick={() => setCreatedCreds(null)}
+          >
+            Cerrar
+          </button>
+        </div>
+      ) : null}
+
       {loading || catalogLoading ? (
         <p className="text-sm" style={{ color: theme.muted }}>
           Cargando plantilla…
@@ -601,7 +721,11 @@ export function RrhhPlantilla({
             </thead>
             <tbody>
               {employees.map((e) => {
-                const userVal = editUser[e.id] ?? e.suite_username ?? '';
+                const linked = Boolean(e.suite_username?.trim());
+                const userVal =
+                  editUser[e.id] ??
+                  e.suite_username ??
+                  suggestSuiteUsername(e.full_name);
                 return (
                   <tr
                     key={e.id}
@@ -612,34 +736,82 @@ export function RrhhPlantilla({
                       style={{ color: theme.title }}
                     >
                       {formatHrListName(e.full_name)}
+                      {e.fecha_ingreso ? (
+                        <span
+                          className="mt-0.5 block text-[11px] font-normal"
+                          style={{ color: theme.muted }}
+                        >
+                          Ingreso {formatHrDate(e.fecha_ingreso)}
+                        </span>
+                      ) : (
+                        <span className="mt-0.5 block text-[11px] font-normal text-amber-700">
+                          Sin fecha de ingreso
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex min-w-[9rem] items-center gap-1">
-                        <input
-                          className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
-                          placeholder="usuario"
-                          value={userVal}
-                          onChange={(ev) =>
-                            setEditUser((m) => ({
-                              ...m,
-                              [e.id]: ev.target.value,
-                            }))
-                          }
-                        />
-                        <button
-                          type="button"
-                          disabled={busyId === e.id}
-                          className="rounded px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
-                          style={{ backgroundColor: SUITE.navy }}
-                          onClick={() =>
-                            patchEmployee(e.id, {
-                              suite_username: userVal.trim() || null,
-                            })
-                          }
-                        >
-                          OK
-                        </button>
-                      </div>
+                      {linked ? (
+                        <div className="flex min-w-[12rem] flex-wrap items-center gap-1.5">
+                          <span
+                            className="rounded-full px-2 py-0.5 text-xs font-semibold"
+                            style={{
+                              backgroundColor: '#ecfdf5',
+                              color: '#065f46',
+                            }}
+                            title="Usuario Suite vinculado"
+                          >
+                            Ya tiene usuario · {e.suite_username}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={busyId === e.id}
+                            className="rounded px-2 py-1 text-xs font-semibold border border-slate-200 disabled:opacity-50"
+                            style={{ color: theme.title }}
+                            onClick={() => resetSuitePassword(e)}
+                            title="Restablecer a DDMM de fecha de ingreso"
+                          >
+                            Reset pass
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex min-w-[12rem] flex-wrap items-center gap-1">
+                          <input
+                            className="w-28 rounded border border-slate-200 px-2 py-1 text-xs"
+                            placeholder="usuario"
+                            value={userVal}
+                            onChange={(ev) =>
+                              setEditUser((m) => ({
+                                ...m,
+                                [e.id]: ev.target.value,
+                              }))
+                            }
+                          />
+                          <button
+                            type="button"
+                            disabled={busyId === e.id}
+                            className="rounded px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                            style={{ backgroundColor: SUITE.navy }}
+                            onClick={() => createSuiteUser(e)}
+                            title="Crea usuario Suite + contraseña = DDMM de ingreso"
+                          >
+                            Crear usuario
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId === e.id}
+                            className="rounded px-2 py-1 text-xs font-semibold border border-slate-200 disabled:opacity-50"
+                            style={{ color: theme.muted }}
+                            onClick={() =>
+                              patchEmployee(e.id, {
+                                suite_username: userVal.trim() || null,
+                              })
+                            }
+                            title="Solo vincular username existente (sin crear)"
+                          >
+                            Vincular
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">

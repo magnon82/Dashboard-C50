@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
 import { todayIsoCdmx } from '@/app/lib/hr';
+import { useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -14,6 +15,8 @@ function isWeekendPreviewCdmx(): boolean {
 
 export default function StaffPage() {
   const weekendPreview = isWeekendPreviewCdmx();
+  const { user, loading } = useSession();
+  const showCorte = Boolean(user?.canAccessStaffCorte);
 
   return (
     <SuiteShell
@@ -26,31 +29,33 @@ export default function StaffPage() {
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2 max-w-3xl">
-        <Link href="/staff/corte" className="group block">
-          <SuiteCard
-            dark
-            className="h-full transition-transform group-hover:-translate-y-0.5"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <h2 className="text-lg font-bold text-white">Corte del día</h2>
-              <span
-                className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-                style={{
-                  backgroundColor: 'rgba(255,255,255,0.15)',
-                  color: '#fff',
-                }}
-              >
-                Principal
-              </span>
-            </div>
-            <p className="mt-3 text-sm leading-relaxed text-white/75">
-              prepara la cámara de tu teléfono
-            </p>
-            <p className="mt-5 text-sm font-bold" style={{ color: SUITE.orange }}>
-              Presiona aqui para realizar el corte diario
-            </p>
-          </SuiteCard>
-        </Link>
+        {!loading && showCorte ? (
+          <Link href="/staff/corte" className="group block">
+            <SuiteCard
+              dark
+              className="h-full transition-transform group-hover:-translate-y-0.5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="text-lg font-bold text-white">Corte del día</h2>
+                <span
+                  className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                  style={{
+                    backgroundColor: 'rgba(255,255,255,0.15)',
+                    color: '#fff',
+                  }}
+                >
+                  Principal
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-relaxed text-white/75">
+                prepara la cámara de tu teléfono
+              </p>
+              <p className="mt-5 text-sm font-bold" style={{ color: SUITE.orange }}>
+                Presiona aqui para realizar el corte diario
+              </p>
+            </SuiteCard>
+          </Link>
+        ) : null}
 
         <Link href="/staff/propinas" className="group block">
           <SuiteCard

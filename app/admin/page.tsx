@@ -7,6 +7,7 @@ import { AdminCajaTpv } from '@/app/components/AdminCajaTpv';
 import { AdminDataMap } from '@/app/components/AdminDataMap';
 import { AdminPresupuestoAjustes } from '@/app/components/AdminPresupuestoAjustes';
 import { AdminSaldosBancos } from '@/app/components/AdminSaldosBancos';
+import { APP_CAPABILITIES } from '@/app/lib/capabilities';
 import { APP_MODULES } from '@/app/lib/modules';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
@@ -18,6 +19,7 @@ interface AdminUser {
   displayName: string | null;
   role: 'admin' | 'viewer';
   modules: string[];
+  capabilities: string[];
   active: boolean;
   canEdit: boolean;
   createdAt?: string;
@@ -31,6 +33,7 @@ const emptyForm = {
   password: '',
   role: 'viewer' as 'admin' | 'viewer',
   modules: ['ventas'] as string[],
+  capabilities: [] as string[],
 };
 
 /** Contraseña legible en cliente (sin caracteres ambiguos). */
@@ -191,6 +194,7 @@ export default function AdminPage() {
   const [editModules, setEditModules] = useState<string[]>([]);
   const [editUsername, setEditUsername] = useState('');
   const [editDisplayName, setEditDisplayName] = useState('');
+  const [editCapabilities, setEditCapabilities] = useState<string[]>([]);
   const [editSaving, setEditSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
@@ -258,10 +262,28 @@ export default function AdminPage() {
     setForm((f) => ({
       ...f,
       modules: ['staff'],
+      capabilities: f.capabilities.includes('staff.corte')
+        ? f.capabilities
+        : [...f.capabilities, 'staff.corte'],
       password: f.password || generateClientPassword(),
     }));
     setOkMsg('');
     setError('');
+  }
+
+  function toggleCapability(id: string) {
+    setForm((f) => ({
+      ...f,
+      capabilities: f.capabilities.includes(id)
+        ? f.capabilities.filter((c) => c !== id)
+        : [...f.capabilities, id],
+    }));
+  }
+
+  function toggleEditCapability(id: string) {
+    setEditCapabilities((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    );
   }
 
   async function copyCreatedCreds() {
@@ -286,6 +308,7 @@ export default function AdminPage() {
     setEditUsername(u.username);
     setEditDisplayName(u.displayName || '');
     setEditModules((u.modules || []).filter((m) => m !== '*'));
+    setEditCapabilities(u.capabilities || []);
     setOkMsg('');
     setError('');
   }
@@ -311,6 +334,7 @@ export default function AdminPage() {
       if (editing?.role !== 'admin') {
         body.role = 'viewer';
         body.modules = editModules;
+        body.capabilities = editCapabilities;
       }
       if (editPassword.trim()) body.password = editPassword.trim();
 
@@ -498,10 +522,11 @@ export default function AdminPage() {
               onClick={applyStaffTemplate}
               className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
             >
-              Plantilla Staff · solo Cortes TPV
+              Plantilla Staff · con permiso de corte
             </button>
             <p className="mt-1 text-xs text-slate-500">
-              Marca el módulo Staff, genera contraseña y al iniciar sesión van a{' '}
+              Marca módulo Staff + palomita «Puede hacer el corte», genera
+              contraseña y al iniciar sesión van a{' '}
               <span className="font-mono">/staff</span>.
             </p>
 
@@ -549,9 +574,36 @@ export default function AdminPage() {
                       onChange={() => toggleModule(m.id)}
                     />
                     {m.label}
-                    {m.id === 'staff' ? (
-                      <span className="text-xs text-slate-400">(Cortes TPV)</span>
-                    ) : null}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="mt-4">
+              <legend className="text-sm font-semibold text-slate-700">
+                Permisos de acceso
+              </legend>
+              <p className="mt-1 text-xs text-slate-500">
+                Palomitas granulares (además de módulos). Se irán agregando más.
+              </p>
+              <div className="mt-2 space-y-2">
+                {APP_CAPABILITIES.map((c) => (
+                  <label
+                    key={c.id}
+                    className="flex items-start gap-2 text-sm text-slate-700"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={form.capabilities.includes(c.id)}
+                      onChange={() => toggleCapability(c.id)}
+                    />
+                    <span>
+                      <span className="font-medium">{c.label}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        {c.hint}
+                      </span>
+                    </span>
                   </label>
                 ))}
               </div>
@@ -776,29 +828,54 @@ export default function AdminPage() {
                 />
 
                 {editingUser.role !== 'admin' && (
-                <fieldset className="mt-3">
-                  <legend className="text-sm font-semibold text-slate-700">
-                    Módulos permitidos (solo lectura)
-                  </legend>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {APP_MODULES.map((m) => (
-                      <label
-                        key={m.id}
-                        className="flex items-center gap-2 text-sm text-slate-700"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={editModules.includes(m.id)}
-                          onChange={() => toggleEditModule(m.id)}
-                        />
-                        {m.label}
-                        {m.id === 'staff' ? (
-                          <span className="text-xs text-slate-400">(Cortes TPV)</span>
-                        ) : null}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                  <>
+                    <fieldset className="mt-3">
+                      <legend className="text-sm font-semibold text-slate-700">
+                        Módulos permitidos (solo lectura)
+                      </legend>
+                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {APP_MODULES.map((m) => (
+                          <label
+                            key={m.id}
+                            className="flex items-center gap-2 text-sm text-slate-700"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={editModules.includes(m.id)}
+                              onChange={() => toggleEditModule(m.id)}
+                            />
+                            {m.label}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <fieldset className="mt-3">
+                      <legend className="text-sm font-semibold text-slate-700">
+                        Permisos de acceso
+                      </legend>
+                      <div className="mt-2 space-y-2">
+                        {APP_CAPABILITIES.map((c) => (
+                          <label
+                            key={c.id}
+                            className="flex items-start gap-2 text-sm text-slate-700"
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              checked={editCapabilities.includes(c.id)}
+                              onChange={() => toggleEditCapability(c.id)}
+                            />
+                            <span>
+                              <span className="font-medium">{c.label}</span>
+                              <span className="mt-0.5 block text-xs text-slate-500">
+                                {c.hint}
+                              </span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  </>
                 )}
 
                 <button

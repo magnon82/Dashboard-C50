@@ -5,7 +5,9 @@ import {
   canAccessModule,
   canAccessAdmin,
   canAccessCorteTpv,
+  canAccessStaffCorte,
   isCorteTpvPath,
+  isStaffCortePath,
   verifySessionToken,
 } from '@/app/lib/auth';
 import { homePathForModules } from '@/app/lib/modules';
@@ -69,8 +71,17 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Cortes TPV: accesible con Ventas o Staff (sin abrir todo /ventas al staff)
-  if (isCorteTpvPath(pathname)) {
+  // Staff Corte: requiere palomita staff.corte (además de módulo staff)
+  if (isStaffCortePath(pathname)) {
+    if (!canAccessModule(session, 'staff') && !canAccessAdmin(session)) {
+      const home = homePathForModules(session.modules);
+      return NextResponse.redirect(new URL(home, request.url));
+    }
+    if (!canAccessStaffCorte(session)) {
+      return NextResponse.redirect(new URL('/staff', request.url));
+    }
+  } else if (isCorteTpvPath(pathname)) {
+    // Cortes TPV (Ventas): capability staff.corte o módulo Ventas / admin
     if (!canAccessCorteTpv(session)) {
       const home = homePathForModules(session.modules);
       return NextResponse.redirect(new URL(home, request.url));
