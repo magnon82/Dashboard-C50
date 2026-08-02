@@ -8,6 +8,7 @@ import {
 } from '@/app/lib/auth';
 import {
   ALL_SOURCE_FILES,
+  HR_TABLES,
   SOURCE_FILE_GROUPS,
 } from '@/app/lib/admin-resources';
 import {
@@ -59,11 +60,19 @@ export async function GET() {
   const body: DataInventoryResult = {
     documented: {
       sourceFiles: ALL_SOURCE_FILES,
-      groups: SOURCE_FILE_GROUPS.map((g) => ({
-        id: g.id,
-        label: g.label,
-        sources: g.sources,
-      })),
+      groups: [
+        ...SOURCE_FILE_GROUPS.map((g) => ({
+          id: g.id,
+          label: g.label,
+          sources: g.sources,
+        })),
+        {
+          id: 'rrhh',
+          label: 'Recursos Humanos (hr_*)',
+          sources: HR_TABLES,
+        },
+      ],
+      hrTables: HR_TABLES,
     },
     detectedSourceFiles: detected.detectedSourceFiles,
     detectedSourceFilesError: detected.detectedSourceFilesError,

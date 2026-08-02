@@ -9,7 +9,10 @@
     "lint": "eslint",
     "ingest:estados": "cd ingestor && python ingest_estados_cuenta.py",
     "ingest:estados:dry": "cd ingestor && python ingest_estados_cuenta.py --dry-run",
-    "gcal:probe": "node scripts/gcal-probe.mjs"
+    "gcal:probe": "node scripts/gcal-probe.mjs",
+    "hr:backfill-expedientes": "node --experimental-strip-types scripts/hr-backfill-expediente-links.mjs",
+    "hr:reconcile-dupes": "node --experimental-strip-types scripts/hr-reconcile-duplicates.mjs",
+    "hr:import-horarios": "node scripts/hr-import-horarios-2026.mjs"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
@@ -21,7 +24,8 @@
     "react-dom": "19.2.4",
     "recharts": "^2.15.4",
     "sharp": "^0.35.3",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

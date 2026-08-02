@@ -13,9 +13,9 @@ export default function StaffPage() {
       subtitle="Operación de piso · Carranza 50"
     >
       <p className="mb-6 max-w-2xl text-sm" style={{ color: theme.muted }}>
-        Herramientas de piso: cierre diario (terminales + WI / Eventos /
-        efectivo) y calculadora de propinas. La guía de fotos está dentro del
-        corte y en Master Panel.
+        Herramientas de piso: cierre diario, propinas, y lo que RH publica para
+        el personal (horario). La gestión de horarios, nómina, vacaciones y
+        resguardos está en Recursos Humanos, no aquí.
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2 max-w-3xl">
@@ -75,6 +75,39 @@ export default function StaffPage() {
               style={{ color: SUITE.orangeDeep }}
             >
               Abrir calculadora →
+            </p>
+          </SuiteCard>
+        </Link>
+
+        <Link href="/staff/horario" className="group block">
+          <SuiteCard
+            className="h-full transition-transform group-hover:-translate-y-0.5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-lg font-bold" style={{ color: SUITE.navy }}>
+                Mi horario
+              </h2>
+              <span
+                className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                style={{
+                  backgroundColor: SUITE.orangeSoft,
+                  color: SUITE.navy,
+                }}
+              >
+                En curso
+              </span>
+            </div>
+            <p
+              className="mt-3 text-sm leading-relaxed"
+              style={{ color: SUITE.muted }}
+            >
+              Semana en curso; los viernes también la próxima si RH la publicó
+            </p>
+            <p
+              className="mt-5 text-sm font-bold"
+              style={{ color: SUITE.orangeDeep }}
+            >
+              Ver horario →
             </p>
           </SuiteCard>
         </Link>

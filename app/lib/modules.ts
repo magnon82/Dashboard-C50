@@ -27,7 +27,7 @@ export const APP_MODULES: AppModule[] = [
     label: 'Staff',
     short: 'Staff',
     description:
-      'Herramientas operativas de piso · Cortes TPV, captura diaria y propinas',
+      'Piso operativo · Cortes TPV, propinas, horario y vacaciones publicadas',
     status: 'activo',
   },
   {
@@ -67,8 +67,10 @@ export const APP_MODULES: AppModule[] = [
     href: '/rrhh',
     label: 'Recursos Humanos',
     short: 'RR.HH.',
-    description: 'Personal, nómina y gestión de equipo · próximamente',
-    status: 'próximo',
+    // Acceso: módulo `rrhh` (Admin). Futuro: flags rrhh.payroll / rrhh.expedientes.
+    description:
+      'Plantilla (expedientes), horarios, nómina, vacaciones y biblioteca · gestión RH/gerentes',
+    status: 'activo',
   },
   {
     id: 'cocina',
@@ -76,7 +78,7 @@ export const APP_MODULES: AppModule[] = [
     label: 'Cocina',
     short: 'Cocina',
     description: 'Operación y tablero de cocina · Carranza 50',
-    status: 'activo',
+    status: 'próximo',
   },
   {
     id: 'barra',
@@ -84,7 +86,7 @@ export const APP_MODULES: AppModule[] = [
     label: 'Barra',
     short: 'Barra',
     description: 'Operación y tablero de barra · Carranza 50',
-    status: 'activo',
+    status: 'próximo',
   },
   {
     id: 'calidad',
@@ -97,9 +99,9 @@ export const APP_MODULES: AppModule[] = [
   {
     id: 'inventarios',
     href: '/inventarios',
-    label: 'Inventarios',
-    short: 'Inventarios',
-    description: 'Existencias, mermas y puntos de reorden',
+    label: 'Costos e Inventarios',
+    short: 'Costos',
+    description: 'Costeo, existencias, mermas y puntos de reorden',
     status: 'próximo',
   },
 ];

@@ -204,34 +204,86 @@ const SOURCE_GROUP_META: Record<
  * Inventario documentado (metadatos): dónde vive cada recurso.
  * La UI fusiona esto con detección en vivo; no es el grafo del mapa.
  */
+/** Tablas RR.HH. (no van en financial_records.source_file). */
+export const HR_TABLES: string[] = [
+  'hr_employees',
+  'hr_payroll_periods',
+  'hr_payroll_lines',
+  'hr_schedule_weeks',
+  'hr_schedule_shifts',
+  'hr_availability',
+  'hr_leave_balances',
+  'hr_leave_requests',
+  'hr_doc_links',
+  'hr_resguardo_requests',
+];
+
 export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
   {
     id: 'supabase',
     title: 'Supabase',
-    subtitle: 'Tabla financial_records · columna source_file',
-    role: 'Almacén central de filas financieras filtrables por origen.',
-    branches: SOURCE_FILE_GROUPS.map((g) => {
-      const meta = SOURCE_GROUP_META[g.id] ?? { role: g.label, updateFrequency: '—' };
-      return {
-        id: `supabase-${g.id}`,
-        label: g.label,
-        role: meta.role,
-        updateFrequency: meta.updateFrequency,
-        leaves: g.sources.map((s) => ({
-          label: s,
-          kind: 'source_file' as const,
-          updateFrequency: SOURCE_FILE_UPDATE[s],
+    subtitle: 'financial_records (source_file) · tablas hr_* (RR.HH.)',
+    role: 'Almacén central: filas financieras por origen + módulo RR.HH. en tablas propias.',
+    branches: [
+      ...SOURCE_FILE_GROUPS.map((g) => {
+        const meta = SOURCE_GROUP_META[g.id] ?? { role: g.label, updateFrequency: '—' };
+        return {
+          id: `supabase-${g.id}`,
+          label: g.label,
+          role: meta.role,
+          updateFrequency: meta.updateFrequency,
+          leaves: g.sources.map((s) => ({
+            label: s,
+            kind: 'source_file' as const,
+            updateFrequency: SOURCE_FILE_UPDATE[s],
+          })),
+          scripts: meta.scripts,
+          routes: meta.routes,
+        };
+      }),
+      {
+        id: 'supabase-hr',
+        label: 'Recursos Humanos (hr_*)',
+        role: 'Plantilla, nómina, horarios, vacaciones, biblioteca y resguardos. No usa source_file.',
+        note: 'Migración: supabase/hr_module.sql (+ hr_resguardo.sql / hr_leave_request_form.sql si aplica)',
+        updateFrequency: 'Operativo en Suite · import local Descargas + captura RH en /rrhh',
+        leaves: HR_TABLES.map((t) => ({
+          label: t,
+          kind: 'file' as const,
+          note:
+            t === 'hr_employees'
+              ? 'Plantilla vigente · suite_username'
+              : t === 'hr_payroll_periods' || t === 'hr_payroll_lines'
+                ? 'Nómina borrador → cerrado → pagado'
+                : t === 'hr_schedule_weeks' || t === 'hr_schedule_shifts'
+                  ? 'Horarios borrador → publicado (propuesta diferida)'
+                  : t === 'hr_doc_links'
+                    ? 'Biblioteca · seed / defaults'
+                    : t === 'hr_resguardo_requests'
+                      ? 'Resguardos (/rrhh → Plantilla)'
+                      : undefined,
+          copyValue: t,
+          updateFrequency: 'Solo Suite (/rrhh · /api/hr/*)',
         })),
-        scripts: meta.scripts,
-        routes: meta.routes,
-      };
-    }),
+        routes: [
+          '/rrhh',
+          '/staff/horario',
+          '/api/hr/employees',
+          '/api/hr/payroll',
+          '/api/hr/schedules',
+          '/api/hr/leave-requests',
+          '/api/hr/leave-balances',
+          '/api/hr/docs',
+          '/api/hr/resguardo',
+        ],
+      },
+    ],
   },
   {
     id: 'drive',
     title: 'Drive / I:',
-    subtitle: 'Archivos locales (Google Drive File Stream) y carpetas espejo',
-    role: 'Origen de Excel, PDFs y carpetas que alimentan los ingestors.',
+    subtitle: 'Archivos locales (Google Drive File Stream), carpetas espejo y Descargas RH',
+    role: 'Origen de Excel, PDFs y carpetas que alimentan los ingestors y el módulo RR.HH.',
     branches: [
       {
         id: 'drive-presupuestos',
@@ -338,6 +390,108 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         scripts: ['ingest_eventos.py'],
         sourceFiles: ['eventos'],
         routes: ['/ventas', '/finanzas'],
+      },
+      {
+        id: 'drive-rh',
+        label: 'Recursos Humanos (RH)',
+        role: 'Módulo /rrhh activo: plantilla (incluye expedientes), horarios, nómina, vacaciones, biblioteca. Drive File Stream = bóveda; import operativo desde Descargas.',
+        note: 'I:\\Mi unidad\\RH',
+        updateFrequency:
+          'Operativo en Suite · consulta File Stream; nómina también Drive API (HR_NOMINA_DRIVE_FOLDER_ID)',
+        leaves: [
+          {
+            label: 'Nóminas',
+            kind: 'path',
+            note: 'Carpeta Drive · plantilla = nómina conciliada ∪ última semana de horarios',
+            copyValue: 'I:\\Mi unidad\\RH\\Nóminas',
+            updateFrequency: 'Import /rrhh → Nómina (local o Drive)',
+          },
+          {
+            label: 'Nóminas · Drive folder ID',
+            kind: 'path',
+            note: 'https://drive.google.com/drive/folders/1qIZq7O2lcvs5zxG6p5jjzh4wRMXoFK3J · env HR_NOMINA_DRIVE_FOLDER_ID',
+            copyValue: '1qIZq7O2lcvs5zxG6p5jjzh4wRMXoFK3J',
+          },
+          {
+            label: 'Horarios',
+            kind: 'path',
+            note: 'Histórico en Drive; import operativo desde Descargas (HORARIOS C50 2026.xlsx)',
+            copyValue: 'I:\\Mi unidad\\RH\\Horarios',
+            updateFrequency: 'Import /rrhh → Horarios',
+          },
+          {
+            label: 'Expedientes personal C50',
+            kind: 'path',
+            note: 'Altas/Bajas · índice /rrhh → Plantilla · opcional HR_EXPEDIENTES_DRIVE_FOLDER_ID',
+            copyValue: 'I:\\Mi unidad\\RH\\Expedientes personal C50',
+          },
+          {
+            label: 'Documentación',
+            kind: 'path',
+            note: 'Políticas, RIT, manuales · hr_doc_links · opcional HR_DOCS_VIGENTE_DRIVE_FOLDER_ID',
+            copyValue: 'I:\\Mi unidad\\RH\\Documentación vigente 2023',
+          },
+          {
+            label: 'Cultura Organizacional',
+            kind: 'path',
+            note: 'Biblioteca /rrhh · categoría cultura',
+            copyValue: 'I:\\Mi unidad\\RH\\Cultura Organizacional',
+          },
+          {
+            label: 'Perfiles por posición',
+            kind: 'path',
+            note: 'Biblioteca /rrhh · categoría perfiles',
+            copyValue: 'I:\\Mi unidad\\RH\\Perfiles por posición',
+          },
+          {
+            label: 'Exámenes piso',
+            kind: 'path',
+            note: 'Biblioteca /rrhh · categoría examenes',
+            copyValue: 'I:\\Mi unidad\\RH\\Exámenes piso',
+          },
+          {
+            label: 'BASE DATOS PERSONAL C50.xlsx',
+            kind: 'file',
+            note: 'Legacy / fallback plantilla (HR_BASE_DATOS_XLSX)',
+            copyValue: 'I:\\Mi unidad\\RH\\BASE DATOS PERSONAL C50.xlsx',
+          },
+        ],
+        routes: [
+          '/rrhh',
+          '/staff/horario',
+          '/api/hr/payroll',
+          '/api/hr/schedules',
+          '/api/hr/docs',
+          '/api/hr/expedientes',
+        ],
+      },
+      {
+        id: 'local-hr-downloads',
+        label: 'Descargas · import RR.HH.',
+        role: 'Excel locales (fuente primaria de import nómina y horarios en el PC).',
+        note: '%USERPROFILE%\\Downloads · env HR_NOMINA_LOCAL_DIR / HR_HORARIOS_LOCAL_DIR',
+        updateFrequency: 'Manual en PC · botones Importar en /rrhh → Nómina / Horarios',
+        leaves: [
+          {
+            label: 'NOMINA C50 2026 .xlsx',
+            kind: 'file',
+            note: 'También 2025…2022 · seed plantilla / períodos',
+            copyValue: 'NOMINA C50 2026 .xlsx',
+            updateFrequency: 'POST /api/hr/payroll/import',
+          },
+          {
+            label: 'HORARIOS C50 2026.xlsx',
+            kind: 'file',
+            note: 'Hojas SEMANA N · pasado+curso→publicado, futuro→borrador (hasta Publicar)',
+            copyValue: 'HORARIOS C50 2026.xlsx',
+            updateFrequency: 'POST /api/hr/schedules/import',
+          },
+        ],
+        routes: [
+          '/rrhh',
+          '/api/hr/payroll/import',
+          '/api/hr/schedules/import',
+        ],
       },
       {
         id: 'drive-sheets-cxp',
@@ -476,6 +630,41 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         ],
       },
       {
+        id: 'repo-hr',
+        label: 'RR.HH. (SQL + libs)',
+        role: 'Esquema Supabase y lógica Next del módulo rrhh (activo).',
+        note: 'No usa ingestors Python · APIs /api/hr/*',
+        updateFrequency: 'Operativo en Suite',
+        leaves: [
+          {
+            label: 'supabase/hr_module.sql',
+            kind: 'file',
+            note: 'Tablas hr_* principales',
+          },
+          {
+            label: 'supabase/hr_resguardo.sql',
+            kind: 'file',
+            note: 'hr_resguardo_requests',
+          },
+          {
+            label: 'supabase/hr_leave_request_form.sql',
+            kind: 'file',
+            note: 'Patch vacaciones (payload / capturada_por_rh)',
+          },
+          {
+            label: 'app/lib/hr*.ts · hr-payroll* · hr-schedule*',
+            kind: 'file',
+            note: 'Paths Drive, import Descargas, plantilla',
+          },
+          {
+            label: 'app/api/hr/*',
+            kind: 'route',
+            note: 'Endpoints del módulo',
+          },
+        ],
+        routes: ['/rrhh', '/staff/horario', '/api/hr/summary'],
+      },
+      {
         id: 'repo-workflows',
         label: '.github/workflows/',
         role: 'Automatización en GitHub Actions (horario CDMX).',
@@ -548,16 +737,109 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             note: 'saldos_bancos_manual',
             updateFrequency: 'Solo admin',
           },
+          {
+            label: '/api/admin/data-inventory',
+            kind: 'route',
+            note: 'Inventario híbrido documentado + Drive/Supabase',
+            updateFrequency: 'Solo admin (lectura)',
+          },
         ],
         routes: [
           '/api/admin/users',
           '/api/admin/presupuesto-ajustes',
           '/api/admin/saldos-bancos',
+          '/api/admin/data-inventory',
         ],
         sourceFiles: [
           'dashboard_auth',
           'presupuesto_ajuste',
           'saldos_bancos_manual',
+        ],
+      },
+      {
+        id: 'vercel-apis-hr',
+        label: 'APIs RR.HH. (/api/hr/*)',
+        role: 'CRUD e import del módulo Recursos Humanos (permiso rrhh; Staff lee publicado).',
+        note: 'Tablas hr_* · no financial_records',
+        updateFrequency: 'En tiempo real (Suite) · import local bajo demanda',
+        leaves: [
+          {
+            label: '/api/hr/employees',
+            kind: 'route',
+            note: 'Plantilla / empleados',
+          },
+          {
+            label: '/api/hr/payroll',
+            kind: 'route',
+            note: 'GET/POST/PATCH períodos · borrador→cerrado→pagado',
+          },
+          {
+            label: '/api/hr/payroll/import',
+            kind: 'route',
+            note: 'NOMINA C50 · Descargas / Drive / upload',
+          },
+          {
+            label: '/api/hr/schedules',
+            kind: 'route',
+            note: 'Semanas · propose / [weekId] / mine / import',
+          },
+          {
+            label: '/api/hr/schedules/mine',
+            kind: 'route',
+            note: 'Staff · solo publicado',
+          },
+          {
+            label: '/api/hr/availability',
+            kind: 'route',
+            note: 'Offs / disponibilidad RH',
+          },
+          {
+            label: '/api/hr/leave-requests',
+            kind: 'route',
+            note: 'Vacaciones · captura RH',
+          },
+          {
+            label: '/api/hr/leave-balances',
+            kind: 'route',
+            note: 'Saldos · plantilla + soft-sync nómina',
+          },
+          {
+            label: '/api/hr/docs',
+            kind: 'route',
+            note: 'Biblioteca · hr_doc_links',
+          },
+          {
+            label: '/api/hr/expedientes',
+            kind: 'route',
+            note: 'Índice Altas/Bajas File Stream',
+          },
+          {
+            label: '/api/hr/resguardo',
+            kind: 'route',
+            note: 'Resguardos en /rrhh → Plantilla',
+          },
+          {
+            label: '/api/hr/summary',
+            kind: 'route',
+            note: 'KPIs / alertas (API; UI Tablero retirada)',
+          },
+        ],
+        routes: [
+          '/api/hr/employees',
+          '/api/hr/payroll',
+          '/api/hr/payroll/import',
+          '/api/hr/schedules',
+          '/api/hr/schedules/mine',
+          '/api/hr/schedules/import',
+          '/api/hr/availability',
+          '/api/hr/leave-requests',
+          '/api/hr/leave-balances',
+          '/api/hr/docs',
+          '/api/hr/expedientes',
+          '/api/hr/resguardo',
+          '/api/hr/summary',
+          '/rrhh',
+          '/staff/horario',
         ],
       },
       {
@@ -574,11 +856,30 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           { label: '/finanzas/comprobantes', kind: 'route' },
           { label: '/finanzas/estados-cuenta', kind: 'route' },
           { label: '/finanzas/facturas', kind: 'route' },
-          { label: '/rrhh', kind: 'route', note: 'placeholder' },
+          {
+            label: '/rrhh',
+            kind: 'route',
+            note: 'Activo · Plantilla (expedientes), Horarios, Nómina, Vacaciones, Biblioteca',
+          },
+          {
+            label: '/staff/horario',
+            kind: 'route',
+            note: 'Staff · solo semana publicada (vínculo suite_username)',
+          },
+          {
+            label: '/staff/vacaciones',
+            kind: 'route',
+            note: 'oculto hasta usuarios por empleado · redirect /staff',
+          },
+          {
+            label: '/staff/perfil',
+            kind: 'route',
+            note: 'oculto hasta usuarios por empleado · redirect /staff',
+          },
           { label: '/reportes-socios', kind: 'route' },
           { label: '/cocina', kind: 'route', note: 'placeholder' },
           { label: '/barra', kind: 'route', note: 'placeholder' },
-          { label: '/admin', kind: 'route' },
+          { label: '/admin', kind: 'route', note: 'Mapa + Inventario de datos' },
         ],
         routes: [
           '/',
@@ -590,6 +891,9 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           '/finanzas/estados-cuenta',
           '/finanzas/facturas',
           '/rrhh',
+          '/staff/horario',
+          '/staff/vacaciones',
+          '/staff/perfil',
           '/reportes-socios',
           '/cocina',
           '/barra',

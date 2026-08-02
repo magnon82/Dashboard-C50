@@ -1,0 +1,22 @@
+-- =============================================================================
+-- Nómina Fase 2 — notas (no es un patch obligatorio)
+-- =============================================================================
+-- Si ya corriste supabase/hr_module.sql (Fase 0), NO necesitas SQL extra.
+--
+-- Usado por la app:
+--   hr_payroll_periods   (borrador → cerrado → pagado)
+--   hr_payroll_lines
+--   hr_plantilla_vigente (última pagada + force_include − force_exclude)
+--   hr_leave_balances    (upsert al marcar pagado / import con vacaciones)
+--   hr_employees.suite_username
+--
+-- Si faltan tablas/vista: re-ejecuta hr_module.sql completo en Supabase SQL Editor.
+--
+-- Prueba:
+--   1. Env: HR_NOMINA_DRIVE_FOLDER_ID + GOOGLE_OAUTH_* o GCAL_* (drive.readonly)
+--   2. /rrhh → Nómina → elegir archivo en «Nóminas en Drive» → hoja SEM → Importar
+--   3. O subir CSV/xlsx / captura manual
+--   4. Marcar pagado → Plantilla muestra “Según nómina pagada del …”
+--   5. Opcional: Enriquecer desde BASE DATOS (Drive o respaldo local silencioso)
+-- =============================================================================
+select 1;
