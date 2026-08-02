@@ -437,7 +437,7 @@ async function reassignOrDropUnique(
   let moved = 0;
   let dropped = 0;
   for (const raw of rows) {
-    const row = raw as Record<string, unknown>;
+    const row = raw as unknown as Record<string, unknown>;
     const filters: Record<string, unknown> = { employee_id: survivorId };
     for (const c of uniqueCols) {
       if (c === 'employee_id') continue;
@@ -654,7 +654,7 @@ export async function loadActiveEmployees(
     .select(EMP_COLS)
     .order('full_name', { ascending: true });
   if (error) throw new Error(error.message);
-  return ((data || []) as Record<string, unknown>[]).map(asEmp);
+  return ((data || []) as unknown as Record<string, unknown>[]).map(asEmp);
 }
 
 async function weekHasRealShifts(

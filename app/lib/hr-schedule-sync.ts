@@ -6,7 +6,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { mondayOfIsoWeek, todayIsoCdmx } from '@/app/lib/hr';
 import { normalizePersonName } from '@/app/lib/hr-payroll';
-import { folderBasenameFromPath } from '@/app/lib/hr-person-match';
+import {
+  folderBasenameFromPath,
+  type NamedPerson,
+} from '@/app/lib/hr-person-match';
 import {
   matchEmployeeId,
   parseAllHorariosWeeks,
@@ -110,7 +113,7 @@ async function resolveNameMap(
 
   const employees = (empRows || []) as Emp[];
   const byKey = new Map<string, Emp>();
-  const namedForMatch = employees.map((e) => {
+  const namedForMatch: NamedPerson[] = employees.map((e) => {
     const base = folderBasenameFromPath(e.drive_folder_path);
     byKey.set(normalizePersonName(e.full_name), e);
     if (base) {
@@ -172,7 +175,11 @@ async function resolveNameMap(
     const e = created as Emp;
     employees.push(e);
     byKey.set(normalizePersonName(e.full_name), e);
-    namedForMatch.push({ id: e.id, full_name: e.full_name });
+    namedForMatch.push({
+      id: e.id,
+      full_name: e.full_name,
+      aliases: undefined,
+    });
     nameToId.set(name, e.id);
     createdEmployees += 1;
     matchedNames += 1;

@@ -155,9 +155,9 @@ export async function POST(request: Request) {
     if (result.fileMissing) {
       return NextResponse.json(
         {
+          ...result,
           error: 'archivo_no_encontrado',
           message: result.message,
-          ...result,
         },
         { status: 404 }
       );
@@ -166,9 +166,9 @@ export async function POST(request: Request) {
     if (!result.ready && result.weeksImported === 0 && result.weeksAlready === 0) {
       return NextResponse.json(
         {
+          ...result,
           error: 'sin_semanas',
           message: result.message,
-          ...result,
         },
         { status: 400 }
       );

@@ -44,7 +44,7 @@ export type HrDrivePayrollProbe = {
   sheets: HrNominaSheetInfo[];
   suggestedSheet: string | null;
   baseDatosOk: boolean;
-  note: string;
+  note?: string;
   error?: string;
 };
 

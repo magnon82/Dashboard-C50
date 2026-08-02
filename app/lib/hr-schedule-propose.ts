@@ -837,7 +837,7 @@ function reshapeDualLimpiezaMesero(
     if (total >= TARGET_WEEKLY_MINUTES) break;
     const remaining = TARGET_WEEKLY_MINUTES - total;
     if (remaining < 240) break;
-    let end = DUAL_LIMPIEZA_MORNING.end;
+    let end: string = DUAL_LIMPIEZA_MORNING.end;
     let mins = morningMins;
     if (mins > remaining) {
       end = endTimeAfterMinutes(DUAL_LIMPIEZA_MORNING.start, remaining);
