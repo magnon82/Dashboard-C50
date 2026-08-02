@@ -6,8 +6,10 @@ import {
   TPV_TERMINALS,
   buildDayCompleteness,
   computeNetoBanco,
+  defaultCorteDateCdmx,
   moneyMx,
   photoKindLabel,
+  todayCdmxIso,
   type TpvAdminReportDay,
   type TpvCorteUpload,
   type TpvPhotoKind,
@@ -21,6 +23,12 @@ import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
 const TEAL = '#0F9F9C';
+
+function apiErrorText(json: Record<string, unknown>, fallback: string): string {
+  return (
+    [json.error, json.hint].filter(Boolean).map(String).join(' — ') || fallback
+  );
+}
 
 function formatCorteDateDisplay(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
@@ -125,7 +133,7 @@ function PhotoCard({
     <div className="rounded-xl border border-slate-100 bg-white p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-          {label}
+          {kind === 'venta' ? 'Venta (Totalización)' : 'Propinas'}
         </p>
         {upload?.image_url ? (
           <a
@@ -234,7 +242,8 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
-  const [jumpDate, setJumpDate] = useState('');
+  /** Fecha elegida para subir/revisar (admin puede cualquier día). */
+  const [jumpDate, setJumpDate] = useState(() => defaultCorteDateCdmx());
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -250,10 +259,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
         rptError?: string | null;
       };
       if (!res.ok) {
-        setError(
-          [json.error, json.hint].filter(Boolean).map(String).join(' ') ||
-            'No se pudo cargar el reporte'
-        );
+        setError(apiErrorText(json, 'No se pudo cargar el reporte'));
         setDays([]);
         return;
       }
@@ -279,7 +285,12 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
         uploads?: TpvCorteUpload[];
       };
       if (!res.ok) {
-        setError(String(json.error || 'No se pudieron cargar las fotos del día'));
+        setError(
+          apiErrorText(
+            json as Record<string, unknown>,
+            'No se pudieron cargar las fotos del día'
+          )
+        );
         setUploads([]);
         return;
       }
@@ -397,11 +408,11 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
         const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
         const json = await readTpvApiJson(res);
         if (!res.ok) {
-          setError(String(json.error || 'No se pudo subir la foto'));
+          setError(apiErrorText(json, 'No se pudo subir la foto'));
           return;
         }
         setMsg(
-          `T${terminal} · ${photoKindLabel(kind)} actualizada (${date}).`
+          `T${terminal} · ${photoKindLabel(kind)} guardada con OCR (${date}).`
         );
         await refreshExpanded();
       } finally {
@@ -441,7 +452,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
       });
       const json = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(String(json.error || 'No se guardó el monto'));
+        setError(apiErrorText(json, 'No se guardó el monto'));
         return;
       }
       setMsg(`Monto actualizado · T${upload.terminal_number}.`);
@@ -473,7 +484,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
       });
       const json = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(String(json.error || 'No se pudo eliminar'));
+        setError(apiErrorText(json, 'No se pudo eliminar'));
         return;
       }
       setMsg(`Eliminado · T${upload.terminal_number}.`);
@@ -505,7 +516,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
       });
       const json = await readTpvApiJson(res);
       if (!res.ok) {
-        setError(String(json.error || 'No se pudo marcar como no utilizada'));
+        setError(apiErrorText(json, 'No se pudo marcar como no utilizada'));
         return;
       }
       setMsg(`T${terminal} marcada como no utilizada.`);
@@ -544,11 +555,12 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
               className="mt-1 text-lg font-bold"
               style={{ color: theme.title }}
             >
-              Cortes TPV · reporte
+              Cortes TPV · reporte y carga
             </h3>
             <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-              Listado de cortes por fecha. Expande un día para ver fotos,
-              montos y editar. El flujo Staff de captura no cambia.
+              Elige cualquier fecha y sube Venta (Totalización) + Propinas por
+              terminal (misma compresión/OCR que Staff). Útil para días pasados
+              o para probar el fix de subida.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -586,27 +598,51 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
           </div>
         </div>
 
-        {!compact ? (
-          <div className="mt-4 flex flex-wrap items-end gap-3">
+        <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+          <p
+            className="text-[11px] font-bold uppercase tracking-[0.14em]"
+            style={{ color: SUITE.navy }}
+          >
+            Cargar / revisar por fecha
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Admin puede cualquier día. Staff solo usa la ventana del día
+            (madrugada → día anterior). Hoy CDMX: {todayCdmxIso()}.
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="block text-xs font-semibold text-slate-600">
-              Ir a fecha
+              Fecha del corte
               <input
                 type="date"
                 value={jumpDate}
                 onChange={(e) => setJumpDate(e.target.value)}
-                className="mt-1 block min-h-10 rounded-xl border border-slate-200 px-3 text-sm"
+                className="mt-1 block min-h-11 w-full min-w-[11rem] rounded-xl border border-slate-200 bg-white px-3 text-sm"
               />
             </label>
+            <button
+              type="button"
+              onClick={() => setJumpDate(defaultCorteDateCdmx())}
+              className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Ventana staff
+            </button>
+            <button
+              type="button"
+              onClick={() => setJumpDate(todayCdmxIso())}
+              className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Hoy
+            </button>
             {jumpDate ? (
               <button
                 type="button"
                 onClick={() => setJumpDate('')}
-                className="min-h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600"
+                className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600"
               >
-                Limpiar filtro
+                Ver todos los días
               </button>
             ) : null}
-            <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700">
               <input
                 type="checkbox"
                 checked={onlyIncomplete}
@@ -616,7 +652,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
               Solo incompletos
             </label>
           </div>
-        ) : null}
+        </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[
@@ -885,7 +921,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                                   <>
                                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                                       <PhotoCard
-                                        label="Venta"
+                                        label="Venta (Totalización)"
                                         kind="venta"
                                         upload={bundle.venta}
                                         busy={Boolean(busy)}

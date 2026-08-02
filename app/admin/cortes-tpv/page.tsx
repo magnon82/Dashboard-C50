@@ -9,7 +9,7 @@ export default function AdminCortesTpvPage() {
   return (
     <SuiteShell
       title="Cortes TPV"
-      subtitle="Reporte admin · fotos por terminal · edición de montos y slots"
+      subtitle="Reporte admin · subir fotos de cualquier día · OCR igual que Staff"
       actions={
         <Link
           href="/admin"
