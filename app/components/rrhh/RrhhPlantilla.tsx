@@ -206,13 +206,17 @@ function PlantillaPersonRow({
   asOf,
   alt,
   folderPath,
+  busy,
   onOpenExpediente,
+  onBaja,
 }: {
   employee: HrEmployee;
   asOf: string | null;
   alt: boolean;
   folderPath: string | null;
+  busy: boolean;
   onOpenExpediente: (employee: HrEmployee, path: string) => void;
+  onBaja: (employee: HrEmployee) => void;
 }) {
   const puesto =
     formatHrPuesto(
@@ -255,6 +259,17 @@ function PlantillaPersonRow({
           </span>
         )}
       </div>
+      <div className="rrhh-plantilla__actions">
+        <button
+          type="button"
+          className="rrhh-plantilla__baja-btn"
+          disabled={busy}
+          onClick={() => onBaja(employee)}
+          title="Dar de baja"
+        >
+          Baja
+        </button>
+      </div>
     </div>
   );
 }
@@ -287,6 +302,34 @@ export function RrhhPlantilla({
   const [folders, setFolders] = useState<ExpedienteFolder[]>([]);
   const [viewer, setViewer] = useState<HrViewerTarget | null>(null);
   const [showResguardos, setShowResguardos] = useState(initialShowResguardos);
+  const [showAlta, setShowAlta] = useState(false);
+  const [altaName, setAltaName] = useState('');
+  const [altaPuesto, setAltaPuesto] = useState('');
+  const [altaIngreso, setAltaIngreso] = useState(() => {
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Mexico_City',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+    } catch {
+      return '';
+    }
+  });
+  const [bajaTarget, setBajaTarget] = useState<HrEmployee | null>(null);
+  const [bajaFecha, setBajaFecha] = useState(() => {
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Mexico_City',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+    } catch {
+      return '';
+    }
+  });
 
   useEffect(() => {
     if (initialShowResguardos) setShowResguardos(true);
@@ -496,6 +539,70 @@ export function RrhhPlantilla({
     }
   }
 
+  async function submitAlta() {
+    const name = altaName.trim().replace(/\s+/g, ' ');
+    if (name.length < 3) {
+      setToast('Escribe el nombre completo (mín. 3 caracteres)');
+      return;
+    }
+    setBusyId('__alta__');
+    setToast(null);
+    try {
+      const res = await fetch('/api/hr/employees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: name,
+          puesto: altaPuesto.trim() || null,
+          fecha_ingreso: altaIngreso || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setToast(json.error || 'No se pudo dar de alta');
+        return;
+      }
+      setToast(json.message || 'Alta registrada');
+      setShowAlta(false);
+      setAltaName('');
+      setAltaPuesto('');
+      onChanged?.();
+      void loadExpedientes();
+    } catch {
+      setToast('Error de red al dar de alta');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function submitBaja() {
+    if (!bajaTarget) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bajaFecha)) {
+      setToast('Indica la fecha de baja (YYYY-MM-DD)');
+      return;
+    }
+    const ok = await patchEmployee(bajaTarget.id, {
+      action: 'baja',
+      fecha_baja: bajaFecha,
+    });
+    if (ok) {
+      setBajaTarget(null);
+      void loadExpedientes();
+    }
+  }
+
+  async function reactivarBaja(a: ArchivedDb) {
+    if (
+      !confirm(
+        `¿Reactivar a ${formatHrListName(a.full_name)} en la plantilla vigente?`
+      )
+    ) {
+      return;
+    }
+    const ok = await patchEmployee(a.id, { action: 'alta' });
+    if (ok) void loadExpedientes();
+  }
+
   async function createSuiteUser(emp: HrEmployee) {
     setBusyId(emp.id);
     setToast(null);
@@ -603,6 +710,17 @@ export function RrhhPlantilla({
         </span>
         <button
           type="button"
+          className="rounded-full px-3 py-1 text-xs font-semibold text-white"
+          style={{ backgroundColor: SUITE.orangeDeep }}
+          onClick={() => {
+            setShowAlta((v) => !v);
+            setBajaTarget(null);
+          }}
+        >
+          {showAlta ? 'Cerrar alta' : 'Alta empleado'}
+        </button>
+        <button
+          type="button"
           className="rounded-full px-3 py-1 text-xs font-semibold border border-slate-200"
           style={{ color: theme.title }}
           onClick={() => setShowCatalog((v) => !v)}
@@ -656,6 +774,122 @@ export function RrhhPlantilla({
           {statusMessage}
         </p>
       )}
+
+      {showAlta ? (
+        <div
+          className="rounded-xl border border-slate-200 bg-white px-4 py-3 max-w-2xl space-y-3"
+          style={{ boxShadow: SUITE.shadow }}
+        >
+          <p className="text-sm font-semibold" style={{ color: theme.title }}>
+            Alta de empleado
+          </p>
+          <p className="text-xs" style={{ color: theme.muted }}>
+            Se agrega a la plantilla vigente (force_include). El usuario Suite se
+            puede crear después en Overrides.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <span className="text-xs font-semibold text-slate-600">
+                Nombre completo *
+              </span>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={altaName}
+                onChange={(e) => setAltaName(e.target.value)}
+                placeholder="Nombre y apellidos"
+                autoFocus
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-semibold text-slate-600">
+                Puesto
+              </span>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={altaPuesto}
+                onChange={(e) => setAltaPuesto(e.target.value)}
+                placeholder="Ej. Mesero, Cocina, Caja…"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-semibold text-slate-600">
+                Fecha de ingreso
+              </span>
+              <input
+                type="date"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={altaIngreso}
+                onChange={(e) => setAltaIngreso(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busyId === '__alta__'}
+              className="rounded-full px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: SUITE.orangeDeep }}
+              onClick={() => void submitAlta()}
+            >
+              {busyId === '__alta__' ? 'Guardando…' : 'Registrar alta'}
+            </button>
+            <button
+              type="button"
+              className="rounded-full px-4 py-1.5 text-xs font-semibold border border-slate-200"
+              style={{ color: theme.muted }}
+              onClick={() => setShowAlta(false)}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {bajaTarget ? (
+        <div
+          className="rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-3 max-w-2xl space-y-3"
+          role="dialog"
+          aria-label="Dar de baja"
+        >
+          <p className="text-sm font-semibold text-rose-900">
+            Baja · {formatHrListName(bajaTarget.full_name)}
+          </p>
+          <p className="text-xs text-rose-800/90">
+            Sale de la plantilla vigente y queda en Bajas del año. El expediente
+            se conserva.
+          </p>
+          <label className="block max-w-xs">
+            <span className="text-xs font-semibold text-rose-900">
+              Último día laborado *
+            </span>
+            <input
+              type="date"
+              className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm"
+              value={bajaFecha}
+              onChange={(e) => setBajaFecha(e.target.value)}
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busyId === bajaTarget.id}
+              className="rounded-full px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: '#be123c' }}
+              onClick={() => void submitBaja()}
+            >
+              {busyId === bajaTarget.id ? 'Guardando…' : 'Confirmar baja'}
+            </button>
+            <button
+              type="button"
+              className="rounded-full px-4 py-1.5 text-xs font-semibold border border-rose-200 bg-white"
+              style={{ color: theme.muted }}
+              onClick={() => setBajaTarget(null)}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {showSyncBanner ? (
         <p className="text-sm rounded-lg px-3 py-2 max-w-3xl text-amber-800 bg-amber-50">
@@ -869,6 +1103,7 @@ export function RrhhPlantilla({
             <div>Fecha de inicio</div>
             <div>Antigüedad</div>
             <div>Expediente</div>
+            <div>Acciones</div>
           </div>
 
           {plantillaGroups.map((bucket) => {
@@ -908,9 +1143,15 @@ export function RrhhPlantilla({
                     asOf={asOf}
                     alt={i % 2 === 1}
                     folderPath={resolveFolderPath(e)}
+                    busy={busyId === e.id}
                     onOpenExpediente={(emp, path) =>
                       openExpediente(emp, path)
                     }
+                    onBaja={(emp) => {
+                      setShowAlta(false);
+                      setBajaTarget(emp);
+                      setBajaFecha((prev) => prev || altaIngreso);
+                    }}
                   />
                 ))}
 
@@ -931,9 +1172,15 @@ export function RrhhPlantilla({
                         asOf={asOf}
                         alt={i % 2 === 1}
                         folderPath={resolveFolderPath(e)}
+                        busy={busyId === e.id}
                         onOpenExpediente={(emp, path) =>
                           openExpediente(emp, path)
                         }
+                        onBaja={(emp) => {
+                          setShowAlta(false);
+                          setBajaTarget(emp);
+                          setBajaFecha((prev) => prev || altaIngreso);
+                        }}
                       />
                     ))}
                   </div>
@@ -1028,6 +1275,16 @@ export function RrhhPlantilla({
                       Sin carpeta
                     </span>
                   )}
+                  <button
+                    type="button"
+                    disabled={busyId === a.id}
+                    onClick={() => void reactivarBaja(a)}
+                    className="text-xs font-semibold disabled:opacity-50"
+                    style={{ color: SUITE.navy }}
+                    title="Volver a plantilla vigente"
+                  >
+                    Reactivar
+                  </button>
                 </li>
               );
             })}

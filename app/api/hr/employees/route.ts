@@ -5,7 +5,11 @@ import {
   requireRrhhSession,
   requireRrhhWrite,
 } from '@/app/lib/hr-api';
-import type { HrEmployee } from '@/app/lib/hr';
+import {
+  plantillaTeamGroup,
+  type HrEmployee,
+  type HrEmployeeStatus,
+} from '@/app/lib/hr';
 import {
   invalidatePlantillaCache,
   resolvePlantillaVigente,
@@ -13,6 +17,34 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const EMP_SELECT_FULL =
+  'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+
+const EMP_SELECT_NO_DOB =
+  'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+
+function areaFromPuesto(puesto: string | null): string | null {
+  if (!puesto) return null;
+  const team = plantillaTeamGroup(puesto);
+  if (team === 'cocina') return 'Cocina';
+  if (team === 'admin') return 'Administrativo';
+  if (team === 'piso') return 'Piso';
+  return null;
+}
+
+function parseIsoDateField(
+  value: unknown,
+  field: string
+): { ok: true; set: false } | { ok: true; set: true; value: string | null } | { ok: false; error: string } {
+  if (value === undefined) return { ok: true, set: false };
+  if (value == null || value === '') return { ok: true, set: true, value: null };
+  const iso = String(value).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    return { ok: false, error: `${field} inválida (usa YYYY-MM-DD)` };
+  }
+  return { ok: true, set: true, value: iso };
+}
 
 let lastNacimientoFillAt = 0;
 const NACIMIENTO_FILL_TTL_MS = 5 * 60_000;
@@ -216,10 +248,137 @@ export async function GET(request: Request) {
 }
 
 /**
+ * POST /api/hr/employees — alta en plantilla.
+ * Body: { full_name, puesto?, fecha_ingreso?, area?, notes? }
+ * Crea status=activo + force_include (aparece en plantilla sin nómina aún).
+ */
+export async function POST(request: Request) {
+  const auth = await requireRrhhSession();
+  if (auth instanceof NextResponse) return auth;
+  const denied = requireRrhhWrite(auth);
+  if (denied) return denied;
+
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
+  }
+
+  const fullName = String(body.full_name || '').trim().replace(/\s+/g, ' ');
+  if (fullName.length < 3) {
+    return NextResponse.json(
+      { error: 'Nombre completo requerido (mín. 3 caracteres)' },
+      { status: 400 }
+    );
+  }
+
+  const puestoRaw =
+    body.puesto == null ? '' : String(body.puesto).trim().replace(/\s+/g, ' ');
+  const puesto = puestoRaw || null;
+  const areaExplicit =
+    body.area == null ? null : String(body.area).trim() || null;
+  const area = areaExplicit || areaFromPuesto(puesto);
+
+  const ingreso = parseIsoDateField(body.fecha_ingreso, 'fecha_ingreso');
+  if (!ingreso.ok) {
+    return NextResponse.json({ error: ingreso.error }, { status: 400 });
+  }
+  const fechaIngreso = ingreso.set ? ingreso.value : null;
+
+  const notes =
+    body.notes != null && String(body.notes).trim()
+      ? String(body.notes).trim()
+      : null;
+
+  try {
+    const sb = getServiceSupabase();
+    const nowIso = new Date().toISOString();
+    const row: Record<string, unknown> = {
+      full_name: fullName,
+      status: 'activo',
+      puesto,
+      area,
+      fecha_ingreso: fechaIngreso,
+      force_include: true,
+      force_exclude: false,
+      fecha_baja: null,
+      source: 'manual',
+      notes,
+      updated_at: nowIso,
+    };
+
+    let { data, error } = await sb
+      .from('hr_employees')
+      .insert(row)
+      .select(EMP_SELECT_FULL)
+      .single();
+
+    if (
+      error &&
+      /fecha_nacimiento|column .* does not exist|42703/i.test(error.message)
+    ) {
+      const retry = await sb
+        .from('hr_employees')
+        .insert(row)
+        .select(EMP_SELECT_NO_DOB)
+        .single();
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
+
+    if (
+      error &&
+      /fecha_baja|column .* does not exist|42703/i.test(error.message)
+    ) {
+      const { fecha_baja: _fb, ...withoutBaja } = row;
+      void _fb;
+      const retry = await sb
+        .from('hr_employees')
+        .insert(withoutBaja)
+        .select(
+          'id, full_name, status, puesto, area, fecha_ingreso, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes'
+        )
+        .single();
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
+
+    if (error || !data) {
+      const missing = hrSchemaMissing(error?.message);
+      return NextResponse.json(
+        {
+          error: missing
+            ? 'Ejecuta supabase/hr_module.sql en Supabase.'
+            : error?.message || 'No se pudo dar de alta',
+        },
+        { status: missing ? 503 : 400 }
+      );
+    }
+
+    invalidatePlantillaCache();
+    return NextResponse.json({
+      ready: true,
+      employee: data as HrEmployee,
+      message: `Alta registrada: ${fullName}. Aparece en plantilla (force_include).`,
+    });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'Error' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
  * PATCH /api/hr/employees
- * RH: force_include / force_exclude / suite_username (+ contacto ligero / DOB).
+ * RH: ficha, overrides, alta/reactivación y baja.
  * Body: { id, force_include?, force_exclude?, suite_username?, email?, phone?,
- *         puesto?, area?, fecha_nacimiento? }
+ *         puesto?, area?, fecha_nacimiento?, fecha_ingreso?, fecha_baja?,
+ *         status?: 'activo'|'baja'|'suspendido', full_name?,
+ *         action?: 'baja'|'alta' }
+ * action=baja → status baja + force_exclude + fecha_baja (requerida).
+ * action=alta → status activo + force_include + limpia fecha_baja.
  */
 export async function PATCH(request: Request) {
   const auth = await requireRrhhSession();
@@ -239,9 +398,41 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'id requerido' }, { status: 400 });
   }
 
+  const action =
+    body.action === 'baja' || body.action === 'alta'
+      ? (body.action as 'baja' | 'alta')
+      : null;
+
   const patch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   };
+
+  if (action === 'baja') {
+    const baja = parseIsoDateField(body.fecha_baja, 'fecha_baja');
+    if (!baja.ok) {
+      return NextResponse.json({ error: baja.error }, { status: 400 });
+    }
+    if (!baja.set || !baja.value) {
+      return NextResponse.json(
+        { error: 'fecha_baja (YYYY-MM-DD) es obligatoria para dar de baja' },
+        { status: 400 }
+      );
+    }
+    patch.status = 'baja';
+    patch.fecha_baja = baja.value;
+    patch.force_exclude = true;
+    patch.force_include = false;
+  } else if (action === 'alta') {
+    patch.status = 'activo';
+    patch.fecha_baja = null;
+    patch.force_exclude = false;
+    patch.force_include = true;
+    const ingreso = parseIsoDateField(body.fecha_ingreso, 'fecha_ingreso');
+    if (!ingreso.ok) {
+      return NextResponse.json({ error: ingreso.error }, { status: 400 });
+    }
+    if (ingreso.set) patch.fecha_ingreso = ingreso.value;
+  }
 
   if (typeof body.force_include === 'boolean') {
     patch.force_include = body.force_include;
@@ -259,13 +450,55 @@ export async function PATCH(request: Request) {
   if (body.phone !== undefined) {
     patch.phone = body.phone == null ? null : String(body.phone).trim() || null;
   }
+  if (body.full_name !== undefined) {
+    const n = String(body.full_name || '').trim().replace(/\s+/g, ' ');
+    if (n.length < 3) {
+      return NextResponse.json(
+        { error: 'Nombre completo inválido' },
+        { status: 400 }
+      );
+    }
+    patch.full_name = n;
+  }
   if (body.puesto !== undefined) {
     patch.puesto =
       body.puesto == null ? null : String(body.puesto).trim() || null;
+    if (body.area === undefined && patch.puesto) {
+      const inferred = areaFromPuesto(String(patch.puesto));
+      if (inferred) patch.area = inferred;
+    }
   }
   if (body.area !== undefined) {
     patch.area = body.area == null ? null : String(body.area).trim() || null;
   }
+  if (body.status !== undefined && !action) {
+    const st = String(body.status).trim() as HrEmployeeStatus;
+    if (!['activo', 'baja', 'suspendido'].includes(st)) {
+      return NextResponse.json({ error: 'status inválido' }, { status: 400 });
+    }
+    patch.status = st;
+    if (st === 'baja') {
+      patch.force_exclude = true;
+      patch.force_include = false;
+    }
+  }
+
+  const ingresoPatch = parseIsoDateField(body.fecha_ingreso, 'fecha_ingreso');
+  if (!ingresoPatch.ok) {
+    return NextResponse.json({ error: ingresoPatch.error }, { status: 400 });
+  }
+  if (ingresoPatch.set && action !== 'alta') {
+    patch.fecha_ingreso = ingresoPatch.value;
+  }
+
+  const bajaPatch = parseIsoDateField(body.fecha_baja, 'fecha_baja');
+  if (!bajaPatch.ok) {
+    return NextResponse.json({ error: bajaPatch.error }, { status: 400 });
+  }
+  if (bajaPatch.set && action !== 'baja' && action !== 'alta') {
+    patch.fecha_baja = bajaPatch.value;
+  }
+
   if (body.fecha_nacimiento !== undefined) {
     if (body.fecha_nacimiento == null || body.fecha_nacimiento === '') {
       patch.fecha_nacimiento = null;
@@ -293,14 +526,55 @@ export async function PATCH(request: Request) {
 
   try {
     const sb = getServiceSupabase();
-    const { data, error } = await sb
+    let { data, error } = await sb
       .from('hr_employees')
       .update(patch)
       .eq('id', id)
-      .select(
-        'id, full_name, status, puesto, area, fecha_ingreso, fecha_nacimiento, email, phone, drive_folder_path, suite_username, force_include, force_exclude'
-      )
+      .select(EMP_SELECT_FULL)
       .maybeSingle();
+
+    if (
+      error &&
+      /fecha_nacimiento|column .* does not exist|42703/i.test(error.message)
+    ) {
+      const { fecha_nacimiento: _dob, ...withoutDob } = patch;
+      void _dob;
+      const retry = await sb
+        .from('hr_employees')
+        .update(withoutDob)
+        .eq('id', id)
+        .select(EMP_SELECT_NO_DOB)
+        .maybeSingle();
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
+
+    if (
+      error &&
+      /fecha_baja|column .* does not exist|42703/i.test(error.message)
+    ) {
+      const { fecha_baja: _fb, ...withoutBaja } = patch;
+      void _fb;
+      if (action === 'baja') {
+        return NextResponse.json(
+          {
+            error:
+              'Falta columna fecha_baja. Ejecuta supabase/hr_employee_baja.sql en Supabase.',
+          },
+          { status: 503 }
+        );
+      }
+      const retry = await sb
+        .from('hr_employees')
+        .update(withoutBaja)
+        .eq('id', id)
+        .select(
+          'id, full_name, status, puesto, area, fecha_ingreso, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes'
+        )
+        .maybeSingle();
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
 
     if (error) {
       const missing = hrSchemaMissing(error.message);
@@ -328,10 +602,16 @@ export async function PATCH(request: Request) {
     }
 
     invalidatePlantillaCache();
+    const message =
+      action === 'baja'
+        ? `Baja registrada (${String(patch.fecha_baja)}). Fuera de plantilla vigente.`
+        : action === 'alta'
+          ? 'Reactivado en plantilla (force_include).'
+          : 'Ficha actualizada.';
     return NextResponse.json({
       ready: true,
       employee: data as HrEmployee,
-      message: 'Ficha actualizada.',
+      message,
     });
   } catch (e) {
     return NextResponse.json(

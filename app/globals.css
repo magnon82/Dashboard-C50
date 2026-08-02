@@ -46,7 +46,8 @@ body {
     minmax(6rem, 1fr)
     minmax(5.25rem, 0.85fr)
     minmax(4.5rem, 0.7fr)
-    minmax(4.5rem, auto);
+    minmax(4.5rem, auto)
+    minmax(3.25rem, auto);
   column-gap: 0.75rem;
   align-items: center;
 }
@@ -253,9 +254,35 @@ body {
   color: #cbd5e1;
 }
 
+.rrhh-plantilla__actions {
+  justify-self: end;
+  text-align: right;
+}
+
+.rrhh-plantilla__baja-btn {
+  border: 1px solid #fecdd3;
+  background: #fff1f2;
+  color: #9f1239;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+
+.rrhh-plantilla__baja-btn:hover:not(:disabled) {
+  background: #ffe4e6;
+}
+
+.rrhh-plantilla__baja-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width: 640px) {
   .rrhh-plantilla__cols {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     row-gap: 0.2rem;
   }
 
@@ -276,6 +303,12 @@ body {
 
   .rrhh-plantilla__exp {
     grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+  }
+
+  .rrhh-plantilla__actions {
+    grid-column: 3;
     grid-row: 1;
     align-self: start;
   }

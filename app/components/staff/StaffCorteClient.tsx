@@ -109,15 +109,19 @@ function MoneyInput({
   required?: boolean;
 }) {
   return (
-    <label className="block">
-      <span className="text-sm font-semibold text-slate-700">
-        {label}
-        {required ? ' *' : ''}
-      </span>
-      {hint ? <p className="mt-0.5 text-xs text-slate-500">{hint}</p> : null}
+    <label className="flex h-full flex-col gap-1.5">
+      <div>
+        <span className="text-sm font-semibold text-slate-700">
+          {label}
+          {required ? ' *' : ''}
+        </span>
+        {hint ? (
+          <p className="mt-0.5 text-xs leading-snug text-slate-500">{hint}</p>
+        ) : null}
+      </div>
       <input
         inputMode="decimal"
-        className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-lg"
+        className="mt-auto min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-lg"
         placeholder="0.00"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -885,20 +889,22 @@ export function StaffCorteClient() {
           de Gmail). Propinas = suma de tickets TPV.
         </p>
 
-        <MoneyInput
-          label="WI (Carranza / Walk-in)"
-          value={wi}
-          onChange={setWi}
-          required
-          hint="Venta WI del día"
-        />
-        <MoneyInput
-          label="Eventos"
-          value={eventos}
-          onChange={setEventos}
-          required
-          hint="0 si no hubo eventos ese día"
-        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <MoneyInput
+            label="WI (Carranza / Walk-in)"
+            value={wi}
+            onChange={setWi}
+            required
+            hint="Venta WI del día"
+          />
+          <MoneyInput
+            label="Eventos"
+            value={eventos}
+            onChange={setEventos}
+            required
+            hint="0 si no hubo eventos ese día"
+          />
+        </div>
 
         <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm">
           <p className="font-semibold text-slate-700">Propinas (tickets TPV)</p>

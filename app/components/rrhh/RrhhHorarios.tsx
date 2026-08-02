@@ -1023,14 +1023,6 @@ export function RrhhHorarios() {
     setAddEmpId('');
   }
 
-  function removePerson(employeeId: string) {
-    if (pastLocked) return;
-    if (!confirm('¿Quitar a esta persona de la semana? (sus turnos se borran al guardar)')) {
-      return;
-    }
-    setRows((prev) => prev.filter((r) => r.employee_id !== employeeId));
-  }
-
   const nextMonday = addIsoDays(currentMonday, 7);
 
   return (
@@ -1149,7 +1141,12 @@ export function RrhhHorarios() {
       {showNewWeek && (
         <SuiteCard className="max-w-xl">
           <p className="text-sm font-bold" style={{ color: theme.title }}>
-            Nueva semana (borrador)
+            Nueva semana
+          </p>
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+            Se copian los turnos de la semana anterior (misma gente / Ent–Sal /
+            DESCANSO). Puedes editar después. Futuras quedan en borrador hasta
+            Publicar.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <label className="text-sm">
@@ -1470,7 +1467,6 @@ export function RrhhHorarios() {
                           dayLocked={dayLocked}
                           onCell={updateCell}
                           onToggleOff={toggleOff}
-                          onRemove={removePerson}
                         />
                       ))
                     )}
@@ -1546,7 +1542,6 @@ function AreaFragment({
   dayLocked = [],
   onCell,
   onToggleOff,
-  onRemove,
 }: {
   area: string;
   people: PersonRow[];
@@ -1555,7 +1550,6 @@ function AreaFragment({
   dayLocked?: boolean[];
   onCell: (id: string, day: number, patch: Partial<DayCell>) => void;
   onToggleOff: (id: string, day: number) => void;
-  onRemove: (id: string) => void;
 }) {
   return (
     <>
@@ -1581,20 +1575,7 @@ function AreaFragment({
             className="sticky left-0 z-[1] bg-white px-2 py-1 text-sm font-medium whitespace-nowrap"
             style={{ color: theme.title, boxShadow: '1px 0 0 #e2e8f0' }}
           >
-            <div className="flex items-center gap-1.5">
-              <span className="min-w-0">{formatHrListName(p.full_name)}</span>
-              {!readOnly && (
-                <button
-                  type="button"
-                  className="shrink-0 text-[11px] font-semibold leading-none text-red-700"
-                  onClick={() => onRemove(p.employee_id)}
-                  title="Quitar persona de la semana"
-                  aria-label={`Quitar a ${formatHrListName(p.full_name)} de la semana`}
-                >
-                  ×
-                </button>
-              )}
-            </div>
+            {formatHrListName(p.full_name)}
           </td>
           {p.days.map((d, di) => {
             const cellLocked = readOnly || Boolean(dayLocked[di]);

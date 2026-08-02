@@ -5,12 +5,13 @@ import {
   requireRrhhSession,
   requireRrhhWrite,
 } from '@/app/lib/hr-api';
-import type { HrScheduleStatus, HrScheduleWeek } from '@/app/lib/hr';
+import { addIsoDays, type HrScheduleStatus, type HrScheduleWeek } from '@/app/lib/hr';
 import {
   statusForImportedWeek,
   weekNumberForHorariosMonday,
 } from '@/app/lib/hr-schedule-import';
 import {
+  daysBetween,
   mondayOfWeek,
   shiftMinutes,
   sundayOfWeek,
@@ -21,6 +22,40 @@ export const dynamic = 'force-dynamic';
 
 const WEEK_SELECT =
   'id, week_start, week_end, status, notes, created_by, published_by, published_at, created_at, updated_at';
+
+const SHIFT_SELECT =
+  'id, week_id, employee_id, shift_date, start_time, end_time, area, role_label, origin, notes, hr_employees(full_name, area, puesto)';
+
+type PrevShiftRow = {
+  employee_id: string;
+  shift_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  area: string | null;
+  role_label: string | null;
+};
+
+function mapShiftOut(raw: Record<string, unknown>) {
+  const emp = raw.hr_employees as
+    | { full_name?: string; area?: string; puesto?: string }
+    | null
+    | undefined;
+  return {
+    id: String(raw.id),
+    week_id: String(raw.week_id),
+    employee_id: String(raw.employee_id),
+    shift_date: String(raw.shift_date).slice(0, 10),
+    start_time: raw.start_time ? String(raw.start_time).slice(0, 8) : null,
+    end_time: raw.end_time ? String(raw.end_time).slice(0, 8) : null,
+    area: raw.area != null ? String(raw.area) : null,
+    role_label: raw.role_label != null ? String(raw.role_label) : null,
+    origin: raw.origin === 'auto' ? ('auto' as const) : ('manual' as const),
+    notes: raw.notes != null ? String(raw.notes) : null,
+    employee_name: emp?.full_name ?? null,
+    employee_area: emp?.area ?? null,
+    employee_puesto: emp?.puesto ?? null,
+  };
+}
 
 /**
  * GET /api/hr/schedules — lista todas las semanas (RH).
@@ -189,9 +224,11 @@ export async function GET(request: Request) {
 }
 
 /**
- * POST /api/hr/schedules — crea semana vacía para planificar.
+ * POST /api/hr/schedules — crea semana y copia turnos de la semana anterior.
  * Pasado/en curso → publicado; futuras → borrador (hasta Publicar explícito).
- * Body: { week_start: YYYY-MM-DD, notes?: string }
+ * Prefill: misma gente / Ent–Sal / DESCANSO, fechas corridas a la semana nueva.
+ * Body: { week_start: YYYY-MM-DD, notes?: string, copy_previous?: boolean }
+ * (copy_previous default true; false = semana vacía)
  */
 export async function POST(request: Request) {
   const auth = await requireRrhhSession();
@@ -217,10 +254,11 @@ export async function POST(request: Request) {
   const weekStart = mondayOfWeek(weekStartRaw);
   const weekEnd = sundayOfWeek(weekStart);
   const status = statusForImportedWeek(weekStart);
-  const notes =
+  const copyPrevious = body.copy_previous !== false;
+  const notesExplicit =
     body.notes != null && String(body.notes).trim()
       ? String(body.notes).trim()
-      : 'Semana vacía creada para planificación.';
+      : null;
 
   try {
     const sb = getServiceSupabase();
@@ -241,6 +279,55 @@ export async function POST(request: Request) {
         { status: 409 }
       );
     }
+
+    // Semana inmediatamente anterior (lunes −7); si no existe, la más reciente previa.
+    let prevWeek: { id: string; week_start: string } | null = null;
+    if (copyPrevious) {
+      const prevMonday = addIsoDays(weekStart, -7);
+      const exactPrev = await sb
+        .from('hr_schedule_weeks')
+        .select('id, week_start')
+        .eq('week_start', prevMonday)
+        .maybeSingle();
+      if (exactPrev.data) {
+        prevWeek = {
+          id: String(exactPrev.data.id),
+          week_start: String(exactPrev.data.week_start).slice(0, 10),
+        };
+      } else {
+        const nearest = await sb
+          .from('hr_schedule_weeks')
+          .select('id, week_start')
+          .lt('week_start', weekStart)
+          .order('week_start', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (nearest.data) {
+          prevWeek = {
+            id: String(nearest.data.id),
+            week_start: String(nearest.data.week_start).slice(0, 10),
+          };
+        }
+      }
+    }
+
+    let prevShifts: PrevShiftRow[] = [];
+    if (prevWeek) {
+      const { data: src } = await sb
+        .from('hr_schedule_shifts')
+        .select('employee_id, shift_date, start_time, end_time, area, role_label')
+        .eq('week_id', prevWeek.id);
+      prevShifts = (src || []) as PrevShiftRow[];
+    }
+
+    const copiedFromLabel = prevWeek?.week_start ?? null;
+    const notes =
+      notesExplicit ||
+      (copiedFromLabel && prevShifts.length > 0
+        ? `Copia de horarios de la semana del ${copiedFromLabel}.`
+        : copiedFromLabel
+          ? `Semana creada (semana anterior ${copiedFromLabel} sin turnos).`
+          : 'Semana vacía creada para planificación.');
 
     const nowIso = new Date().toISOString();
     const insert: Record<string, unknown> = {
@@ -273,22 +360,84 @@ export async function POST(request: Request) {
       );
     }
 
+    const weekId = String(weekRow.id);
+    let shiftsOut: ReturnType<typeof mapShiftOut>[] = [];
+    let copiedCount = 0;
+
+    if (prevWeek && prevShifts.length > 0) {
+      const offset = daysBetween(prevWeek.week_start, weekStart);
+      const rows = prevShifts
+        .map((s) => {
+          const newDate = addIsoDays(String(s.shift_date).slice(0, 10), offset);
+          if (newDate < weekStart || newDate > weekEnd) return null;
+          return {
+            week_id: weekId,
+            employee_id: String(s.employee_id),
+            shift_date: newDate,
+            start_time: s.start_time ? String(s.start_time).slice(0, 8) : null,
+            end_time: s.end_time ? String(s.end_time).slice(0, 8) : null,
+            area: s.area != null ? String(s.area) : null,
+            role_label: s.role_label != null ? String(s.role_label) : null,
+            origin: 'manual' as const,
+            notes: null,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r != null);
+
+      if (rows.length > 0) {
+        const { error: insErr } = await sb
+          .from('hr_schedule_shifts')
+          .insert(rows);
+        if (insErr) {
+          return NextResponse.json(
+            {
+              error: `Semana creada pero no se pudieron copiar turnos: ${insErr.message}`,
+              weekId,
+            },
+            { status: 400 }
+          );
+        }
+        copiedCount = rows.length;
+      }
+
+      const { data: shifts } = await sb
+        .from('hr_schedule_shifts')
+        .select(SHIFT_SELECT)
+        .eq('week_id', weekId)
+        .order('shift_date', { ascending: true });
+      shiftsOut = (shifts || []).map((s) =>
+        mapShiftOut(s as Record<string, unknown>)
+      );
+    }
+
     const ws = String(weekRow.week_start).slice(0, 10);
+    const mins = shiftsOut.reduce(
+      (acc, s) => acc + shiftMinutes(s.start_time, s.end_time),
+      0
+    );
+    const statusLabel =
+      status === 'publicado' ? 'publicada / en curso' : 'borrador';
+    const message =
+      copiedCount > 0
+        ? `Semana creada (${statusLabel}) con ${copiedCount} turno(s) copiados de la semana del ${copiedFromLabel}.`
+        : status === 'publicado'
+          ? 'Semana vacía creada (publicada / en curso).'
+          : 'Semana vacía creada (borrador).';
+
     return NextResponse.json({
       ready: true,
       week: {
         ...weekRow,
         week_start: ws,
         week_end: String(weekRow.week_end).slice(0, 10),
-        shift_count: 0,
-        hours_total: 0,
+        shift_count: shiftsOut.length,
+        hours_total: Math.round((mins / 60) * 10) / 10,
         week_number: weekNumberForHorariosMonday(ws),
       },
-      shifts: [],
-      message:
-        status === 'publicado'
-          ? 'Semana vacía creada (publicada / en curso).'
-          : 'Semana vacía creada (borrador).',
+      shifts: shiftsOut,
+      copiedFrom: copiedFromLabel,
+      copiedShifts: copiedCount,
+      message,
     });
   } catch (e) {
     return NextResponse.json(

@@ -13,14 +13,11 @@ import {
   calcTipPools,
   formatIsoDateEs,
   normalizeTipHeadcount,
-  tipSalesRptNote,
-  tipSalesSourceNote,
   weekBoundsFromIso,
   type StaffPropinasStored,
   type TipHeadcount,
   type TipPeriodMode,
   type TipRoleId,
-  type TipSalesRangeResult,
 } from '@/app/lib/staff-propinas';
 import { defaultCorteDateCdmx, moneyMx } from '@/app/lib/tpv-cortes';
 import { SUITE } from '@/app/lib/themes';
@@ -28,11 +25,6 @@ import { SUITE } from '@/app/lib/themes';
 function pctLabel(frac: number): string {
   const n = frac * 100;
   return `${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1)}%`;
-}
-
-function moneyField(n: number): string {
-  if (!Number.isFinite(n) || n === 0) return '0';
-  return String(Math.round(n * 100) / 100);
 }
 
 export function StaffPropinasClient() {
@@ -46,18 +38,12 @@ export function StaffPropinasClient() {
   const [headcount, setHeadcount] = useState<TipHeadcount>({
     ...DEFAULT_HEADCOUNT,
   });
-  const [salesMsg, setSalesMsg] = useState<string | null>(null);
-  const [salesLoading, setSalesLoading] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [salesMeta, setSalesMeta] = useState<TipSalesRangeResult | null>(null);
-  const [appliedFromSystem, setAppliedFromSystem] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const manualRef = useRef<{
     date: string;
     ventasWi: string;
     ventasEventos: string;
   } | null>(null);
-  const loadSeq = useRef(0);
 
   useEffect(() => {
     try {
@@ -90,7 +76,6 @@ export function StaffPropinasClient() {
         setHoyDate(parsed.manualHoy.date);
         setVentasWi(parsed.manualHoy.ventasWi);
         setVentasEventos(parsed.manualHoy.ventasEventos);
-        setAppliedFromSystem(false);
       }
     } catch {
       /* ignore */
@@ -101,7 +86,7 @@ export function StaffPropinasClient() {
   useEffect(() => {
     if (!hydrated) return;
     const isManual =
-      mode === 'hoy' && !appliedFromSystem && (ventasWi !== '' || ventasEventos !== '');
+      mode === 'hoy' && (ventasWi !== '' || ventasEventos !== '');
     const payload: StaffPropinasStored = {
       headcount,
       manualHoy: isManual
@@ -127,7 +112,6 @@ export function StaffPropinasClient() {
     headcount,
     ventasWi,
     ventasEventos,
-    appliedFromSystem,
     mode,
     hoyDate,
     calendarToday,
@@ -154,107 +138,6 @@ export function StaffPropinasClient() {
     };
   }, [mode, hoyDate, calendarToday, rangeFrom, rangeTo]);
 
-  function availabilityNote(data: TipSalesRangeResult): string {
-    const note = tipSalesSourceNote(data.primarySource, data.sourceCounts);
-    if (data.daysWithData === 0) {
-      return `${note}. Captura WI y Eventos a mano, o elige un día con correo Infocaja.`;
-    }
-    if (data.dayCount > 1) {
-      return `${note} · ${data.daysWithData}/${data.dayCount} días con dato · WI ${moneyMx(data.ventasWi)} · Eventos ${moneyMx(data.ventasEventos)}.`;
-    }
-    return `${note} · WI ${moneyMx(data.ventasWi)} · Eventos ${moneyMx(data.ventasEventos)}.`;
-  }
-
-  function composeSalesMsg(data: TipSalesRangeResult): string {
-    let msg = availabilityNote(data);
-    if (data.financialError) {
-      msg = `${msg} (Error leyendo Infocaja: ${data.financialError})`;
-    }
-    const rptNote = tipSalesRptNote(
-      data.rptError,
-      data.daysWithData,
-      data.primarySource
-    );
-    if (rptNote) msg = `${msg} · ${rptNote}`;
-    return msg;
-  }
-
-  async function fetchAvailableSales(): Promise<TipSalesRangeResult | null> {
-    const seq = ++loadSeq.current;
-    setSalesLoading(true);
-    setSalesMsg(null);
-    try {
-      const res = await fetch(
-        `/api/staff-propinas?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`
-      );
-      const data = (await res.json()) as TipSalesRangeResult & {
-        error?: string;
-      };
-      if (seq !== loadSeq.current) return null;
-      if (!res.ok) {
-        setSalesMsg(data.error || 'No se pudieron consultar las ventas');
-        setSalesMeta(null);
-        return null;
-      }
-      setSalesMeta(data);
-      setSalesMsg(composeSalesMsg(data));
-      return data;
-    } catch {
-      if (seq !== loadSeq.current) return null;
-      setSalesMsg('Error de red al consultar ventas');
-      setSalesMeta(null);
-      return null;
-    } finally {
-      if (seq === loadSeq.current) setSalesLoading(false);
-    }
-  }
-
-  function applySalesToFields(data: TipSalesRangeResult) {
-    setVentasWi(moneyField(data.ventasWi));
-    setVentasEventos(moneyField(data.ventasEventos));
-    setAppliedFromSystem(true);
-    if (mode === 'hoy') {
-      manualRef.current = null;
-    }
-    const note = tipSalesSourceNote(data.primarySource, data.sourceCounts);
-    const rptNote = tipSalesRptNote(
-      data.rptError,
-      data.daysWithData,
-      data.primarySource
-    );
-    let msg =
-      data.daysWithData === 0
-        ? `${note}. Sin dato en sistema — campos en 0; puedes editar a mano.`
-        : `${note}. Aplicado a la calculadora · editable si necesitas ajustar.`;
-    if (data.financialError) {
-      msg = `${msg} (Error Infocaja: ${data.financialError})`;
-    } else if (rptNote && data.daysWithData === 0) {
-      msg = `${msg} · ${rptNote}`;
-    }
-    setSalesMsg(msg);
-  }
-
-  /** Opt-in: trae ventas del Corte / Infocaja y las usa para calcular propinas. */
-  async function calcularConVentasDisponibles() {
-    setApplying(true);
-    try {
-      const data = await fetchAvailableSales();
-      if (!data) return;
-      applySalesToFields(data);
-    } finally {
-      setApplying(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!hydrated) return;
-    setSalesMeta(null);
-    setAppliedFromSystem(false);
-    // Solo consulta disponibilidad; no rellena ventas (opt-in).
-    void fetchAvailableSales();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional period sync
-  }, [hydrated, period.from, period.to, mode]);
-
   const wiNum = parseMoneyInput(ventasWi) ?? 0;
   const evNum = parseMoneyInput(ventasEventos) ?? 0;
   const result = useMemo(
@@ -267,35 +150,14 @@ export function StaffPropinasClient() {
     setHeadcount((prev) => ({ ...prev, [id]: n }));
   }
 
-  function onEditWi(raw: string) {
-    setVentasWi(raw);
-    setAppliedFromSystem(false);
-  }
-
-  function onEditEventos(raw: string) {
-    setVentasEventos(raw);
-    setAppliedFromSystem(false);
-  }
-
   const modes: { id: TipPeriodMode; label: string }[] = [
     { id: 'hoy', label: 'Hoy' },
     { id: 'semana', label: 'Semana' },
     { id: 'rango', label: 'Rango' },
   ];
 
-  const applyLabel =
-    mode === 'hoy'
-      ? 'Calcular con ventas del día'
-      : 'Calcular con ventas del periodo';
-
-  const hasAvailable =
-    salesMeta != null &&
-    (salesMeta.daysWithData > 0 ||
-      salesMeta.ventasWi > 0 ||
-      salesMeta.ventasEventos > 0);
-
   const inputClass =
-    'mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-lg';
+    'min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-lg';
 
   return (
     <div className="space-y-5">
@@ -358,22 +220,22 @@ export function StaffPropinasClient() {
         ) : null}
         {mode === 'rango' ? (
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label className="block">
+            <label className="flex h-full flex-col gap-1.5">
               <span className="text-sm font-semibold text-slate-700">Desde</span>
               <input
                 type="date"
                 value={rangeFrom}
                 onChange={(e) => setRangeFrom(e.target.value)}
-                className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3"
+                className="mt-auto min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3"
               />
             </label>
-            <label className="block">
+            <label className="flex h-full flex-col gap-1.5">
               <span className="text-sm font-semibold text-slate-700">Hasta</span>
               <input
                 type="date"
                 value={rangeTo}
                 onChange={(e) => setRangeTo(e.target.value)}
-                className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3"
+                className="mt-auto min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3"
               />
             </label>
           </div>
@@ -387,119 +249,48 @@ export function StaffPropinasClient() {
 
       {/* Ventas */}
       <SuiteCard>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold" style={{ color: SUITE.navy }}>
-              Ventas del periodo
-            </h2>
-            <p className="mt-1 text-sm" style={{ color: SUITE.muted }}>
-              Captura a mano o usa ventas del sistema: Corte del día (si hay) o
-              Infocaja del correo.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={salesLoading || applying}
-              onClick={() => void calcularConVentasDisponibles()}
-              className="min-h-11 shrink-0 rounded-xl px-4 text-sm font-bold disabled:opacity-50"
-              style={{
-                backgroundColor: SUITE.navy,
-                color: '#fff',
-                border: `1px solid ${SUITE.navy}`,
-              }}
-            >
-              {applying || salesLoading ? 'Cargando…' : applyLabel}
-            </button>
-            <button
-              type="button"
-              disabled={salesLoading || applying}
-              onClick={() => void fetchAvailableSales()}
-              className="min-h-11 shrink-0 rounded-xl px-4 text-sm font-bold disabled:opacity-50"
-              style={{
-                backgroundColor: SUITE.orangeSoft,
-                color: SUITE.navy,
-                border: `1px solid ${SUITE.border}`,
-              }}
-            >
-              Consultar disponibles
-            </button>
-          </div>
-        </div>
-        {salesMsg ? (
-          <p className="mt-3 text-sm" style={{ color: SUITE.navySoft }}>
-            {salesMsg}
-          </p>
-        ) : null}
-        {hasAvailable && !appliedFromSystem ? (
-          <p className="mt-2 text-xs font-semibold" style={{ color: SUITE.orangeDeep }}>
-            Hay ventas en sistema — pulsa «{applyLabel}» para llenar la
-            calculadora (no se aplica sola).
-          </p>
-        ) : null}
-        {appliedFromSystem ? (
-          <p className="mt-2 text-xs" style={{ color: SUITE.muted }}>
-            Valores del sistema aplicados. Puedes editarlos a mano en cualquier
-            momento.
-          </p>
-        ) : null}
+        <h2 className="text-base font-bold" style={{ color: SUITE.navy }}>
+          Ventas del periodo
+        </h2>
+        <p className="mt-1 text-sm" style={{ color: SUITE.muted }}>
+          Captura a mano las ventas WI y Eventos para calcular la repartición.
+        </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">
-              Ventas WI / C50 ($)
-            </span>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Base propinas walk-in {pctLabel(TIP_TOTAL_WI)}
-            </p>
+          <label className="flex h-full flex-col gap-1.5">
+            <div>
+              <span className="text-sm font-semibold text-slate-700">
+                Ventas WI / C50 ($)
+              </span>
+              <p className="mt-0.5 text-xs leading-snug text-slate-500">
+                Base propinas walk-in {pctLabel(TIP_TOTAL_WI)}
+              </p>
+            </div>
             <input
               inputMode="decimal"
               value={ventasWi}
-              onChange={(e) => onEditWi(e.target.value)}
+              onChange={(e) => setVentasWi(e.target.value)}
               placeholder="0.00"
-              className={inputClass}
+              className={`${inputClass} mt-auto`}
             />
           </label>
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">
-              Ventas Eventos ($)
-            </span>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Servicio eventos {pctLabel(TIP_TOTAL_EVENTOS)}
-            </p>
+          <label className="flex h-full flex-col gap-1.5">
+            <div>
+              <span className="text-sm font-semibold text-slate-700">
+                Ventas Eventos ($)
+              </span>
+              <p className="mt-0.5 text-xs leading-snug text-slate-500">
+                Servicio eventos {pctLabel(TIP_TOTAL_EVENTOS)}
+              </p>
+            </div>
             <input
               inputMode="decimal"
               value={ventasEventos}
-              onChange={(e) => onEditEventos(e.target.value)}
+              onChange={(e) => setVentasEventos(e.target.value)}
               placeholder="0.00"
-              className={inputClass}
+              className={`${inputClass} mt-auto`}
             />
           </label>
         </div>
-        {salesMeta && salesMeta.dayCount > 1 && salesMeta.daysWithData > 0 ? (
-          <details className="mt-4">
-            <summary
-              className="cursor-pointer text-sm font-semibold"
-              style={{ color: SUITE.navy }}
-            >
-              Desglose por día ({salesMeta.daysWithData} con dato)
-            </summary>
-            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs text-slate-600">
-              {salesMeta.days
-                .filter((d) => d.source !== 'ninguno')
-                .map((d) => (
-                  <li key={d.date} className="flex flex-wrap gap-x-2">
-                    <span className="font-semibold tabular-nums">
-                      {formatIsoDateEs(d.date)}
-                    </span>
-                    <span>
-                      WI {moneyMx(d.ventasWi)} · Ev. {moneyMx(d.ventasEventos)}
-                    </span>
-                    <span className="text-slate-400">({d.label})</span>
-                  </li>
-                ))}
-            </ul>
-          </details>
-        ) : null}
       </SuiteCard>
 
       {/* Headcount */}
@@ -513,13 +304,17 @@ export function StaffPropinasClient() {
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {TIP_ROLES.map((role) => (
-            <label key={role.id} className="block">
-              <span className="text-sm font-semibold text-slate-700">
-                {role.label}
-              </span>
-              {role.note ? (
-                <p className="mt-0.5 text-xs text-slate-500">{role.note}</p>
-              ) : null}
+            <label key={role.id} className="flex h-full flex-col gap-1.5">
+              <div>
+                <span className="text-sm font-semibold text-slate-700">
+                  {role.label}
+                </span>
+                {role.note ? (
+                  <p className="mt-0.5 text-xs leading-snug text-slate-500">
+                    {role.note}
+                  </p>
+                ) : null}
+              </div>
               <input
                 type="number"
                 inputMode="numeric"
@@ -527,7 +322,7 @@ export function StaffPropinasClient() {
                 step={1}
                 value={headcount[role.id]}
                 onChange={(e) => setCount(role.id, e.target.value)}
-                className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-lg"
+                className="mt-auto min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-lg"
               />
             </label>
           ))}
