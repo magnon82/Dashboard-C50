@@ -13,6 +13,7 @@ import {
   calcTipPools,
   formatIsoDateEs,
   normalizeTipHeadcount,
+  tipSalesRptNote,
   tipSalesSourceNote,
   weekBoundsFromIso,
   type StaffPropinasStored,
@@ -156,12 +157,26 @@ export function StaffPropinasClient() {
   function availabilityNote(data: TipSalesRangeResult): string {
     const note = tipSalesSourceNote(data.primarySource, data.sourceCounts);
     if (data.daysWithData === 0) {
-      return `${note}. Captura WI y Eventos a mano, o vuelve cuando haya corte / Infocaja.`;
+      return `${note}. Captura WI y Eventos a mano, o elige un día con correo Infocaja.`;
     }
     if (data.dayCount > 1) {
       return `${note} · ${data.daysWithData}/${data.dayCount} días con dato · WI ${moneyMx(data.ventasWi)} · Eventos ${moneyMx(data.ventasEventos)}.`;
     }
     return `${note} · WI ${moneyMx(data.ventasWi)} · Eventos ${moneyMx(data.ventasEventos)}.`;
+  }
+
+  function composeSalesMsg(data: TipSalesRangeResult): string {
+    let msg = availabilityNote(data);
+    if (data.financialError) {
+      msg = `${msg} (Error leyendo Infocaja: ${data.financialError})`;
+    }
+    const rptNote = tipSalesRptNote(
+      data.rptError,
+      data.daysWithData,
+      data.primarySource
+    );
+    if (rptNote) msg = `${msg} · ${rptNote}`;
+    return msg;
   }
 
   async function fetchAvailableSales(): Promise<TipSalesRangeResult | null> {
@@ -182,9 +197,7 @@ export function StaffPropinasClient() {
         return null;
       }
       setSalesMeta(data);
-      let msg = availabilityNote(data);
-      if (data.rptError) msg = `${msg} (${data.rptError})`;
-      setSalesMsg(msg);
+      setSalesMsg(composeSalesMsg(data));
       return data;
     } catch {
       if (seq !== loadSeq.current) return null;
@@ -204,11 +217,21 @@ export function StaffPropinasClient() {
       manualRef.current = null;
     }
     const note = tipSalesSourceNote(data.primarySource, data.sourceCounts);
-    setSalesMsg(
+    const rptNote = tipSalesRptNote(
+      data.rptError,
+      data.daysWithData,
+      data.primarySource
+    );
+    let msg =
       data.daysWithData === 0
         ? `${note}. Sin dato en sistema — campos en 0; puedes editar a mano.`
-        : `${note}. Aplicado a la calculadora · editable si necesitas ajustar.`
-    );
+        : `${note}. Aplicado a la calculadora · editable si necesitas ajustar.`;
+    if (data.financialError) {
+      msg = `${msg} (Error Infocaja: ${data.financialError})`;
+    } else if (rptNote && data.daysWithData === 0) {
+      msg = `${msg} · ${rptNote}`;
+    }
+    setSalesMsg(msg);
   }
 
   /** Opt-in: trae ventas del Corte / Infocaja y las usa para calcular propinas. */
@@ -370,7 +393,8 @@ export function StaffPropinasClient() {
               Ventas del periodo
             </h2>
             <p className="mt-1 text-sm" style={{ color: SUITE.muted }}>
-              Captura a mano o, si quieres, usa las ventas del Corte / Infocaja.
+              Captura a mano o usa ventas del sistema: Corte del día (si hay) o
+              Infocaja del correo.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

@@ -5,9 +5,11 @@ import { defaultCorteDateCdmx } from '@/app/lib/tpv-cortes';
 import {
   STAFF_RPT_TABLE,
   asStaffRptRow,
+  isInfocajaVentaTotalCategory,
 } from '@/app/lib/staff-rpt';
 import {
   eachIsoDateInclusive,
+  isEventosSalesCategory,
   resolveTipSalesDay,
   type TipSalesDaySource,
   type TipSalesRangeResult,
@@ -21,7 +23,8 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * GET /api/staff-propinas?from=YYYY-MM-DD&to=YYYY-MM-DD
  * Ventas WI / Eventos del periodo para la calculadora de propinas.
- * Prioridad por día: staff_rpt (corte) → Infocaja Venta Total + Eventos.
+ * Prioridad por día: staff_rpt (corte con montos) → Infocaja Venta Total + Eventos.
+ * Si falta staff_rpt_diario, no falla: sigue con financial_records (Infocaja).
  */
 export async function GET(request: Request) {
   const auth = await requireVentasSession();
@@ -45,59 +48,82 @@ export async function GET(request: Request) {
     const sb = getServiceSupabase();
     const dates = eachIsoDateInclusive(from, to);
 
-    const { data: rptRows, error: rptError } = await sb
-      .from(STAFF_RPT_TABLE)
-      .select('*')
-      .gte('rpt_date', from)
-      .lte('rpt_date', to);
-
-    let rptErrMsg: string | null = null;
-    if (rptError) {
-      if (/relation|does not exist|schema cache/i.test(rptError.message)) {
-        rptErrMsg =
-          'Falta la tabla staff_rpt_diario. Ejecuta supabase/staff_rpt_diario.sql';
-      } else {
-        rptErrMsg = rptError.message;
-      }
-    }
-
     const rptByDate = new Map<string, { wi: number; eventos: number }>();
-    for (const raw of rptRows || []) {
-      const row = asStaffRptRow(raw as Record<string, unknown>);
-      rptByDate.set(row.rpt_date, {
-        wi: row.wi_amount,
-        eventos: row.eventos_amount,
-      });
+    let rptErrMsg: string | null = null;
+
+    // Corte RPT es opcional para propinas — nunca abortar el lookup de Infocaja.
+    try {
+      const { data: rptRows, error: rptError } = await sb
+        .from(STAFF_RPT_TABLE)
+        .select('*')
+        .gte('rpt_date', from)
+        .lte('rpt_date', to);
+
+      if (rptError) {
+        if (/relation|does not exist|schema cache/i.test(rptError.message)) {
+          rptErrMsg =
+            'Falta la tabla staff_rpt_diario (opcional para propinas si hay Infocaja)';
+        } else {
+          rptErrMsg = rptError.message;
+        }
+      } else {
+        for (const raw of rptRows || []) {
+          const row = asStaffRptRow(raw as Record<string, unknown>);
+          rptByDate.set(row.rpt_date, {
+            wi: row.wi_amount,
+            eventos: row.eventos_amount,
+          });
+        }
+      }
+    } catch (e) {
+      rptErrMsg =
+        e instanceof Error
+          ? e.message
+          : 'No se pudo leer staff_rpt_diario (se intenta Infocaja)';
     }
-
-    const { data: finRows, error: finError } = await sb
-      .from('financial_records')
-      .select('date, category, amount, source_file')
-      .in('source_file', ['infocaja', 'eventos'])
-      .gte('date', from)
-      .lte('date', to);
-
-    const finErrMsg = finError?.message ?? null;
 
     const infocajaTotalByDate = new Map<string, number>();
     const eventosByDate = new Map<string, number>();
-    for (const r of finRows || []) {
-      const date = String((r as { date?: string }).date || '').slice(0, 10);
-      if (!date) continue;
-      const amt = Number((r as { amount?: number }).amount) || 0;
-      const source = String((r as { source_file?: string }).source_file || '');
-      const cat = String((r as { category?: string }).category || '');
-      if (source === 'infocaja' && cat === 'Venta Total') {
-        infocajaTotalByDate.set(
-          date,
-          Math.round(((infocajaTotalByDate.get(date) || 0) + amt) * 100) / 100
-        );
-      } else if (source === 'eventos' && cat === 'Eventos') {
-        eventosByDate.set(
-          date,
-          Math.round(((eventosByDate.get(date) || 0) + amt) * 100) / 100
-        );
+    let finErrMsg: string | null = null;
+
+    try {
+      const { data: finRows, error: finError } = await sb
+        .from('financial_records')
+        .select('date, category, amount, source_file')
+        .in('source_file', ['infocaja', 'eventos'])
+        .gte('date', from)
+        .lte('date', to);
+
+      if (finError) {
+        finErrMsg = finError.message;
+      } else {
+        for (const r of finRows || []) {
+          const date = String((r as { date?: string }).date || '').slice(0, 10);
+          if (!date) continue;
+          const amt = Number((r as { amount?: number }).amount) || 0;
+          const source = String(
+            (r as { source_file?: string }).source_file || ''
+          );
+          const cat = String((r as { category?: string }).category || '');
+          if (source === 'infocaja' && isInfocajaVentaTotalCategory(cat)) {
+            infocajaTotalByDate.set(
+              date,
+              Math.round(((infocajaTotalByDate.get(date) || 0) + amt) * 100) /
+                100
+            );
+          } else if (source === 'eventos' && isEventosSalesCategory(cat)) {
+            eventosByDate.set(
+              date,
+              Math.round(((eventosByDate.get(date) || 0) + amt) * 100) / 100
+            );
+          }
+        }
       }
+    } catch (e) {
+      finErrMsg =
+        e instanceof Error
+          ? e.message
+          : 'No se pudieron leer ventas Infocaja / Eventos';
     }
 
     const days = dates.map((date) => {
@@ -111,12 +137,10 @@ export async function GET(request: Request) {
       });
     });
 
-    const ventasWi = Math.round(
-      days.reduce((s, d) => s + d.ventasWi, 0) * 100
-    ) / 100;
-    const ventasEventos = Math.round(
-      days.reduce((s, d) => s + d.ventasEventos, 0) * 100
-    ) / 100;
+    const ventasWi =
+      Math.round(days.reduce((s, d) => s + d.ventasWi, 0) * 100) / 100;
+    const ventasEventos =
+      Math.round(days.reduce((s, d) => s + d.ventasEventos, 0) * 100) / 100;
     const daysWithData = days.filter((d) => d.source !== 'ninguno').length;
 
     const sourceCounts: Record<TipSalesDaySource, number> = {

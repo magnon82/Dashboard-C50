@@ -407,16 +407,6 @@ export function EventosCalendario() {
           Mostrar más ({filtered.length - PAGE_SIZE} restantes)
         </button>
       )}
-
-      <SuiteCard dark>
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">
-          Siguiente: Google Calendar
-        </p>
-        <p className="mt-2 text-sm text-white/90">
-          Un calendario compartido (no uno por usuario) · hold 72 h hábiles ·
-          sin hold si faltan &lt;15 días al evento · solo fechas futuras.
-        </p>
-      </SuiteCard>
     </div>
   );
 }

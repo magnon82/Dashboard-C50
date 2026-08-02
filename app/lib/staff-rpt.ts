@@ -186,6 +186,12 @@ export function buildBancosFromTpv(
   };
 }
 
+/** Categorías de Venta Total en financial_records (ingest Gmail usa «Venta Total»). */
+export function isInfocajaVentaTotalCategory(category: string): boolean {
+  const cat = String(category || '').trim().toLowerCase();
+  return cat === 'venta total' || cat === 'infocaja venta total';
+}
+
 export function sumInfocajaDay(
   rows: Array<{ category?: string | null; amount?: number | null }>
 ): StaffRptInfocajaDay {
@@ -199,7 +205,7 @@ export function sumInfocajaDay(
     if (cat === 'Infocaja Efectivo') efectivo += amt;
     else if (cat === 'Infocaja Bancarias') bancarias += amt;
     else if (cat === 'Infocaja Propina') propina += amt;
-    else if (cat === 'Infocaja Venta Total') ventaTotal += amt;
+    else if (isInfocajaVentaTotalCategory(cat)) ventaTotal += amt;
   }
   return {
     efectivo: Math.round(efectivo * 100) / 100,

@@ -499,26 +499,6 @@ export function EventosCrm({
         )}
       </div>
 
-      {canEdit && (
-        <SuiteCard>
-          <h3 className="text-sm font-bold" style={{ color: theme.title }}>
-            Control Excel / Sheets
-          </h3>
-          <p className="mt-1 text-xs leading-relaxed text-slate-600">
-            1) Clientes: regenera el seed con{' '}
-            <code className="text-[11px]">
-              python scripts/import_event_clients_from_excel.py
-            </code>{' '}
-            (lista Excel en Drive) y pulsa «Importar Excel clientes». 2) Leads del
-            control Seguimiento:{' '}
-            <code className="text-[11px]">
-              python scripts/seed_event_leads_from_seguimiento.py --json-only
-            </code>{' '}
-            y luego «Importar Seguimiento». No borra filas existentes.
-          </p>
-        </SuiteCard>
-      )}
-
       {(err || msg) && (
         <p
           className="text-sm font-medium"

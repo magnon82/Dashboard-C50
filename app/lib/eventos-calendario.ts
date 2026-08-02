@@ -17,6 +17,8 @@ export type CalendarEventItem = {
   source: CalendarSource;
   source_label: string;
   detail: string | null;
+  /** Etapa CRM (lead) si aplica */
+  stage: string | null;
   /** PDF en disco (scan). Vacío si solo hay seed / Anticipos. */
   os_path: string | null;
   os_filename: string | null;
@@ -107,6 +109,7 @@ function mergeItem(
     pax: base.pax ?? other.pax,
     client: base.client || other.client,
     detail: base.detail || other.detail,
+    stage: base.stage || other.stage,
     os_path: base.os_path || other.os_path,
     os_filename: base.os_filename || other.os_filename,
     digital_os_id: base.digital_os_id || other.digital_os_id,
@@ -118,9 +121,16 @@ function mergeItem(
 
 function emptyLinks(): Pick<
   CalendarEventItem,
-  'os_path' | 'os_filename' | 'digital_os_id' | 'quote_id' | 'lead_id' | 'client_id'
+  | 'stage'
+  | 'os_path'
+  | 'os_filename'
+  | 'digital_os_id'
+  | 'quote_id'
+  | 'lead_id'
+  | 'client_id'
 > {
   return {
+    stage: null,
     os_path: null,
     os_filename: null,
     digital_os_id: null,
@@ -286,6 +296,7 @@ export async function buildUpcomingCalendar(
           source_label: 'CRM / lead',
           detail: row.stage ? `Etapa: ${row.stage}` : null,
           ...emptyLinks(),
+          stage: row.stage ? String(row.stage) : null,
           lead_id: String(row.id),
           client_id: row.client_id ? String(row.client_id) : null,
         });
@@ -369,6 +380,26 @@ export async function buildUpcomingCalendar(
           if (!prev || pickBetterQuoteId(prev, qRef) === qRef.id) {
             byNameDate.set(nk, qRef);
           }
+        }
+        // Cotización con fecha propia (aunque el lead no tenga event_date)
+        if (eventDate) {
+          const title =
+            (q.celebration || company || 'Cotización').toString().trim() ||
+            'Cotización';
+          mergeItem(map, {
+            id: `quote:${q.id}`,
+            event_date: eventDate,
+            title,
+            client: company?.toString().trim() || null,
+            pax: null,
+            source: 'crm',
+            source_label: 'Cotización',
+            detail: q.status ? `Estado: ${q.status}` : null,
+            ...emptyLinks(),
+            quote_id: String(q.id),
+            lead_id: q.lead_id ? String(q.lead_id) : null,
+            client_id: q.client_id ? String(q.client_id) : null,
+          });
         }
       }
 

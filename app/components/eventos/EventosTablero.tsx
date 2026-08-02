@@ -7,6 +7,23 @@ import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
 
+type UpcomingEvent = {
+  id: string;
+  title?: string;
+  celebration?: string | null;
+  company?: string | null;
+  event_date: string | null;
+  stage: string;
+  pax?: number | null;
+  estimated_amount?: number | null;
+  source?: string;
+  source_label?: string;
+  detail?: string | null;
+  lead_id?: string | null;
+  digital_os_id?: string | null;
+  quote_id?: string | null;
+};
+
 type Summary = {
   ready: boolean;
   error?: string;
@@ -23,17 +40,41 @@ type Summary = {
     activityEvents?: number;
   };
   byStage: Record<string, number>;
-  upcomingEvents: Array<{
-    id: string;
-    title?: string;
-    celebration?: string | null;
-    company?: string | null;
-    event_date: string | null;
-    stage: string;
-    pax?: number | null;
-    estimated_amount?: number | null;
-  }>;
+  upcomingEvents: UpcomingEvent[];
 };
+
+function formatEventDate(iso: string | null | undefined): string {
+  if (!iso) return 'Sin fecha';
+  return new Date(iso.slice(0, 10) + 'T12:00:00').toLocaleDateString('es-MX', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function daysUntilLabel(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const [ty, tm, td] = new Date()
+    .toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' })
+    .split('-')
+    .map(Number);
+  const days = Math.round(
+    (Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86_400_000
+  );
+  if (days === 0) return 'Hoy';
+  if (days === 1) return 'Mañana';
+  if (days > 1 && days <= 14) return `En ${days} días`;
+  return '';
+}
+
+function stageOrSourceLabel(ev: UpcomingEvent): string {
+  if (ev.stage && LEAD_STAGE_LABELS[ev.stage as LeadStage]) {
+    return LEAD_STAGE_LABELS[ev.stage as LeadStage];
+  }
+  return ev.source_label || 'Evento';
+}
 
 export function EventosTablero({
   summary,
@@ -76,6 +117,8 @@ export function EventosTablero({
       border: SUITE.orange,
     },
   ];
+
+  const upcoming = summary?.upcomingEvents || [];
 
   return (
     <div className="space-y-5">
@@ -159,39 +202,105 @@ export function EventosTablero({
         </SuiteCard>
 
         <SuiteCard>
-          <h3 className="text-base font-bold" style={{ color: theme.title }}>
-            Próximos eventos (leads)
-          </h3>
-          {(summary?.upcomingEvents || []).length === 0 ? (
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-base font-bold" style={{ color: theme.title }}>
+              Próximos eventos
+            </h3>
+            {k != null && k.upcoming > 0 && (
+              <span className="text-xs font-semibold text-slate-500">
+                {k.upcoming} en puerta
+                {upcoming.length < k.upcoming
+                  ? ` · mostrando ${upcoming.length}`
+                  : ''}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+            Eventos en puerta: CRM, cotizaciones, OS e historial (hoy CDMX+).
+          </p>
+          {upcoming.length === 0 ? (
             <p className="mt-3 text-sm" style={{ color: theme.muted }}>
-              Sin fechas próximas. Crea leads en CRM o cotiza un evento.
+              {loading
+                ? 'Cargando fechas próximas…'
+                : 'Sin fechas próximas en CRM, OS ni historial. Crea un lead con fecha, cotiza un evento o regenera el seed de actividad.'}
             </p>
           ) : (
             <ul className="mt-3 space-y-2">
-              {summary!.upcomingEvents.map((ev) => (
-                <li
-                  key={ev.id}
-                  className="rounded-xl border border-slate-100 px-3 py-2 text-sm"
-                >
-                  <div className="font-semibold text-slate-800">
-                    {ev.celebration || ev.title || 'Evento'}
-                  </div>
-                  <div className="mt-0.5 text-xs text-slate-500">
-                    {ev.company ? `${ev.company} · ` : ''}
-                    {ev.event_date
-                      ? new Date(ev.event_date + 'T12:00:00').toLocaleDateString(
-                          'es-MX',
-                          { day: 'numeric', month: 'short', year: 'numeric' }
-                        )
-                      : 'Sin fecha'}{' '}
-                    · {LEAD_STAGE_LABELS[ev.stage as LeadStage] || ev.stage}
-                    {ev.pax ? ` · ${ev.pax} pax` : ''}
-                    {ev.estimated_amount
-                      ? ` · Presupuesto por persona ${formatMxn(Number(ev.estimated_amount))}`
-                      : ''}
-                  </div>
-                </li>
-              ))}
+              {upcoming.map((ev) => {
+                const when = daysUntilLabel(ev.event_date);
+                const showCompany =
+                  ev.company &&
+                  ev.company.trim().toLowerCase() !==
+                    (ev.celebration || ev.title || '')
+                      .trim()
+                      .toLowerCase();
+                const goOs = Boolean(ev.digital_os_id || ev.source === 'os');
+                const goCrm = Boolean(ev.lead_id || ev.source === 'crm');
+                return (
+                  <li
+                    key={ev.id}
+                    className="rounded-xl border border-slate-100 px-3 py-2 text-sm"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-slate-800">
+                          {ev.celebration || ev.title || 'Evento'}
+                        </div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          <span className="font-semibold text-slate-700">
+                            {formatEventDate(ev.event_date)}
+                          </span>
+                          {when ? ` · ${when}` : ''}
+                          {showCompany ? ` · ${ev.company}` : ''}
+                          {' · '}
+                          {stageOrSourceLabel(ev)}
+                          {ev.pax ? ` · ${ev.pax} pax` : ''}
+                          {ev.estimated_amount
+                            ? ` · Presupuesto/pax ${formatMxn(Number(ev.estimated_amount))}`
+                            : ''}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-1">
+                        {goCrm && (
+                          <button
+                            type="button"
+                            onClick={onGoCrm}
+                            className="rounded-lg px-2 py-1 text-[11px] font-bold text-white"
+                            style={{ backgroundColor: SUITE.navy }}
+                          >
+                            CRM
+                          </button>
+                        )}
+                        {ev.digital_os_id ? (
+                          <a
+                            href={`/eventos/os/${ev.digital_os_id}`}
+                            className="rounded-lg px-2 py-1 text-[11px] font-bold text-white"
+                            style={{ backgroundColor: SUITE.orange }}
+                          >
+                            Ver OS
+                          </a>
+                        ) : goOs && onGoOs ? (
+                          <button
+                            type="button"
+                            onClick={onGoOs}
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+                          >
+                            OS
+                          </button>
+                        ) : null}
+                        {ev.quote_id ? (
+                          <a
+                            href={`/eventos/cotizacion/${ev.quote_id}`}
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+                          >
+                            Cotiz.
+                          </a>
+                        ) : null}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
           <div className="mt-4 flex flex-wrap gap-2">

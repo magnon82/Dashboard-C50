@@ -233,10 +233,17 @@ export function eachIsoDateInclusive(from: string, to: string): string[] {
   return out;
 }
 
+/** Eventos diarios en financial_records (source_file=eventos). */
+export function isEventosSalesCategory(category: string): boolean {
+  const cat = String(category || '').trim().toLowerCase();
+  return cat === 'eventos';
+}
+
 /**
  * Resuelve WI / Eventos de un día.
- * Prioridad: cierre staff_rpt (corte) → Infocaja Venta Total + Eventos financieros.
+ * Prioridad: cierre staff_rpt con montos → Infocaja Venta Total + Eventos financieros.
  * WI sistema = max(0, Infocaja Venta Total − Eventos).
+ * Corte en 0 no bloquea Infocaja (fallback).
  */
 export function resolveTipSalesDay(
   date: string,
@@ -246,11 +253,13 @@ export function resolveTipSalesDay(
     eventosFinancial: number | null;
   }
 ): TipSalesDay {
-  if (opts.rpt) {
+  const rptWi = opts.rpt ? Math.max(0, Number(opts.rpt.wi) || 0) : 0;
+  const rptEv = opts.rpt ? Math.max(0, Number(opts.rpt.eventos) || 0) : 0;
+  if (opts.rpt && (rptWi > 0 || rptEv > 0)) {
     return {
       date,
-      ventasWi: roundMoney(Math.max(0, opts.rpt.wi)),
-      ventasEventos: roundMoney(Math.max(0, opts.rpt.eventos)),
+      ventasWi: roundMoney(rptWi),
+      ventasEventos: roundMoney(rptEv),
       source: 'corte',
       label: 'Corte del día',
     };
@@ -262,14 +271,18 @@ export function resolveTipSalesDay(
   if (hasInfo || hasEv) {
     const total = hasInfo ? Number(opts.infocajaVentaTotal) : 0;
     const ev = hasEv ? Number(opts.eventosFinancial) : 0;
+    let label = 'Infocaja + Eventos';
+    if (hasInfo && !hasEv) {
+      label = 'Infocaja (Eventos 0 — ajusta a mano si aplica)';
+    } else if (!hasInfo && hasEv) {
+      label = 'Eventos (sin Infocaja)';
+    }
     return {
       date,
       ventasWi: roundMoney(Math.max(0, total - ev)),
       ventasEventos: roundMoney(Math.max(0, ev)),
       source: 'sistema',
-      label: hasInfo
-        ? 'Infocaja + Eventos'
-        : 'Eventos (sin Infocaja)',
+      label,
     };
   }
   return {
@@ -292,11 +305,30 @@ export function tipSalesSourceNote(
   }
   if (primary === 'sistema') {
     return counts.sistema === 1
-      ? 'Desde sistema · Infocaja / Eventos'
-      : `Desde sistema · Infocaja / Eventos (${counts.sistema} días)`;
+      ? 'Desde sistema · Infocaja (correo)'
+      : `Desde sistema · Infocaja (correo) · ${counts.sistema} días`;
   }
   if (primary === 'mixto') {
     return `Desde sistema · Corte ${counts.corte} · Infocaja ${counts.sistema}`;
   }
-  return 'Sin ventas registradas en el periodo';
+  return 'Sin ventas de Corte ni Infocaja en el periodo';
+}
+
+/** Nota de RPT para UI: no alarmar si ya hay Infocaja. */
+export function tipSalesRptNote(
+  rptError: string | null,
+  daysWithData: number,
+  primary: TipSalesDaySource | 'mixto'
+): string | null {
+  if (!rptError) return null;
+  const missingTable = /staff_rpt_diario|Falta la tabla/i.test(rptError);
+  if (daysWithData > 0 || primary === 'sistema' || primary === 'mixto') {
+    return missingTable
+      ? 'Corte RPT opcional (no usado; hay Infocaja)'
+      : null;
+  }
+  if (missingTable) {
+    return 'Sin corte RPT (opcional). Si falta Infocaja del día, captura a mano o elige otra fecha.';
+  }
+  return rptError;
 }

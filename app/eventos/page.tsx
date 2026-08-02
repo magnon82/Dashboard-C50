@@ -45,6 +45,12 @@ type SummaryPayload = {
     stage: string;
     pax?: number | null;
     estimated_amount?: number | null;
+    source?: string;
+    source_label?: string;
+    detail?: string | null;
+    lead_id?: string | null;
+    digital_os_id?: string | null;
+    quote_id?: string | null;
   }>;
 };
 
