@@ -236,7 +236,7 @@ const NODES: MapNode[] = [
   {
     id: 'wf-gmail',
     label: 'sync-gmail.yml',
-    sub: 'L–S 4:00 AM · Dom 20:00',
+    sub: 'cada 3 h + anclas',
     x: 388,
     y: 96,
     w: 196,
@@ -249,7 +249,7 @@ const NODES: MapNode[] = [
       'ingest_facturas_gmail.py',
     ],
     detail:
-      'Función: ventas diarias (Infocaja + CORTE) + CFDI → financial_records. Lun–sáb 4:00 AM CDMX (0 10 UTC) + respaldo ~5:17 AM; domingo 8:00 PM CDMX (lun 02:00 UTC). CFDI = paso aparte continue-on-error.',
+      'Función: ventas diarias (Infocaja + CORTE) + CFDI → financial_records. Cron cada 3 h UTC (best-effort) + anclas L–S 4:00/5:17 AM y Dom 20:00–21:00 CDMX. Si falta un día: hub alerta + Actions → Run workflow. CFDI = continue-on-error.',
   },
   {
     id: 'wf-saldos',

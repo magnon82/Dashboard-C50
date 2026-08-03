@@ -61,6 +61,8 @@ export default function HubPage() {
 
     const wantEventos = canSeeModule(user, 'eventos');
     const wantRrhh = canSeeModule(user, 'rrhh');
+    const wantVentasSync =
+      canSeeModule(user, 'ventas') || canSeeModule(user, 'reportes-socios');
     const calmIds = (
       ['reportes-socios', 'staff', 'ventas', 'finanzas'] as const
     ).filter((id) => canSeeModule(user, id));
@@ -69,7 +71,7 @@ export default function HubPage() {
     for (const id of calmIds) seed[id] = calmNoAlert();
     setAlerts(seed);
 
-    if (!wantEventos && !wantRrhh) {
+    if (!wantEventos && !wantRrhh && !wantVentasSync) {
       setAlertsLoading(false);
       return;
     }
@@ -82,6 +84,30 @@ export default function HubPage() {
 
       try {
         const fetches: Promise<void>[] = [];
+
+        if (wantVentasSync) {
+          fetches.push(
+            (async () => {
+              try {
+                const res = await fetch('/api/ventas-sync-status', {
+                  cache: 'no-store',
+                });
+                if (!res.ok) return;
+                const json = (await res.json()) as {
+                  hubAlert?: { text: string; severity: 'warn' | 'ok' };
+                };
+                const alert = json.hubAlert;
+                if (!alert) return;
+                if (canSeeModule(user, 'ventas')) next.ventas = alert;
+                if (canSeeModule(user, 'reportes-socios')) {
+                  next['reportes-socios'] = alert;
+                }
+              } catch {
+                /* keep calm seed */
+              }
+            })()
+          );
+        }
 
         if (wantEventos) {
           fetches.push(

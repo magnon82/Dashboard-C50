@@ -9,6 +9,7 @@ import { VentasPorMesCard } from '@/app/components/VentasPorMesCard';
 import { SemanaEnCursoTable } from '@/app/components/SemanaEnCursoTable';
 import { DetalleSemanalCard } from '@/app/components/DetalleSemanalCard';
 import { BalanceMensualSociosCard } from '@/app/components/BalanceMensualSociosCard';
+import { InfocajaSyncBanner } from '@/app/components/InfocajaSyncBanner';
 import { getTheme } from '@/app/lib/themes';
 import {
   buildWeekToDateSales,
@@ -51,6 +52,51 @@ export default function ReportesSociosPage() {
           return;
         }
         setRecords(json.records || []);
+        // #region agent log
+        {
+          const recs = (json.records || []) as Array<{
+            date?: string;
+            source_file?: string;
+            category?: string;
+            amount?: number;
+          }>;
+          const target = '2026-08-02';
+          const todayRows = recs.filter(
+            (r) =>
+              r.source_file === 'infocaja' &&
+              String(r.date || '').slice(0, 10) === target
+          );
+          const venta = todayRows
+            .filter((r) => r.category === 'Venta Total')
+            .reduce((s, r) => s + (Number(r.amount) || 0), 0);
+          fetch(
+            'http://127.0.0.1:7380/ingest/81f79b2f-04c6-4299-bfe0-7d82bd5d2a50',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Debug-Session-Id': '6fa192',
+              },
+              body: JSON.stringify({
+                sessionId: '6fa192',
+                runId: 'post-fix',
+                hypothesisId: 'D/E',
+                location: 'reportes-socios/page.tsx:fetch',
+                message: 'Socios client received records',
+                data: {
+                  recordCount: recs.length,
+                  targetDate: target,
+                  targetInfocajaRows: todayRows.length,
+                  targetVentaTotal: Math.round(venta * 100) / 100,
+                  sampleDate: todayRows[0]?.date ?? null,
+                  ok: res.ok,
+                },
+                timestamp: Date.now(),
+              }),
+            }
+          ).catch(() => {});
+        }
+        // #endregion
       } catch (e) {
         setDataError(e instanceof Error ? e.message : 'Error de red al cargar datos');
         setRecords([]);
@@ -133,6 +179,7 @@ export default function ReportesSociosPage() {
 
   return (
     <SuiteShell title="Reportes Socios">
+      <InfocajaSyncBanner />
       {dataError && (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <p className="font-semibold">No se cargaron los datos de ventas</p>

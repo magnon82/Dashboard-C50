@@ -21,9 +21,21 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 
 | Workflow | Cadencia (CDMX) | Cron UTC | Qué hace |
 |----------|-----------------|----------|----------|
-| `sync-gmail.yml` | Lun–sáb 4:00 AM (+ respaldo ~5:17 AM); Dom 8:00 PM (+ respaldos 8:15 / 8:30 / 9:00 PM) | `0 10 * * 1-6`, `17 11 * * 1-6`, `0/15/30 2 * * 1`, `0 3 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
+| `sync-gmail.yml` | Cada ~3 h + anclas L–S 4:00/5:17 AM y Dom 20:00–21:00 | `5 */3 * * *` + anclas | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
 | `sync-saldos.yml` | Cada hora (:07) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
 | `sync-hr-drive.yml` | Diario 12:00 PM | `0 18 * * *` | Soft-check `hr_*` + `hr_drive_sync_state` |
+
+### Certeza del sync de ventas (no solo “confiar en el cron”)
+
+GitHub Actions **no garantiza** la hora exacta: el cron puede retrasarse o, si faltan secrets, fallar en silencio hasta que lo revises.
+
+Para **saber** que está bien (y no depender de pedirlo a mano):
+
+1. **Secrets Actions** (repo → Settings → Secrets): `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_OAUTH_CLIENT_JSON`, `GOOGLE_OAUTH_TOKEN_JSON`.
+2. **Notificaciones**: GitHub → Settings → Notifications → Actions → avisar si el workflow falla.
+3. **Suite**: hub / Socios muestran alerta si el último día Infocaja está atrasado (`/api/ventas-sync-status`).
+4. **Rescate**: Actions → Sync Gmail diario → **Run workflow** (o botón admin si configuras `GH_WORKFLOW_DISPATCH_TOKEN` en Vercel).
+5. Tras cambiar secrets o el YAML, corre **Run workflow** una vez y confirma en el log `OK YYYY-MM-DD: Venta Total=…`.
 
 Tras agregar o cambiar secrets, dispara **Run workflow** una vez en Actions (el cron de GitHub es best-effort y puede saltarse el primer día).
 

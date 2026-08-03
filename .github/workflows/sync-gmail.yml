@@ -1,19 +1,22 @@
 name: Sync Gmail diario
 
 # CDMX sin DST desde 2022 (UTC-6).
-# Lun–sáb 4:00 AM CDMX = 10:00 UTC (días 1–6).
-# Domingo 8:00 PM CDMX = lunes 02:00 UTC (cron weekday 1).
+# GitHub cron es best-effort (puede retrasarse minutos/horas). Por eso:
+#   · cron cada 3 h UTC (cobertura continua)
+#   · anclas L–S madrugada + Dom noche
 # Infocaja (ventas) + CORTE → Supabase; CFDI → financial_records (best-effort).
-# Dashboard: Ventas · Finanzas/Facturas
+# Dashboard: Ventas · Socios · Finanzas/Facturas
+# Certeza: Actions → Notify me (fallos) + alerta en hub si Infocaja atrasada.
 
 on:
   schedule:
+    # Cada 3 h UTC (~cada 3 h CDMX). Minuto :05 para evitar colisión con otros workflows.
+    - cron: "5 */3 * * *"
     # Lun–sáb 4:00 AM CDMX
     - cron: "0 10 * * 1-6"
     # Lun–sáb respaldo ~5:17 AM CDMX
     - cron: "17 11 * * 1-6"
-    # Domingo 8:00 PM CDMX (lunes 02:00 UTC). GitHub cron puede retrasarse;
-    # respaldos 8:15 / 8:30 / 9:00 PM CDMX para no perder el Fin de Día.
+    # Domingo 8:00 / 8:15 / 8:30 / 9:00 PM CDMX (lunes 02:00–03:00 UTC)
     - cron: "0 2 * * 1"
     - cron: "15 2 * * 1"
     - cron: "30 2 * * 1"
@@ -94,3 +97,9 @@ jobs:
           # En CI sin I: los adjuntos van a ingestor/data/facturas; el índice sí a ERP (financial_records).
           FACTURAS_PATH: ${{ github.workspace }}/ingestor/data/facturas
         run: python ingest_facturas_gmail.py --newer-than 7
+
+      - name: Mark job failed clearly
+        if: failure()
+        run: |
+          echo "::error::Sync Gmail falló. Revisa el paso en rojo y secrets Actions. Activa notificaciones: GitHub → Settings → Notifications → Actions."
+          exit 1
