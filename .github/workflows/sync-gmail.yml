@@ -12,8 +12,12 @@ on:
     - cron: "0 10 * * 1-6"
     # Lun–sáb respaldo ~5:17 AM CDMX
     - cron: "17 11 * * 1-6"
-    # Domingo 8:00 PM CDMX (lunes 02:00 UTC)
+    # Domingo 8:00 PM CDMX (lunes 02:00 UTC). GitHub cron puede retrasarse;
+    # respaldos 8:15 / 8:30 / 9:00 PM CDMX para no perder el Fin de Día.
     - cron: "0 2 * * 1"
+    - cron: "15 2 * * 1"
+    - cron: "30 2 * * 1"
+    - cron: "0 3 * * 1"
   workflow_dispatch:
 
 concurrency:

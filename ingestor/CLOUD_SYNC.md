@@ -21,7 +21,7 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 
 | Workflow | Cadencia (CDMX) | Cron UTC | Qué hace |
 |----------|-----------------|----------|----------|
-| `sync-gmail.yml` | Lun–sáb 4:00 AM (+ respaldo ~5:17 AM); Dom 8:00 PM | `0 10 * * 1-6`, `17 11 * * 1-6`, `0 2 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
+| `sync-gmail.yml` | Lun–sáb 4:00 AM (+ respaldo ~5:17 AM); Dom 8:00 PM (+ respaldos 8:15 / 8:30 / 9:00 PM) | `0 10 * * 1-6`, `17 11 * * 1-6`, `0/15/30 2 * * 1`, `0 3 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
 | `sync-saldos.yml` | Cada hora (:07) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
 | `sync-hr-drive.yml` | Diario 12:00 PM | `0 18 * * *` | Soft-check `hr_*` + `hr_drive_sync_state` |
 
