@@ -154,8 +154,7 @@ export function EventosTablero({
             </li>
             <li>Recarga esta página.</li>
             <li>
-              En CRM → «Importar Excel clientes» si aún no hay clientes (
-              <code className="text-xs">seed_event_clients.json</code>).
+              En CRM, agrega clientes manualmente si aún no hay ninguno.
             </li>
           </ol>
           {summary?.error && (

@@ -1,16 +1,25 @@
 /**
  * Reconciliación de duplicados en hr_employees.
- * Cluster por matchPerson (exact/high, autoLink) + carpetas Altas / drive_folder_path.
+ * Cluster por: CURP (campo / docs INE·CURP) + matchPerson (exact/high, autoLink
+ * con forma lista nombres+apellido) + carpetas Altas / drive_folder_path.
  * Survivor: expediente → nombre canónico más largo → más datos (fecha_ingreso).
+ * Absorbe FKs + documentos de perfil de las cáscaras.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { isMergedDuplicateShell } from '@/app/lib/hr';
+import { isMergedDuplicateShell } from './hr';
+import {
+  curpDuplicateGroups,
+  loadEmployeeCurpMap,
+  normalizeCurp,
+  type EmployeeIdentity,
+} from './hr-identity';
 import {
   canonicalHrEmployeeName,
   folderBasenameFromPath,
+  formatHrListName,
   matchPerson,
   normalizePersonKey,
   preferCanonicalFullName,
@@ -32,6 +41,7 @@ export type ReconcileEmployee = {
   notes: string | null;
   email: string | null;
   phone: string | null;
+  curp: string | null;
 };
 
 export type ExpedienteFolder = {
@@ -60,6 +70,8 @@ export type MergeAction = {
   leaveBalancesDropped: number;
   leaveRequestsMoved: number;
   resguardoMoved: number;
+  documentsMoved: number;
+  documentsDropped: number;
   loserUpdates: { id: string; full_name: string }[];
   dryRun: boolean;
 };
@@ -78,7 +90,7 @@ export type ReconcileReport = {
 };
 
 const EMP_COLS =
-  'id, full_name, status, puesto, area, fecha_ingreso, drive_folder_path, suite_username, force_include, force_exclude, notes, email, phone';
+  'id, full_name, status, puesto, area, fecha_ingreso, drive_folder_path, suite_username, force_include, force_exclude, notes, email, phone, curp';
 
 const MERGE_NOTE = 'duplicado_fusionado';
 
@@ -99,6 +111,7 @@ function asEmp(row: Record<string, unknown>): ReconcileEmployee {
     notes: (row.notes as string | null) ?? null,
     email: (row.email as string | null) ?? null,
     phone: (row.phone as string | null) ?? null,
+    curp: normalizeCurp((row.curp as string | null) ?? null),
   };
 }
 
@@ -138,6 +151,13 @@ function toNamed(e: ReconcileEmployee): NamedPerson {
     normalizePersonKey(alias) !== normalizePersonKey(e.full_name)
   ) {
     aliases.push(alias);
+  }
+  const listForm = formatHrListName(e.full_name);
+  if (
+    listForm &&
+    normalizePersonKey(listForm) !== normalizePersonKey(e.full_name)
+  ) {
+    aliases.push(listForm);
   }
   return {
     id: e.id,
@@ -247,12 +267,14 @@ export function resolveCanonicalName(
 /**
  * Cluster duplicados entre activos elegibles (no force_exclude),
  * priorizando quienes están en horarios recientes o tienen expediente.
+ * También une por CURP idéntica (campo o extraída de docs INE/CURP).
  */
 export function clusterDuplicateEmployees(
   employees: ReconcileEmployee[],
   opts: {
     scheduleIds: Set<string>;
     folders: ExpedienteFolder[];
+    identities?: Map<string, EmployeeIdentity>;
   }
 ): {
   clusters: ReconcileCluster[];
@@ -274,12 +296,33 @@ export function clusterDuplicateEmployees(
   const pairKey = (a: string, b: string) =>
     a < b ? `${a}|${b}` : `${b}|${a}`;
 
+  const curpOf = (id: string): string | null => {
+    const fromMap = opts.identities?.get(id)?.curp;
+    if (fromMap) return fromMap;
+    return byId.get(id)?.curp ?? null;
+  };
+
+  const curpConflict = (a: ReconcileEmployee, b: ReconcileEmployee) => {
+    const ca = curpOf(a.id);
+    const cb = curpOf(b.id);
+    return Boolean(ca && cb && ca !== cb);
+  };
+
   const tryLink = (
     a: ReconcileEmployee,
     b: ReconcileEmployee,
     reason: string
   ) => {
     if (a.id === b.id) return;
+    if (curpConflict(a, b)) {
+      skippedAmbiguous.push({
+        a: a.full_name,
+        b: b.full_name,
+        score: 0,
+        reason: 'curp_conflict',
+      });
+      return;
+    }
     const m = matchPerson(a.full_name, [toNamed(b)]);
     const m2 = matchPerson(b.full_name, [toNamed(a)]);
     const best = m.score >= m2.score ? m : m2;
@@ -305,14 +348,34 @@ export function clusterDuplicateEmployees(
     }
   };
 
-  // Prioridad: empleados en horarios o con expediente
+  // CURP idéntica → mismo empleado (aunque el nombre corto difiera)
+  if (opts.identities) {
+    for (const [curp, ids] of curpDuplicateGroups(opts.identities)) {
+      const members = ids
+        .map((id) => byId.get(id))
+        .filter((e): e is ReconcileEmployee => Boolean(e));
+      for (let i = 0; i < members.length; i++) {
+        for (let j = i + 1; j < members.length; j++) {
+          uf.union(members[i]!.id, members[j]!.id);
+          pairMeta.set(pairKey(members[i]!.id, members[j]!.id), {
+            score: 1,
+            reason: `curp:${curp}`,
+          });
+        }
+      }
+    }
+  }
+
+  // Prioridad: empleados en horarios o con expediente / nombre largo
   const priority = active.filter(
     (e) =>
       opts.scheduleIds.has(e.id) ||
       Boolean(e.drive_folder_path) ||
-      significantTokenCount(e.full_name) >= 3
+      significantTokenCount(e.full_name) >= 3 ||
+      significantTokenCount(formatHrListName(e.full_name)) >= 3
   );
   const pool = priority.length >= 2 ? priority : active;
+  const priorityIds = new Set(pool.map((e) => e.id));
 
   for (let i = 0; i < pool.length; i++) {
     for (let j = i + 1; j < pool.length; j++) {
@@ -320,12 +383,22 @@ export function clusterDuplicateEmployees(
     }
   }
 
-  // Misma carpeta Altas → une empleados que matchean esa carpeta
+  // Cáscaras cortas (2 tokens) fuera del pool ↔ cada prioritario
+  for (const e of active) {
+    if (priorityIds.has(e.id)) continue;
+    for (const p of pool) {
+      tryLink(e, p, 'employee_pair_short');
+    }
+  }
+
+  // Misma carpeta Altas → une empleados que matchean forma lista de la carpeta
   for (const folder of opts.folders) {
+    const folderLabel =
+      formatHrListName(folder.name) || folder.name;
     const named = active.map(toNamed);
     const matches: ReconcileEmployee[] = [];
     for (const e of active) {
-      const m = matchPerson(folder.name, [toNamed(e)]);
+      const m = matchPerson(folderLabel, [toNamed(e)]);
       if (
         m.autoLink &&
         (m.confidence === 'exact' || m.confidence === 'high')
@@ -333,16 +406,22 @@ export function clusterDuplicateEmployees(
         matches.push(e);
       }
     }
-    // También: match carpeta contra todos y tomar autoLink
-    const global = matchPerson(folder.name, named);
+    const global = matchPerson(folderLabel, named);
     if (global.autoLink && global.employeeId) {
       const emp = byId.get(global.employeeId);
       if (emp && !matches.some((x) => x.id === emp.id)) matches.push(emp);
     }
-    for (let i = 0; i < matches.length; i++) {
-      for (let j = i + 1; j < matches.length; j++) {
-        uf.union(matches[i]!.id, matches[j]!.id);
-        const k = pairKey(matches[i]!.id, matches[j]!.id);
+    // Filtrar pares con CURP en conflicto dentro del match de carpeta
+    const filtered: ReconcileEmployee[] = [];
+    for (const cand of matches) {
+      if (filtered.some((f) => curpConflict(f, cand))) continue;
+      filtered.push(cand);
+    }
+    for (let i = 0; i < filtered.length; i++) {
+      for (let j = i + 1; j < filtered.length; j++) {
+        if (curpConflict(filtered[i]!, filtered[j]!)) continue;
+        uf.union(filtered[i]!.id, filtered[j]!.id);
+        const k = pairKey(filtered[i]!.id, filtered[j]!.id);
         if (!pairMeta.has(k)) {
           pairMeta.set(k, {
             score: 1,
@@ -351,21 +430,19 @@ export function clusterDuplicateEmployees(
         }
       }
     }
-    // Carpeta vs cada activo: si auto-linkea a A y A ya está en cluster con B corto…
-    // (cubierto por pair matching). Además: si carpeta matchea A y hay B
-    // en horarios que matchea carpeta vía nombre corto.
     for (const e of active) {
-      if (matches.some((m) => m.id === e.id)) continue;
+      if (filtered.some((m) => m.id === e.id)) continue;
       const m = matchPerson(e.full_name, [
-        { id: 'folder', full_name: folder.name },
+        { id: 'folder', full_name: folderLabel },
       ]);
       if (
         m.autoLink &&
         (m.confidence === 'exact' || m.confidence === 'high') &&
-        matches.length === 1
+        filtered.length === 1 &&
+        !curpConflict(e, filtered[0]!)
       ) {
-        uf.union(e.id, matches[0]!.id);
-        pairMeta.set(pairKey(e.id, matches[0]!.id), {
+        uf.union(e.id, filtered[0]!.id);
+        pairMeta.set(pairKey(e.id, filtered[0]!.id), {
           score: m.score,
           reason: `expediente_bridge:${folder.name}`,
         });
@@ -490,11 +567,101 @@ async function reassignAll(
   return rows.length;
 }
 
+function docRank(status: string, hasFile: boolean): number {
+  if (status === 'verified') return 4;
+  if (status === 'uploaded') return 3;
+  if (hasFile && status !== 'rejected') return 2;
+  if (status === 'pending') return 1;
+  return 0;
+}
+
+/** Absorbe checklist documental del loser → survivor (unique employee_id+doc_type). */
+async function mergeDocuments(
+  sb: SupabaseClient,
+  loserId: string,
+  survivorId: string,
+  dryRun: boolean
+): Promise<{ moved: number; dropped: number }> {
+  const { data: loserDocs, error } = await sb
+    .from('hr_employee_documents')
+    .select(
+      'id, doc_type, status, storage_path, mime_type, byte_size, title, required, notes, uploaded_by, verified_by, verified_at'
+    )
+    .eq('employee_id', loserId);
+  if (error || !loserDocs?.length) return { moved: 0, dropped: 0 };
+
+  let moved = 0;
+  let dropped = 0;
+  for (const raw of loserDocs) {
+    const row = raw as Record<string, unknown>;
+    const docType = String(row.doc_type || '');
+    if (!docType) continue;
+    const { data: survivorRow } = await sb
+      .from('hr_employee_documents')
+      .select(
+        'id, doc_type, status, storage_path, mime_type, byte_size, title, required, notes, uploaded_by, verified_by, verified_at'
+      )
+      .eq('employee_id', survivorId)
+      .eq('doc_type', docType)
+      .maybeSingle();
+
+    const loserHas = Boolean(row.storage_path);
+    const loserRank = docRank(String(row.status || 'pending'), loserHas);
+
+    if (!survivorRow) {
+      if (!dryRun) {
+        await sb
+          .from('hr_employee_documents')
+          .update({
+            employee_id: survivorId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', row.id as string);
+      }
+      moved += 1;
+      continue;
+    }
+
+    const surv = survivorRow as Record<string, unknown>;
+    const survHas = Boolean(surv.storage_path);
+    const survRank = docRank(String(surv.status || 'pending'), survHas);
+
+    if (loserRank > survRank) {
+      if (!dryRun) {
+        await sb
+          .from('hr_employee_documents')
+          .update({
+            status: row.status,
+            storage_path: row.storage_path,
+            mime_type: row.mime_type,
+            byte_size: row.byte_size,
+            title: row.title ?? surv.title,
+            notes: row.notes ?? surv.notes,
+            uploaded_by: row.uploaded_by ?? surv.uploaded_by,
+            verified_by: row.verified_by ?? surv.verified_by,
+            verified_at: row.verified_at ?? surv.verified_at,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', surv.id as string);
+        await sb.from('hr_employee_documents').delete().eq('id', row.id as string);
+      }
+      moved += 1;
+    } else {
+      if (!dryRun) {
+        await sb.from('hr_employee_documents').delete().eq('id', row.id as string);
+      }
+      dropped += 1;
+    }
+  }
+  return { moved, dropped };
+}
+
 export async function mergeCluster(
   sb: SupabaseClient,
   cluster: ReconcileCluster,
   byId: Map<string, ReconcileEmployee>,
-  dryRun: boolean
+  dryRun: boolean,
+  identities?: Map<string, EmployeeIdentity>
 ): Promise<MergeAction> {
   const survivor = byId.get(cluster.survivorId)!;
   let payrollLinesMoved = 0;
@@ -505,6 +672,8 @@ export async function mergeCluster(
   let leaveBalancesDropped = 0;
   let leaveRequestsMoved = 0;
   let resguardoMoved = 0;
+  let documentsMoved = 0;
+  let documentsDropped = 0;
   const loserUpdates: { id: string; full_name: string }[] = [];
 
   for (const loserId of cluster.loserIds) {
@@ -563,6 +732,15 @@ export async function mergeCluster(
       dryRun
     );
 
+    const docs = await mergeDocuments(
+      sb,
+      loserId,
+      cluster.survivorId,
+      dryRun
+    );
+    documentsMoved += docs.moved;
+    documentsDropped += docs.dropped;
+
     const noteBits = [loser.notes, `${MERGE_NOTE}→${cluster.survivorId}`]
       .filter(Boolean)
       .join(' | ');
@@ -616,6 +794,22 @@ export async function mergeCluster(
       }
       survivor.fecha_ingreso = loser.fecha_ingreso;
     }
+    // Transferir CURP si falta
+    const loserCurp =
+      identities?.get(loserId)?.curp || loser.curp || null;
+    if (loserCurp && !survivor.curp) {
+      if (!dryRun) {
+        await sb
+          .from('hr_employees')
+          .update({
+            curp: loserCurp,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', cluster.survivorId)
+          .is('curp', null);
+      }
+      survivor.curp = loserCurp;
+    }
 
     if (!dryRun) {
       await sb.from('hr_employees').update(patch).eq('id', loserId);
@@ -623,13 +817,17 @@ export async function mergeCluster(
     loserUpdates.push({ id: loserId, full_name: loser.full_name });
   }
 
-  // Nombre canónico del survivor (carpeta expediente)
+  // Nombre canónico + CURP del survivor
   if (!dryRun && cluster.canonicalName) {
     const patch: Record<string, unknown> = {
       full_name: cluster.canonicalName,
       updated_at: new Date().toISOString(),
     };
-    // Vincular carpeta si falta y hay match
+    const survCurp =
+      identities?.get(cluster.survivorId)?.curp || survivor.curp || null;
+    if (survCurp && !survivor.curp) {
+      patch.curp = survCurp;
+    }
     await sb.from('hr_employees').update(patch).eq('id', cluster.survivorId);
   }
 
@@ -643,6 +841,8 @@ export async function mergeCluster(
     leaveBalancesDropped,
     leaveRequestsMoved,
     resguardoMoved,
+    documentsMoved,
+    documentsDropped,
     loserUpdates,
     dryRun,
   };
@@ -651,12 +851,20 @@ export async function mergeCluster(
 export async function loadActiveEmployees(
   sb: SupabaseClient
 ): Promise<ReconcileEmployee[]> {
-  const { data, error } = await sb
+  let res = await sb
     .from('hr_employees')
     .select(EMP_COLS)
     .order('full_name', { ascending: true });
-  if (error) throw new Error(error.message);
-  return ((data || []) as unknown as Record<string, unknown>[]).map(asEmp);
+  if (res.error && /curp/i.test(res.error.message)) {
+    res = await sb
+      .from('hr_employees')
+      .select(
+        'id, full_name, status, puesto, area, fecha_ingreso, drive_folder_path, suite_username, force_include, force_exclude, notes, email, phone'
+      )
+      .order('full_name', { ascending: true });
+  }
+  if (res.error) throw new Error(res.error.message);
+  return ((res.data || []) as unknown as Record<string, unknown>[]).map(asEmp);
 }
 
 async function weekHasRealShifts(
@@ -799,6 +1007,7 @@ export async function runEmployeeReconcile(
   opts: {
     dryRun?: boolean;
     expedientesRoot?: string;
+    extractCurpFromDocs?: boolean;
   } = {}
 ): Promise<ReconcileReport> {
   const dryRun = Boolean(opts.dryRun);
@@ -834,15 +1043,48 @@ export async function runEmployeeReconcile(
     (e) => e.status !== 'baja' && !e.force_exclude
   ).length;
 
+  const activeIds = employees
+    .filter(
+      (e) =>
+        e.status !== 'baja' &&
+        !e.force_exclude &&
+        !isMergedDuplicateShell(e.notes)
+    )
+    .map((e) => e.id);
+
+  const identities = await loadEmployeeCurpMap(sb, activeIds, {
+    extractFromDocs: opts.extractCurpFromDocs !== false,
+    maxDocExtracts: 100,
+  });
+  // Propagar CURP resuelta al empleado en memoria + backfill campo si falta
+  for (const e of employees) {
+    const idn = identities.get(e.id);
+    if (idn?.curp && !e.curp) e.curp = idn.curp;
+  }
+  if (!dryRun) {
+    for (const idn of identities.values()) {
+      if (!idn.curp || idn.source === 'field') continue;
+      await sb
+        .from('hr_employees')
+        .update({
+          curp: idn.curp,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', idn.employeeId)
+        .is('curp', null);
+    }
+  }
+
   const { clusters, skippedAmbiguous } = clusterDuplicateEmployees(employees, {
     scheduleIds,
     folders: allFolders,
+    identities,
   });
 
   const byId = new Map(employees.map((e) => [e.id, e]));
   const merges: MergeAction[] = [];
   for (const c of clusters) {
-    merges.push(await mergeCluster(sb, c, byId, dryRun));
+    merges.push(await mergeCluster(sb, c, byId, dryRun, identities));
   }
 
   let plantillaAfter: number | null = null;

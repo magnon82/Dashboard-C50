@@ -7,6 +7,7 @@ import {
   sessionHasRrhh,
 } from '@/app/lib/hr-api';
 import {
+  isLeaveExemptEmployee,
   leaveInclusiveDays,
   todayIsoCdmx,
   type HrLeavePago,
@@ -343,12 +344,29 @@ export async function POST(request: Request) {
       // Validar que el empleado exista (evita IDs inventados)
       const { data: emp, error: empErr } = await sb
         .from('hr_employees')
-        .select('id, full_name, puesto')
+        .select('id, full_name, puesto, area, notes')
         .eq('id', employeeId)
         .maybeSingle();
       if (empErr || !emp) {
         return NextResponse.json(
           { error: 'Empleado no encontrado en plantilla.' },
+          { status: 400 }
+        );
+      }
+      if (
+        isLeaveExemptEmployee(
+          emp as {
+            puesto: string | null;
+            area: string | null;
+            notes: string | null;
+          }
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Este colaborador (Socios) no lleva control de vacaciones.',
+          },
           { status: 400 }
         );
       }

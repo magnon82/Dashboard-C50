@@ -83,9 +83,11 @@ function ChartTooltip({
   );
 }
 
-/** Puntos Lun–Dom: año actual (navy) vs año anterior (oro), con línea suave de apoyo.
- *  Año en curso: no grafica hoy ni días futuros (CDMX); año anterior sí muestra la semana completa
- *  salvo domingos <2026 (cerrado → null, no $0). */
+/**
+ * Lun–Dom: año en curso (navy) vs año anterior (oro).
+ * Años anteriores <2026: domingo omitido (cerrado), no se grafica ni se suma.
+ * 2026+: domingo sí cuenta. No grafica días futuros; sí incluye hoy con venta.
+ */
 export function SemanaEnCursoChart({
   days,
   year,
@@ -93,21 +95,22 @@ export function SemanaEnCursoChart({
 }: SemanaEnCursoChartProps) {
   const todayMx = todayMexicoIso();
   const data: ChartRow[] = days.map((d) => {
-    // Omitir punto (null): día en curso / futuros, o domingo cerrado <2026 — no dibujar $0
-    const omitActual = d.date >= todayMx || shouldExcludeSunday(d.date);
+    const omitActual = d.date > todayMx || shouldExcludeSunday(d.date);
     const omitAnterior =
       d.prevTotal == null ||
       (d.prevDate != null && shouldExcludeSunday(d.prevDate));
     return {
       dia: shortWeekday(d.weekday),
-      actual: omitActual ? null : d.total,
-      anterior: omitAnterior ? null : (d.prevTotal ?? null),
+      actual: omitActual ? null : d.total > 0 ? d.total : null,
+      anterior: omitAnterior ? null : (d.prevTotal ?? null) > 0 ? d.prevTotal! : null,
     };
   });
 
-  const hasAny =
-    data.some((r) => (r.actual != null && r.actual > 0) || (r.anterior != null && r.anterior > 0));
-
+  const hasAny = data.some(
+    (r) =>
+      (r.actual != null && r.actual > 0) ||
+      (r.anterior != null && r.anterior > 0)
+  );
   if (!hasAny) return null;
 
   return (
@@ -146,14 +149,19 @@ export function SemanaEnCursoChart({
             name={String(prevYear)}
             stroke={SUITE.orange}
             strokeWidth={1.5}
-            strokeOpacity={0.45}
+            strokeOpacity={0.55}
             dot={{
               fill: SUITE.orange,
               r: 6,
               strokeWidth: 2,
               stroke: '#fff',
             }}
-            activeDot={{ r: 8, strokeWidth: 2, stroke: '#fff', fill: SUITE.orangeDeep }}
+            activeDot={{
+              r: 8,
+              strokeWidth: 2,
+              stroke: '#fff',
+              fill: SUITE.orangeDeep,
+            }}
             connectNulls={false}
           />
           <Line
@@ -161,15 +169,20 @@ export function SemanaEnCursoChart({
             dataKey="actual"
             name={String(year)}
             stroke={SUITE.navy}
-            strokeWidth={1.75}
-            strokeOpacity={0.5}
+            strokeWidth={2}
+            strokeOpacity={0.9}
             dot={{
               fill: SUITE.navy,
               r: 6.5,
               strokeWidth: 2,
               stroke: '#fff',
             }}
-            activeDot={{ r: 8.5, strokeWidth: 2, stroke: '#fff', fill: SUITE.navyDeep }}
+            activeDot={{
+              r: 8.5,
+              strokeWidth: 2,
+              stroke: '#fff',
+              fill: SUITE.navyDeep,
+            }}
             connectNulls={false}
           />
         </LineChart>

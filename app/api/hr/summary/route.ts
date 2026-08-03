@@ -3,6 +3,7 @@ import { getServiceSupabase } from '@/app/lib/users';
 import { requireRrhhSession } from '@/app/lib/hr-api';
 import {
   HR_LEAVE_LOW_THRESHOLD,
+  isLeaveExemptEmployee,
   todayIsoCdmx,
   type HrSummaryAlert,
   type HrSummaryKpis,
@@ -51,7 +52,7 @@ export async function GET() {
       schedulePublished,
       payrollOpen,
       currentWeek,
-      leaveLow,
+      leaveLowRows,
     ] = await Promise.all([
       resolvePlantillaVigente(sb, { allowSeed: false }),
       sb.from('hr_employees').select('id', { count: 'exact', head: true }),
@@ -84,7 +85,7 @@ export async function GET() {
         .maybeSingle(),
       sb
         .from('hr_leave_balances')
-        .select('id', { count: 'exact', head: true })
+        .select('employee_id, days_remaining')
         .eq('year', year)
         .lte('days_remaining', HR_LEAVE_LOW_THRESHOLD),
     ]);
@@ -109,8 +110,8 @@ export async function GET() {
       resguardoPending.error?.code === '42P01';
 
     const leaveBalMissing =
-      leaveLow.error?.message?.includes('does not exist') ||
-      leaveLow.error?.code === '42P01';
+      leaveLowRows.error?.message?.includes('does not exist') ||
+      leaveLowRows.error?.code === '42P01';
 
     const err =
       employees.error ||
@@ -124,7 +125,44 @@ export async function GET() {
     const resguardoCount = resguardoMissing ? 0 : (resguardoPending.count ?? 0);
     const draftWeeks = scheduleDraft.count ?? 0;
     const currentWeekPublished = Boolean(currentWeek.data?.id);
-    const leaveLowCount = leaveBalMissing ? 0 : (leaveLow.count ?? 0);
+
+    // Excluir socios / sin_vacaciones del KPI de saldos bajos
+    let leaveLowCount = 0;
+    if (!leaveBalMissing && leaveLowRows.data?.length) {
+      const lowIds = [
+        ...new Set(
+          leaveLowRows.data.map((r: { employee_id: string }) =>
+            String(r.employee_id)
+          )
+        ),
+      ];
+      const exemptIds = new Set(
+        plantillaResolved.employees
+          .filter((e) => isLeaveExemptEmployee(e))
+          .map((e) => e.id)
+      );
+      const missing = lowIds.filter(
+        (id) =>
+          !exemptIds.has(id) &&
+          !plantillaResolved.employees.some((e) => e.id === id)
+      );
+      if (missing.length > 0) {
+        const { data: extra } = await sb
+          .from('hr_employees')
+          .select('id, puesto, area, notes')
+          .in('id', missing);
+        for (const row of extra || []) {
+          const r = row as {
+            id: string;
+            puesto: string | null;
+            area: string | null;
+            notes: string | null;
+          };
+          if (isLeaveExemptEmployee(r)) exemptIds.add(String(r.id));
+        }
+      }
+      leaveLowCount = lowIds.filter((id) => !exemptIds.has(id)).length;
+    }
 
     const paid = plantillaResolved.period;
     const kpis: HrSummaryKpis = {

@@ -14,6 +14,8 @@ import { getTheme } from '@/app/lib/themes';
 import {
   buildWeekToDateSales,
   parseIsoDate,
+  todayMexicoIso,
+  weekOptionsYearInCourse,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
 
@@ -39,6 +41,12 @@ export default function ReportesSociosPage() {
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [year, setYear] = useState(2026);
   const [month, setMonth] = useState<number | null>(null);
+  /** Semana a consultar en card «semana en curso» (solo año en curso). */
+  const [consultaSemana, setConsultaSemana] = useState<number | null>(null);
+
+  useEffect(() => {
+    setConsultaSemana(null);
+  }, [year]);
 
   useEffect(() => {
     async function fetchRecords() {
@@ -52,51 +60,6 @@ export default function ReportesSociosPage() {
           return;
         }
         setRecords(json.records || []);
-        // #region agent log
-        {
-          const recs = (json.records || []) as Array<{
-            date?: string;
-            source_file?: string;
-            category?: string;
-            amount?: number;
-          }>;
-          const target = '2026-08-02';
-          const todayRows = recs.filter(
-            (r) =>
-              r.source_file === 'infocaja' &&
-              String(r.date || '').slice(0, 10) === target
-          );
-          const venta = todayRows
-            .filter((r) => r.category === 'Venta Total')
-            .reduce((s, r) => s + (Number(r.amount) || 0), 0);
-          fetch(
-            'http://127.0.0.1:7380/ingest/81f79b2f-04c6-4299-bfe0-7d82bd5d2a50',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Debug-Session-Id': '6fa192',
-              },
-              body: JSON.stringify({
-                sessionId: '6fa192',
-                runId: 'post-fix',
-                hypothesisId: 'D/E',
-                location: 'reportes-socios/page.tsx:fetch',
-                message: 'Socios client received records',
-                data: {
-                  recordCount: recs.length,
-                  targetDate: target,
-                  targetInfocajaRows: todayRows.length,
-                  targetVentaTotal: Math.round(venta * 100) / 100,
-                  sampleDate: todayRows[0]?.date ?? null,
-                  ok: res.ok,
-                },
-                timestamp: Date.now(),
-              }),
-            }
-          ).catch(() => {});
-        }
-        // #endregion
       } catch (e) {
         setDataError(e instanceof Error ? e.message : 'Error de red al cargar datos');
         setRecords([]);
@@ -166,10 +129,19 @@ export default function ReportesSociosPage() {
       .sort((a, b) => b - a);
   }, [records]);
 
-  const weekToDate = useMemo(
-    () => buildWeekToDateSales(records, undefined, { year }),
-    [records, year]
-  );
+  const weekToDate = useMemo(() => {
+    const currentYear = parseIsoDate(todayMexicoIso())?.y ?? new Date().getFullYear();
+    return buildWeekToDateSales(records, undefined, {
+      year,
+      week: year === currentYear ? (consultaSemana ?? undefined) : undefined,
+    });
+  }, [records, year, consultaSemana]);
+
+  const semanaEnCursoOptions = useMemo(() => weekOptionsYearInCourse(), []);
+
+  const currentYearMx =
+    parseIsoDate(todayMexicoIso())?.y ?? new Date().getFullYear();
+  const showSemanaSelect = year === currentYearMx;
 
   const hoy = new Date().toLocaleDateString('es-MX', {
     day: 'numeric',
@@ -207,7 +179,24 @@ export default function ReportesSociosPage() {
         filtersBelowBreakdown
       />
 
-      <SemanaEnCursoTable weekToDate={weekToDate} showDescCanc={false} />
+      <SemanaEnCursoTable
+        weekToDate={weekToDate}
+        showDescCanc={false}
+        weekOptions={showSemanaSelect ? semanaEnCursoOptions : undefined}
+        selectedWeek={
+          showSemanaSelect
+            ? (consultaSemana ?? weekToDate.weekNumber)
+            : undefined
+        }
+        onWeekChange={
+          showSemanaSelect
+            ? (w) => {
+                const current = semanaEnCursoOptions[0]?.week;
+                setConsultaSemana(current != null && w === current ? null : w);
+              }
+            : undefined
+        }
+      />
 
       <ChequePromedioMensualCard records={records} years={COMPARE_YEARS} />
 

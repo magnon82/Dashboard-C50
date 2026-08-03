@@ -21,6 +21,7 @@ import {
   isPlantillaExterno,
   plantillaPositionKey,
   type HrEmployee,
+  type HrTipoEmpleo,
   type PlantillaTeamGroup,
 } from '@/app/lib/hr';
 import type { HrDocAlertSummary } from '@/app/lib/hr-employee-profile';
@@ -315,6 +316,8 @@ export function RrhhPlantilla({
   const [viewer, setViewer] = useState<HrViewerTarget | null>(null);
   const [showResguardos, setShowResguardos] = useState(initialShowResguardos);
   const [showAlta, setShowAlta] = useState(false);
+  const [altaTipo, setAltaTipo] = useState<HrTipoEmpleo>('interno');
+  const [altaRequiereDocs, setAltaRequiereDocs] = useState(true);
   const [altaName, setAltaName] = useState('');
   const [altaPuesto, setAltaPuesto] = useState('');
   const [altaIngreso, setAltaIngreso] = useState(() => {
@@ -588,6 +591,8 @@ export function RrhhPlantilla({
           full_name: name,
           puesto: altaPuesto.trim() || null,
           fecha_ingreso: altaIngreso || null,
+          tipo_empleo: altaTipo,
+          requiere_documentacion: altaRequiereDocs,
         }),
       });
       const json = await res.json();
@@ -597,6 +602,8 @@ export function RrhhPlantilla({
       }
       setToast(json.message || 'Alta registrada');
       setShowAlta(false);
+      setAltaTipo('interno');
+      setAltaRequiereDocs(true);
       setAltaName('');
       setAltaPuesto('');
       onChanged?.();
@@ -781,6 +788,55 @@ export function RrhhPlantilla({
             nombre) para documentos, médico, resguardos y datos.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
+            <fieldset className="sm:col-span-2">
+              <legend className="text-xs font-semibold text-slate-600">
+                Tipo de empleo *
+              </legend>
+              <div className="mt-1 flex flex-wrap gap-4 text-sm">
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="alta-tipo"
+                    checked={altaTipo === 'interno'}
+                    onChange={() => {
+                      setAltaTipo('interno');
+                      setAltaRequiereDocs(true);
+                    }}
+                  />
+                  Interno
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="alta-tipo"
+                    checked={altaTipo === 'externo'}
+                    onChange={() => {
+                      setAltaTipo('externo');
+                      setAltaRequiereDocs(false);
+                    }}
+                  />
+                  Externo
+                </label>
+              </div>
+            </fieldset>
+            <label className="sm:col-span-2 inline-flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={altaRequiereDocs}
+                onChange={(e) => setAltaRequiereDocs(e.target.checked)}
+              />
+              <span>
+                <span className="text-xs font-semibold text-slate-600 block">
+                  ¿Requiere documentación de alta?
+                </span>
+                <span className="text-xs" style={{ color: theme.muted }}>
+                  {altaRequiereDocs
+                    ? 'Se pedirán INE, acta, CURP y comprobante de domicilio.'
+                    : 'Sin alerta ni checklist obligatorio (típico en externos).'}
+                </span>
+              </span>
+            </label>
             <label className="block sm:col-span-2">
               <span className="text-xs font-semibold text-slate-600">
                 Nombre completo *

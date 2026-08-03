@@ -13,6 +13,7 @@
  *  - Credencial INE/IFE → ine (nunca acta).
  */
 
+import 'server-only';
 import { execFile } from 'child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
@@ -879,6 +880,46 @@ export async function classifyPdfBuffer(
     textSample: text.slice(0, 240),
     method: !hasText ? 'empty' : usedOcr ? 'ocr' : 'keywords',
   };
+}
+
+/**
+ * Texto útil de un PDF: capa de streams; si es basura/escaneo, OCR de JPEGs embebidos.
+ * `forceOcr` intenta OCR aunque la capa de texto tenga bytes (p. ej. JPEG mal interpretado).
+ */
+export async function extractPdfTextWithOcr(
+  pdfBytes: Buffer | Uint8Array,
+  opts?: { forceOcr?: boolean }
+): Promise<{ text: string; method: 'streams' | 'ocr' | 'empty' }> {
+  const buf = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
+  let text = extractTextFromPdfBytes(buf);
+  const letterCount = (normalizeText(text).match(/[a-z0-9]/gi) || []).length;
+  const looksLikeGarbage =
+    letterCount < 40 ||
+    /JFIF|Exif|Adobe|stream/i.test(text.slice(0, 200)) ||
+    (text.match(/[\x00-\x08\x0e-\x1f]/g) || []).length > 20;
+
+  if (!opts?.forceOcr && letterCount >= 40 && !looksLikeGarbage) {
+    return { text, method: 'streams' };
+  }
+
+  try {
+    const jpegs = extractEmbeddedJpegs(buf);
+    if (jpegs.length) {
+      const ocrText = await ocrImageBuffers(jpegs);
+      const ocrLetters = (normalizeText(ocrText).match(/[a-z0-9]/gi) || [])
+        .length;
+      if (ocrLetters >= 12) {
+        return { text: ocrText, method: 'ocr' };
+      }
+    }
+  } catch {
+    /* keep streams */
+  }
+
+  if (letterCount >= 12 && !looksLikeGarbage) {
+    return { text, method: 'streams' };
+  }
+  return { text: looksLikeGarbage ? '' : text, method: 'empty' };
 }
 
 /**

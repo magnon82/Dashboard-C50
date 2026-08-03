@@ -833,13 +833,41 @@ export function weekRangeLabel(year: number, week: number): string {
   return `S${week} · ${formatShort(mon)} – ${formatShort(fri)}`;
 }
 
+/** Opciones Lun–Dom para consultar semanas del año en curso (1…semana actual). */
+export function weekOptionsYearInCourse(todayIso?: string): Array<{
+  week: number;
+  label: string;
+  isCurrent: boolean;
+}> {
+  const today = todayIso || todayMexicoIso();
+  const p = parseIsoDate(today);
+  if (!p) return [];
+  const maxWeek = acumuladoWeekForDate(today);
+  if (maxWeek <= 0) return [];
+  const opts: Array<{ week: number; label: string; isCurrent: boolean }> = [];
+  for (let w = maxWeek; w >= 1; w--) {
+    const mon = weekMondayIso(p.y, w);
+    const sun = sundayOfWeek(mon);
+    const isCurrent = w === maxWeek;
+    opts.push({
+      week: w,
+      isCurrent,
+      label: isCurrent
+        ? `S${w} · en curso (${formatShort(mon)} – ${formatShort(sun)})`
+        : `S${w} · ${formatShort(mon)} – ${formatShort(sun)}`,
+    });
+  }
+  return opts;
+}
+
 /** Semana en curso (siempre Lun→Dom) con ventas diarias Infocaja + cortes CORTE.
  *  Días futuros del semana: fila presente, venta "—" (0), comparación año anterior si hay dato.
  *  Totales agregados = lun–hoy (no incluyen días futuros).
  *  Compara día a día vs misma semana del año anterior (solo ventas diarias; no prorratea Acumulado).
  *  Domingos <2026 (cerrado): omitidos en totales/var % y prevTotal=undefined (no graficar $0);
  *  domingos ≥2026 se conservan.
- *  Cheque promedio = Venta Total (sin propina) ÷ Infocaja Personas. */
+ *  Cheque promedio = Venta Total (sin propina) ÷ Infocaja Personas.
+ *  `opts.week` (año en curso): consultar una semana anterior completa del mismo año. */
 export function buildWeekToDateSales(
   records: FinancialRecord[],
   todayIso?: string,
@@ -850,6 +878,12 @@ export function buildWeekToDateSales(
      * si es un año pasado → esa misma nº de semana completa (contexto del periodo).
      */
     year?: number;
+    /**
+     * Nº de semana Acumulado (1…) del año en curso.
+     * Solo aplica cuando `year` es el año actual: semanas 1…semana actual.
+     * Semana actual → WTD hasta hoy; semanas anteriores → lun–dom completo.
+     */
+    week?: number;
   }
 ): {
   days: DaySale[];
@@ -877,7 +911,7 @@ export function buildWeekToDateSales(
   const today = todayIso || todayMexicoIso();
   const todayParsed = parseIsoDate(today)!;
   const currentYear = todayParsed.y;
-  const weekNumber = acumuladoWeekForDate(today);
+  const currentWeekNumber = acumuladoWeekForDate(today);
   // Año futuro o omitido → año en curso (semana actual WTD)
   const year =
     opts?.year != null && opts.year >= 2021 && opts.year <= currentYear
@@ -885,11 +919,28 @@ export function buildWeekToDateSales(
       : currentYear;
   const prevYear = year - 1;
 
+  let weekNumber = currentWeekNumber;
+  if (
+    year === currentYear &&
+    opts?.week != null &&
+    Number.isFinite(opts.week) &&
+    opts.week >= 1 &&
+    opts.week <= currentWeekNumber
+  ) {
+    weekNumber = Math.floor(opts.week);
+  }
+
   let mondayKey: string;
   let asOf: string;
   if (year === currentYear) {
-    mondayKey = toIsoLocal(mondayOf(today));
-    asOf = today;
+    if (weekNumber === currentWeekNumber || weekNumber <= 0) {
+      mondayKey = toIsoLocal(mondayOf(today));
+      asOf = today;
+    } else {
+      // Semana anterior del año en curso: lun–dom completo
+      mondayKey = weekMondayIso(year, weekNumber);
+      asOf = sundayOfWeek(mondayKey);
+    }
   } else {
     // Misma nº de semana del año filtrado (semana completa)
     mondayKey =

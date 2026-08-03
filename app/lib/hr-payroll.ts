@@ -18,12 +18,26 @@ export const HR_PAYROLL_STATUS_LABELS: Record<HrPayrollStatus, string> = {
   pagado: 'Pagado',
 };
 
+/** Cadencia de periodo: semanal (ops) o quincenal (admin/socios). */
+export type HrPayrollCadence = 'semanal' | 'quincenal';
+
+export const HR_PAYROLL_CADENCE_LABELS: Record<HrPayrollCadence, string> = {
+  semanal: 'Semanal',
+  quincenal: 'Quincenal',
+};
+
+export function isPayrollCadence(v: unknown): v is HrPayrollCadence {
+  return v === 'semanal' || v === 'quincenal';
+}
+
 export type HrPayrollPeriod = {
   id: string;
   label: string;
   period_start: string;
   period_end: string;
   status: HrPayrollStatus;
+  /** Default semanal si la columna aún no existe en DB. */
+  cadence: HrPayrollCadence;
   paid_at: string | null;
   notes: string | null;
   source_file: string | null;
@@ -297,4 +311,21 @@ export function canTransitionPayroll(
   to: HrPayrollStatus
 ): boolean {
   return isPayrollStatus(from) && isPayrollStatus(to);
+}
+
+/** Periodo quincenal por defecto (hoy CDMX, o el más reciente ≤ hoy). Safe for client. */
+export function pickDefaultQuincena(
+  periods: HrPayrollPeriod[],
+  today: string = todayIsoCdmxPayroll()
+): HrPayrollPeriod | null {
+  if (!periods.length) return null;
+  const sorted = [...periods].sort((a, b) =>
+    b.period_start.localeCompare(a.period_start)
+  );
+  const current = sorted.find(
+    (p) => p.period_start <= today && p.period_end >= today
+  );
+  if (current) return current;
+  const past = sorted.find((p) => p.period_end < today);
+  return past || sorted[0] || null;
 }

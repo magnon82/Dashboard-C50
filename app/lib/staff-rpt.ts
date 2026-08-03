@@ -8,7 +8,10 @@ import {
 
 export const STAFF_RPT_TABLE = 'staff_rpt_diario';
 
-/** Tolerancia $ (legacy; el cierre bloquea si contado < Infocaja, sin tolerancia). */
+/**
+ * Tolerancia histórica ($1). El cierre ya NO hard-bloquea si tómbola < Infocaja:
+ * es alerta operativa + cierre permitido con acknowledge_shortage (faltante real).
+ */
 export const EFECTIVO_TOLERANCE_MXN = 1;
 
 export interface StaffRptRow {
@@ -218,8 +221,9 @@ export function sumInfocajaDay(
 }
 
 /**
- * Alerta / bloqueo cuando efectivo en tómbola es estrictamente menor que Infocaja.
- * Si falta monto o Infocaja (null), no hay alerta.
+ * Alerta cuando efectivo en tómbola es estrictamente menor que Infocaja.
+ * Producto (ops): es WARNING, no hard-block — un faltante real debe poder
+ * cerrarse con acknowledge_shortage + nota. Si falta monto o Infocaja, sin alerta.
  */
 export function efectivoMismatch(
   contado: number | null | undefined,
@@ -248,13 +252,23 @@ export function efectivoMismatch(
     };
   }
   const faltante = Math.abs(delta);
-  const message = `Efectivo en tómbola (${moneyMx(contado)}) es menor que Infocaja (${moneyMx(infocaja)}). Faltan ${moneyMx(faltante)}. Corrige el monto antes de cerrar.`;
+  const message = `Efectivo en tómbola (${moneyMx(contado)}) es menor que Infocaja (${moneyMx(infocaja)}). Faltan ${moneyMx(faltante)}. Confirma el faltante para poder cerrar.`;
   return {
     mismatch: true,
     belowInfocaja: true,
     delta,
     message,
   };
+}
+
+/** Nota automática al cerrar con faltante (tómbola < Infocaja). */
+export function shortageCloseNote(
+  contado: number,
+  infocaja: number
+): string {
+  const delta = Math.round((contado - infocaja) * 100) / 100;
+  const faltante = Math.abs(delta);
+  return `[Faltante efectivo] Tómbola ${moneyMx(contado)} < Infocaja ${moneyMx(infocaja)} (faltan ${moneyMx(faltante)}). Confirmado al cerrar.`;
 }
 
 /**

@@ -2,6 +2,9 @@
 
 export type HrEmployeeStatus = 'activo' | 'baja' | 'suspendido';
 
+/** Relación laboral en plantilla (docs de alta suelen no aplicar a externos). */
+export type HrTipoEmpleo = 'interno' | 'externo';
+
 /** Cáscara de duplicado fusionado (no es baja operativa real). */
 export function isMergedDuplicateShell(
   notes: string | null | undefined
@@ -60,8 +63,15 @@ export type HrEmployee = {
   suite_username?: string | null;
   force_include?: boolean;
   force_exclude?: boolean;
-  /** Flags libres (p. ej. `externo`, `remoto_1_dia`, `dual_limpieza_mesero`). */
+  /** Flags libres (p. ej. `externo`, `remoto_1_dia`, `dual_limpieza_mesero`, `sin_vacaciones`, `sueldo_quincenal:N`). Admin=quincenal; resto=semanal. */
   notes?: string | null;
+  /** interno | externo (patch `hr_employee_tipo_empleo.sql`). */
+  tipo_empleo?: HrTipoEmpleo | null;
+  /**
+   * Si false, no alerta por docs de alta faltantes.
+   * Default: true (interno) / false (externo). Patch `hr_employee_tipo_empleo.sql`.
+   */
+  requiere_documentacion?: boolean | null;
   plantilla_origen?: string | null;
   payroll_period_label?: string | null;
   payroll_period_end?: string | null;
@@ -726,6 +736,8 @@ const PUESTO_ACRONYMS = new Set(['rh', 'rrhh']);
  * Solo presentación — no escribe en DB.
  */
 const PUESTO_DISPLAY_FIXES: Record<string, string> = {
+  socio: 'Socios',
+  socios: 'Socios',
   hosstes: 'Hostess',
   hosses: 'Hostess',
   hostes: 'Hostess',
@@ -790,6 +802,7 @@ export function plantillaTeamGroup(
 
   // Administrativo (antes de cocina: evita “encargado” genérico mal clasificado)
   if (
+    /\bsocio/.test(p) ||
     /\binventario/.test(p) ||
     /\bcontrol(\s+de)?\s+costo/.test(p) ||
     /\bcaja\b/.test(p) ||
@@ -950,6 +963,8 @@ export function scheduleSectionFromPosition(
   // Headers Excel directos (Barra legado → Bartender)
   const direct: Record<string, string> = {
     gerencia: 'Gerencia',
+    socio: 'Administración',
+    socios: 'Administración',
     hostess: 'Hostess',
     caja: 'Caja',
     barra: 'Bartender',
@@ -1048,6 +1063,8 @@ export function plantillaPositionFamily(
     /\bcocina\b/.test(p)
   ) {
     id = 'estacion_cocina';
+  } else if (/\bsocio/.test(p)) {
+    id = 'gerente';
   } else if (/\bgerente\b/.test(p)) {
     id = 'gerente';
   } else if (
@@ -1105,12 +1122,13 @@ function foldNameTokenSet(fullName: string | null | undefined): Set<string> {
 
 /**
  * Admin principal en plantilla (arriba en Administrativo):
- * Gerencia / Compras y Administración / Rodrigo.
+ * Socios / Gerencia / Compras y Administración / Rodrigo.
  */
 export function isPlantillaAdminPrincipal(
   e: Pick<HrEmployee, 'full_name' | 'puesto' | 'area'>
 ): boolean {
   const key = foldPuestoKey(e.puesto || e.area || '');
+  if (/\bsocio/.test(key)) return true;
   if (/\bgerente\b/.test(key)) return true;
   if (/\bcompras\b/.test(key)) return true;
   const tokens = foldNameTokenSet(e.full_name);
@@ -1124,12 +1142,80 @@ export function isPlantillaAdminPrincipal(
 }
 
 /**
+ * Socios / colaboradores sin control de vacaciones.
+ * Flag `sin_vacaciones` en notes, o puesto Socios.
+ */
+export function isLeaveExemptEmployee(
+  e: Pick<HrEmployee, 'puesto' | 'notes' | 'area'>
+): boolean {
+  if (employeeNotesHasFlag(e.notes, 'sin_vacaciones')) return true;
+  const key = foldPuestoKey(e.puesto || e.area || '');
+  return /\bsocio/.test(key);
+}
+
+/** Lee `sueldo_quincenal:N` desde notes (pago quincenal documentado). */
+export function parseSueldoQuincenalFromNotes(
+  notes: string | null | undefined
+): number | null {
+  const m = String(notes || '').match(/sueldo_quincenal\s*:\s*([0-9]+(?:\.[0-9]+)?)/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+}
+
+export type HrPayCadence = 'quincenal' | 'semanal';
+
+/**
+ * Cadencia de pago: Administrativo (sección/área/puesto admin) → quincenal;
+ * resto de plantilla → semanal. Flag `sueldo_quincenal:N` en notes fuerza quincenal.
+ */
+export function employeePayCadence(
+  e: Pick<HrEmployee, 'puesto' | 'area' | 'notes' | 'puestos_secundarios'>
+): HrPayCadence {
+  if (parseSueldoQuincenalFromNotes(e.notes) != null) return 'quincenal';
+  const key = plantillaPositionKey(e);
+  if (plantillaTeamGroup(key) === 'admin') return 'quincenal';
+  const areaKey = foldPuestoKey(e.area || '');
+  if (/\badmin/.test(areaKey) || /\badministraci/.test(areaKey)) {
+    return 'quincenal';
+  }
+  return 'semanal';
+}
+
+/**
+ * Equivalente quincenal documentado.
+ * Prioridad: `sueldo_quincenal:N` en notes; si no, diario × 15 solo para
+ * socios/leave-exempt (patrón admin documentado). No inventa montos para
+ * otros administrativos sin flag en notes.
+ */
+export function resolveSueldoQuincenal(e: {
+  sueldo_diario?: number | null;
+  notes?: string | null;
+  puesto?: string | null;
+  area?: string | null;
+  puestos_secundarios?: string[] | null;
+}): number | null {
+  const fromNotes = parseSueldoQuincenalFromNotes(e.notes);
+  if (fromNotes != null) return fromNotes;
+  if (employeePayCadence(e) !== 'quincenal') return null;
+  if (!isLeaveExemptEmployee(e)) return null;
+  const sd =
+    e.sueldo_diario != null && Number.isFinite(Number(e.sueldo_diario))
+      ? Number(e.sueldo_diario)
+      : null;
+  if (sd == null || sd < 0) return null;
+  return Math.round(sd * 15 * 100) / 100;
+}
+
+/**
  * Externo / remoto en plantilla (abajo en Administrativo).
- * Flags en notes (`externo`, `remoto_1_dia`) o nombres conocidos (Alexis / Diego Olvera).
+ * `tipo_empleo=externo`, flags en notes (`externo`, `remoto_1_dia`) o nombres
+ * conocidos (Alexis / Diego Olvera) si aún no hay columna.
  */
 export function isPlantillaExterno(
-  e: Pick<HrEmployee, 'full_name' | 'notes'>
+  e: Pick<HrEmployee, 'full_name' | 'notes' | 'tipo_empleo'>
 ): boolean {
+  if (e.tipo_empleo === 'externo') return true;
   if (employeeNotesHasFlag(e.notes, 'externo')) return true;
   if (employeeNotesHasFlag(e.notes, 'remoto_1_dia')) return true;
   const tokens = foldNameTokenSet(e.full_name);
@@ -1138,6 +1224,51 @@ export function isPlantillaExterno(
   }
   if (tokens.has('diego') && tokens.has('olvera')) return true;
   return false;
+}
+
+/** Sync flag legado `externo` en notes al guardar tipo_empleo. */
+export function syncExternoFlagInNotes(
+  notes: string | null | undefined,
+  isExterno: boolean
+): string | null {
+  const flag = 'externo';
+  let n = String(notes || '').trim();
+  const has = employeeNotesHasFlag(n, flag);
+  if (isExterno && !has) {
+    n = n ? `${flag}; ${n}` : `${flag}.`;
+  } else if (!isExterno && has) {
+    n = n
+      .replace(new RegExp(`;?\\s*${flag}\\.?\\s*;?`, 'gi'), ';')
+      .replace(/^;|;$/g, '')
+      .replace(/;;+/g, ';')
+      .trim();
+  }
+  return n || null;
+}
+
+/**
+ * ¿Debe alertar / exigir docs de alta (INE, acta, CURP, domicilio)?
+ * Prioridad: `requiere_documentacion` → `tipo_empleo` → legado externo (notes/nombre).
+ */
+export function employeeRequiresDocumentation(
+  e: Pick<
+    HrEmployee,
+    'requiere_documentacion' | 'tipo_empleo' | 'full_name' | 'notes'
+  >
+): boolean {
+  if (e.requiere_documentacion === false) return false;
+  if (e.requiere_documentacion === true) return true;
+  if (e.tipo_empleo === 'externo') return false;
+  if (e.tipo_empleo === 'interno') return true;
+  if (isPlantillaExterno(e)) return false;
+  return true;
+}
+
+/** Default de requiere_documentacion según tipo. */
+export function defaultRequiereDocumentacion(
+  tipo: HrTipoEmpleo | null | undefined
+): boolean {
+  return tipo !== 'externo';
 }
 
 /** 0 = principal · 1 = interno · 2 = externo (solo grupo admin). */

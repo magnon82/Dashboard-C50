@@ -12,6 +12,7 @@ import {
   checklistSeedRows,
   docTypeDef,
   emptyChecklistStats,
+  isRequiredDocSatisfied,
   placeholderDocuments,
   type HrDocStatus,
   type HrEmployeeDocument,
@@ -36,12 +37,17 @@ import {
   shouldSoftPullExpediente,
   shouldSoftPullMedical,
 } from '@/app/lib/hr-expediente-docs-pull';
+import { localDriveFsEnabled } from '@/app/lib/local-fs';
 import {
   pickDefaultContract,
   sortContracts,
   type HrEmployeeContract,
 } from '@/app/lib/hr-employee-contracts';
-import { plantillaTeamGroup, type HrEmployee } from '@/app/lib/hr';
+import {
+  employeeRequiresDocumentation,
+  plantillaTeamGroup,
+  type HrEmployee,
+} from '@/app/lib/hr';
 import {
   hasDualLimpiezaServicio,
   parseRolesFromBody,
@@ -49,6 +55,11 @@ import {
 } from '@/app/lib/hr-puestos';
 import { matchPerson } from '@/app/lib/hr-person-match';
 import { invalidatePlantillaCache } from '@/app/lib/hr-plantilla';
+import {
+  fillEmptyEmployeeIdentity,
+  normalizeCurp,
+  normalizeNss,
+} from '@/app/lib/hr-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -80,6 +91,7 @@ function asResguardoRequest(row: Record<string, unknown>): HrResguardoRequest {
  * placeholder 0.00 aunque la ficha ya tenga SD en DB.
  */
 const EMP_SELECTS = [
+  'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone, tipo_empleo, requiere_documentacion',
   'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone',
   'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone',
   // Sin fecha_nacimiento (DB sin patch nacimiento) — mantiene sueldo_diario
@@ -224,53 +236,60 @@ export async function GET(_req: Request, ctx: Ctx) {
       drive_folder_path?: string | null;
       photo_storage_path?: string | null;
     };
+    const docsRequired = employeeRequiresDocumentation(empEarly);
 
     // Semilla DB primero; si falta schema → checklist local + aviso SQL.
-    const seed = await ensureChecklist(id);
-    if (seed.error) {
-      const placeholders = placeholderDocuments(id);
-      return NextResponse.json(
-        {
-          ready: false,
-          schemaMissing: true,
-          error:
-            'Falta el schema de documentos en Supabase (tabla o bucket).',
-          hint:
-            schemaHint(seed.error) ||
-            'Ejecuta supabase/hr_employee_documents.sql en Supabase SQL Editor',
-          detail: seed.error,
-          employee: empEarly,
-          documents: placeholders,
-          docTypes: HR_DOC_TYPES,
-          reimbursements: [],
-          justifications: [],
-          exams: [],
-          contracts: [],
-          resguardos: [],
-          checklist: emptyChecklistStats(),
-          photoUrl: empEarly.photo_storage_path
-            ? await signedUrl(empEarly.photo_storage_path)
-            : null,
-          canVerify: canAccessAdmin(auth),
-          canEditEmployee: canEditHrEmployees(auth),
-        },
-        { status: 200 }
-      );
+    // Externos / sin docs requeridos: no forzar filas pendientes.
+    if (docsRequired) {
+      const seed = await ensureChecklist(id);
+      if (seed.error) {
+        const placeholders = placeholderDocuments(id);
+        return NextResponse.json(
+          {
+            ready: false,
+            schemaMissing: true,
+            error:
+              'Falta el schema de documentos en Supabase (tabla o bucket).',
+            hint:
+              schemaHint(seed.error) ||
+              'Ejecuta supabase/hr_employee_documents.sql en Supabase SQL Editor',
+            detail: seed.error,
+            employee: empEarly,
+            documents: placeholders,
+            docTypes: HR_DOC_TYPES,
+            reimbursements: [],
+            justifications: [],
+            exams: [],
+            contracts: [],
+            resguardos: [],
+            checklist: emptyChecklistStats(),
+            photoUrl: empEarly.photo_storage_path
+              ? await signedUrl(empEarly.photo_storage_path)
+              : null,
+            canVerify: canAccessAdmin(auth),
+            canEditEmployee: canEditHrEmployees(auth),
+          },
+          { status: 200 }
+        );
+      }
     }
 
     // Soft-pull: sin archivos en DB + File Stream → jala del expediente.
     // Reparación: paquete legado (mismo storage_path) o slots mal etiquetados (CURP en Acta).
     // Contratos / médico: también si checklist ya lleno pero esas secciones vacías.
     try {
-      const needDocs = await shouldSoftPullExpediente(id);
+      const needDocs = docsRequired && (await shouldSoftPullExpediente(id));
       const needContracts = await shouldSoftPullContracts(id);
       const needMedical = await shouldSoftPullMedical(id);
+      const localFs = localDriveFsEnabled();
+      let folderResolved = false;
       if (needDocs || needContracts || needMedical) {
         const folder = await resolveExpedienteFolder({
           employeeId: id,
           fullName: String(empEarly.full_name || ''),
           driveFolderPath: empEarly.drive_folder_path,
         });
+        folderResolved = Boolean(folder);
         if (folder) {
           await pullExpedienteDocuments({
             employeeId: id,
@@ -287,14 +306,15 @@ export async function GET(_req: Request, ctx: Ctx) {
           force: false,
         });
       }
-      if (await shouldRepairMislabeledPack(id)) {
+      const shouldRepair = await shouldRepairMislabeledPack(id);
+      if (shouldRepair) {
         await repairMislabeledPackFromStorage({
           employeeId: id,
           who: auth.username,
           force: false,
         });
       }
-    } catch {
+    } catch (softPullErr) {
       /* best-effort */
     }
 
@@ -338,7 +358,8 @@ export async function GET(_req: Request, ctx: Ctx) {
       docs.push({
         ...d,
         // Catálogo manda sobre filas viejas (p. ej. CV ya no es obligatorio).
-        required: def ? def.required : d.required,
+        // Externos / sin docs: nada es obligatorio de alta.
+        required: docsRequired ? (def ? def.required : d.required) : false,
         viewUrl: await signedUrl(d.storage_path),
       });
     }
@@ -472,8 +493,8 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
 
     const required = docs.filter((d) => d.required);
-    const done = required.filter(
-      (d) => d.status === 'uploaded' || d.status === 'verified'
+    const done = required.filter((d) =>
+      isRequiredDocSatisfied(d.status, d.storage_path)
     ).length;
     const verified = required.filter((d) => d.status === 'verified').length;
 
@@ -482,6 +503,21 @@ export async function GET(_req: Request, ctx: Ctx) {
     photoUrl = foto?.viewUrl || null;
     if (!photoUrl && emp.photo_storage_path) {
       photoUrl = await signedUrl(emp.photo_storage_path);
+    }
+
+    // Soft-fill CURP/NSS vacíos desde docs / leave (no sobrescribe ficha).
+    if (!normalizeCurp(emp.curp) || !normalizeNss(emp.nss)) {
+      try {
+        const [filled] = await fillEmptyEmployeeIdentity(sb, [id], {
+          extractFromDocs: true,
+          includeLeavePayloads: true,
+          maxDocExtracts: 8,
+        });
+        if (filled?.curp) emp.curp = filled.curp;
+        if (filled?.nss) emp.nss = filled.nss;
+      } catch {
+        /* best-effort */
+      }
     }
 
     return NextResponse.json({

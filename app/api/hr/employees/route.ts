@@ -7,8 +7,11 @@ import {
 } from '@/app/lib/hr-api';
 import {
   plantillaTeamGroup,
+  syncExternoFlagInNotes,
+  defaultRequiereDocumentacion,
   type HrEmployee,
   type HrEmployeeStatus,
+  type HrTipoEmpleo,
 } from '@/app/lib/hr';
 import {
   hasDualLimpiezaServicio,
@@ -24,16 +27,23 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const EMP_SELECT_FULL =
+  'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes, tipo_empleo, requiere_documentacion';
+
+const EMP_SELECT_FULL_NO_TIPO =
   'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
 
 const EMP_SELECT_NO_ROLES =
-  'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+  'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes, tipo_empleo, requiere_documentacion';
 
 const EMP_SELECT_NO_DOB =
   'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
 
 const EMP_SELECT_MIN =
   'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes';
+
+function missingTipoEmpleoColumn(message: string): boolean {
+  return /tipo_empleo|requiere_documentacion/i.test(message);
+}
 
 function areaFromPuesto(puesto: string | null): string | null {
   if (!puesto) return null;
@@ -276,7 +286,8 @@ export async function GET(request: Request) {
 
 /**
  * POST /api/hr/employees — alta en plantilla.
- * Body: { full_name, puesto?, fecha_ingreso?, area?, notes? }
+ * Body: { full_name, puesto?, fecha_ingreso?, area?, notes?,
+ *         tipo_empleo?: 'interno'|'externo', requiere_documentacion?: boolean }
  * Crea status=activo + force_include (aparece en plantilla sin nómina aún).
  */
 export async function POST(request: Request) {
@@ -320,11 +331,28 @@ export async function POST(request: Request) {
   }
   const fechaIngreso = ingreso.set ? ingreso.value : null;
 
+  let tipoEmpleo: HrTipoEmpleo = 'interno';
+  if (body.tipo_empleo != null) {
+    const t = String(body.tipo_empleo).trim().toLowerCase();
+    if (t !== 'interno' && t !== 'externo') {
+      return NextResponse.json(
+        { error: 'tipo_empleo debe ser interno o externo' },
+        { status: 400 }
+      );
+    }
+    tipoEmpleo = t;
+  }
+
+  const requiereDocumentacion =
+    typeof body.requiere_documentacion === 'boolean'
+      ? body.requiere_documentacion
+      : defaultRequiereDocumentacion(tipoEmpleo);
+
   const notesRaw =
     body.notes != null && String(body.notes).trim()
       ? String(body.notes).trim()
       : null;
-  const notes = syncDualFlagInNotes(
+  let notes = syncDualFlagInNotes(
     notesRaw,
     hasDualLimpiezaServicio({
       puesto,
@@ -333,6 +361,7 @@ export async function POST(request: Request) {
       full_name: fullName,
     })
   );
+  notes = syncExternoFlagInNotes(notes, tipoEmpleo === 'externo');
 
   try {
     const sb = getServiceSupabase();
@@ -349,6 +378,8 @@ export async function POST(request: Request) {
       fecha_baja: null,
       source: 'manual',
       notes,
+      tipo_empleo: tipoEmpleo,
+      requiere_documentacion: requiereDocumentacion,
       updated_at: nowIso,
     };
 
@@ -358,17 +389,66 @@ export async function POST(request: Request) {
       .select(EMP_SELECT_FULL)
       .single();
 
-    if (error && /puestos_secundarios/i.test(error.message)) {
-      const { puestos_secundarios: _ps, ...withoutRoles } = row;
-      void _ps;
+    if (error && missingTipoEmpleoColumn(error.message)) {
+      const {
+        tipo_empleo: _te,
+        requiere_documentacion: _rd,
+        ...withoutTipo
+      } = row;
+      void _te;
+      void _rd;
       const retry = await sb
         .from('hr_employees')
-        .insert(withoutRoles)
-        .select(EMP_SELECT_NO_ROLES)
+        .insert(withoutTipo)
+        .select(EMP_SELECT_FULL_NO_TIPO)
         .single();
       data = retry.data as typeof data;
       error = retry.error;
-      if (!error) {
+    }
+
+    if (error && /puestos_secundarios/i.test(error.message)) {
+      const {
+        puestos_secundarios: _ps,
+        tipo_empleo: _te,
+        requiere_documentacion: _rd,
+        ...base
+      } = row;
+      void _ps;
+      // Preferir insert con tipo si la columna existe; si no, sin tipo.
+      let retry = await sb
+        .from('hr_employees')
+        .insert({
+          ...base,
+          tipo_empleo: row.tipo_empleo,
+          requiere_documentacion: row.requiere_documentacion,
+        })
+        .select(EMP_SELECT_NO_ROLES)
+        .single();
+      if (retry.error && missingTipoEmpleoColumn(retry.error.message)) {
+        retry = await sb
+          .from('hr_employees')
+          .insert(base)
+          .select(EMP_SELECT_MIN)
+          .single();
+      }
+      void _te;
+      void _rd;
+      data = retry.data as typeof data;
+      error = retry.error;
+      if (!error && data) {
+        invalidatePlantillaCache();
+        if (requiereDocumentacion) {
+          try {
+            const { checklistSeedRows } = await import(
+              '@/app/lib/hr-employee-profile'
+            );
+            await sb.from('hr_employee_documents').insert(
+              checklistSeedRows((data as HrEmployee).id)
+            );
+          } catch {
+            /* tabla aún no migrada */
+          }
+        }
         return NextResponse.json(
           {
             ready: true,
@@ -395,6 +475,22 @@ export async function POST(request: Request) {
         .single();
       data = retry.data as typeof data;
       error = retry.error;
+      if (error && missingTipoEmpleoColumn(error.message)) {
+        const {
+          tipo_empleo: _te,
+          requiere_documentacion: _rd,
+          ...withoutTipo
+        } = withoutRoles;
+        void _te;
+        void _rd;
+        const retry2 = await sb
+          .from('hr_employees')
+          .insert(withoutTipo)
+          .select(EMP_SELECT_MIN)
+          .single();
+        data = retry2.data as typeof data;
+        error = retry2.error;
+      }
     }
 
     if (
@@ -421,6 +517,9 @@ export async function POST(request: Request) {
           error: missing
             ? 'Ejecuta supabase/hr_module.sql en Supabase.'
             : error?.message || 'No se pudo dar de alta',
+          hint: missingTipoEmpleoColumn(error?.message || '')
+            ? 'Ejecuta supabase/hr_employee_tipo_empleo.sql en Supabase'
+            : undefined,
         },
         { status: missing ? 503 : 400 }
       );
@@ -428,21 +527,33 @@ export async function POST(request: Request) {
 
     invalidatePlantillaCache();
 
-    try {
-      const { checklistSeedRows } = await import(
-        '@/app/lib/hr-employee-profile'
-      );
-      await sb.from('hr_employee_documents').insert(
-        checklistSeedRows((data as HrEmployee).id)
-      );
-    } catch {
-      /* tabla aún no migrada — perfil pedirá SQL */
+    if (requiereDocumentacion) {
+      try {
+        const { checklistSeedRows } = await import(
+          '@/app/lib/hr-employee-profile'
+        );
+        await sb.from('hr_employee_documents').insert(
+          checklistSeedRows((data as HrEmployee).id)
+        );
+      } catch {
+        /* tabla aún no migrada — perfil pedirá SQL */
+      }
     }
+
+    const docsHint = requiereDocumentacion
+      ? ' Completa el perfil (documentos) desde el nombre en plantilla.'
+      : ' Sin checklist documental (externo / docs no requeridos).';
 
     return NextResponse.json({
       ready: true,
       employee: data as HrEmployee,
-      message: `Alta registrada: ${fullName}. Completa el perfil (documentos) desde el nombre en plantilla.`,
+      message: `Alta registrada: ${fullName}.${docsHint}`,
+      hint:
+        data &&
+        ((data as HrEmployee).tipo_empleo == null ||
+          (data as HrEmployee).requiere_documentacion == null)
+          ? 'Ejecuta supabase/hr_employee_tipo_empleo.sql para persistir tipo/docs.'
+          : undefined,
     });
   } catch (e) {
     return NextResponse.json(
@@ -458,6 +569,7 @@ export async function POST(request: Request) {
  * Body: { id, force_include?, force_exclude?, suite_username?, email?, phone?,
  *         puesto?, area?, sueldo_diario?, fecha_nacimiento?, fecha_ingreso?, fecha_baja?,
  *         status?: 'activo'|'baja'|'suspendido', full_name?,
+ *         tipo_empleo?: 'interno'|'externo', requiere_documentacion?: boolean,
  *         action?: 'baja'|'alta' }
  * action=baja → status baja + force_exclude + fecha_baja (requerida).
  * action=alta → status activo + force_include + limpia fecha_baja.
@@ -542,6 +654,28 @@ export async function PATCH(request: Request) {
     }
     patch.full_name = n;
   }
+
+  let tipoTouched = false;
+  if (body.tipo_empleo !== undefined) {
+    const t = String(body.tipo_empleo || '')
+      .trim()
+      .toLowerCase();
+    if (t !== 'interno' && t !== 'externo') {
+      return NextResponse.json(
+        { error: 'tipo_empleo debe ser interno o externo' },
+        { status: 400 }
+      );
+    }
+    patch.tipo_empleo = t;
+    tipoTouched = true;
+    if (body.requiere_documentacion === undefined) {
+      patch.requiere_documentacion = defaultRequiereDocumentacion(t);
+    }
+  }
+  if (typeof body.requiere_documentacion === 'boolean') {
+    patch.requiere_documentacion = body.requiere_documentacion;
+  }
+
   const rolesTouched =
     body.puesto !== undefined ||
     body.puestos_secundarios !== undefined ||
@@ -575,7 +709,7 @@ export async function PATCH(request: Request) {
   if (body.area !== undefined) {
     patch.area = body.area == null ? null : String(body.area).trim() || null;
   }
-  if (body.notes !== undefined || rolesTouched) {
+  if (body.notes !== undefined || rolesTouched || tipoTouched) {
     const notesIn =
       body.notes !== undefined
         ? body.notes == null
@@ -584,7 +718,7 @@ export async function PATCH(request: Request) {
         : undefined;
     // Sync dual flag cuando hay roles; si notes no viene, se fusiona en update abajo
     if (notesIn !== undefined) {
-      patch.notes = syncDualFlagInNotes(
+      let nextNotes = syncDualFlagInNotes(
         notesIn,
         hasDualLimpiezaServicio({
           puesto: (patch.puesto as string | null | undefined) ?? null,
@@ -593,6 +727,26 @@ export async function PATCH(request: Request) {
           notes: notesIn,
         })
       );
+      if (tipoTouched) {
+        nextNotes = syncExternoFlagInNotes(
+          nextNotes,
+          patch.tipo_empleo === 'externo'
+        );
+      }
+      patch.notes = nextNotes;
+    } else if (tipoTouched) {
+      // Solo tipo: cargar notes actuales y sincronizar flag externo.
+      const cur = await getServiceSupabase()
+        .from('hr_employees')
+        .select('notes')
+        .eq('id', id)
+        .maybeSingle();
+      if (!cur.error) {
+        patch.notes = syncExternoFlagInNotes(
+          (cur.data as { notes?: string | null } | null)?.notes ?? null,
+          patch.tipo_empleo === 'externo'
+        );
+      }
     }
   }
   if (body.sueldo_diario !== undefined) {
@@ -670,6 +824,30 @@ export async function PATCH(request: Request) {
       .eq('id', id)
       .select(EMP_SELECT_FULL)
       .maybeSingle();
+
+    if (error && missingTipoEmpleoColumn(error.message)) {
+      if (
+        patch.tipo_empleo !== undefined ||
+        patch.requiere_documentacion !== undefined
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Faltan columnas tipo_empleo / requiere_documentacion. Ejecuta supabase/hr_employee_tipo_empleo.sql en Supabase.',
+            hint: 'supabase/hr_employee_tipo_empleo.sql',
+          },
+          { status: 503 }
+        );
+      }
+      const retry = await sb
+        .from('hr_employees')
+        .update(patch)
+        .eq('id', id)
+        .select(EMP_SELECT_FULL_NO_TIPO)
+        .maybeSingle();
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
 
     if (
       error &&

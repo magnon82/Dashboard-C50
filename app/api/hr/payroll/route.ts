@@ -7,12 +7,21 @@ import {
 } from '@/app/lib/hr-api';
 import {
   canTransitionPayroll,
+  isPayrollCadence,
   isPayrollStatus,
   normalizeDiasSemana,
   todayIsoCdmxPayroll,
+  type HrPayrollCadence,
   type HrPayrollLineInput,
   type HrPayrollPeriod,
 } from '@/app/lib/hr-payroll';
+import {
+  ensureQuincenaYear,
+  mapPeriodRow,
+  PERIOD_SELECT_LEGACY,
+  PERIOD_SELECT_Q,
+  seedQuincenaPeriodIfEmpty,
+} from '@/app/lib/hr-payroll-quincena';
 import {
   applyPaidSideEffects,
   replacePeriodLines,
@@ -23,30 +32,21 @@ import type { HrPayrollStatus } from '@/app/lib/hr';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const PERIOD_SELECT =
-  'id, label, period_start, period_end, status, paid_at, notes, source_file, created_by, updated_by, created_at, updated_at';
+const PERIOD_SELECT = PERIOD_SELECT_Q;
 
 function mapPeriod(raw: Record<string, unknown>): HrPayrollPeriod {
-  return {
-    id: String(raw.id),
-    label: String(raw.label),
-    period_start: String(raw.period_start).slice(0, 10),
-    period_end: String(raw.period_end).slice(0, 10),
-    status: raw.status as HrPayrollStatus,
-    paid_at: raw.paid_at ? String(raw.paid_at).slice(0, 10) : null,
-    notes: raw.notes != null ? String(raw.notes) : null,
-    source_file: raw.source_file != null ? String(raw.source_file) : null,
-    created_by: raw.created_by != null ? String(raw.created_by) : null,
-    updated_by: raw.updated_by != null ? String(raw.updated_by) : null,
-    created_at: String(raw.created_at),
-    updated_at: String(raw.updated_at),
-  };
+  return mapPeriodRow(raw);
+}
+
+function cadenceMissing(msg: string | undefined): boolean {
+  return /cadence|column .* does not exist|42703/i.test(String(msg || ''));
 }
 
 /**
  * GET /api/hr/payroll
  * Lista periodos (RH). ?id=uuid → periodo + líneas.
  * ?year=2026 filtra periodos del año.
+ * ?cadence=semanal|quincenal (default semanal).
  * Solo módulo rrhh (nunca staff).
  */
 export async function GET(request: Request) {
@@ -58,6 +58,11 @@ export async function GET(request: Request) {
   const yearParam = url.searchParams.get('year');
   const year =
     yearParam && /^\d{4}$/.test(yearParam) ? Number(yearParam) : null;
+  const cadenceParam = url.searchParams.get('cadence');
+  const cadence: HrPayrollCadence = isPayrollCadence(cadenceParam)
+    ? cadenceParam
+    : 'semanal';
+  const ensure = url.searchParams.get('ensure') === '1';
 
   try {
     const sb = getServiceSupabase();
@@ -68,18 +73,19 @@ export async function GET(request: Request) {
       const LINES_SELECT_LEGACY =
         'id, period_id, employee_id, sueldo_diario, dias_trabajados, horas_extra, bonos, retenciones, importe_pagado, vacaciones_tomadas, vacaciones_restantes, puesto_snapshot, notes, hr_employees(full_name, area, fecha_ingreso)';
 
-      const [periodRes, linesFirst] = await Promise.all([
-        sb
+      let periodRes = await sb
+        .from('hr_payroll_periods')
+        .select(PERIOD_SELECT)
+        .eq('id', id)
+        .maybeSingle();
+
+      if (periodRes.error && cadenceMissing(periodRes.error.message)) {
+        periodRes = await sb
           .from('hr_payroll_periods')
-          .select(PERIOD_SELECT)
+          .select(PERIOD_SELECT_LEGACY)
           .eq('id', id)
-          .maybeSingle(),
-        sb
-          .from('hr_payroll_lines')
-          .select(LINES_SELECT)
-          .eq('period_id', id)
-          .order('importe_pagado', { ascending: false }),
-      ]);
+          .maybeSingle();
+      }
 
       if (periodRes.error) {
         const missing = hrSchemaMissing(periodRes.error.message);
@@ -96,7 +102,21 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Periodo no encontrado' }, { status: 404 });
       }
 
-      // Columna nueva: si aún no corrieron el patch, reintentar sin dias_semana
+      const periodMapped = mapPeriod(periodRes.data as Record<string, unknown>);
+      if (periodMapped.cadence === 'quincenal') {
+        const reseed = url.searchParams.get('reseed') === '1';
+        await seedQuincenaPeriodIfEmpty(sb, id, {
+          username: auth.username,
+          force: reseed,
+        });
+      }
+
+      const linesFirst = await sb
+        .from('hr_payroll_lines')
+        .select(LINES_SELECT)
+        .eq('period_id', id)
+        .order('importe_pagado', { ascending: false });
+
       const linesQuery =
         linesFirst.error &&
         /dias_semana/i.test(linesFirst.error.message || '')
@@ -107,13 +127,12 @@ export async function GET(request: Request) {
               .order('importe_pagado', { ascending: false })
           : linesFirst;
 
-      const period = periodRes.data;
       const { data: lines, error: lErr } = linesQuery;
 
       if (lErr) {
         return NextResponse.json({
           ready: false,
-          period: mapPeriod(period as Record<string, unknown>),
+          period: periodMapped,
           lines: [],
           message: lErr.message,
         });
@@ -160,14 +179,69 @@ export async function GET(request: Request) {
 
       return NextResponse.json({
         ready: true,
-        period: mapPeriod(period as Record<string, unknown>),
+        period: periodMapped,
         lines: mapped,
+      });
+    }
+
+    if (cadence === 'quincenal') {
+      if (year == null) {
+        return NextResponse.json(
+          { error: 'year requerido para quincenas' },
+          { status: 400 }
+        );
+      }
+      const ensured = await ensureQuincenaYear(sb, year, {
+        username: auth.username,
+      });
+      if (!ensured.ready) {
+        return NextResponse.json({
+          ready: false,
+          year,
+          cadence: 'quincenal',
+          periods: [] as HrPayrollPeriod[],
+          message: ensured.message,
+        });
+      }
+
+      const periods = ensured.periods;
+      const ids = periods.map((p) => p.id);
+      const counts = new Map<string, { n: number; total: number }>();
+      if (ids.length > 0) {
+        const { data: lines } = await sb
+          .from('hr_payroll_lines')
+          .select('period_id, importe_pagado')
+          .in('period_id', ids);
+        for (const row of lines || []) {
+          const pid = String((row as { period_id: string }).period_id);
+          const cur = counts.get(pid) || { n: 0, total: 0 };
+          cur.n += 1;
+          cur.total += Number(
+            (row as { importe_pagado?: number }).importe_pagado ?? 0
+          );
+          counts.set(pid, cur);
+        }
+      }
+
+      const withStats = periods.map((p) => ({
+        ...p,
+        line_count: counts.get(p.id)?.n ?? 0,
+        total_pagado: counts.get(p.id)?.total ?? 0,
+      }));
+
+      return NextResponse.json({
+        ready: true,
+        year,
+        cadence: 'quincenal' as const,
+        periods: withStats,
+        message: ensure ? ensured.message : undefined,
       });
     }
 
     let query = sb
       .from('hr_payroll_periods')
       .select(PERIOD_SELECT)
+      .eq('cadence', 'semanal')
       .order('period_end', { ascending: false })
       .limit(year ? 80 : 80);
 
@@ -177,7 +251,23 @@ export async function GET(request: Request) {
         .lte('period_start', `${year}-12-31`);
     }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
+
+    if (error && cadenceMissing(error.message)) {
+      let legacy = sb
+        .from('hr_payroll_periods')
+        .select(PERIOD_SELECT_LEGACY)
+        .order('period_end', { ascending: false })
+        .limit(year ? 80 : 80);
+      if (year != null) {
+        legacy = legacy
+          .gte('period_start', `${year}-01-01`)
+          .lte('period_start', `${year}-12-31`);
+      }
+      const retry = await legacy;
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
 
     if (error) {
       const missing = hrSchemaMissing(error.message);
@@ -217,7 +307,6 @@ export async function GET(request: Request) {
       total_pagado: counts.get(p.id)?.total ?? 0,
     }));
 
-    // Una fila por period_start (evita histórico duplicado si DB aún tiene extras).
     const statusRank: Record<string, number> = {
       pagado: 3,
       cerrado: 2,
@@ -247,6 +336,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ready: true,
       year: year ?? null,
+      cadence: 'semanal' as const,
       periods: uniquePeriods,
     });
   } catch (e) {
@@ -264,7 +354,7 @@ export async function GET(request: Request) {
 /**
  * POST /api/hr/payroll
  * Crea periodo (+ líneas opcionales).
- * Body: { label, period_start, period_end, status?, notes?, source_file?, lines? }
+ * Body: { label, period_start, period_end, status?, cadence?, notes?, source_file?, lines? }
  */
 export async function POST(request: Request) {
   const auth = await requireRrhhSession();
@@ -298,6 +388,9 @@ export async function POST(request: Request) {
   const status: HrPayrollStatus = isPayrollStatus(body.status)
     ? body.status
     : 'borrador';
+  const cadence: HrPayrollCadence = isPayrollCadence(body.cadence)
+    ? body.cadence
+    : 'semanal';
 
   try {
     const sb = getServiceSupabase();
@@ -306,6 +399,7 @@ export async function POST(request: Request) {
       period_start,
       period_end,
       status: status === 'pagado' ? 'borrador' : status,
+      cadence,
       notes: body.notes != null ? String(body.notes) : null,
       source_file:
         body.source_file != null ? String(body.source_file) : null,
@@ -313,11 +407,31 @@ export async function POST(request: Request) {
       updated_by: auth.username,
     };
 
-    const { data: period, error } = await sb
+    let { data: period, error } = await sb
       .from('hr_payroll_periods')
       .insert(insert)
       .select(PERIOD_SELECT)
       .single();
+
+    if (error && cadenceMissing(error.message)) {
+      delete insert.cadence;
+      const retry = await sb
+        .from('hr_payroll_periods')
+        .insert(insert)
+        .select(PERIOD_SELECT_LEGACY)
+        .single();
+      period = retry.data as typeof period;
+      error = retry.error;
+      if (cadence === 'quincenal') {
+        return NextResponse.json(
+          {
+            error:
+              'Ejecuta supabase/hr_payroll_quincena.sql en Supabase para habilitar quincenas.',
+          },
+          { status: 503 }
+        );
+      }
+    }
 
     if (error || !period) {
       const missing = hrSchemaMissing(error?.message);
@@ -361,24 +475,29 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: stErr.message }, { status: 500 });
       }
       balancesSynced = side.balancesSynced;
-      invalidatePlantillaCache();
+      if (cadence === 'semanal') invalidatePlantillaCache();
     }
 
     const { data: refreshed } = await sb
       .from('hr_payroll_periods')
-      .select(PERIOD_SELECT)
+      .select(cadence === 'quincenal' ? PERIOD_SELECT : PERIOD_SELECT)
       .eq('id', periodId)
       .single();
 
+    const mapped = mapPeriod((refreshed || period) as Record<string, unknown>);
     return NextResponse.json({
       ready: true,
-      period: mapPeriod((refreshed || period) as Record<string, unknown>),
+      period: mapped,
       ...lineStats,
       balancesSynced,
       message:
         status === 'pagado'
-          ? 'Periodo creado y marcado pagado. La plantilla vigente une esta nómina con la última semana de horarios.'
-          : 'Periodo creado en borrador.',
+          ? cadence === 'quincenal'
+            ? 'Quincena creada y marcada pagada.'
+            : 'Periodo creado y marcado pagado. La plantilla vigente une esta nómina con la última semana de horarios.'
+          : cadence === 'quincenal'
+            ? 'Quincena creada en borrador.'
+            : 'Periodo creado en borrador.',
     });
   } catch (e) {
     return NextResponse.json(
@@ -413,11 +532,21 @@ export async function PATCH(request: Request) {
 
   try {
     const sb = getServiceSupabase();
-    const { data: current, error: findErr } = await sb
+    let findRes = await sb
       .from('hr_payroll_periods')
       .select(PERIOD_SELECT)
       .eq('id', id)
       .maybeSingle();
+
+    if (findRes.error && cadenceMissing(findRes.error.message)) {
+      findRes = await sb
+        .from('hr_payroll_periods')
+        .select(PERIOD_SELECT_LEGACY)
+        .eq('id', id)
+        .maybeSingle();
+    }
+
+    const { data: current, error: findErr } = findRes;
 
     if (findErr || !current) {
       return NextResponse.json(
@@ -427,6 +556,7 @@ export async function PATCH(request: Request) {
     }
 
     const cur = mapPeriod(current as Record<string, unknown>);
+    const isQuincena = cur.cadence === 'quincenal';
     const patch: Record<string, unknown> = {
       updated_by: auth.username,
       updated_at: new Date().toISOString(),
@@ -516,14 +646,23 @@ export async function PATCH(request: Request) {
       }
     }
 
-    const { data: refreshed } = await sb
+    let refreshedRes = await sb
       .from('hr_payroll_periods')
       .select(PERIOD_SELECT)
       .eq('id', id)
       .single();
+    if (refreshedRes.error && cadenceMissing(refreshedRes.error.message)) {
+      refreshedRes = await sb
+        .from('hr_payroll_periods')
+        .select(PERIOD_SELECT_LEGACY)
+        .eq('id', id)
+        .single();
+    }
 
-    const period = mapPeriod((refreshed || current) as Record<string, unknown>);
-    if (body.status != null || Array.isArray(body.lines)) {
+    const period = mapPeriod(
+      (refreshedRes.data || current) as Record<string, unknown>
+    );
+    if (!isQuincena && (body.status != null || Array.isArray(body.lines))) {
       invalidatePlantillaCache();
     }
     return NextResponse.json({
@@ -533,8 +672,12 @@ export async function PATCH(request: Request) {
       ...lineStats,
       message:
         period.status === 'pagado'
-          ? `Marcado pagado (${period.paid_at}). Plantilla vigente = esta nómina + force_include − force_exclude.`
-          : `Periodo actualizado (${period.status}).`,
+          ? isQuincena
+            ? `Quincena marcada pagada (${period.paid_at}).`
+            : `Marcado pagado (${period.paid_at}). Plantilla vigente = esta nómina + force_include − force_exclude.`
+          : isQuincena
+            ? `Quincena actualizada (${period.status}).`
+            : `Periodo actualizado (${period.status}).`,
     });
   } catch (e) {
     return NextResponse.json(

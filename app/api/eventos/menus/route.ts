@@ -49,27 +49,106 @@ type MenuRow = {
   [key: string]: unknown;
 };
 
+const DRINK_MENU_SEED_CODES = [
+  'barra_libre_2025',
+  'bebidas_a_la_carta',
+] as const;
+
+/** Ítems de barra libre / Bebidas C50 desde seed, reusando ids de DB por SKU. */
+function overlayDrinkItemsFromSeed(
+  m: MenuRow,
+  seedMenu: {
+    name?: string;
+    description?: string | null;
+    notes?: string | null;
+    items?: Array<Record<string, unknown> & { id?: string; sku?: string | null }>;
+  }
+): MenuRow {
+  const seedItems = seedMenu.items || [];
+  const dbBySku = new Map(
+    (m.items || [])
+      .filter((i) => i.sku != null)
+      .map((i) => [String(i.sku), i])
+  );
+  return {
+    ...m,
+    name: seedMenu.name ?? m.name,
+    description: seedMenu.description ?? m.description,
+    notes: seedMenu.notes ?? m.notes,
+    items: seedItems.map((si) => {
+      const db = si.sku ? dbBySku.get(String(si.sku)) : undefined;
+      return {
+        id: (db?.id as string | undefined) ?? si.id,
+        menu_id: m.id,
+        sku: si.sku,
+        name: si.name,
+        description: si.description,
+        unit: si.unit,
+        unit_price: si.unit_price,
+        min_pax: si.min_pax,
+        is_vegetarian: si.is_vegetarian,
+        active: true,
+        sort_order: si.sort_order,
+        price_source: si.price_source,
+        price_verified: si.price_verified,
+        choice_groups: null,
+      };
+    }),
+  };
+}
+
 /**
  * Sincroniza min_pax del seed (reglas comerciales); aporta choice_groups si DB
  * aún es plana; fuerza choice_groups del PDF vigente en menú 3 tiempos (evita
- * extras viejos en DB/OS); y, si bebidas_a_la_carta en DB está corto, sustituye
- * ítems desde seed JSON (Menú C50 Esp) reutilizando ids de DB por SKU.
+ * extras viejos en DB/OS); y, si barra libre / bebidas_a_la_carta en DB están
+ * vacíos o cortos, sustituye ítems desde seed JSON reutilizando ids por SKU.
+ * Si faltan esos catálogos enteros en DB, los aporta desde seed.
  */
 async function enrichCatalogFromSeed(menus: MenuRow[]) {
   const needsChoiceGroups = menus.some((m) =>
     (m.items || []).some((it) => !Array.isArray(it.choice_groups))
   );
-  const needsBebidas = menus.some(
-    (m) =>
-      String(m.code || '') === 'bebidas_a_la_carta' &&
-      (m.items || []).length < 20
-  );
   const needsTresTiemposOverlay = menus.some(
     (m) => String(m.code || '') === 'menu_3_tiempos_2025'
+  );
+  const presentCodes = new Set(menus.map((m) => String(m.code || '')));
+  const missingDrinkCodes = DRINK_MENU_SEED_CODES.filter(
+    (c) => !presentCodes.has(c)
   );
   try {
     const seed = await loadEventMenusSeed();
     const byCode = new Map(seed.map((m) => [m.code, m]));
+    /** Catálogo presente en DB pero con menos ítems que el seed (vacío / stub). */
+    const needsDrinkItemsOverlay = menus.some((m) => {
+      const code = String(m.code || '');
+      if (
+        !(DRINK_MENU_SEED_CODES as readonly string[]).includes(code)
+      ) {
+        return false;
+      }
+      const seedMenu = byCode.get(code);
+      const seedLen = seedMenu?.items?.length || 0;
+      return seedLen > 0 && seedLen > (m.items || []).length;
+    });
+    const appendMissingDrinks = (base: MenuRow[]): MenuRow[] => {
+      if (!missingDrinkCodes.length) return base;
+      const extras: MenuRow[] = [];
+      for (const code of missingDrinkCodes) {
+        const seedMenu = byCode.get(code);
+        if (!seedMenu) continue;
+        extras.push({
+          ...(seedMenu as MenuRow),
+          items: (seedMenu.items || []).map((si) => ({
+            ...si,
+            menu_id: seedMenu.id,
+            choice_groups: Array.isArray(si.choice_groups)
+              ? si.choice_groups
+              : null,
+          })),
+        });
+      }
+      return extras.length ? [...base, ...extras] : base;
+    };
     // Reglas comerciales del seed (p. ej. desayunos min_pax 50) ganan sobre DB vieja
     const withSeedRules = menus.map((m) => {
       const seedMenu = m.code ? byCode.get(String(m.code)) : undefined;
@@ -77,50 +156,35 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
       return {
         ...m,
         min_pax: seedMenu.min_pax ?? m.min_pax,
+        requires_food: seedMenu.requires_food ?? m.requires_food,
       };
     });
-    if (!needsChoiceGroups && !needsBebidas && !needsTresTiemposOverlay) {
+    if (
+      !needsChoiceGroups &&
+      !needsDrinkItemsOverlay &&
+      !needsTresTiemposOverlay &&
+      !missingDrinkCodes.length
+    ) {
       return withSeedRules;
     }
-    return withSeedRules.map((m) => {
+    if (
+      !needsChoiceGroups &&
+      !needsDrinkItemsOverlay &&
+      !needsTresTiemposOverlay
+    ) {
+      return appendMissingDrinks(withSeedRules);
+    }
+    const enriched = withSeedRules.map((m) => {
       const seedMenu = m.code ? byCode.get(String(m.code)) : undefined;
       if (!seedMenu?.items?.length) return m;
 
-      // Bebidas: seed C50 completo si DB aún tiene el stub OS / parcial
+      // Barra libre / Bebidas C50: seed completo si DB vacía, stub o parcial
+      const code = String(m.code || '');
       if (
-        String(m.code) === 'bebidas_a_la_carta' &&
+        (DRINK_MENU_SEED_CODES as readonly string[]).includes(code) &&
         seedMenu.items.length > (m.items || []).length
       ) {
-        const dbBySku = new Map(
-          (m.items || [])
-            .filter((i) => i.sku != null)
-            .map((i) => [String(i.sku), i])
-        );
-        return {
-          ...m,
-          name: seedMenu.name ?? m.name,
-          description: seedMenu.description ?? m.description,
-          notes: seedMenu.notes ?? m.notes,
-          items: seedMenu.items.map((si) => {
-            const db = si.sku ? dbBySku.get(String(si.sku)) : undefined;
-            return {
-              id: (db?.id as string | undefined) ?? si.id,
-              menu_id: m.id,
-              sku: si.sku,
-              name: si.name,
-              description: si.description,
-              unit: si.unit,
-              unit_price: si.unit_price,
-              min_pax: si.min_pax,
-              is_vegetarian: si.is_vegetarian,
-              active: true,
-              sort_order: si.sort_order,
-              price_source: si.price_source,
-              price_verified: si.price_verified,
-              choice_groups: null,
-            };
-          }),
-        };
+        return overlayDrinkItemsFromSeed(m, seedMenu);
       }
 
       const seedPackage = seedMenu.items.find(
@@ -218,6 +282,7 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
       }
       return { ...m, items };
     });
+    return appendMissingDrinks(enriched);
   } catch {
     return menus;
   }

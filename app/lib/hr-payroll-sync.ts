@@ -26,6 +26,8 @@ import {
 } from '@/app/lib/hr-payroll-import';
 import { listSheetsFromLocalFile } from '@/app/lib/hr-payroll-local';
 import { weekNumberForHorariosMonday } from '@/app/lib/hr-schedule-import';
+import { isLeaveExemptEmployee } from '@/app/lib/hr';
+import { normalizeCurp, normalizeNss } from '@/app/lib/hr-identity';
 
 type EmpRow = {
   id: string;
@@ -41,9 +43,13 @@ type EmpRow = {
   force_exclude?: boolean | null;
   fecha_baja?: string | null;
   drive_folder_path?: string | null;
+  curp?: string | null;
+  nss?: string | null;
 };
 
 const EMP_MAP_SELECT_FULL =
+  'id, full_name, puesto, area, fecha_ingreso, fecha_nacimiento, sueldo_diario, email, phone, status, force_exclude, fecha_baja, drive_folder_path, curp, nss';
+const EMP_MAP_SELECT_NO_ID =
   'id, full_name, puesto, area, fecha_ingreso, fecha_nacimiento, sueldo_diario, email, phone, status, force_exclude, fecha_baja, drive_folder_path';
 const EMP_MAP_SELECT_NO_NAC =
   'id, full_name, puesto, area, fecha_ingreso, sueldo_diario, email, phone, status, force_exclude, fecha_baja, drive_folder_path';
@@ -54,6 +60,9 @@ export async function loadEmployeeNameMap(
   sb: SupabaseClient
 ): Promise<Map<string, EmpRow>> {
   let res = await sb.from('hr_employees').select(EMP_MAP_SELECT_FULL);
+  if (res.error && /curp|nss|column/i.test(res.error.message)) {
+    res = await sb.from('hr_employees').select(EMP_MAP_SELECT_NO_ID);
+  }
   if (res.error && /fecha_nacimiento|column/i.test(res.error.message)) {
     res = await sb.from('hr_employees').select(EMP_MAP_SELECT_NO_NAC);
   }
@@ -406,6 +415,7 @@ export function shortNominaWeekLabel(
 
 /**
  * Sincroniza saldos de vacaciones desde líneas con datos (nómina en curso / al pagar).
+ * Omite empleados con flag/puesto sin vacaciones (Socios).
  */
 export async function syncLeaveBalancesFromPeriod(
   sb: SupabaseClient,
@@ -421,6 +431,30 @@ export async function syncLeaveBalancesFromPeriod(
     .eq('period_id', periodId);
   if (error) throw new Error(error.message);
 
+  const empIds = [
+    ...new Set(
+      (lines || [])
+        .map((l: { employee_id: string }) => String(l.employee_id))
+        .filter(Boolean)
+    ),
+  ];
+  const exemptIds = new Set<string>();
+  if (empIds.length > 0) {
+    const { data: emps } = await sb
+      .from('hr_employees')
+      .select('id, puesto, area, notes')
+      .in('id', empIds);
+    for (const raw of emps || []) {
+      const e = raw as {
+        id: string;
+        puesto: string | null;
+        area: string | null;
+        notes: string | null;
+      };
+      if (isLeaveExemptEmployee(e)) exemptIds.add(String(e.id));
+    }
+  }
+
   let n = 0;
   for (const raw of lines || []) {
     const line = raw as {
@@ -429,6 +463,7 @@ export async function syncLeaveBalancesFromPeriod(
       vacaciones_restantes: number | null;
       notes: string | null;
     };
+    if (exemptIds.has(String(line.employee_id))) continue;
     const taken = line.vacaciones_tomadas;
     const remaining = line.vacaciones_restantes;
     let entitled: number | null = null;
@@ -569,6 +604,16 @@ export async function enrichEmployeesFromBaseDatos(
       found.fecha_nacimiento = row.fecha_nacimiento;
     }
     if (row.phone && !found.phone) patch.phone = row.phone;
+    const curp = normalizeCurp(row.curp);
+    if (curp && !normalizeCurp(found.curp)) {
+      patch.curp = curp;
+      found.curp = curp;
+    }
+    const nss = normalizeNss(row.nss);
+    if (nss && !normalizeNss(found.nss)) {
+      patch.nss = nss;
+      found.nss = nss;
+    }
     if (
       row.sueldo_diario != null &&
       (found.sueldo_diario == null || Number(found.sueldo_diario) === 0)
@@ -580,6 +625,18 @@ export async function enrichEmployeesFromBaseDatos(
         .from('hr_employees')
         .update(patch)
         .eq('id', found.id);
+      if (error && /curp|nss|column/i.test(error.message)) {
+        delete patch.curp;
+        delete patch.nss;
+        if (Object.keys(patch).length > 1) {
+          ({ error } = await sb
+            .from('hr_employees')
+            .update(patch)
+            .eq('id', found.id));
+        } else {
+          error = null;
+        }
+      }
       if (error && /fecha_nacimiento|column/i.test(error.message)) {
         delete patch.fecha_nacimiento;
         if (Object.keys(patch).length > 1) {
@@ -909,14 +966,32 @@ export async function dedupePayrollPeriodsForYear(
   sb: SupabaseClient,
   year: number
 ): Promise<{ removed: number; kept: number }> {
-  const { data: existingRows, error } = await sb
+  // Solo semanal: no tocar quincenas (cadence=quincenal).
+  let existingQuery = sb
     .from('hr_payroll_periods')
-    .select('id, label, period_start, period_end, status, source_file, paid_at')
+    .select(
+      'id, label, period_start, period_end, status, source_file, paid_at, cadence'
+    )
     .gte('period_start', `${year}-01-01`)
     .lte('period_start', `${year}-12-31`);
+
+  let { data: existingRows, error } = await existingQuery;
+  if (error && /cadence|column .* does not exist|42703/i.test(error.message)) {
+    const retry = await sb
+      .from('hr_payroll_periods')
+      .select('id, label, period_start, period_end, status, source_file, paid_at')
+      .gte('period_start', `${year}-01-01`)
+      .lte('period_start', `${year}-12-31`);
+    existingRows = retry.data as typeof existingRows;
+    error = retry.error;
+  }
   if (error) throw new Error(error.message);
 
-  const rows = (existingRows || []) as Omit<PeriodDupRow, 'line_count'>[];
+  const rows = (
+    (existingRows || []) as Array<
+      Omit<PeriodDupRow, 'line_count'> & { cadence?: string | null }
+    >
+  ).filter((r) => (r.cadence || 'semanal') !== 'quincenal');
   if (!rows.length) return { removed: 0, kept: 0 };
 
   const ids = rows.map((r) => r.id);
@@ -1023,13 +1098,18 @@ export type EnsureYearPayrollResult = {
  * Soft-load: lee el xlsx local del año y crea periodos faltantes en DB.
  * Repara etiqueta/fechas de existentes (mes real del Excel).
  * Deduplica por period_start / hoja. refreshExisting reemplaza líneas
- * de no-pagados.
+ * de no-pagados; con refreshPaid también reescribe líneas de periodos `pagado`
+ * (útil tras corregir el parseo de SUELDO DIARIO).
  */
 export async function ensureYearPayrollFromLocal(
   sb: SupabaseClient,
   username: string,
   year: number,
-  opts?: { refreshExisting?: boolean; enrichBase?: boolean }
+  opts?: {
+    refreshExisting?: boolean;
+    refreshPaid?: boolean;
+    enrichBase?: boolean;
+  }
 ): Promise<EnsureYearPayrollResult> {
   // Primero limpia duplicados históricos (mismo start / misma hoja).
   const dedupe = await dedupePayrollPeriodsForYear(sb, year);
@@ -1216,7 +1296,10 @@ export async function ensureYearPayrollFromLocal(
         sheetNameFromSource(hit.source_file)?.toLowerCase() !==
           sheet.name.toLowerCase();
 
-      if (opts?.refreshExisting && hit.status !== 'pagado') {
+      const canRefreshLines =
+        opts?.refreshExisting &&
+        (hit.status !== 'pagado' || opts?.refreshPaid === true);
+      if (canRefreshLines) {
         const parsed = importNominaSheet(listed.buffer, sheet.name);
         await replacePeriodLines(sb, hit.id, parsed.lines, 'nomina_import');
         await sb

@@ -111,13 +111,16 @@ export async function POST(request: Request) {
     if (onlyMissing && employees.length) {
       const requiredIds = HR_REQUIRED_DOC_TYPES.map((d) => d.id);
       const ids = employees.map((e) => e.id);
-      const byEmp = new Map<string, { doc_type: string; status: string }[]>();
+      const byEmp = new Map<
+        string,
+        { doc_type: string; status: string; storage_path?: string | null }[]
+      >();
       const CHUNK = 80;
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK);
         const res = await sb
           .from('hr_employee_documents')
-          .select('employee_id, doc_type, status')
+          .select('employee_id, doc_type, status, storage_path')
           .in('employee_id', chunk)
           .in('doc_type', requiredIds);
         if (res.error) {
@@ -129,14 +132,23 @@ export async function POST(request: Request) {
           list.push({
             doc_type: String((r as { doc_type: string }).doc_type),
             status: String((r as { status: string }).status),
+            storage_path: (r as { storage_path: string | null }).storage_path,
           });
           byEmp.set(eid, list);
         }
       }
       employees = employees.filter((e) => {
         const rows = byEmp.get(e.id) || [];
-        const byType = new Map(rows.map((r) => [r.doc_type, r.status]));
-        return requiredIds.some((id) => !isRequiredDocSatisfied(byType.get(id)));
+        const byType = new Map(
+          rows.map((r) => [
+            r.doc_type,
+            { status: r.status, storage_path: r.storage_path },
+          ])
+        );
+        return requiredIds.some((id) => {
+          const row = byType.get(id);
+          return !isRequiredDocSatisfied(row?.status, row?.storage_path);
+        });
       });
     }
 

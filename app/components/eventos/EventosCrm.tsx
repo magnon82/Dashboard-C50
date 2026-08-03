@@ -6,8 +6,10 @@ import { filterControlClass, filterSelectClass } from '@/app/components/SectionH
 import {
   EVENTOS_MAX_PAX,
   EVENTOS_MIN_PAX_GRUPOS,
+  EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT,
   LEAD_STAGE_LABELS,
   LEAD_STAGES,
+  earliestSelectableEventDateIso,
   formatMxn,
   type EventClient,
   type EventLead,
@@ -103,6 +105,8 @@ export function EventosCrm({
     place_hold: false,
   });
 
+  const minEventDate = useMemo(() => earliestSelectableEventDateIso(), []);
+
   const filteredClients = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return clients;
@@ -154,58 +158,6 @@ export function EventosCrm({
       cancelled = true;
     };
   }, [view]);
-
-  async function seedClients() {
-    setBusy(true);
-    setErr('');
-    setMsg('');
-    try {
-      const res = await fetch('/api/eventos/clients/seed', { method: 'POST' });
-      const json = await res.json();
-      if (!res.ok) {
-        setErr(json.error || 'No se pudo importar');
-        return;
-      }
-      setMsg(
-        `Importados ${json.inserted} clientes (omitidos ${json.skipped} de ${json.totalSeed}).`
-      );
-      await onRefresh();
-    } catch {
-      setErr('Error de red al importar seed');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /** Leads desde seed_event_leads_seguimiento.json (Excel/Sheet Control → script). */
-  async function seedSeguimiento() {
-    setBusy(true);
-    setErr('');
-    setMsg('');
-    try {
-      const res = await fetch('/api/eventos/leads/seed-seguimiento', {
-        method: 'POST',
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setErr(
-          [json.error, json.hint].filter(Boolean).join(' — ') ||
-            'No se pudo importar Seguimiento'
-        );
-        return;
-      }
-      setMsg(
-        `Seguimiento: ${json.inserted ?? 0} nuevos, ${json.updated ?? 0} actualizados` +
-          (json.skipped != null ? ` · ${json.skipped} omitidos` : '') +
-          (json.totalSeed != null ? ` (de ${json.totalSeed})` : '')
-      );
-      await onRefresh();
-    } catch {
-      setErr('Error de red al importar Seguimiento');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function generateOsForLead(leadId: string) {
     if (!canEdit) return;
@@ -476,28 +428,6 @@ export function EventosCrm({
             placeholder="Empresa, contacto…"
           />
         </label>
-        {canEdit && (
-          <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void seedClients()}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              title="Clientes desde lista Excel (seed_event_clients.json)"
-            >
-              Importar Excel clientes
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void seedSeguimiento()}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              title="Leads desde Control/Seguimiento (seed_event_leads_seguimiento.json)"
-            >
-              Importar Seguimiento
-            </button>
-          </>
-        )}
       </div>
 
       {(err || msg) && (
@@ -516,8 +446,8 @@ export function EventosCrm({
           </p>
           <p className="mt-1 text-sm text-slate-600">
             Ejecuta <code className="text-xs">supabase/eventos_module.sql</code>{' '}
-            en el SQL Editor (crea CRM + catálogo + cotizaciones). Después usa
-            «Importar Excel clientes» / «Importar Seguimiento» para cargar seeds.
+            en el SQL Editor (crea CRM + catálogo + cotizaciones). Después agrega
+            clientes o leads manualmente en el CRM.
           </p>
         </SuiteCard>
       )}
@@ -593,6 +523,7 @@ export function EventosCrm({
                   <input
                     type="date"
                     value={leadForm.event_date}
+                    min={minEventDate}
                     onChange={(e) =>
                       setLeadForm((f) => ({
                         ...f,
@@ -601,6 +532,11 @@ export function EventosCrm({
                     }
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
+                  <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                    No se ofrecen fechas a{' '}
+                    {EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT} h o menos
+                    (CDMX).
+                  </span>
                 </label>
                 <label className="block text-xs font-medium text-slate-600">
                   <span className="flex flex-wrap items-baseline justify-between gap-x-2">
@@ -1048,13 +984,7 @@ export function EventosCrm({
                                 <code>supabase/eventos_module.sql</code> en
                                 Supabase.
                               </li>
-                              <li>
-                                Con sesión de edición: botón «Importar Excel
-                                clientes» (lista Carranza 50).
-                              </li>
-                              <li>
-                                O agrega un cliente manualmente arriba.
-                              </li>
+                              <li>Agrega un cliente manualmente arriba.</li>
                               <li>
                                 Para enriquecer con OS/Anticipos/Seguimiento:{' '}
                                 <code>

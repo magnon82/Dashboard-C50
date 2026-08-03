@@ -34,6 +34,7 @@ import {
   availableCorteCancelacionesMonths,
   latestMonthWithCorteCancelaciones,
   weekRangeLabel,
+  weekOptionsYearInCourse,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
 
@@ -68,6 +69,8 @@ export default function Dashboard() {
   const [corteOpenId, setCorteOpenId] = useState<string | null>(null);
   const [weekFrom, setWeekFrom] = useState<number | null>(null);
   const [weekTo, setWeekTo] = useState<number | null>(null);
+  /** Semana a consultar en card «semana en curso» (null = semana actual WTD). */
+  const [consultaSemana, setConsultaSemana] = useState<number | null>(null);
 
   useEffect(() => {
     async function fetchRecords() {
@@ -176,7 +179,15 @@ export default function Dashboard() {
     year: 'numeric',
   });
 
-  const weekToDate = useMemo(() => buildWeekToDateSales(records), [records]);
+  const semanaEnCursoOptions = useMemo(() => weekOptionsYearInCourse(), []);
+
+  const weekToDate = useMemo(
+    () =>
+      buildWeekToDateSales(records, undefined, {
+        week: consultaSemana ?? undefined,
+      }),
+    [records, consultaSemana]
+  );
 
   /** Cancelaciones/descuentos: default = último mes con datos (no el calendario vacío). */
   const corteMesesDisponibles = useMemo(
@@ -273,7 +284,16 @@ export default function Dashboard() {
           showPaymentMix
         />
 
-        <SemanaEnCursoTable weekToDate={weekToDate} showDescCanc />
+        <SemanaEnCursoTable
+          weekToDate={weekToDate}
+          showDescCanc
+          weekOptions={semanaEnCursoOptions}
+          selectedWeek={consultaSemana ?? weekToDate.weekNumber}
+          onWeekChange={(w) => {
+            const current = semanaEnCursoOptions[0]?.week;
+            setConsultaSemana(current != null && w === current ? null : w);
+          }}
+        />
 
         <ChequePromedioMensualCard records={records} years={COMPARE_YEARS} />
 

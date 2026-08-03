@@ -237,6 +237,7 @@ const GIVEN_NAME_SET: Set<string> = (() => {
     'alfonso',
     'alfred',
     'alfredo',
+    'ramses',
     'alice',
     'alicia',
     'alina',
@@ -899,7 +900,7 @@ function conflictingGivenNames(qSig: string[], cSig: string[]): boolean {
   return !anyOverlap && qHasUnmatched && cHasUnmatched;
 }
 
-function scorePair(query: string, candidateName: string): number {
+function scorePairRaw(query: string, candidateName: string): number {
   const qKey = normalizePersonKey(query);
   const cKey = normalizePersonKey(candidateName);
   if (!qKey || !cKey) return 0;
@@ -947,6 +948,17 @@ function scorePair(query: string, candidateName: string): number {
   }
 
   return Math.min(1, score);
+}
+
+/**
+ * Score con forma lista «nombres + 1 apellido» como identidad canónica.
+ * Evita falsos positivos por 2º apellido en carpeta (Carmona Resendiz Eduardo
+ * ⊇ Eduardo Resendiz) y une cáscaras tipo CRISTIAN SUAREZ RUIZ ↔ Cristian Alfonso Suarez.
+ */
+function scorePair(query: string, candidateName: string): number {
+  const fq = formatHrListName(query) || query;
+  const fc = formatHrListName(candidateName) || candidateName;
+  return scorePairRaw(fq, fc);
 }
 
 function confidenceFromScore(

@@ -11,9 +11,14 @@ export const EVENTOS_DESAYUNOS_PACK_MIN_PAX = 50;
 export const EVENTOS_DESAYUNOS_PACK_PRICE = 30_000;
 /**
  * Entrada/postre (opcionales en cotizador) deben definirse a más tardar
- * min(anticipo+N, evento−N) días calendario (CDMX).
+ * min(anticipo+15d, evento−72h) en CDMX (solo con fechas conocidas).
  */
-export const EVENTOS_OPTIONAL_MENU_CHOICE_DAYS = 15;
+export const EVENTOS_OPTIONAL_MENU_CHOICE_DAYS_AFTER_ANTICIPO = 15;
+/** Horas de reloj antes del inicio del día del evento (CDMX). */
+export const EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT = 72;
+/** @deprecated Usar DAYS_AFTER_ANTICIPO / HOURS_BEFORE_EVENT. */
+export const EVENTOS_OPTIONAL_MENU_CHOICE_DAYS =
+  EVENTOS_OPTIONAL_MENU_CHOICE_DAYS_AFTER_ANTICIPO;
 /** choice_groups sujetos a plazo (no inventar otros). */
 export const EVENTOS_OPTIONAL_MENU_CHOICE_IDS = ['entrada', 'postre'] as const;
 export type OptionalMenuChoiceId =
@@ -68,11 +73,11 @@ export function isEventosCotizadorFoodMenu(menu: {
 export function quoteHasFoodLines(
   lines: { category?: string | null }[]
 ): boolean {
-  return lines.some((l) =>
-    (EVENTOS_PAX_ALLOC_CATEGORIES as readonly string[]).includes(
-      String(l.category || '')
-    )
-  );
+  return lines.some((l) => {
+    const cat = String(l.category || '').trim();
+    if (!cat) return false;
+    return (EVENTOS_PAX_ALLOC_CATEGORIES as readonly string[]).includes(cat);
+  });
 }
 
 export function quoteLineIsDrink(line: {
@@ -306,6 +311,99 @@ function addCalendarDaysIso(iso: string, days: number): string | null {
   return dt.toISOString().slice(0, 10);
 }
 
+/**
+ * Medianoche civil America/Mexico_City del YYYY-MM-DD como Instant UTC.
+ * CDMX sin DST desde 2022 (UTC−6); se valida con Intl por robustez.
+ */
+export function mexicoCityDayStartUtc(iso: string): Date | null {
+  const day = iso.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const [y, m, d] = day.split('-').map(Number);
+  // Candidato: 00:00 CDMX ≈ 06:00 UTC
+  let guess = Date.UTC(y, m - 1, d, 6, 0, 0);
+  for (let i = 0; i < 3; i++) {
+    const parts = mexicoDateTimeParts(new Date(guess));
+    if (!parts) return null;
+    const got = `${parts.y}-${parts.mo}-${parts.d}`;
+    if (got === day && parts.h === 0 && parts.mi === 0 && parts.s === 0) {
+      return new Date(guess);
+    }
+    const targetUtc = Date.UTC(y, m - 1, d, 0, 0, 0);
+    const shownUtc = Date.UTC(
+      parts.y,
+      Number(parts.mo) - 1,
+      Number(parts.d),
+      parts.h,
+      parts.mi,
+      parts.s
+    );
+    guess += targetUtc - shownUtc;
+  }
+  return new Date(guess);
+}
+
+function mexicoDateTimeParts(from: Date): {
+  y: number;
+  mo: string;
+  d: string;
+  h: number;
+  mi: number;
+  s: number;
+} | null {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Mexico_City',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const map: Record<string, string> = {};
+  for (const p of fmt.formatToParts(from)) {
+    if (p.type !== 'literal') map[p.type] = p.value;
+  }
+  const y = Number(map.year);
+  const h = Number(map.hour);
+  const mi = Number(map.minute);
+  const s = Number(map.second);
+  if (!y || map.month == null || map.day == null || Number.isNaN(h)) {
+    return null;
+  }
+  return { y, mo: map.month, d: map.day, h, mi, s };
+}
+
+/** YYYY-MM-DD civil CDMX de (inicio del día del evento − N horas). */
+export function eventDateMinusHoursIso(
+  eventDate: string,
+  hours: number
+): string | null {
+  const start = mexicoCityDayStartUtc(eventDate);
+  if (!start) return null;
+  const at = new Date(start.getTime() - hours * 3_600_000);
+  return mexicoTodayIso(at);
+}
+
+/**
+ * Primera fecha de evento (YYYY-MM-DD CDMX) con al menos
+ * EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT horas de anticipación
+ * (inicio del día del evento estrictamente después de now+72h).
+ */
+export function earliestSelectableEventDateIso(from = new Date()): string {
+  const hours = EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT;
+  const threshold = from.getTime() + hours * 3_600_000;
+  let day = mexicoTodayIso(new Date(threshold));
+  for (let i = 0; i < 8; i++) {
+    const start = mexicoCityDayStartUtc(day);
+    if (start && start.getTime() > threshold) return day;
+    const next = addCalendarDaysIso(day, 1);
+    if (!next) break;
+    day = next;
+  }
+  return day;
+}
+
 export function formatIsoDateEs(iso: string | null | undefined): string {
   if (!iso) return '';
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
@@ -320,22 +418,22 @@ export function formatIsoDateEs(iso: string | null | undefined): string {
 export type OptionalMenuChoiceDeadline = {
   /** YYYY-MM-DD del plazo efectivo, o null si no hay fechas. */
   deadline: string | null;
-  /** anticipo + 15 (si hay anticipo). */
+  /** anticipo + 15 d (si hay anticipo). */
   fromAnticipo: string | null;
-  /** evento − 15 (si hay fecha de evento). */
+  /** evento − 72 h (fecha civil CDMX del instante), si hay evento. */
   fromEvent: string | null;
   anticipoDate: string | null;
   eventDate: string | null;
-  /** hoy CDMX ≥ deadline → ya obligatorio. */
+  /** ahora ≥ plazo → ya obligatorio. */
   isRequired: boolean;
-  /** hoy CDMX > deadline. */
+  /** ahora > plazo (pasó el día civil del deadline). */
   isOverdue: boolean;
   daysRemaining: number | null;
 };
 
 /**
- * Plazo = min(anticipo+15, evento−15) con las fechas conocidas.
- * Sin fechas → deadline null (solo política en UI).
+ * Plazo = min(anticipo+15d, evento−72h) con las fechas conocidas.
+ * Sin anticipo → solo 72 h antes del evento. Sin fechas → deadline null.
  */
 export function computeOptionalMenuChoiceDeadline(
   anticipoDate: string | null | undefined,
@@ -346,11 +444,17 @@ export function computeOptionalMenuChoiceDeadline(
   const ev = eventDate?.slice(0, 10) || null;
   const fromAnticipo =
     ant && /^\d{4}-\d{2}-\d{2}$/.test(ant)
-      ? addCalendarDaysIso(ant, EVENTOS_OPTIONAL_MENU_CHOICE_DAYS)
+      ? addCalendarDaysIso(
+          ant,
+          EVENTOS_OPTIONAL_MENU_CHOICE_DAYS_AFTER_ANTICIPO
+        )
       : null;
   const fromEvent =
     ev && /^\d{4}-\d{2}-\d{2}$/.test(ev)
-      ? addCalendarDaysIso(ev, -EVENTOS_OPTIONAL_MENU_CHOICE_DAYS)
+      ? eventDateMinusHoursIso(
+          ev,
+          EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT
+        )
       : null;
 
   let deadline: string | null = null;
@@ -521,8 +625,9 @@ export function checkOptionalMenuChoicesOnLines(
 export function optionalMenuChoiceDeadlineCopy(
   info: OptionalMenuChoiceDeadline
 ): { tone: 'muted' | 'ok' | 'warn' | 'danger'; text: string } {
-  const days = EVENTOS_OPTIONAL_MENU_CHOICE_DAYS;
-  const policy = `Política: entrada y postre a más tardar ${days} días después del anticipo o ${days} días antes del evento (lo que ocurra primero).`;
+  const daysAnt = EVENTOS_OPTIONAL_MENU_CHOICE_DAYS_AFTER_ANTICIPO;
+  const hoursEv = EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT;
+  const policy = `Política: entrada y postre a más tardar ${daysAnt} días después del anticipo o ${hoursEv} horas antes del evento (lo que ocurra primero).`;
 
   if (!info.deadline) {
     return {
@@ -535,14 +640,14 @@ export function optionalMenuChoiceDeadlineCopy(
   const parts: string[] = [];
   if (info.fromAnticipo && info.anticipoDate) {
     parts.push(
-      `anticipo ${formatIsoDateEs(info.anticipoDate)} + ${days} d → ${formatIsoDateEs(info.fromAnticipo)}`
+      `anticipo ${formatIsoDateEs(info.anticipoDate)} + ${daysAnt} d → ${formatIsoDateEs(info.fromAnticipo)}`
     );
   } else if (!info.anticipoDate) {
     parts.push('sin fecha de anticipo');
   }
   if (info.fromEvent && info.eventDate) {
     parts.push(
-      `evento ${formatIsoDateEs(info.eventDate)} − ${days} d → ${formatIsoDateEs(info.fromEvent)}`
+      `evento ${formatIsoDateEs(info.eventDate)} − ${hoursEv} h → ${formatIsoDateEs(info.fromEvent)}`
     );
   } else if (!info.eventDate) {
     parts.push('sin fecha de evento');

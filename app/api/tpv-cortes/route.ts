@@ -2,8 +2,11 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
   assertWritableCorteDate,
+  isTpvSchemaError,
+  probeTpvPhotoKindColumn,
   requireVentasSession,
   tpvSchemaHint,
+  tpvSchemaMissingResponse,
 } from '@/app/lib/tpv-api';
 import {
   TPV_UPLOAD_MAX_BYTES,

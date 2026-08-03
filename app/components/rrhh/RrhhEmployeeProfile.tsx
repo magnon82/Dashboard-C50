@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  employeePayCadence,
   formatAntiguedad,
   formatHrDate,
   formatHrPuesto,
+  isLeaveExemptEmployee,
+  resolveSueldoQuincenal,
   type HrEmployee,
 } from '@/app/lib/hr';
 import {
@@ -29,7 +32,6 @@ import {
   type HrResguardoRequest,
 } from '@/app/lib/hr-resguardo';
 import { RrhhResguardoForm } from '@/app/components/rrhh/RrhhResguardoForm';
-import { RrhhDocsReview } from '@/app/components/rrhh/RrhhDocsReview';
 import { formatHrListName } from '@/app/lib/hr-person-match';
 import {
   HR_PUESTO_CATALOG,
@@ -99,7 +101,6 @@ export function RrhhEmployeeProfile({
     doc_type?: string;
   } | null>(null);
   const [showResguardoForm, setShowResguardoForm] = useState(false);
-  const [showDocsReview, setShowDocsReview] = useState(false);
   const [editingResguardo, setEditingResguardo] =
     useState<HrResguardoRequest | null>(null);
   const [selectedContractId, setSelectedContractId] = useState<string | null>(
@@ -122,7 +123,6 @@ export function RrhhEmployeeProfile({
   useEffect(() => {
     setTab(initialTab);
     setShowResguardoForm(false);
-    setShowDocsReview(false);
     setEditingResguardo(null);
     setSelectedContractId(null);
   }, [employeeId, initialTab]);
@@ -574,24 +574,12 @@ export function RrhhEmployeeProfile({
               >
                 Contrato
               </h3>
-              {canEdit ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
-                  style={{ backgroundColor: SUITE.orangeDeep }}
-                  onClick={() => pickFile('contract')}
-                >
-                  + Subir contrato
-                </button>
-              ) : null}
             </div>
             {contracts.length === 0 ? (
               <p className="text-xs text-slate-500">
                 Sin contrato en sistema. Si hay archivo{' '}
                 <span className="font-semibold">Contrato*</span> en el
-                expediente Drive, se importa al abrir el perfil (PC admin) o
-                súbelo aquí.
+                expediente Drive, se importa al abrir el perfil (PC admin).
               </p>
             ) : (
               <div className="rounded-xl border border-slate-200 bg-slate-50/90 p-3">
@@ -760,31 +748,6 @@ export function RrhhEmployeeProfile({
 
           {!loading && tab === 'docs' ? (
             <div className="space-y-3">
-            {!schemaBlocked && canEdit ? (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white px-3 py-2.5">
-                <div className="min-w-0">
-                  <p
-                    className="text-xs font-bold"
-                    style={{ color: SUITE.navy }}
-                  >
-                    Clasificar páginas del expediente
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Pregunta «¿qué es esto?» con vista previa · corrige INE /
-                    acta / CURP / domicilio / CV mal etiquetados
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="rounded-full px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-50"
-                  style={{ backgroundColor: SUITE.navy }}
-                  onClick={() => setShowDocsReview(true)}
-                >
-                  Revisar documentos
-                </button>
-              </div>
-            ) : null}
             <ul className="space-y-2">
               {docsList.map((d) => (
                 <li
@@ -1320,7 +1283,41 @@ export function RrhhEmployeeProfile({
                     disabled={!canEdit}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
                   />
+                  {(() => {
+                    const cadence = employeePayCadence(emp);
+                    if (cadence === 'semanal') {
+                      return (
+                        <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                          Pago semanal (plantilla operativa).
+                        </span>
+                      );
+                    }
+                    const q = resolveSueldoQuincenal(emp);
+                    if (q == null) {
+                      return (
+                        <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                          Pago quincenal (Administrativo).
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                        Pago quincenal: $
+                        {q.toLocaleString('es-MX', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{' '}
+                        (diario × 15)
+                      </span>
+                    );
+                  })()}
                 </label>
+                {isLeaveExemptEmployee(emp) ? (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Sin control de vacaciones (Socios / flag{' '}
+                    <code className="text-[11px]">sin_vacaciones</code>).
+                  </p>
+                ) : null}
                 <label className="block text-xs font-semibold text-slate-600">
                   Notas
                   <input
@@ -1470,16 +1467,6 @@ export function RrhhEmployeeProfile({
           </div>
         ) : null}
       </div>
-      {showDocsReview ? (
-        <RrhhDocsReview
-          employeeId={employeeId}
-          onClose={() => setShowDocsReview(false)}
-          onChanged={() => {
-            void load();
-            onChanged?.();
-          }}
-        />
-      ) : null}
     </div>
   );
 }

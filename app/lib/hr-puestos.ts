@@ -13,6 +13,7 @@ function notesHasFlag(notes: string | null | undefined, flag: string): boolean {
 
 /** Catálogo canónico (UI + almacenamiento preferido). */
 export const HR_PUESTO_CATALOG = [
+  'Socios',
   'Gerente',
   'Capitan',
   'Meserx Encargadx',
@@ -51,6 +52,10 @@ function foldKey(raw: string): string {
 
 /** Alias legados → etiqueta de catálogo. */
 const PUESTO_ALIASES: Record<string, HrPuestoCatalog> = {
+  socio: 'Socios',
+  socios: 'Socios',
+  colaborador: 'Socios',
+  colaboradores: 'Socios',
   gerente: 'Gerente',
   gerencia: 'Gerente',
   capitan: 'Capitan',

@@ -203,8 +203,14 @@ export const HR_REQUIRED_DOC_TYPES: HrDocTypeDef[] = HR_DOC_TYPES.filter(
   (d) => d.required
 );
 
-export function isRequiredDocSatisfied(status: string | null | undefined): boolean {
-  return status === 'uploaded' || status === 'verified';
+export function isRequiredDocSatisfied(
+  status: string | null | undefined,
+  storagePath?: string | null
+): boolean {
+  if (status === 'uploaded' || status === 'verified') return true;
+  // Archivo ya en storage aunque el status quede pending (lag pull/repair)
+  if (storagePath && status !== 'rejected') return true;
+  return false;
 }
 
 export type HrMissingRequiredDoc = {
@@ -214,15 +220,21 @@ export type HrMissingRequiredDoc = {
 
 /** Docs obligatorios sin archivo válido (pendiente / rechazado / sin fila). */
 export function missingRequiredDocs(
-  rows: { doc_type: string; status: string }[] | null | undefined
+  rows:
+    | { doc_type: string; status: string; storage_path?: string | null }[]
+    | null
+    | undefined
 ): HrMissingRequiredDoc[] {
   const byType = new Map(
-    (rows || []).map((r) => [r.doc_type, r.status] as const)
+    (rows || []).map(
+      (r) =>
+        [r.doc_type, { status: r.status, storage_path: r.storage_path }] as const
+    )
   );
   return HR_REQUIRED_DOC_TYPES.filter((d) => {
-    const status = byType.get(d.id);
-    if (status == null) return true;
-    return !isRequiredDocSatisfied(status);
+    const row = byType.get(d.id);
+    if (row == null) return true;
+    return !isRequiredDocSatisfied(row.status, row.storage_path);
   }).map((d) => ({ id: d.id, title: d.title }));
 }
 
@@ -234,7 +246,10 @@ export type HrDocAlertSummary = {
 };
 
 export function docAlertSummary(
-  rows: { doc_type: string; status: string }[] | null | undefined
+  rows:
+    | { doc_type: string; status: string; storage_path?: string | null }[]
+    | null
+    | undefined
 ): HrDocAlertSummary {
   const missing = missingRequiredDocs(rows);
   const requiredTotal = HR_REQUIRED_DOC_TYPES.length;

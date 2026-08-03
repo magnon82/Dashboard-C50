@@ -7,11 +7,8 @@ import {
   adminCorteDateWindow,
   buildDayCompleteness,
   computeNetoBanco,
-  defaultCorteDateCdmx,
   moneyMx,
   photoKindLabel,
-  shiftIsoDate,
-  todayCdmxIso,
   type TpvAdminReportDay,
   type TpvCorteUpload,
   type TpvPhotoKind,
@@ -243,20 +240,18 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
   const [uploads, setUploads] = useState<TpvCorteUpload[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [onlyIncomplete, setOnlyIncomplete] = useState(false);
-  /** Fecha elegida: día operativo o hasta 7 días atrás. */
-  const [jumpDate, setJumpDate] = useState(() => defaultCorteDateCdmx());
+  /** Día pendiente seleccionado (ventana Master, solo incompletos). */
+  const [jumpDate, setJumpDate] = useState('');
   const dateWindow = useMemo(() => adminCorteDateWindow(), []);
 
-  function setJumpDateClamped(next: string) {
-    if (!next) {
+  function selectPendingDate(next: string) {
+    if (!next || !/^\d{4}-\d{2}-\d{2}$/.test(next)) {
       setJumpDate('');
       return;
     }
     const { minDate, maxDate } = adminCorteDateWindow();
-    if (next < minDate) setJumpDate(minDate);
-    else if (next > maxDate) setJumpDate(maxDate);
-    else setJumpDate(next);
+    if (next < minDate || next > maxDate) return;
+    setJumpDate(next);
   }
 
   const loadList = useCallback(async () => {
@@ -337,40 +332,61 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
     if (expanded) await loadDetail(expanded);
   }
 
+  const pendingInWindow = useMemo(() => {
+    const { minDate, maxDate, opDay } = dateWindow;
+    const incomplete = days.filter(
+      (d) =>
+        !d.corteCompleto &&
+        d.date >= minDate &&
+        d.date <= maxDate
+    );
+    const hasOp = incomplete.some((d) => d.date === opDay);
+    const withOp =
+      !hasOp &&
+      (!days.find((d) => d.date === opDay) ||
+        !days.find((d) => d.date === opDay)?.corteCompleto)
+        ? [
+            ...incomplete,
+            {
+              date: opDay,
+              complete: false,
+              accounted: 0,
+              missing: [...TPV_TERMINALS],
+              slots: TPV_TERMINALS.map((terminal) => ({
+                terminal,
+                state: 'missing' as const,
+                cobrado: null,
+                propina: null,
+                neto: null,
+                ventaUploader: null,
+                propinaUploader: null,
+                unusedUploader: null,
+              })),
+              totals: { cobrado: 0, propina: 0, neto: 0 },
+              rpt: null,
+              hasRpt: false,
+              corteCompleto: false,
+            } satisfies TpvAdminReportDay,
+          ]
+        : incomplete;
+    return [...withOp].sort((a, b) =>
+      a.date < b.date ? 1 : a.date > b.date ? -1 : 0
+    );
+  }, [days, dateWindow]);
+
   const visibleDays = useMemo(() => {
-    let list = days;
-    if (onlyIncomplete) {
-      list = list.filter((d) => !d.corteCompleto);
+    return compact ? pendingInWindow.slice(0, 8) : pendingInWindow;
+  }, [pendingInWindow, compact]);
+
+  // Si el seleccionado ya no es pendiente, caer al primero de la lista.
+  useEffect(() => {
+    if (!pendingInWindow.length) {
+      if (jumpDate) setJumpDate('');
+      return;
     }
-    if (jumpDate && /^\d{4}-\d{2}-\d{2}$/.test(jumpDate)) {
-      const found = list.filter((d) => d.date === jumpDate);
-      if (found.length) return found;
-      // Día sin registros aún: permite expandir y cargar/subir
-      return [
-        {
-          date: jumpDate,
-          complete: false,
-          accounted: 0,
-          missing: [...TPV_TERMINALS],
-          slots: TPV_TERMINALS.map((terminal) => ({
-            terminal,
-            state: 'missing' as const,
-            cobrado: null,
-            propina: null,
-            neto: null,
-            ventaUploader: null,
-            propinaUploader: null,
-            unusedUploader: null,
-          })),
-          totals: { cobrado: 0, propina: 0, neto: 0 },
-          rpt: null,
-          hasRpt: false,
-          corteCompleto: false,
-        },
-      ];
-    }
-    return compact ? list.slice(0, 8) : list;
-  }, [days, onlyIncomplete, jumpDate, compact]);
+    if (jumpDate && pendingInWindow.some((d) => d.date === jumpDate)) return;
+    setJumpDate(pendingInWindow[0].date);
+  }, [pendingInWindow, jumpDate]);
 
   useEffect(() => {
     if (!jumpDate || !/^\d{4}-\d{2}-\d{2}$/.test(jumpDate)) return;
@@ -618,65 +634,31 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
           >
             Cargar / revisar por fecha
           </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Master: día operativo ({dateWindow.opDay}) o desde{' '}
-            {dateWindow.minDate}. Staff solo usa la ventana del momento. Hoy
-            calendario CDMX: {todayCdmxIso()}.
-          </p>
-          <div className="mt-3 flex flex-wrap items-end gap-3">
-            <label className="block text-xs font-semibold text-slate-600">
-              Fecha del corte
-              <input
-                type="date"
-                value={jumpDate || dateWindow.opDay}
-                min={dateWindow.minDate}
-                max={dateWindow.maxDate}
-                onChange={(e) => setJumpDateClamped(e.target.value)}
-                className="mt-1 block min-h-11 w-full min-w-[11rem] rounded-xl border border-slate-200 bg-white px-3 text-sm"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => setJumpDateClamped(defaultCorteDateCdmx())}
-              className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          <label className="mt-3 block text-xs font-semibold text-slate-600">
+            Días pendientes
+            <select
+              value={jumpDate}
+              onChange={(e) => selectPendingDate(e.target.value)}
+              disabled={pendingInWindow.length === 0}
+              className="mt-1 block min-h-11 w-full max-w-md rounded-xl border border-slate-200 bg-white px-3 text-sm capitalize disabled:opacity-60"
             >
-              Día operativo
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setJumpDateClamped(shiftIsoDate(defaultCorteDateCdmx(), -7))
-              }
-              className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Hace 7 días
-            </button>
-            <button
-              type="button"
-              onClick={() => setJumpDateClamped(todayCdmxIso())}
-              className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Hoy calendario
-            </button>
-            {jumpDate ? (
-              <button
-                type="button"
-                onClick={() => setJumpDate('')}
-                className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600"
-              >
-                Ver todos los días
-              </button>
-            ) : null}
-            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={onlyIncomplete}
-                onChange={(e) => setOnlyIncomplete(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300"
-              />
-              Solo incompletos
-            </label>
-          </div>
+              {pendingInWindow.length === 0 ? (
+                <option value="">Sin días pendientes</option>
+              ) : (
+                pendingInWindow.map((d) => (
+                  <option key={d.date} value={d.date}>
+                    {formatCorteDateDisplay(d.date)}
+                    {d.date === dateWindow.opDay ? ' · operativo' : ''}
+                    {d.complete && !d.corteCompleto
+                      ? ' · TPV listo'
+                      : d.accounted
+                        ? ` · ${d.accounted}/3`
+                        : ' · sin TPV'}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -739,9 +721,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
 
         {!loading && !error && visibleDays.length === 0 ? (
           <p className="mt-6 text-center text-sm text-slate-500">
-            {jumpDate
-              ? `No hay registros para ${jumpDate}.`
-              : 'Aún no hay cortes TPV ni cierres RPT.'}
+            No hay días pendientes en los últimos 7 días.
           </p>
         ) : null}
 
@@ -875,6 +855,23 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                             Sin cierre RPT guardado para este día.
                           </p>
                         )}
+
+                        <div className="mb-4">
+                          <Link
+                            href={`/staff/corte?date=${encodeURIComponent(day.date)}`}
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-bold text-white"
+                            style={{ backgroundColor: SUITE.orange }}
+                          >
+                            {day.corteCompleto
+                              ? 'Abrir corte del día'
+                              : 'Completar / cerrar corte'}
+                          </Link>
+                          <p className="mt-1.5 text-[11px] text-slate-400">
+                            Abre el flujo Staff (fotos + WI / Eventos / tómbola)
+                            para esta fecha. Master puede días pendientes hasta
+                            7 atrás.
+                          </p>
+                        </div>
 
                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                           {TPV_TERMINALS.map((terminal) => {

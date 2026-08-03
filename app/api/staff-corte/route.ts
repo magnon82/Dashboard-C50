@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server';
+import { canAccessAdmin } from '@/app/lib/auth';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
-  assertWritableCorteDate,
+  assertStaffCorteWritableDate,
+  isTpvSchemaError,
   requireVentasSession,
+  tpvSchemaHint,
+  tpvSchemaMissingResponse,
 } from '@/app/lib/tpv-api';
 import {
+  adminCorteDateWindow,
   asTpvRow,
   defaultCorteDateCdmx,
+  listAdminLookbackDates,
   staffCorteDateWindow,
 } from '@/app/lib/tpv-cortes';
 import {
@@ -17,6 +23,7 @@ import {
   efectivoMismatch,
   efectivoTombolaMustMatch,
   parseMoneyInput,
+  shortageCloseNote,
   sumInfocajaDay,
 } from '@/app/lib/staff-rpt';
 
@@ -27,12 +34,20 @@ async function loadTpvUploads(
   sb: ReturnType<typeof getServiceSupabase>,
   corteDate: string
 ) {
+  // No order by photo_kind: si la columna falta, select('*') aún puede responder.
   const { data, error } = await sb
     .from('tpv_corte_uploads')
     .select('*')
     .eq('corte_date', corteDate)
     .order('terminal_number', { ascending: true });
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isTpvSchemaError(error.message)) {
+      const err = new Error(error.message) as Error & { schemaMissing?: boolean };
+      err.schemaMissing = true;
+      throw err;
+    }
+    throw new Error(error.message);
+  }
   return (data || []).map((r) => asTpvRow(r as Record<string, unknown>));
 }
 
@@ -79,18 +94,20 @@ async function loadRpt(
     .eq('rpt_date', date)
     .maybeSingle();
   if (error) {
-    if (/relation|does not exist|schema cache/i.test(error.message)) {
+    if (isTpvSchemaError(error.message)) {
       return {
         rpt: null,
         rptError:
-          'Falta la tabla staff_rpt_diario. Ejecuta supabase/staff_rpt_diario.sql',
+          'Falta la tabla staff_rpt_diario. Ejecuta supabase/staff_corte_prod_fix.sql',
+        schemaMissing: true as const,
       };
     }
-    return { rpt: null, rptError: error.message };
+    return { rpt: null, rptError: error.message, schemaMissing: false as const };
   }
   return {
     rpt: data ? asStaffRptRow(data as Record<string, unknown>) : null,
     rptError: null as string | null,
+    schemaMissing: false as const,
   };
 }
 
@@ -156,7 +173,10 @@ export async function GET(request: Request) {
     const sb = getServiceSupabase();
     const uploads = await loadTpvUploads(sb, date);
     await attachSignedUrls(sb, uploads);
-    const { rpt, rptError } = await loadRpt(sb, date);
+    const { rpt, rptError, schemaMissing: rptSchemaMissing } = await loadRpt(
+      sb,
+      date
+    );
     const { infocaja, infocajaError } = await loadInfocajaDay(sb, date);
     const status = buildStaffCorteStatus(date, uploads, rpt);
     const bancos = status.bancos;
@@ -173,20 +193,51 @@ export async function GET(request: Request) {
 
     let recent: ReturnType<typeof asStaffRptRow>[] = [];
     if (wantRecent) {
-      const { data: recentRows } = await sb
+      const { data: recentRows, error: recentErr } = await sb
         .from(STAFF_RPT_TABLE)
         .select('*')
         .order('rpt_date', { ascending: false })
         .limit(10);
-      recent = (recentRows || []).map((r) =>
-        asStaffRptRow(r as Record<string, unknown>)
-      );
+      if (!recentErr) {
+        recent = (recentRows || []).map((r) =>
+          asStaffRptRow(r as Record<string, unknown>)
+        );
+      }
     }
 
     const cashCheck = efectivoMismatch(
       rpt?.efectivo_contado ?? null,
       infocaja.hasEfectivo ? infocaja.efectivo : null
     );
+
+    const isMaster = canAccessAdmin(auth);
+    let adminLookback:
+      | {
+          minDate: string;
+          maxDate: string;
+          days: DayWindowSummary[];
+        }
+      | undefined;
+    if (isMaster) {
+      const win = adminCorteDateWindow();
+      const lookbackDates = listAdminLookbackDates();
+      const daySummaries = await Promise.all(
+        lookbackDates.map((d) =>
+          d === date
+            ? Promise.resolve(selectedSummary)
+            : d === opDay
+              ? Promise.resolve(opSummary)
+              : d === prevDay
+                ? Promise.resolve(prevSummary)
+                : loadDayWindowSummary(sb, d)
+        )
+      );
+      adminLookback = {
+        minDate: win.minDate,
+        maxDate: win.maxDate,
+        days: daySummaries,
+      };
+    }
 
     return NextResponse.json({
       date,
@@ -198,22 +249,34 @@ export async function GET(request: Request) {
         op: opSummary,
         prev: prevSummary,
       },
+      adminLookback: adminLookback || null,
+      isMasterAdmin: isMaster,
       uploads,
       bancos,
       infocaja,
       infocajaError,
       rpt,
       rptError,
+      schemaMissing: rptSchemaMissing || undefined,
       status,
       cashCheck,
       recent,
     });
   } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al cargar corte';
+    const schemaMissing =
+      (e as { schemaMissing?: boolean })?.schemaMissing ||
+      isTpvSchemaError(msg);
+    if (schemaMissing) {
+      return tpvSchemaMissingResponse(msg, {
+        defaultDate: opDay,
+        staffPrevDate: prevDay,
+      });
+    }
     return NextResponse.json(
       {
-        error: e instanceof Error ? e.message : 'Error al cargar corte',
-        hint:
-          '¿Ejecutaste supabase/staff_corte_prod_fix.sql (o tpv_cortes.sql + staff_rpt_diario.sql)?',
+        error: msg,
+        hint: tpvSchemaHint(msg),
         defaultDate: opDay,
         staffPrevDate: prevDay,
         dateWindow: {
@@ -243,10 +306,10 @@ export async function GET(request: Request) {
 /**
  * PUT /api/staff-corte — Cerrar / actualizar cierre del día (upsert 1 fila).
  * Body JSON: { date?, wi_amount, eventos_amount, efectivo_tombola?,
- *              efectivo_contado, notes? }
+ *              efectivo_contado, notes?, acknowledge_shortage? }
  * Bancos y propinas se toman de TPV (obligatorio día completo + montos).
- * efectivo_contado obligatorio (= tómbola / «Efectivo en Tómbola»); si se envía
- * tómbola, debe coincidir. Si hay Infocaja Efectivo, no puede ser menor.
+ * efectivo_contado obligatorio (= tómbola). Si tómbola < Infocaja: warning;
+ * se permite cerrar solo con acknowledge_shortage=true (faltante real).
  */
 export async function PUT(request: Request) {
   const auth = await requireVentasSession();
@@ -260,7 +323,7 @@ export async function PUT(request: Request) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json({ error: 'Fecha inválida' }, { status: 400 });
     }
-    const dateGate = assertWritableCorteDate(auth, date);
+    const dateGate = assertStaffCorteWritableDate(auth, date);
     if (dateGate) return dateGate;
 
     const wi = parseMoneyInput(body.wi_amount);
@@ -311,13 +374,27 @@ export async function PUT(request: Request) {
     const tombola = efectivoContado;
 
     const notesRaw = body.notes;
-    const notes =
+    let notes =
       notesRaw == null || String(notesRaw).trim() === ''
         ? null
         : String(notesRaw).trim().slice(0, 2000);
 
+    const acknowledgeShortage =
+      body.acknowledge_shortage === true ||
+      body.acknowledge_shortage === 'true' ||
+      body.acknowledge_shortage === 1;
+
     const sb = getServiceSupabase();
-    const uploads = await loadTpvUploads(sb, date);
+    let uploads;
+    try {
+      uploads = await loadTpvUploads(sb, date);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isTpvSchemaError(msg)) {
+        return tpvSchemaMissingResponse(msg);
+      }
+      throw e;
+    }
     const bancos = buildBancosFromTpv(uploads, date);
 
     if (!bancos.canSaveRpt) {
@@ -336,17 +413,32 @@ export async function PUT(request: Request) {
       efectivoContado,
       infocaja.hasEfectivo ? infocaja.efectivo : null
     );
-    if (cashCheck.belowInfocaja) {
+
+    // Regla ops: tómbola < Infocaja = warning + cierre con confirmación explícita.
+    // No hard-blockear faltantes reales (p. ej. $259 vs $5,817).
+    if (cashCheck.belowInfocaja && !acknowledgeShortage) {
       return NextResponse.json(
         {
-          error: cashCheck.message || 'Efectivo en tómbola menor que Infocaja',
+          error:
+            cashCheck.message ||
+            'Efectivo en tómbola menor que Infocaja. Confirma el faltante para cerrar.',
           cashCheck,
+          requiresShortageAck: true,
           blockers: [
-            'El efectivo en tómbola no puede ser menor que el efectivo de Infocaja.',
+            'Confirma el faltante de efectivo (tómbola < Infocaja) para poder cerrar.',
           ],
         },
         { status: 409 }
       );
+    }
+
+    if (cashCheck.belowInfocaja && acknowledgeShortage) {
+      const auto = shortageCloseNote(
+        efectivoContado,
+        infocaja.efectivo
+      );
+      notes = notes ? `${notes}\n${auto}`.slice(0, 2000) : auto;
+    } else {
     }
 
     const now = new Date().toISOString();
@@ -368,11 +460,15 @@ export async function PUT(request: Request) {
       updated_at: now,
     };
 
-    const { data: existing } = await sb
+    const { data: existing, error: existErr } = await sb
       .from(STAFF_RPT_TABLE)
       .select('id, created_by')
       .eq('rpt_date', date)
       .maybeSingle();
+
+    if (existErr && isTpvSchemaError(existErr.message)) {
+      return tpvSchemaMissingResponse(existErr.message);
+    }
 
     let saved;
     if (existing?.id) {
@@ -383,10 +479,13 @@ export async function PUT(request: Request) {
         .select('*')
         .single();
       if (error) {
+        if (isTpvSchemaError(error.message)) {
+          return tpvSchemaMissingResponse(error.message);
+        }
         return NextResponse.json(
           {
             error: error.message,
-            hint: '¿Ejecutaste supabase/staff_rpt_diario.sql?',
+            hint: tpvSchemaHint(error.message),
           },
           { status: 500 }
         );
@@ -404,10 +503,13 @@ export async function PUT(request: Request) {
         .select('*')
         .single();
       if (error) {
+        if (isTpvSchemaError(error.message)) {
+          return tpvSchemaMissingResponse(error.message);
+        }
         return NextResponse.json(
           {
             error: error.message,
-            hint: '¿Ejecutaste supabase/staff_rpt_diario.sql?',
+            hint: tpvSchemaHint(error.message),
           },
           { status: 500 }
         );
@@ -425,12 +527,13 @@ export async function PUT(request: Request) {
       bancos,
       infocaja,
       cashCheck,
-      warning: null,
+      warning: cashCheck.belowInfocaja ? cashCheck.message : null,
     });
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'Error al cerrar corte' },
-      { status: 500 }
-    );
+    const msg = e instanceof Error ? e.message : 'Error al cerrar corte';
+    if (isTpvSchemaError(msg)) {
+      return tpvSchemaMissingResponse(msg);
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

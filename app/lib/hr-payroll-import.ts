@@ -507,6 +507,10 @@ export type BaseDatosRow = {
   sueldo_diario: number | null;
   phone: string | null;
   email: string | null;
+  /** Folio CURP si viene en Excel (columna CURP). */
+  curp: string | null;
+  /** NSS IMSS si viene en Excel (columna NSS). */
+  nss: string | null;
 };
 
 export function parseBaseDatosPersonal(
@@ -516,9 +520,14 @@ export function parseBaseDatosPersonal(
   const sheetName =
     wb.SheetNames.find((n) => /activo/i.test(n)) || wb.SheetNames[0];
   const rows = sheetMatrix(wb, sheetName);
-  const headerIdx = rows.findIndex((r) =>
-    normalizePersonName(cellStr(r?.[5] ?? r?.[4])).includes('nombre completo')
-  );
+  // Buscar fila de encabezados por label (sin sort de tokens de nombre).
+  const headerIdx = rows.findIndex((r) => {
+    if (!Array.isArray(r)) return false;
+    return r.some((cell) => {
+      const h = normalizeHeaderLabel(cellStr(cell));
+      return h === 'nombre completo' || h.includes('nombre completo');
+    });
+  });
   if (headerIdx < 0) return [];
   const header = rows[headerIdx];
   const iName = headerIndex(header, 'nombre completo');
@@ -533,14 +542,19 @@ export function parseBaseDatosPersonal(
   );
   const iSd = headerIndex(header, 's.d.', 'sd', 'sueldo diario');
   // Teléfono suele estar en columnas variables; buscar header
-  const iPhone = headerIndex(header, 'telefono', 'teléfono', 'celular');
+  const iPhone = headerIndex(header, 'telefono', 'teléfono', 'celular', 'tel cel');
+  const iCurp = headerIndex(header, 'curp');
+  const iNss = headerIndex(header, 'nss', 'numero de seguro social', 'imss');
+  const iEmail = headerIndex(header, 'email', 'correo', 'e mail');
 
   const out: BaseDatosRow[] = [];
   for (let r = headerIdx + 1; r < rows.length; r++) {
     const row = rows[r] || [];
-    const full_name = cellStr(row[iName >= 0 ? iName : 5]);
+    const full_name = cellStr(row[iName >= 0 ? iName : 6]);
     if (!full_name || full_name.length < 3) continue;
     const st = cellStr(row[iStatus >= 0 ? iStatus : 1]).toUpperCase();
+    const curpRaw = iCurp >= 0 ? cellStr(row[iCurp]) : '';
+    const nssRaw = iNss >= 0 ? cellStr(row[iNss]) : '';
     out.push({
       full_name: full_name.replace(/\s+/g, ' '),
       status: st.includes('BAJA') ? 'baja' : 'activo',
@@ -551,7 +565,9 @@ export function parseBaseDatosPersonal(
         iNacimiento >= 0 ? isoFromUnknownDate(row[iNacimiento]) : null,
       sueldo_diario: parseLooseNumber(row[iSd]),
       phone: iPhone >= 0 ? cellStr(row[iPhone]) || null : guessPhone(row),
-      email: null,
+      email: iEmail >= 0 ? cellStr(row[iEmail]) || null : null,
+      curp: curpRaw || null,
+      nss: nssRaw || null,
     });
   }
   return out;

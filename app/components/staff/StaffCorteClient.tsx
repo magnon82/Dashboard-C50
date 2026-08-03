@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   TPV_MIN_LONG_SIDE,
   TPV_MIN_SHARPNESS,
@@ -9,6 +9,7 @@ import {
   TPV_CORTE_DATE_HELP,
   computeNetoBanco,
   defaultCorteDateCdmx,
+  isAdminWritableCorteDate,
   moneyMx,
   photoKindLabel,
   staffCorteDateWindow,
@@ -28,6 +29,7 @@ import type {
 } from '@/app/lib/staff-rpt';
 import { parseMoneyInput } from '@/app/lib/staff-rpt';
 import { SUITE } from '@/app/lib/themes';
+import { useSession } from '@/app/lib/useSession';
 
 type PendingFile = {
   file: File;
@@ -52,6 +54,12 @@ type DateWindowPayload = {
   prev: DayWindowSummary;
 };
 
+type AdminLookbackPayload = {
+  minDate: string;
+  maxDate: string;
+  days: DayWindowSummary[];
+};
+
 type DayPayload = {
   date: string;
   uploads: TpvCorteUpload[];
@@ -69,6 +77,8 @@ type DayPayload = {
   };
   recent: StaffRptRow[];
   dateWindow?: DateWindowPayload;
+  adminLookback?: AdminLookbackPayload | null;
+  isMasterAdmin?: boolean;
   staffPrevDate?: string;
   defaultDate?: string;
 };
@@ -129,8 +139,16 @@ function MoneyInput({
 }
 
 export function StaffCorteClient() {
+  const { user } = useSession();
+  const isMaster = Boolean(user?.canAccessAdmin);
   const localWindow = staffCorteDateWindow();
-  const [corteDate, setCorteDate] = useState(defaultCorteDateCdmx);
+  const [corteDate, setCorteDate] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const q = new URLSearchParams(window.location.search).get('date')?.slice(0, 10);
+      if (q && /^\d{4}-\d{2}-\d{2}$/.test(q)) return q;
+    }
+    return defaultCorteDateCdmx();
+  });
   const [dateWindow, setDateWindow] = useState<DateWindowPayload>(() => ({
     opDay: localWindow.opDay,
     prevDay: localWindow.prevDay,
@@ -149,9 +167,14 @@ export function StaffCorteClient() {
       unknown: true,
     },
   }));
+  const [adminLookback, setAdminLookback] = useState<AdminLookbackPayload | null>(
+    null
+  );
   const opDay = dateWindow.opDay;
   const prevDay = dateWindow.prevDay;
   const isPrevDay = corteDate === prevDay;
+  const isOutsideStaffWindow =
+    corteDate !== opDay && corteDate !== prevDay;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -169,9 +192,16 @@ export function StaffCorteClient() {
   const [eventos, setEventos] = useState('');
   /** Fuente de verdad: contado = tómbola (mismo depósito). */
   const [efectivoContado, setEfectivoContado] = useState('');
+  /** Faltante tómbola < Infocaja: cierre permitido solo con confirmación explícita. */
+  const [ackShortage, setAckShortage] = useState(false);
   const [notes, setNotes] = useState('');
 
-  // Mantener selección dentro de hoy / ayer si cruza la ventana CDMX.
+  const pendingAdminDays = useMemo(() => {
+    if (!adminLookback?.days?.length) return [];
+    return adminLookback.days.filter((d) => !d.corteCompleto && !d.unknown);
+  }, [adminLookback]);
+
+  // Mantener selección dentro de la ventana writable (staff: hoy/ayer; master: 7 días).
   useEffect(() => {
     function syncWritableDate() {
       const { opDay: nextOp, prevDay: nextPrev } = staffCorteDateWindow();
@@ -197,14 +227,25 @@ export function StaffCorteClient() {
               },
             }
       );
-      setCorteDate((prev) =>
-        prev === nextOp || prev === nextPrev ? prev : nextOp
-      );
+      setCorteDate((prev) => {
+        if (prev === nextOp || prev === nextPrev) return prev;
+        if (isMaster && isAdminWritableCorteDate(prev)) return prev;
+        return nextOp;
+      });
     }
     syncWritableDate();
     window.addEventListener('focus', syncWritableDate);
     return () => window.removeEventListener('focus', syncWritableDate);
-  }, []);
+  }, [isMaster]);
+
+  // Si llega ?date= y el usuario es Master, respetarlo dentro de la ventana.
+  useEffect(() => {
+    if (!isMaster) return;
+    const q = new URLSearchParams(window.location.search).get('date')?.slice(0, 10);
+    if (!q || !/^\d{4}-\d{2}-\d{2}$/.test(q)) return;
+    if (!isAdminWritableCorteDate(q)) return;
+    setCorteDate((prev) => (prev === q ? prev : q));
+  }, [isMaster]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -232,6 +273,11 @@ export function StaffCorteClient() {
           opDay: fallbackOp,
           prevDay: fallbackPrev,
         }));
+      }
+      if (data.adminLookback && typeof data.adminLookback === 'object') {
+        setAdminLookback(data.adminLookback as AdminLookbackPayload);
+      } else if (data.isMasterAdmin !== true) {
+        setAdminLookback(null);
       }
       if (!res.ok) {
         setError(
@@ -280,6 +326,10 @@ export function StaffCorteClient() {
 
   function selectCorteDate(next: string) {
     if (next === corteDate) return;
+    if (!isMaster && next !== opDay && next !== prevDay) return;
+    if (isMaster && !isAdminWritableCorteDate(next) && next !== opDay && next !== prevDay) {
+      return;
+    }
     clearPending();
     setMsg(null);
     setError(null);
@@ -291,6 +341,11 @@ export function StaffCorteClient() {
     setActiveTerminal(1);
     setActiveKind('venta');
     setCorteDate(next);
+    if (typeof window !== 'undefined' && isMaster) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('date', next);
+      window.history.replaceState({}, '', url.toString());
+    }
   }
 
   async function onPickFile(file: File | null) {
@@ -514,9 +569,11 @@ export function StaffCorteClient() {
         setError('Indica el efectivo en tómbola (obligatorio)');
         return;
       }
-      if (info?.hasEfectivo && contadoNum < info.efectivo) {
+      const below =
+        Boolean(info?.hasEfectivo) && contadoNum < (info?.efectivo ?? 0);
+      if (below && !ackShortage) {
         setError(
-          `Efectivo en tómbola (${moneyMx(contadoNum)}) es menor que Infocaja (${moneyMx(info.efectivo)}). Corrige el monto antes de cerrar.`
+          `Efectivo en tómbola (${moneyMx(contadoNum)}) es menor que Infocaja (${moneyMx(info!.efectivo)}). Confirma el faltante para poder cerrar.`
         );
         return;
       }
@@ -531,6 +588,7 @@ export function StaffCorteClient() {
           efectivo_tombola: String(contadoNum),
           efectivo_contado: String(contadoNum),
           notes: notes || null,
+          acknowledge_shortage: below ? true : undefined,
         }),
       });
       const data = await readTpvApiJson(res);
@@ -580,7 +638,7 @@ export function StaffCorteClient() {
   const canCerrarCorte =
     Boolean(bancos?.canSaveRpt) &&
     efectivoContadoOk &&
-    !efectivoBelowInfocaja;
+    (!efectivoBelowInfocaja || ackShortage);
 
   const prevIncomplete =
     !dateWindow.prev.unknown && !dateWindow.prev.corteCompleto;
@@ -603,10 +661,10 @@ export function StaffCorteClient() {
           <button
             type="button"
             role="tab"
-            aria-selected={!isPrevDay}
+            aria-selected={!isPrevDay && !isOutsideStaffWindow}
             onClick={() => selectCorteDate(opDay)}
             className={`rounded-xl px-3 py-2.5 text-left text-sm transition ${
-              !isPrevDay
+              !isPrevDay && !isOutsideStaffWindow
                 ? 'bg-slate-900 font-semibold text-white'
                 : 'bg-slate-50 font-medium text-slate-700 ring-1 ring-slate-200'
             }`}
@@ -615,7 +673,7 @@ export function StaffCorteClient() {
               Hoy
               <span
                 className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                  !isPrevDay
+                  !isPrevDay && !isOutsideStaffWindow
                     ? 'bg-white/15 text-slate-100'
                     : dateWindow.op.corteCompleto
                       ? 'bg-emerald-100 text-emerald-800'
@@ -627,7 +685,9 @@ export function StaffCorteClient() {
             </span>
             <span
               className={`mt-0.5 block text-xs capitalize ${
-                !isPrevDay ? 'text-slate-300' : 'text-slate-500'
+                !isPrevDay && !isOutsideStaffWindow
+                  ? 'text-slate-300'
+                  : 'text-slate-500'
               }`}
             >
               {formatCorteDateDisplay(opDay)}
@@ -669,6 +729,54 @@ export function StaffCorteClient() {
             </span>
           </button>
         </div>
+
+        {isMaster ? (
+          <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+              Master · días pendientes
+            </p>
+            {pendingAdminDays.length > 0 ? (
+              <label className="block text-xs font-semibold text-slate-600">
+                Pendientes (últimos 7)
+                <select
+                  value={
+                    pendingAdminDays.some((d) => d.date === corteDate)
+                      ? corteDate
+                      : pendingAdminDays[0].date
+                  }
+                  onChange={(e) => {
+                    const v = e.target.value.slice(0, 10);
+                    if (v) selectCorteDate(v);
+                  }}
+                  className="mt-1 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm capitalize"
+                >
+                  {pendingAdminDays.map((d) => (
+                    <option key={d.date} value={d.date}>
+                      {formatCorteDateDisplay(d.date)} ·{' '}
+                      {corteStatusLabel(d)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="text-xs text-slate-500">
+                No hay días pendientes en la ventana Master.
+              </p>
+            )}
+            {isOutsideStaffWindow ? (
+              <p className="text-xs font-medium text-amber-900">
+                Editando día pendiente · {formatCorteDateDisplay(corteDate)}
+              </p>
+            ) : null}
+            <Link
+              href="/admin/cortes-tpv"
+              className="inline-flex text-xs font-semibold underline"
+              style={{ color: SUITE.navy }}
+            >
+              Volver a Cortes TPV (Master)
+            </Link>
+          </div>
+        ) : null}
 
         {showPrevCatchUpBanner ? (
           <button
@@ -1183,24 +1291,39 @@ export function StaffCorteClient() {
         <MoneyInput
           label="Efectivo en Tómbola"
           value={efectivoContado}
-          onChange={setEfectivoContado}
+          onChange={(v) => {
+            setEfectivoContado(v);
+            setAckShortage(false);
+          }}
           required
           hint={
             infocaja?.hasEfectivo
-              ? 'Obligatorio. Monto que depositas en tómbola. No puede ser menor que Infocaja.'
+              ? 'Obligatorio. Monto que depositas en tómbola. Si es menor que Infocaja, confirma el faltante.'
               : 'Obligatorio. Monto que depositas en tómbola.'
           }
         />
         {liveCashDelta != null && liveCashDelta < 0 ? (
-          <p
+          <div
             role="alert"
-            className="rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-950"
+            className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950"
           >
-            Alerta: el efectivo en tómbola ({moneyMx(efectivoContadoNum ?? 0)}){' '}
-            es menor que Infocaja ({moneyMx(infocaja?.efectivo ?? 0)}). Faltan{' '}
-            {moneyMx(Math.abs(liveCashDelta))}. Corrige el monto para poder
-            cerrar el corte.
-          </p>
+            <p className="font-medium">
+              Alerta: el efectivo en tómbola ({moneyMx(efectivoContadoNum ?? 0)}){' '}
+              es menor que Infocaja ({moneyMx(infocaja?.efectivo ?? 0)}). Faltan{' '}
+              {moneyMx(Math.abs(liveCashDelta))}.
+            </p>
+            <label className="flex cursor-pointer items-start gap-2 text-sm font-semibold">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 shrink-0"
+                checked={ackShortage}
+                onChange={(e) => setAckShortage(e.target.checked)}
+              />
+              <span>
+                Confirmo el faltante y quiero cerrar el corte con este monto
+              </span>
+            </label>
+          </div>
         ) : null}
         {efectivoContado.trim() !== '' && !efectivoContadoOk ? (
           <p role="alert" className="text-sm text-red-700">
@@ -1246,9 +1369,9 @@ export function StaffCorteClient() {
           <p className="text-center text-xs text-slate-500">
             Indica el efectivo en tómbola para poder cerrar
           </p>
-        ) : efectivoBelowInfocaja ? (
-          <p className="text-center text-xs text-red-700">
-            El efectivo en tómbola es menor que Infocaja — no se puede cerrar
+        ) : efectivoBelowInfocaja && !ackShortage ? (
+          <p className="text-center text-xs text-amber-800">
+            Marca la casilla de faltante para poder cerrar
           </p>
         ) : null}
       </section>

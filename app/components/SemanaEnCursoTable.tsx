@@ -2,6 +2,10 @@
 
 import { Card, Metric, Text } from '@tremor/react';
 import { SemanaEnCursoChart } from '@/app/components/SemanaEnCursoChart';
+import {
+  filterControlClass,
+  filterSelectClass,
+} from '@/app/components/SectionHeader';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import { formatShort, type DaySale } from '@/app/lib/ventas-semana';
 
@@ -43,11 +47,24 @@ export type WeekToDateData = {
   comensalesChangePct: number | null;
 };
 
+export type SemanaWeekOption = {
+  week: number;
+  label: string;
+};
+
 export type SemanaEnCursoTableProps = {
   weekToDate: WeekToDateData;
   /** Show DESC./CANC. column (Ventas). Hide for Reportes Socios. Default true. */
   showDescCanc?: boolean;
   className?: string;
+  /**
+   * Selector de semanas del año en curso (más reciente primero).
+   * Si no se pasa, no se muestra el control.
+   */
+  weekOptions?: SemanaWeekOption[];
+  /** Semana seleccionada (Acumulado). Default = weekToDate.weekNumber. */
+  selectedWeek?: number;
+  onWeekChange?: (week: number) => void;
 };
 
 /** Comparativo semana en curso: año actual | año anterior | Var. */
@@ -55,6 +72,9 @@ export function SemanaEnCursoTable({
   weekToDate,
   showDescCanc = true,
   className = 'mb-8',
+  weekOptions,
+  selectedWeek,
+  onWeekChange,
 }: SemanaEnCursoTableProps) {
   const cardClass = 'rounded-[24px] border-0 p-5 md:p-6';
   const cardStyle = {
@@ -64,28 +84,64 @@ export function SemanaEnCursoTable({
 
   const yearColSpan = showDescCanc ? 5 : 4;
   const daysWithSale = weekToDate.days.filter((d) => d.total > 0).length;
+  const isCurrentWeekWtd = weekToDate.asOf < weekToDate.sundayKey;
+  const showWeekSelect =
+    Array.isArray(weekOptions) &&
+    weekOptions.length > 1 &&
+    typeof onWeekChange === 'function';
+  const activeWeek = selectedWeek ?? weekToDate.weekNumber;
+  const latestOptionWeek = weekOptions?.[0]?.week;
+  const viewingPriorWeek =
+    latestOptionWeek != null && activeWeek > 0 && activeWeek < latestOptionWeek;
+
+  const title = viewingPriorWeek
+    ? `Ventas de la semana${weekToDate.weekNumber > 0 ? ` · S${weekToDate.weekNumber}` : ''}`
+    : `Ventas de la semana en curso${weekToDate.weekNumber > 0 ? ` · S${weekToDate.weekNumber}` : ''}`;
+
+  const totalLabel = isCurrentWeekWtd ? 'Total (lun–hoy)' : 'Total (lun–dom)';
 
   return (
     <Card
       className={`${className} ${cardClass}`}
       style={{ ...cardStyle, borderTop: `4px solid ${SUITE.navy}` }}
     >
-      <div className="mb-4">
-        <Text
-          className="text-xs font-bold uppercase tracking-wide"
-          style={{ color: theme.kpi[2]?.label ?? theme.kpi[0].label }}
-        >
-          Ventas de la semana en curso
-          {weekToDate.weekNumber > 0 ? ` · S${weekToDate.weekNumber}` : ''}
-        </Text>
-        <Metric className="mt-1 text-3xl font-bold text-slate-900 md:text-4xl">
-          {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
-        </Metric>
-        <Text className="mt-1 text-sm text-slate-500">
-          {formatShort(weekToDate.mondayKey)} – {formatShort(weekToDate.sundayKey)}
-          {' · '}
-          {daysWithSale} día{daysWithSale !== 1 ? 's' : ''} con venta
-        </Text>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <Text
+            className="text-xs font-bold uppercase tracking-wide"
+            style={{ color: theme.kpi[2]?.label ?? theme.kpi[0].label }}
+          >
+            {title}
+          </Text>
+          <Metric className="mt-1 text-3xl font-bold text-slate-900 md:text-4xl">
+            {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
+          </Metric>
+          <Text className="mt-1 text-sm text-slate-500">
+            {formatShort(weekToDate.mondayKey)} – {formatShort(weekToDate.sundayKey)}
+            {' · '}
+            {daysWithSale} día{daysWithSale !== 1 ? 's' : ''} con venta
+          </Text>
+        </div>
+        {showWeekSelect ? (
+          <label className={`${filterControlClass} bg-white shadow-sm`}>
+            <span className="shrink-0 text-slate-500">Semana</span>
+            <select
+              className={`${filterSelectClass} min-w-[12rem] max-w-[18rem] cursor-pointer bg-white`}
+              value={activeWeek > 0 ? activeWeek : ''}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v) && v >= 1) onWeekChange!(v);
+              }}
+              aria-label="Consultar semana del año en curso"
+            >
+              {weekOptions!.map((o) => (
+                <option key={o.week} value={o.week}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
       {weekToDate.days.length === 0 ? (
         <p className="py-4 text-center text-slate-400">Sin datos Infocaja esta semana.</p>
@@ -218,7 +274,7 @@ export function SemanaEnCursoTable({
             <tfoot>
               <tr className="font-bold text-white" style={{ backgroundColor: theme.tableFoot }}>
                 <td className="px-4 py-2.5" colSpan={2}>
-                  Total (lun–hoy)
+                  {totalLabel}
                 </td>
                 <td className="px-3 py-2.5 text-right tabular-nums">
                   {weekToDate.total > 0 ? money(weekToDate.total) : '—'}

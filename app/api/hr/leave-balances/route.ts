@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import { hrSchemaMissing, requireRrhhSession } from '@/app/lib/hr-api';
-import { todayIsoCdmx, type HrLeaveBalanceRow } from '@/app/lib/hr';
+import {
+  isLeaveExemptEmployee,
+  todayIsoCdmx,
+  type HrLeaveBalanceRow,
+} from '@/app/lib/hr';
 import { resolvePlantillaVigente } from '@/app/lib/hr-plantilla';
 import {
   findNominaEnCursoPeriod,
@@ -59,7 +63,10 @@ export async function GET() {
       });
     }
 
-    const employees = plantilla.employees;
+    // Socios / sin_vacaciones: fuera del control de vacaciones
+    const employees = plantilla.employees.filter(
+      (e) => !isLeaveExemptEmployee(e)
+    );
     const ids = employees.map((e) => e.id);
 
     let balanceMap = new Map<string, BalanceDb>();

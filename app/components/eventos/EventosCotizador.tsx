@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
 } from 'react';
@@ -13,6 +14,7 @@ import {
   EVENTOS_MAX_PAX,
   EVENTOS_MIN_PAX_GRUPOS,
   EVENTOS_NO_HOLD_WITHIN_DAYS,
+  EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT,
   EVENTOS_OPTIONAL_MENU_CHOICE_IDS,
   EVENTOS_QUOTE_LOCK_WITHIN_DAYS,
   EVENTOS_SERVICIO_PCT,
@@ -20,6 +22,7 @@ import {
   checkOptionalMenuChoicesOnLines,
   computeOptionalMenuChoiceDeadline,
   computeQuoteTotals,
+  earliestSelectableEventDateIso,
   formatIsoDateEs,
   formatMxn,
   formatQuoteLineDescription,
@@ -28,9 +31,9 @@ import {
   isEventosDrinkMenu,
   isPaxAllocationLine,
   isQuoteLockedByEventDate,
-  mexicoTodayIso,
   optionalMenuChoiceDeadlineCopy,
   quoteHasFoodLines,
+  quoteLineIsDrink,
   quoteLockMessage,
   resolveAnticipoDateFromActivity,
   resolveItemUnitPrice,
@@ -129,7 +132,10 @@ export function EventosCotizador({
     null
   );
   /** Nueva cotización: hoy civil CDMX (yyyy-mm-dd) para el input date nativo. */
-  const [eventDate, setEventDate] = useState(() => mexicoTodayIso());
+  const [eventDate, setEventDate] = useState(() =>
+    earliestSelectableEventDateIso()
+  );
+  const minEventDate = useMemo(() => earliestSelectableEventDateIso(), []);
   const [celebration, setCelebration] = useState('');
   const [notes, setNotes] = useState('');
   const [applyServicio, setApplyServicio] = useState(true);
@@ -152,11 +158,15 @@ export function EventosCotizador({
     phone: '',
     email: '',
   });
+  /** Resalta el CTA de bebidas tras agregar alimentos / pax completo. */
+  const [drinksCtaPulse, setDrinksCtaPulse] = useState(false);
+  const drinksCtaRef = useRef<HTMLDivElement | null>(null);
+  const itemPickerRef = useRef<HTMLDivElement | null>(null);
 
-  // Fallback en montaje: si aún no hay fecha (nueva cotización), usar hoy CDMX.
-  // No sobrescribe una fecha ya cargada o elegida.
+  // Fallback en montaje: si aún no hay fecha (nueva cotización), primera
+  // fecha con >72 h de anticipación. No sobrescribe una fecha ya cargada.
   useEffect(() => {
-    setEventDate((prev) => (prev ? prev : mexicoTodayIso()));
+    setEventDate((prev) => (prev ? prev : earliestSelectableEventDateIso()));
   }, []);
 
   /**
@@ -194,6 +204,16 @@ export function EventosCotizador({
 
   /** Bebidas solo tras agregar al menos una línea de alimentos. */
   const hasFoodInQuote = useMemo(() => quoteHasFoodLines(lines), [lines]);
+  const hasDrinkInQuote = useMemo(
+    () =>
+      lines.some((l) =>
+        quoteLineIsDrink({
+          category: l.category,
+          requires_food: l.requires_food,
+        })
+      ),
+    [lines]
+  );
 
   const selectedMenu =
     availableMenus.find((m) => m.id === menuId) ||
@@ -291,6 +311,29 @@ export function EventosCotizador({
 
   const quoteLocked = isQuoteLockedByEventDate(eventDate || null);
   const lockMsg = quoteLockMessage(eventDate || null);
+
+  // Al completar pax de alimentos, resaltar el CTA de bebidas bajo la tabla.
+  useEffect(() => {
+    if (
+      !hasFoodInQuote ||
+      hasDrinkInQuote ||
+      quoteLocked ||
+      drinkMenus.length === 0
+    ) {
+      return;
+    }
+    if (!paxAlloc.hasAllocLines || paxAlloc.remaining !== 0) return;
+    setDrinksCtaPulse(true);
+    const t = window.setTimeout(() => setDrinksCtaPulse(false), 5000);
+    return () => window.clearTimeout(t);
+  }, [
+    drinkMenus.length,
+    hasDrinkInQuote,
+    hasFoodInQuote,
+    paxAlloc.hasAllocLines,
+    paxAlloc.remaining,
+    quoteLocked,
+  ]);
 
   const anticipoDate = useMemo(() => {
     const c = clients.find((x) => x.id === clientId);
@@ -579,13 +622,36 @@ export function EventosCotizador({
         quantity: qty,
         unit_price: unitPrice,
         unit: item.unit || 'persona',
-        category: selectedMenu.category,
-        requires_food: selectedMenu.requires_food,
+        category: String(selectedMenu.category || ''),
+        requires_food: Boolean(selectedMenu.requires_food),
         includes_servicio: selectedMenu.includes_servicio,
         min_pax: item.min_pax ?? selectedMenu.min_pax ?? null,
         options: cleanOptions,
       },
     ]);
+
+    // Tras alimentos, avisar + llevar el CTA de bebidas a la vista (junto a la tabla).
+    if (isEventosCotizadorFoodMenu(selectedMenu)) {
+      const alreadyHadDrinks = lines.some((l) =>
+        quoteLineIsDrink({
+          category: l.category,
+          requires_food: l.requires_food,
+        })
+      );
+      if (!alreadyHadDrinks && drinkMenus.length > 0) {
+        setMsg(
+          'Línea de alimentos agregada. Elige bebidas abajo: Barra libre o Bebidas C50.'
+        );
+        setDrinksCtaPulse(true);
+        window.setTimeout(() => {
+          drinksCtaRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest',
+          });
+        }, 80);
+        window.setTimeout(() => setDrinksCtaPulse(false), 4500);
+      }
+    }
   }
 
   function removeLine(key: string) {
@@ -594,6 +660,54 @@ export function EventosCotizador({
       return;
     }
     setLines((prev) => prev.filter((l) => l.key !== key));
+  }
+
+  /** Cambia el catálogo a barra libre / Bebidas C50 (después de alimentos). */
+  function selectDrinkCatalog(nextId: string) {
+    if (quoteLocked) {
+      setErr(lockMsg || 'Cotización bloqueada por fecha del evento.');
+      return;
+    }
+    const next = availableMenus.find((m) => m.id === nextId);
+    if (!next || !isEventosDrinkMenu(next)) return;
+    if (!hasFoodInQuote) {
+      setErr(
+        'Primero agrega un menú de alimentos a la cotización; luego elige bebidas.'
+      );
+      return;
+    }
+    setErr('');
+    setMenuId(next.id);
+    const firstItem = next.items?.[0];
+    setItemId(firstItem?.id || '');
+    setChoices({});
+    // Bebidas por pieza/hora: no arrastrar el pax de alimentos como cantidad
+    if (firstItem && firstItem.unit !== 'persona') {
+      setLineQty(1);
+    }
+    setDrinksCtaPulse(false);
+    const nItems = next.items?.length || 0;
+    setMsg(
+      next.category === 'barra_libre'
+        ? nItems
+          ? `Catálogo: barra libre (${nItems} ítems). Elige nacional / internacional / refrescos abajo y agrega la línea.`
+          : 'Catálogo: barra libre sin ítems — revisa el seed de menús.'
+        : nItems
+          ? `Catálogo: Bebidas C50 (${nItems} ítems). Elige la bebida abajo (más pedidas primero) y agrega la línea.`
+          : 'Catálogo: Bebidas C50 sin ítems — revisa el seed de menús.'
+    );
+    window.setTimeout(() => {
+      drinksCtaRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }, 60);
+  }
+
+  function drinkMenuLabel(m: EventMenu): string {
+    if (m.category === 'barra_libre') return 'Barra libre';
+    if (m.code === 'bebidas_a_la_carta') return 'Bebidas C50';
+    return m.name;
   }
 
   /** Limpia líneas para armar otra cotización (mismo cliente / fecha / pax). */
@@ -1260,12 +1374,14 @@ export function EventosCotizador({
               <input
                 type="date"
                 value={eventDate}
+                min={minEventDate}
                 onChange={(e) => setEventDate(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Sin cambios si faltan {EVENTOS_QUOTE_LOCK_WITHIN_DAYS} días o
-                menos (hora CDMX).
+                No disponibles fechas a {EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT}{' '}
+                h o menos del evento (CDMX). Sin cambios de cotización si faltan{' '}
+                {EVENTOS_QUOTE_LOCK_WITHIN_DAYS} días o menos.
               </p>
             </label>
             <label className="text-sm">
@@ -1322,6 +1438,7 @@ export function EventosCotizador({
                   setMenuId(e.target.value);
                   setItemId('');
                   setChoices({});
+                  setErr('');
                 }}
                 disabled={quoteLocked}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
@@ -1337,7 +1454,13 @@ export function EventosCotizador({
                   </optgroup>
                 ) : null}
                 {drinkMenus.length > 0 ? (
-                  <optgroup label="2. Bebidas">
+                  <optgroup
+                    label={
+                      hasFoodInQuote
+                        ? '2. Bebidas (disponibles)'
+                        : '2. Bebidas (tras alimentos)'
+                    }
+                  >
                     {drinkMenus.map((m) => (
                       <option
                         key={m.id}
@@ -1346,11 +1469,8 @@ export function EventosCotizador({
                       >
                         {m.name}
                         {m.min_pax ? ` · min ${m.min_pax} pax` : ''}
-                        {m.category === 'barra_libre'
-                          ? ' (requiere alimentos)'
-                          : ''}
                         {m.code === 'bebidas_a_la_carta'
-                          ? ' (por pieza · Menú C50)'
+                          ? ' · por pieza · Menú C50'
                           : ''}
                         {!hasFoodInQuote ? ' · primero alimentos' : ''}
                       </option>
@@ -1359,21 +1479,58 @@ export function EventosCotizador({
                 ) : null}
               </select>
               <p className="mt-1 text-xs text-slate-500">
-                Primero alimentos, después bebidas
-                {foodMenus.length + drinkMenus.length > 0
-                  ? ` · ${foodMenus.length} alimentos / ${drinkMenus.length} bebidas`
-                  : ''}
-                {items.length ? ` · ${items.length} ítems en el menú` : ''}
-                {!hasFoodInQuote && drinkMenus.length > 0
-                  ? ' · Agrega una línea de alimentos para habilitar barra libre y bebidas C50'
-                  : selectedMenu?.category === 'barra_libre'
-                    ? ' · Barra libre: PDF eventos vigentes (requiere alimentos)'
-                    : selectedMenu?.code === 'bebidas_a_la_carta'
-                      ? ' · Bebidas: Menú C50 Esp (solo bebidas)'
-                      : ''}
+                {hasFoodInQuote
+                  ? isDrinkMenu
+                    ? 'Elige el ítem abajo y agrega la línea de bebidas a la cotización.'
+                    : 'Alimentos listos. Usa los botones Barra libre / Bebidas C50 bajo la tabla, o cambia este menú a Bebidas.'
+                  : 'Primero agrega una línea de alimentos; después se habilitan barra libre y Bebidas (Menú C50).'}
               </p>
             </label>
           </div>
+
+          {hasFoodInQuote && drinkMenus.length > 0 && !quoteLocked ? (
+            <div
+              className="mt-3 rounded-xl border px-3 py-2.5"
+              style={{
+                borderColor: isDrinkMenu ? SUITE.border : SUITE.orange,
+                backgroundColor: isDrinkMenu ? SUITE.pageBg : SUITE.orangeSoft,
+              }}
+              role="region"
+              aria-label="Atajo bebidas"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs font-bold" style={{ color: SUITE.navy }}>
+                  {isDrinkMenu
+                    ? 'Catálogo de bebidas activo'
+                    : 'Bebidas (atajo)'}
+                </p>
+                {drinkMenus.map((m) => {
+                  const active = m.id === menuId;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => selectDrinkCatalog(m.id)}
+                      className="inline-flex items-center rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors"
+                      style={{
+                        borderColor: active ? SUITE.navy : SUITE.border,
+                        backgroundColor: active ? '#E8F1F8' : '#fff',
+                        color: SUITE.navy,
+                      }}
+                      aria-pressed={active}
+                    >
+                      {drinkMenuLabel(m)}
+                    </button>
+                  );
+                })}
+                {!isDrinkMenu ? (
+                  <p className="text-[11px]" style={{ color: SUITE.muted }}>
+                    También aparecen bajo la tabla al agregar alimentos
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           {isDrinkMenu && topPedidas.length > 0 && !quoteLocked ? (
             <div
@@ -1497,6 +1654,8 @@ export function EventosCotizador({
           )}
 
           <div
+            ref={itemPickerRef}
+            id="cotizador-item-picker"
             className={`mt-3 grid grid-cols-1 items-end gap-3 ${
               choiceGroups.length === 0 &&
               (nextLineIsAlloc || selectedItem?.unit === 'persona')
@@ -1884,6 +2043,273 @@ export function EventosCotizador({
             </table>
           </div>
 
+          {hasFoodInQuote && drinkMenus.length > 0 && !quoteLocked ? (
+            <div
+              ref={drinksCtaRef}
+              id="cotizador-bebidas-cta"
+              className="mt-3 rounded-xl border-2 px-4 py-3.5 shadow-sm"
+              style={{
+                borderColor:
+                  drinksCtaPulse ||
+                  (!hasDrinkInQuote &&
+                    paxAlloc.hasAllocLines &&
+                    paxAlloc.remaining === 0)
+                    ? SUITE.orange
+                    : isDrinkMenu
+                      ? SUITE.navy
+                      : SUITE.orange,
+                backgroundColor:
+                  drinksCtaPulse || !hasDrinkInQuote
+                    ? SUITE.orangeSoft
+                    : SUITE.pageBg,
+                boxShadow:
+                  drinksCtaPulse
+                    ? `0 0 0 3px ${SUITE.orange}33`
+                    : undefined,
+              }}
+              role="region"
+              aria-label="Elegir bebidas"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p
+                    className="text-sm font-bold"
+                    style={{ color: SUITE.navy }}
+                  >
+                    {hasDrinkInQuote
+                      ? 'Agregar más bebidas'
+                      : paxAlloc.hasAllocLines && paxAlloc.remaining === 0
+                        ? 'Alimentos listos · elige bebidas'
+                        : 'Siguiente: bebidas'}
+                  </p>
+                  <p className="mt-0.5 text-xs" style={{ color: SUITE.muted }}>
+                    {isDrinkMenu
+                      ? 'Catálogo activo: elige el ítem aquí abajo y pulsa Agregar bebida.'
+                      : 'Plato fuerte / entrada / postre son alimentos. Las bebidas son otro catálogo: Barra libre o Menú C50.'}
+                  </p>
+                </div>
+                {!hasDrinkInQuote ? (
+                  <span
+                    className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide"
+                    style={{
+                      backgroundColor: '#fff',
+                      color: SUITE.orange,
+                      border: `1px solid ${SUITE.orange}`,
+                    }}
+                  >
+                    Paso 2
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {drinkMenus.map((m) => {
+                  const active = m.id === menuId;
+                  return (
+                    <button
+                      key={`cta-${m.id}`}
+                      type="button"
+                      onClick={() => selectDrinkCatalog(m.id)}
+                      className="inline-flex min-h-11 items-center rounded-xl border-2 px-4 py-2.5 text-sm font-bold transition-colors"
+                      style={{
+                        borderColor: active ? SUITE.navy : SUITE.border,
+                        backgroundColor: active ? SUITE.navy : '#fff',
+                        color: active ? '#fff' : SUITE.navy,
+                      }}
+                      aria-pressed={active}
+                    >
+                      {drinkMenuLabel(m)}
+                      {m.code === 'bebidas_a_la_carta' ? ' (Menú C50)' : ''}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <label className="mt-3 block text-sm">
+                <span className="font-semibold text-slate-700">
+                  Menú / catálogo (bebidas)
+                </span>
+                <select
+                  value={isDrinkMenu ? menuId : ''}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (id) selectDrinkCatalog(id);
+                  }}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"
+                >
+                  <option value="" disabled>
+                    {isDrinkMenu
+                      ? 'Catálogo de bebidas seleccionado'
+                      : 'Elegir barra libre o Bebidas C50…'}
+                  </option>
+                  {drinkMenus.map((m) => (
+                    <option key={`sel-${m.id}`} value={m.id}>
+                      {m.name}
+                      {m.code === 'bebidas_a_la_carta'
+                        ? ' · por pieza · Menú C50'
+                        : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {isDrinkMenu ? (
+                <div className="mt-3 space-y-3 border-t border-slate-200 pt-3">
+                  {topPedidas.length > 0 ? (
+                    <div>
+                      <p
+                        className="text-xs font-bold"
+                        style={{ color: SUITE.navy }}
+                      >
+                        Más pedidas en eventos
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {topPedidas.map((it, idx) => {
+                          const active = it.id === itemId;
+                          return (
+                            <button
+                              key={`paso2-top-${it.id}`}
+                              type="button"
+                              onClick={() => {
+                                setItemId(it.id);
+                                setChoices({});
+                              }}
+                              className="inline-flex max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors"
+                              style={{
+                                borderColor: active ? SUITE.navy : SUITE.border,
+                                backgroundColor: active ? '#E8F1F8' : '#fff',
+                                color: SUITE.navy,
+                              }}
+                              title={`${it.name} · pedida en ${it.os_count} OS`}
+                            >
+                              {idx < 3 ? (
+                                <span
+                                  className="shrink-0 text-[10px] font-bold uppercase tracking-wide"
+                                  style={{ color: SUITE.orange }}
+                                >
+                                  Top
+                                </span>
+                              ) : null}
+                              <span className="min-w-0 truncate font-semibold">
+                                {it.name}
+                              </span>
+                              <span
+                                className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
+                                style={{
+                                  backgroundColor: SUITE.orangeSoft,
+                                  color: SUITE.navySoft,
+                                }}
+                              >
+                                {it.os_count} OS
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="min-w-[14rem] flex-1 text-sm">
+                      <span
+                        className="font-semibold"
+                        style={{ color: SUITE.navy }}
+                      >
+                        Ítem
+                        {items.length
+                          ? ` · ${items.length} opciones`
+                          : ''}
+                      </span>
+                      <select
+                        value={itemId}
+                        onChange={(e) => setItemId(e.target.value)}
+                        disabled={!items.length}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
+                      >
+                        {!items.length ? (
+                          <option value="">Sin ítems en este menú</option>
+                        ) : (
+                          items.map((it) => (
+                            <option key={`paso2-${it.id}`} value={it.id}>
+                              {it.os_count && it.os_count > 0
+                                ? `★ ${it.name}`
+                                : it.name}
+                              {` · ${formatMxn(Number(it.unit_price))}/${it.unit}`}
+                              {it.os_count && it.os_count > 0
+                                ? ` · ${it.os_count} OS`
+                                : ''}
+                              {!it.price_verified ? ' *' : ''}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+                    <label className="w-28 text-sm">
+                      <span
+                        className="font-semibold"
+                        style={{ color: SUITE.navy }}
+                      >
+                        Cantidad
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        max={EVENTOS_MAX_PAX}
+                        value={lineQty}
+                        onChange={(e) => {
+                          const raw = Math.max(
+                            1,
+                            Math.floor(Number(e.target.value) || 1)
+                          );
+                          setLineQty(Math.min(EVENTOS_MAX_PAX, raw));
+                        }}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => addLine()}
+                      disabled={!canAddLine}
+                      className="h-10 rounded-lg px-4 text-sm font-bold text-white disabled:opacity-50"
+                      style={{ backgroundColor: SUITE.navy }}
+                    >
+                      Agregar bebida
+                    </button>
+                  </div>
+
+                  {!items.length ? (
+                    <p
+                      className="rounded-lg border px-3 py-2 text-xs"
+                      style={{
+                        borderColor: SUITE.border,
+                        backgroundColor: SUITE.orangeSoft,
+                        color: SUITE.navySoft,
+                      }}
+                    >
+                      Este catálogo no trae ítems. Recarga la página o
+                      re-ejecuta el seed de{' '}
+                      <code className="text-[11px]">
+                        supabase/eventos_module.sql
+                      </code>
+                      .
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {msg && !err ? (
+                <p
+                  className="mt-2 text-sm font-medium"
+                  style={{ color: SUITE.navy }}
+                  role="status"
+                >
+                  {msg}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           {paxAlloc.hasAllocLines && (
             <div
               className="mt-2 rounded-xl border px-4 py-2.5"
@@ -1988,7 +2414,9 @@ export function EventosCotizador({
             </p>
           )}
 
-          {(err || msg) && (
+          {(err ||
+            (msg &&
+              !(hasFoodInQuote && drinkMenus.length > 0 && !quoteLocked))) && (
             <p
               className="mt-3 text-sm font-medium"
               style={{ color: err ? '#b91c1c' : SUITE.navy }}

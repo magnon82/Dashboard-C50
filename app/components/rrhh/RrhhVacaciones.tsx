@@ -15,6 +15,7 @@ import {
   formatHrPuesto,
   groupPlantillaByTeam,
   hrLeaveDisplayLabel,
+  isLeaveExemptEmployee,
   isLeaveTomada,
   leaveInclusiveDays,
   plantillaPositionKey,
@@ -347,7 +348,7 @@ export function RrhhVacaciones() {
         list = (json.employees || []) as HrEmployee[];
         source = String(json.source || 'activos');
       }
-      setEmployees(list);
+      setEmployees(list.filter((e) => !isLeaveExemptEmployee(e)));
       setEmpSource(source);
     } catch {
       setEmployees([]);

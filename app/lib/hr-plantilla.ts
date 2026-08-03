@@ -425,7 +425,9 @@ export async function buildPlantillaFromScheduleWeek(
   );
 }
 
-/** Última nómina conciliada: pagado con líneas, si no cerrado con líneas. */
+/** Última nómina conciliada: pagado con líneas, si no cerrado con líneas.
+ * Solo semanal (quincenas no redefine plantilla).
+ */
 export async function findLatestTranscurridaPeriod(
   sb: SupabaseClient
 ): Promise<HrPlantillaPeriod | null> {
@@ -433,12 +435,27 @@ export async function findLatestTranscurridaPeriod(
     .from('hr_payroll_periods')
     .select(PERIOD_SELECT_LEAN)
     .eq('status', 'pagado')
+    .neq('cadence', 'quincenal')
     .order('period_end', { ascending: false })
     .order('paid_at', { ascending: false })
     .limit(8);
 
-  if (!paid.error && paid.data?.length) {
-    const rows = paid.data as PeriodRow[];
+  let paidData = paid.data;
+  let paidErr = paid.error;
+  if (paidErr && /cadence|column .* does not exist|42703/i.test(paidErr.message)) {
+    const retry = await sb
+      .from('hr_payroll_periods')
+      .select(PERIOD_SELECT_LEAN)
+      .eq('status', 'pagado')
+      .order('period_end', { ascending: false })
+      .order('paid_at', { ascending: false })
+      .limit(8);
+    paidData = retry.data;
+    paidErr = retry.error;
+  }
+
+  if (!paidErr && paidData?.length) {
+    const rows = paidData as PeriodRow[];
     const withLines = await periodIdsWithLines(
       sb,
       rows.map((p) => p.id)
@@ -452,11 +469,28 @@ export async function findLatestTranscurridaPeriod(
     .from('hr_payroll_periods')
     .select(PERIOD_SELECT_LEAN)
     .eq('status', 'cerrado')
+    .neq('cadence', 'quincenal')
     .order('period_end', { ascending: false })
     .limit(8);
 
-  if (!closed.error && closed.data?.length) {
-    const rows = closed.data as PeriodRow[];
+  let closedData = closed.data;
+  let closedErr = closed.error;
+  if (
+    closedErr &&
+    /cadence|column .* does not exist|42703/i.test(closedErr.message)
+  ) {
+    const retry = await sb
+      .from('hr_payroll_periods')
+      .select(PERIOD_SELECT_LEAN)
+      .eq('status', 'cerrado')
+      .order('period_end', { ascending: false })
+      .limit(8);
+    closedData = retry.data;
+    closedErr = retry.error;
+  }
+
+  if (!closedErr && closedData?.length) {
+    const rows = closedData as PeriodRow[];
     const withLines = await periodIdsWithLines(
       sb,
       rows.map((p) => p.id)

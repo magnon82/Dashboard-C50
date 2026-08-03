@@ -181,6 +181,18 @@ export function adminCorteDateWindow(at: Date = new Date()): {
   };
 }
 
+/** Fechas ISO de la ventana Master (opDay … minDate), más reciente primero. */
+export function listAdminLookbackDates(at: Date = new Date()): string[] {
+  const { opDay, minDate } = adminCorteDateWindow(at);
+  const out: string[] = [];
+  let cur = opDay;
+  while (cur >= minDate) {
+    out.push(cur);
+    cur = shiftIsoDate(cur, -1);
+  }
+  return out;
+}
+
 export function isAdminWritableCorteDate(
   corteDate: string,
   at: Date = new Date()

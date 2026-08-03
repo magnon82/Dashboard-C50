@@ -265,6 +265,7 @@ export async function POST(request: Request) {
           year,
           {
             refreshExisting: body.refreshExisting === true,
+            refreshPaid: body.refreshPaid === true,
             enrichBase: body.enrichBase !== false,
           }
         );

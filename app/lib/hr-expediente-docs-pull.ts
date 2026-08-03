@@ -12,6 +12,7 @@ import {
   HR_DOCS_BUCKET,
   checklistSeedRows,
   docTypeDef,
+  missingRequiredDocs,
   type HrDocStatus,
   type HrDocTypeId,
 } from '@/app/lib/hr-employee-profile';
@@ -258,11 +259,12 @@ export function classifyExpedienteFile(
     return 'foto_perfil';
   }
 
+  // Paquete de alta: Documentos.pdf, DOCS.*, Documentos Nombre.pdf
   if (
     base === 'documentos' ||
     base === 'docs' ||
     /^documentos([\s._-]|$)/.test(base) ||
-    /^docs?[\s._-]/.test(base)
+    /^docs?([\s._-]|$)/.test(base)
   ) {
     return 'pack';
   }
@@ -687,6 +689,9 @@ export async function pullExpedienteDocuments(opts: {
 
   // Médico: exámenes / gastos médicos / justificantes del expediente.
   let medicalImported = 0;
+  let medicalSkipped = 0;
+  let medicalMatchedCount = 0;
+  let medicalError = false;
   try {
     const medicalPull = await pullExpedienteMedical({
       employeeId: opts.employeeId,
@@ -696,10 +701,13 @@ export async function pullExpedienteDocuments(opts: {
       force,
     });
     medicalImported = medicalPull.imported;
+    medicalSkipped = medicalPull.skipped;
+    medicalMatchedCount = medicalPull.matched.length;
     imported += medicalPull.imported;
     skipped += medicalPull.skipped;
     matched.push(...medicalPull.matched);
   } catch {
+    medicalError = true;
     /* schema médico ausente · best-effort */
   }
 
@@ -1153,11 +1161,6 @@ async function pullExpedienteMedical(opts: {
 
   return { imported, skipped, matched };
 }
-
-/**
- * Reparte un PDF ya subido que varios tipos del checklist comparten
- * (legado: Documentos.pdf → mismo storage_path). No requiere File Stream.
- */
 export async function repairSharedPackFromStorage(opts: {
   employeeId: string;
   who?: string;
@@ -1268,7 +1271,7 @@ export async function repairSharedPackFromStorage(opts: {
   };
 }
 
-/** ¿Conviene soft-pull al abrir perfil? (sin docs / paquete compartido legado). */
+/** ¿Conviene soft-pull al abrir perfil? (sin docs / obligatorios faltantes). */
 export async function shouldSoftPullExpediente(
   employeeId: string
 ): Promise<boolean> {
@@ -1277,13 +1280,21 @@ export async function shouldSoftPullExpediente(
     const sb = getServiceSupabase();
     const { data, error } = await sb
       .from('hr_employee_documents')
-      .select('storage_path, doc_type')
+      .select('storage_path, doc_type, status')
       .eq('employee_id', employeeId);
     if (error) return false;
     const rows = data || [];
     if (!rows.length) return true;
     if (rows.every((r) => !r.storage_path)) return true;
-    return false;
+    // Parcial: p. ej. INE ya jalado pero domicilio aún en el paquete Drive.
+    const missing = missingRequiredDocs(
+      rows.map((r) => ({
+        doc_type: String(r.doc_type),
+        status: String(r.status || 'pending'),
+        storage_path: r.storage_path ?? null,
+      }))
+    );
+    return missing.length > 0;
   } catch {
     return false;
   }

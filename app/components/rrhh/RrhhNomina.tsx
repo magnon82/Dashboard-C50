@@ -15,16 +15,19 @@ import {
 } from '@/app/lib/hr';
 import { formatHrListName } from '@/app/lib/hr-person-match';
 import {
+  HR_PAYROLL_CADENCE_LABELS,
   HR_PAYROLL_DAY_LETTERS,
   HR_PAYROLL_STATUS_LABELS,
   emptyDiasSemana,
   normalizeDiasSemana,
   setDiasSemanaDay,
   sumDiasSemana,
+  type HrPayrollCadence,
   type HrPayrollDiasSemana,
   type HrPayrollLine,
   type HrPayrollLineInput,
   type HrPayrollPeriod,
+  pickDefaultQuincena,
 } from '@/app/lib/hr-payroll';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
@@ -447,6 +450,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
 
   const [yearOptions, setYearOptions] = useState<number[]>([2026]);
   const [year, setYear] = useState(2026);
+  const [cadence, setCadence] = useState<HrPayrollCadence>('semanal');
   const [periods, setPeriods] = useState<HrPayrollPeriod[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [period, setPeriod] = useState<HrPayrollPeriod | null>(null);
@@ -454,6 +458,8 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const isQuincena = cadence === 'quincenal';
 
   const sortedPeriods = useMemo(() => {
     // Defensa UI: una entrada por period_start aunque la API/DB traiga extras.
@@ -493,8 +499,11 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
 
   const dayLabels = useMemo(() => weekDayLabels(period), [period]);
 
-  const loadPeriods = useCallback(async (y: number) => {
-    const res = await fetch(`/api/hr/payroll?year=${y}`, { cache: 'no-store' });
+  const loadPeriods = useCallback(async (y: number, cad: HrPayrollCadence) => {
+    const res = await fetch(
+      `/api/hr/payroll?year=${y}&cadence=${cad}`,
+      { cache: 'no-store' }
+    );
     const json = (await res.json()) as ListPayload;
     const list = json.periods || [];
     setPeriods(list);
@@ -518,7 +527,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
       setDirty(false);
       setEditing(false);
       setToast(
-        friendlyUserMessage(json.message) || 'No se pudo cargar la semana'
+        friendlyUserMessage(json.message) || 'No se pudo cargar el periodo'
       );
       return;
     }
@@ -569,24 +578,34 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
   const openYear = useCallback(
     async (
       y: number,
+      cad: HrPayrollCadence = 'semanal',
       opts?: { forceRefresh?: boolean; pickId?: string | null }
     ) => {
       setLoading(true);
       setYear(y);
+      setCadence(cad);
       try {
-        let list = await loadPeriods(y);
-        if (list.length === 0 || opts?.forceRefresh) {
-          await ensureYear(y, Boolean(opts?.forceRefresh));
-          list = await loadPeriods(y);
-        } else {
-          void ensureYear(y, false).then(async (ok) => {
-            if (!ok) return;
-            const next = await loadPeriods(y);
-            setPeriods(next);
-          });
+        let list = await loadPeriods(y, cad);
+        if (cad === 'semanal') {
+          if (list.length === 0 || opts?.forceRefresh) {
+            await ensureYear(y, Boolean(opts?.forceRefresh));
+            list = await loadPeriods(y, cad);
+          } else {
+            void ensureYear(y, false).then(async (ok) => {
+              if (!ok) return;
+              const next = await loadPeriods(y, cad);
+              setPeriods(next);
+            });
+          }
         }
 
-        const pick = pickDefaultPeriod(list, opts?.pickId);
+        const pick =
+          cad === 'quincenal'
+            ? opts?.pickId
+              ? list.find((p) => p.id === opts.pickId) ||
+                pickDefaultQuincena(list)
+              : pickDefaultQuincena(list)
+            : pickDefaultPeriod(list, opts?.pickId);
         if (pick) {
           await loadDetail(pick.id);
         } else {
@@ -623,11 +642,13 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
         const unique = [...new Set(years.length ? years : [2026])].sort(
           (a, b) => b - a
         );
+        if (!unique.includes(2026)) unique.push(2026);
+        unique.sort((a, b) => b - a);
         setYearOptions(unique);
         const startYear = unique.includes(2026) ? 2026 : unique[0] || 2026;
-        await openYear(startYear);
+        await openYear(startYear, 'semanal');
       } catch {
-        if (!cancelled) await openYear(2026);
+        if (!cancelled) await openYear(2026, 'semanal');
       }
     })();
     return () => {
@@ -653,7 +674,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
         return;
       }
       setToast(friendlyUserMessage(json.message) || 'Estatus actualizado');
-      await loadPeriods(year);
+      await loadPeriods(year, cadence);
       await loadDetail(selectedId);
       onChanged?.();
     } catch {
@@ -686,7 +707,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
         return;
       }
       setToast(friendlyUserMessage(json.message) || 'Cambios guardados');
-      await loadPeriods(year);
+      await loadPeriods(year, cadence);
       await loadDetail(selectedId);
       onChanged?.();
     } catch {
@@ -723,7 +744,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
       const periodId = json.period?.id as string | undefined;
       const periodStart = String(json.period?.period_start || '').slice(0, 4);
       const y = Number(periodStart) || year;
-      await openYear(y, { pickId: periodId || null });
+      await openYear(y, 'semanal', { pickId: periodId || null });
       onChanged?.();
     } catch {
       setToast('Error de red al subir archivo');
@@ -813,10 +834,22 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
     ) {
       return;
     }
-    await openYear(y);
+    await openYear(y, cadence);
+  }
+
+  async function changeCadence(next: HrPayrollCadence) {
+    if (next === cadence) return;
+    if (
+      dirty &&
+      !confirm('Hay cambios sin guardar. ¿Continuar?')
+    ) {
+      return;
+    }
+    await openYear(year, next);
   }
 
   function periodListLabel(p: HrPayrollPeriod): string {
+    if (p.cadence === 'quincenal' || isQuincena) return p.label;
     const wn = weekNumber(p);
     return wn != null ? `Semana ${wn}` : p.label;
   }
@@ -824,9 +857,11 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
   const asOf = period?.period_end || period?.paid_at || null;
   const statusMsg = friendlyUserMessage(toast) || friendlyUserMessage(message);
   const weekLabelShort =
-    period && weekNumber(period) != null
-      ? `Semana ${weekNumber(period)}`
-      : period?.label || '';
+    isQuincena || period?.cadence === 'quincenal'
+      ? period?.label || ''
+      : period && weekNumber(period) != null
+        ? `Semana ${weekNumber(period)}`
+        : period?.label || '';
   const personCount =
     draft.length || period?.line_count || 0;
 
@@ -838,8 +873,36 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
             Nómina
           </h3>
           <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-            Histórico de periodos · detalle por semana
+            {isQuincena
+              ? 'Control de pago quincenal · administrativos y socios'
+              : 'Histórico de periodos · detalle por semana'}
           </p>
+          <div
+            className="mt-3 inline-flex rounded-full border border-slate-200 bg-white p-0.5"
+            role="tablist"
+            aria-label="Cadencia de nómina"
+          >
+            {(['semanal', 'quincenal'] as const).map((c) => {
+              const active = cadence === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  disabled={busy || loading || syncing}
+                  onClick={() => void changeCadence(c)}
+                  className="rounded-full px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                  style={{
+                    backgroundColor: active ? SUITE.navy : 'transparent',
+                    color: active ? '#fff' : theme.title,
+                  }}
+                >
+                  {HR_PAYROLL_CADENCE_LABELS[c]}
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="relative flex flex-wrap items-end gap-2">
           <label
@@ -881,7 +944,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                 disabled={busy || syncing}
                 onClick={() => {
                   setMenuOpen(false);
-                  void openYear(year, {
+                  void openYear(year, cadence, {
                     forceRefresh: true,
                     pickId: selectedId,
                   });
@@ -895,7 +958,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                   type="file"
                   accept=".csv,.xlsx,.xls"
                   className="hidden"
-                  disabled={busy}
+                  disabled={busy || isQuincena}
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     if (f) void uploadFile(f);
@@ -903,6 +966,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                   }}
                 />
               </label>
+              {!isQuincena && (
               <button
                 type="button"
                 className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
@@ -911,6 +975,47 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
               >
                 Enriquecer personal
               </button>
+              )}
+              {isQuincena && (
+              <button
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                disabled={busy || !selectedId}
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (!selectedId) return;
+                  void (async () => {
+                    setBusy(true);
+                    try {
+                      const res = await fetch(
+                        `/api/hr/payroll?id=${encodeURIComponent(selectedId)}&reseed=1`,
+                        { cache: 'no-store' }
+                      );
+                      const json = (await res.json()) as DetailPayload;
+                      if (!json.period) {
+                        setToast(
+                          friendlyUserMessage(json.message) ||
+                            'No se pudo recargar'
+                        );
+                        return;
+                      }
+                      setPeriod(json.period);
+                      setDraft(linesToDraft(json.lines || []));
+                      setDirty(false);
+                      setEditing(false);
+                      setToast('Personal quincenal actualizado desde plantilla');
+                      await loadPeriods(year, cadence);
+                    } catch {
+                      setToast('Error de red');
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                }}
+              >
+                Recargar personal quincenal
+              </button>
+              )}
             </div>
           )}
         </div>
@@ -954,14 +1059,15 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                 Sin periodos en {year}
               </p>
               <p className="mt-2 text-sm" style={{ color: theme.muted }}>
-                Cuando haya historial sincronizado, aquí verás todas las
-                semanas. Puedes actualizar desde Más… o subir un archivo.
+                {isQuincena
+                  ? 'Cuando haya quincenas del año, aquí verás Q1/Q2 de cada mes. Puedes actualizar desde Más…'
+                  : 'Cuando haya historial sincronizado, aquí verás todas las semanas. Puedes actualizar desde Más… o subir un archivo.'}
               </p>
               <button
                 type="button"
                 disabled={busy || syncing}
                 onClick={() =>
-                  void openYear(year, { forceRefresh: true })
+                  void openYear(year, cadence, { forceRefresh: true })
                 }
                 className="mt-3 rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 style={{ backgroundColor: SUITE.navy }}
@@ -1051,9 +1157,9 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                 Elige un periodo del histórico
               </p>
               <p className="mt-2 text-sm" style={{ color: theme.muted }}>
-                Se selecciona por defecto la última nómina pagada o
-                conciliada. Cerrar o marcar pagado actualiza la plantilla
-                vigente.
+                {isQuincena
+                  ? 'Se selecciona la quincena en curso. Marcar pagada registra el pago a administrativos/socios (no cambia la plantilla semanal).'
+                  : 'Se selecciona por defecto la última nómina pagada o conciliada. Cerrar o marcar pagado actualiza la plantilla vigente.'}
               </p>
             </SuiteCard>
           ) : (
@@ -1115,9 +1221,13 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                     className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
                     style={{ color: TEAL.deep }}
                     onClick={() => void setStatus('pagado')}
-                    title="Conciliar: alimenta la plantilla vigente"
+                    title={
+                      isQuincena
+                        ? 'Registrar pago de esta quincena'
+                        : 'Conciliar: alimenta la plantilla vigente'
+                    }
                   >
-                    Marcar pagado
+                    {isQuincena ? 'Marcar pagada' : 'Marcar pagado'}
                   </button>
                 )}
                 {period.status === 'pagado' && (
@@ -1168,7 +1278,136 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                 )}
               </div>
 
-              {/* Tabla agrupada por equipo */}
+              {/* Tabla quincenal o semanal */}
+              {isQuincena ? (
+              <div
+                className="overflow-x-auto rounded-2xl bg-white"
+                style={{ boxShadow: SUITE.shadow }}
+              >
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr
+                      className="border-b text-[11px] uppercase tracking-[0.12em]"
+                      style={{ color: theme.muted }}
+                    >
+                      <th className="px-4 py-3 font-semibold">Nombre</th>
+                      <th className="px-4 py-3 font-semibold">Puesto</th>
+                      <th className="px-4 py-3 font-semibold text-right">
+                        Importe quincenal
+                      </th>
+                      <th className="px-4 py-3 font-semibold">Antigüedad</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.map((row) => {
+                      const idx = findDraftIndex(row.key);
+                      return editing && idx >= 0 ? (
+                        <tr key={row.key} className="border-b border-slate-100">
+                          <td className="px-2 py-1.5">
+                            <input
+                              className="w-full min-w-[9rem] rounded border border-slate-200 px-2 py-1 text-sm font-medium"
+                              style={{ color: theme.title }}
+                              value={row.full_name}
+                              onChange={(e) =>
+                                updateDraft(idx, { full_name: e.target.value })
+                              }
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              className="w-full min-w-[7rem] rounded border border-slate-200 px-2 py-1 text-sm"
+                              value={row.puesto}
+                              onChange={(e) =>
+                                updateDraft(idx, { puesto: e.target.value })
+                              }
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 text-right">
+                            <input
+                              className="w-28 rounded border border-slate-200 px-2 py-1 text-right text-sm tabular-nums"
+                              value={row.importe_pagado}
+                              onChange={(e) =>
+                                updateDraft(idx, {
+                                  importe_pagado: e.target.value,
+                                })
+                              }
+                            />
+                          </td>
+                          <td
+                            className="whitespace-nowrap px-4 py-2 text-xs"
+                            style={{ color: theme.muted }}
+                          >
+                            {formatAntiguedad(row.fecha_ingreso, asOf)}
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={row.key} className="border-b border-slate-100">
+                          <td
+                            className="px-4 py-3 font-medium"
+                            style={{ color: theme.title }}
+                          >
+                            {formatHrListName(row.full_name) || row.full_name}
+                          </td>
+                          <td className="px-4 py-3" style={{ color: theme.muted }}>
+                            {formatHrPuesto(row.puesto) || row.puesto || '—'}
+                          </td>
+                          <td
+                            className="px-4 py-3 text-right font-semibold tabular-nums"
+                            style={{ color: SUITE.navy }}
+                          >
+                            {money(parseNum(row.importe_pagado))}
+                          </td>
+                          <td
+                            className="whitespace-nowrap px-4 py-3 text-xs"
+                            style={{ color: theme.muted }}
+                          >
+                            {formatAntiguedad(row.fecha_ingreso, asOf)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!draft.length && (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-4 py-8 text-sm"
+                          style={{ color: theme.muted }}
+                        >
+                          Sin personal quincenal en esta quincena. Abre el
+                          periodo (se arma desde plantilla admin/socios) o usa
+                          «Editar líneas».
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                  {draft.length > 0 && (
+                    <tfoot>
+                      <tr
+                        className="border-t"
+                        style={{ backgroundColor: '#F7F9FC' }}
+                      >
+                        <td
+                          colSpan={2}
+                          className="px-4 py-3 text-xs font-semibold uppercase tracking-wide"
+                          style={{ color: theme.muted }}
+                        >
+                          Total · {draft.length} colaborador
+                          {draft.length === 1 ? '' : 'es'}
+                        </td>
+                        <td
+                          className="px-4 py-3 text-right text-sm font-bold tabular-nums"
+                          style={{ color: SUITE.navy }}
+                        >
+                          {money(totalImporte)}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+              ) : (
+
               <div
                 className="overflow-x-auto rounded-2xl bg-white"
                 style={{ boxShadow: SUITE.shadow }}
@@ -1479,6 +1718,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                   )}
                 </table>
               </div>
+              )}
 
               {teamBuckets.length > 1 && (
                 <div className="flex flex-wrap gap-2">
