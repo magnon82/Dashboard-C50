@@ -10,6 +10,7 @@ import { SemanaEnCursoTable } from '@/app/components/SemanaEnCursoTable';
 import { DetalleSemanalCard } from '@/app/components/DetalleSemanalCard';
 import { ChequePromedioMensualCard } from '@/app/components/ChequePromedioMensualCard';
 import { PromedioVentaSemanalPorMesCard } from '@/app/components/PromedioVentaSemanalPorMesCard';
+import { InfocajaSyncBanner } from '@/app/components/InfocajaSyncBanner';
 import {
   SectionHeader,
   filterControlClass,
@@ -250,6 +251,7 @@ export default function Dashboard() {
 
   return (
     <SuiteShell title="Ventas" subtitle={`Actualizado al ${hoy}`}>
+        <InfocajaSyncBanner />
         {dataError && (
           <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             <p className="font-semibold">No se cargaron los datos</p>
