@@ -57,6 +57,7 @@ import { matchPerson } from '@/app/lib/hr-person-match';
 import { invalidatePlantillaCache } from '@/app/lib/hr-plantilla';
 import {
   fillEmptyEmployeeIdentity,
+  isPlausibleDobIso,
   normalizeCurp,
   normalizeNss,
 } from '@/app/lib/hr-identity';
@@ -505,8 +506,12 @@ export async function GET(_req: Request, ctx: Ctx) {
       photoUrl = await signedUrl(emp.photo_storage_path);
     }
 
-    // Soft-fill CURP/NSS vacíos desde docs / leave (no sobrescribe ficha).
-    if (!normalizeCurp(emp.curp) || !normalizeNss(emp.nss)) {
+    // Soft-fill CURP/NSS/fecha_nacimiento vacíos desde docs / leave / acta (no sobrescribe ficha).
+    if (
+      !normalizeCurp(emp.curp) ||
+      !normalizeNss(emp.nss) ||
+      !isPlausibleDobIso(emp.fecha_nacimiento)
+    ) {
       try {
         const [filled] = await fillEmptyEmployeeIdentity(sb, [id], {
           extractFromDocs: true,
@@ -515,6 +520,7 @@ export async function GET(_req: Request, ctx: Ctx) {
         });
         if (filled?.curp) emp.curp = filled.curp;
         if (filled?.nss) emp.nss = filled.nss;
+        if (filled?.fechaNacimiento) emp.fecha_nacimiento = filled.fechaNacimiento;
       } catch {
         /* best-effort */
       }

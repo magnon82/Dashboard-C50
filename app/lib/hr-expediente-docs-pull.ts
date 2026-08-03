@@ -1,8 +1,9 @@
 /**
  * Jala PDFs/imágenes del expediente Drive (File Stream) → hr_employee_documents,
  * contratos, y médico (exámenes / gastos médicos / justificantes).
- * Clasifica por nombre de archivo; `Documentos.pdf` / `DOCS.*` = paquete de alta
- * que se parte en un PDF por tipo (INE, acta, CURP, domicilio, CV).
+ * Clasifica por nombre de archivo; PDFs de identidad se re-tipan por contenido
+ * (acta vs CURP vs INE). `Documentos.pdf` / `DOCS.*` = paquete de alta partido
+ * en un PDF por tipo.
  */
 
 import { existsSync } from 'fs';
@@ -24,6 +25,10 @@ import {
 import {
   PACK_DOC_ORDER,
   classifyPdfBuffer,
+  clearlyActaSignals,
+  clearlyCurpConstanciaSignals,
+  clearlyIneSignals,
+  curpConstanciaBrandSignals,
   detectDocTypeFromText,
   detectSharedPackPaths,
   notesSuggestPackSplit,
@@ -65,6 +70,8 @@ export type ExpedientePullResult = {
   }>;
   contractsImported?: number;
   medicalImported?: number;
+  /** `hr_employee_exams` ausente: exámenes se guardaron como reembolso-consulta. */
+  examsTableMissing?: boolean;
   error?: string;
   hint?: string;
 };
@@ -80,7 +87,8 @@ function normalizeName(name: string): string {
 /** ¿PDF/imagen bajo carpeta «Gastos médicos» del expediente? */
 export function isUnderGastosMedicosFolder(absolutePath: string): boolean {
   const n = normalizeName(absolutePath.replace(/\\/g, '/'));
-  return /(?:^|\/)gastos\s*medicos(?:\/|$)/.test(n);
+  // «Gastos médicos», singular, guiones/underscores, sin acento.
+  return /(?:^|\/)gastos?[_\s-]*medicos?(?:\/|$)/.test(n);
 }
 
 /**
@@ -203,12 +211,20 @@ function expedienteNote(fileName: string): string {
   return `Desde expediente: ${fileName}`;
 }
 
+/** Nota cuando el archivo es examen pero `hr_employee_exams` aún no existe. */
+function expedienteExamFallbackNote(fileName: string): string {
+  return `Desde expediente (examen): ${fileName}`;
+}
+
 function alreadyFromExpediente(
   notes: string | null | undefined,
   fileName: string
 ): boolean {
   const n = String(notes || '');
-  return n.includes(expedienteNote(fileName));
+  return (
+    n.includes(expedienteNote(fileName)) ||
+    n.includes(expedienteExamFallbackNote(fileName))
+  );
 }
 
 /** Heurística por nombre · null = ignorar (contratos, vacaciones, etc.). */
@@ -236,13 +252,23 @@ export function classifyExpedienteFile(
   }
   if (/acta\s*administrativa|administrativa/.test(n)) return null;
   if (/\bine\b|identificacion|credencial\s*para\s*votar/.test(n)) return 'ine';
-  if (/\bcurp\b/.test(n)) return 'curp';
+  // Constancia CURP / SEGOB / RENAPO antes de “nacimiento” genérico.
   if (
-    (/acta[.\s_-]*de[.\s_-]*nacimiento|acta[.\s_-]*nacimiento|\bnacimiento\b/.test(
+    /\bcurp\b|constancia[.\s_-]*(de[.\s_-]*)?(curp|clave)|renapo|\bsegob\b|clave[.\s_-]*unica/.test(
       n
-    ) &&
-      !/administrativa/.test(n))
+    )
   ) {
+    return 'curp';
+  }
+  if (
+    (/acta[.\s_-]*de[.\s_-]*nacimiento|acta[.\s_-]*nacimiento/.test(n) ||
+      (/^nacimiento\b|\bnacimiento\b/.test(n) && /acta/.test(n))) &&
+    !/administrativa/.test(n)
+  ) {
+    return 'acta_nacimiento';
+  }
+  // Solo “nacimiento” sin acta/curp: histórico de carpetas Drive.
+  if (/\bnacimiento\b/.test(n) && !/administrativa/.test(n)) {
     return 'acta_nacimiento';
   }
   if (/\bcv\b|curriculum|curriculo/.test(n)) return 'cv';
@@ -605,27 +631,6 @@ export async function pullExpedienteDocuments(opts: {
     classified.push({ ...f, kind });
   }
 
-  const byType = new Map<HrDocTypeId, Classified>();
-  const packs: Classified[] = [];
-  for (const c of classified) {
-    if (c.kind === 'pack') {
-      packs.push(c);
-      continue;
-    }
-    const prev = byType.get(c.kind);
-    if (!prev || (c.sizeBytes || 0) > (prev.sizeBytes || 0)) {
-      byType.set(c.kind, c);
-    }
-  }
-
-  const matched: ExpedientePullResult['matched'] = [
-    ...[...byType.entries()].map(([docType, f]) => ({
-      file: f.name,
-      docType,
-    })),
-    ...packs.map((p) => ({ file: p.name, docType: 'pack' as const })),
-  ];
-
   let imported = 0;
   let skipped = 0;
   const bufCache = new Map<string, { buf: Buffer; mime: string }>();
@@ -648,6 +653,37 @@ export async function pullExpedienteDocuments(opts: {
     bufCache.set(filePath, entry);
     return entry;
   }
+
+  const byType = new Map<HrDocTypeId, Classified>();
+  const packs: Classified[] = [];
+  for (const c of classified) {
+    if (c.kind === 'pack') {
+      packs.push(c);
+      continue;
+    }
+    // Contenido PDF manda sobre nombre Drive (p. ej. CURP mal nombrado como acta).
+    let kind = c.kind;
+    try {
+      if (REQUIRED_FROM_PACK.includes(c.kind) && /\.pdf$/i.test(c.name)) {
+        const loaded = await loadBuf(c.path, c.name);
+        kind = await resolveIdentityDocTypeFromPdf(c.kind, loaded.buf);
+      }
+    } catch {
+      /* filename kind */
+    }
+    const prev = byType.get(kind);
+    if (!prev || (c.sizeBytes || 0) > (prev.sizeBytes || 0)) {
+      byType.set(kind, { ...c, kind });
+    }
+  }
+
+  const matched: ExpedientePullResult['matched'] = [
+    ...[...byType.entries()].map(([docType, f]) => ({
+      file: f.name,
+      docType,
+    })),
+    ...packs.map((p) => ({ file: p.name, docType: 'pack' as const })),
+  ];
 
   for (const [docType, file] of byType) {
     try {
@@ -689,9 +725,7 @@ export async function pullExpedienteDocuments(opts: {
 
   // Médico: exámenes / gastos médicos / justificantes del expediente.
   let medicalImported = 0;
-  let medicalSkipped = 0;
-  let medicalMatchedCount = 0;
-  let medicalError = false;
+  let examsTableMissing = false;
   try {
     const medicalPull = await pullExpedienteMedical({
       employeeId: opts.employeeId,
@@ -701,13 +735,11 @@ export async function pullExpedienteDocuments(opts: {
       force,
     });
     medicalImported = medicalPull.imported;
-    medicalSkipped = medicalPull.skipped;
-    medicalMatchedCount = medicalPull.matched.length;
+    examsTableMissing = Boolean(medicalPull.examsTableMissing);
     imported += medicalPull.imported;
     skipped += medicalPull.skipped;
     matched.push(...medicalPull.matched);
   } catch {
-    medicalError = true;
     /* schema médico ausente · best-effort */
   }
 
@@ -773,6 +805,10 @@ export async function pullExpedienteDocuments(opts: {
     matched,
     contractsImported,
     medicalImported,
+    examsTableMissing: examsTableMissing || undefined,
+    hint: examsTableMissing
+      ? 'Exámenes del expediente: ejecuta supabase/hr_employee_exams.sql (mientras tanto se muestran en Médico vía fallback).'
+      : undefined,
   };
 }
 
@@ -967,6 +1003,7 @@ async function pullExpedienteMedical(opts: {
   imported: number;
   skipped: number;
   matched: Array<{ file: string; docType: MedicalPullKind }>;
+  examsTableMissing?: boolean;
 }> {
   const sb = getServiceSupabase();
   const medicalFiles = opts.files
@@ -997,14 +1034,22 @@ async function pullExpedienteMedical(opts: {
       .eq('employee_id', opts.employeeId),
   ]);
 
+  const schemaMissing = (msg: string | undefined) =>
+    Boolean(msg && /does not exist|relation|42P01|schema cache/i.test(msg));
+
   const allMissing = [examsRes, remRes, jusRes].every(
-    (r) =>
-      r.error &&
-      /does not exist|relation|42P01|schema cache/i.test(r.error.message)
+    (r) => r.error && schemaMissing(r.error.message)
   );
   if (allMissing) {
     return { imported: 0, skipped: 0, matched: [] };
   }
+
+  const examsTableMissing = Boolean(
+    examsRes.error && schemaMissing(examsRes.error.message)
+  );
+  const matchedExamKinds = medicalFiles.some(
+    (f) => f.kind === 'examen' || f.kind === 'medico_doc'
+  );
 
   let imported = 0;
   let skipped = 0;
@@ -1018,9 +1063,14 @@ async function pullExpedienteMedical(opts: {
     }
 
     const kind = file.kind;
-    const note = expedienteNote(file.name);
+    // Exámenes sin tabla → reembolso con nota especial (consulta en Médico).
+    const useExamFallback =
+      (kind === 'examen' || kind === 'medico_doc') && examsTableMissing;
+    const note = useExamFallback
+      ? expedienteExamFallbackNote(file.name)
+      : expedienteNote(file.name);
     const existingRows =
-      kind === 'reembolso'
+      kind === 'reembolso' || useExamFallback
         ? remRes.data || []
         : kind === 'justificante'
           ? jusRes.data || []
@@ -1064,16 +1114,21 @@ async function pullExpedienteMedical(opts: {
 
       const when = dateFromMedicalFilename(file.name) || todayCdmx();
 
-      if (kind === 'reembolso') {
+      if (kind === 'reembolso' || useExamFallback) {
         if (remRes.error) {
           skipped += 1;
           continue;
         }
+        const exam_type = useExamFallback
+          ? examTypeFromFilename(file.name)
+          : null;
         const row = {
           employee_id: opts.employeeId,
           amount: 0,
           expense_date: when,
-          description: file.name.replace(/\.[^.]+$/, ''),
+          description: useExamFallback
+            ? exam_type || file.name.replace(/\.[^.]+$/, '')
+            : file.name.replace(/\.[^.]+$/, ''),
           storage_path: storagePath,
           mime_type: mime,
           status: 'solicitado' as const,
@@ -1093,6 +1148,12 @@ async function pullExpedienteMedical(opts: {
             .from('hr_medical_reimbursements')
             .insert(row);
           if (error) throw new Error(error.message);
+          if (!remRes.data) remRes.data = [];
+          remRes.data.push({
+            id: 'new',
+            notes: note,
+            storage_path: storagePath,
+          });
         }
       } else if (kind === 'justificante') {
         if (jusRes.error) {
@@ -1159,7 +1220,12 @@ async function pullExpedienteMedical(opts: {
     }
   }
 
-  return { imported, skipped, matched };
+  return {
+    imported,
+    skipped,
+    matched,
+    examsTableMissing: examsTableMissing && matchedExamKinds,
+  };
 }
 export async function repairSharedPackFromStorage(opts: {
   employeeId: string;
@@ -1400,6 +1466,9 @@ export async function shouldRepairSharedPack(
   }
 }
 
+/** Marca de soft-check con heurística acta↔curp actual (invalida “contenido verificado” viejo). */
+const ACTA_CURP_CONTENT_OK = 'contenido verificado acta-curp-2026-08';
+
 /**
  * ¿Conviene re-clasificar PDFs del pack ya separados?
  * (p. ej. CURP en acta, o Acta guardada como INE tras heurística de orden).
@@ -1414,16 +1483,22 @@ export async function shouldRepairMislabeledPack(
       .select('doc_type, storage_path, status, notes')
       .eq('employee_id', employeeId);
     if (error) return false;
-    // Soft-open: tipos del paquete no verificados, aún sin check de contenido.
     return (data || []).some((r) => {
       const dt = String(r.doc_type);
       if (!REQUIRED_FROM_PACK.includes(dt as HrDocTypeId)) return false;
       if (!r.storage_path || r.status !== 'uploaded') return false;
       const notes = String(r.notes || '').toLowerCase();
       if (notes.includes('reclasificado por contenido')) return false;
+      // Acta/CURP: re-checar si aún no pasaron la heurística nueva (slots cruzados).
+      if (dt === 'acta_nacimiento' || dt === 'curp') {
+        if (notes.includes(ACTA_CURP_CONTENT_OK)) return false;
+        return (
+          notesSuggestPackSplit(r.notes) ||
+          /(?:^|\/)(?:acta_nacimiento|curp|ine)-exp-\d+\./i.test(r.storage_path)
+        );
+      }
       if (notes.includes('contenido verificado')) return false;
       if (notesSuggestPackSplit(r.notes)) return true;
-      // Incluye INE: el orden heurístico pone pág.1 → ine aunque sea el acta.
       return /(?:^|\/)(?:ine|acta_nacimiento|curp|comprobante_domicilio|cv)-exp-\d+\./i.test(
         r.storage_path
       );
@@ -1431,6 +1506,57 @@ export async function shouldRepairMislabeledPack(
   } catch {
     return false;
   }
+}
+
+/**
+ * Si el PDF tiene señal fuerte de otro tipo, corrige el slot del nombre Drive.
+ * Prioridad: marca constancia CURP > título acta > INE > clasificador.
+ */
+async function resolveIdentityDocTypeFromPdf(
+  filenameKind: HrDocTypeId,
+  buf: Buffer
+): Promise<HrDocTypeId> {
+  if (!REQUIRED_FROM_PACK.includes(filenameKind)) return filenameKind;
+  if (buf.length < 5 || buf.subarray(0, 4).toString() !== '%PDF') {
+    return filenameKind;
+  }
+  try {
+    const classification = await classifyPdfBuffer(buf);
+    const sample = classification.textSample || '';
+    if (
+      curpConstanciaBrandSignals(sample) ||
+      clearlyCurpConstanciaSignals(sample)
+    ) {
+      return 'curp';
+    }
+    if (clearlyActaSignals(sample) && !clearlyIneSignals(sample)) {
+      return 'acta_nacimiento';
+    }
+    if (clearlyIneSignals(sample) && !clearlyActaSignals(sample)) {
+      return 'ine';
+    }
+    const detected =
+      classification.docType &&
+      REQUIRED_FROM_PACK.includes(classification.docType)
+        ? classification.docType
+        : detectDocTypeFromText(sample);
+    if (
+      detected &&
+      REQUIRED_FROM_PACK.includes(detected) &&
+      detected !== filenameKind &&
+      (filenameKind === 'acta_nacimiento' ||
+        filenameKind === 'curp' ||
+        filenameKind === 'ine' ||
+        detected === 'acta_nacimiento' ||
+        detected === 'curp' ||
+        detected === 'ine')
+    ) {
+      return detected;
+    }
+  } catch {
+    /* filename kind */
+  }
+  return filenameKind;
 }
 
 function resolveDetectedType(
@@ -1588,26 +1714,38 @@ export async function repairMislabeledPackFromStorage(opts: {
       const notes = String(row?.notes || '');
       const low = notes.toLowerCase();
       if (
-        low.includes('contenido verificado') ||
+        low.includes(ACTA_CURP_CONTENT_OK) ||
         low.includes('reclasificado por contenido')
       ) {
         continue;
       }
       if (
-        !notesSuggestPackSplit(notes) &&
-        !/(?:^|\/)(?:ine|acta_nacimiento|curp|comprobante_domicilio|cv)-exp-\d+\./i.test(
-          c.path
-        )
+        c.slot !== 'acta_nacimiento' &&
+        c.slot !== 'curp' &&
+        (low.includes('contenido verificado') ||
+          (!notesSuggestPackSplit(notes) &&
+            !/(?:^|\/)(?:ine|acta_nacimiento|curp|comprobante_domicilio|cv)-exp-\d+\./i.test(
+              c.path
+            )))
       ) {
         continue;
       }
+      if (
+        (c.slot === 'acta_nacimiento' || c.slot === 'curp') &&
+        !notesSuggestPackSplit(notes) &&
+        !/(?:^|\/)(?:acta_nacimiento|curp|ine)-exp-\d+\./i.test(c.path)
+      ) {
+        continue;
+      }
+      const mark =
+        c.slot === 'acta_nacimiento' || c.slot === 'curp'
+          ? ACTA_CURP_CONTENT_OK
+          : 'contenido verificado';
       try {
         await sb
           .from('hr_employee_documents')
           .update({
-            notes: notes
-              ? `${notes} · contenido verificado`
-              : 'contenido verificado',
+            notes: notes ? `${notes} · ${mark}` : mark,
             updated_at: new Date().toISOString(),
           })
           .eq('id', c.id);

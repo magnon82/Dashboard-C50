@@ -35,6 +35,13 @@ function fileUrlToFsPath(url) {
 }
 
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier === 'server-only') {
+    return {
+      shortCircuit: true,
+      url: pathToFileURL(path.join(root, 'scripts', 'server-only-stub.mjs')).href,
+    };
+  }
+
   if (specifier.startsWith('@/')) {
     const target = path.join(root, specifier.slice(2));
     const href = resolveFile(target);

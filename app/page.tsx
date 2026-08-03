@@ -192,7 +192,7 @@ export default function HubPage() {
       subtitle={`${PRODUCT_TAGLINE} · ${hoy}${user ? ` · ${user.username}` : ''}`}
     >
       <p className="mb-6 max-w-2xl text-sm" style={{ color: theme.muted }}>
-        Tablero de negocio y control operativo. Elige un módulo.
+        Elige un módulo.
       </p>
 
       {loading ? (

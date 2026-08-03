@@ -13,6 +13,7 @@ import {
 import {
   HR_DOC_TYPES,
   emptyChecklistStats,
+  isExpedienteExamFallbackNote,
   placeholderDocuments,
   statusLabelEs,
   type HrDocTypeDef,
@@ -848,46 +849,94 @@ export function RrhhEmployeeProfile({
                   empleado (p. ej. Examen.pdf).
                 </p>
                 <ul className="space-y-2">
-                  {(data?.exams || []).filter((e) => e.viewUrl || e.storage_path)
-                    .length === 0 ? (
-                    <li className="text-xs text-slate-400">
-                      Sin archivos médicos en el expediente
-                    </li>
-                  ) : (
-                    (data?.exams || [])
-                      .filter((e) => e.viewUrl || e.storage_path)
-                      .map((e) => (
-                        <li
-                          key={e.id}
-                          className="rounded-xl border border-slate-100 p-3 text-sm"
-                        >
-                          <p className="font-semibold">
-                            {e.exam_type}
-                            {e.test_date ? ` · ${e.test_date}` : ''}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {[e.result !== 'En expediente' ? e.result : null, e.notes]
-                              .filter(Boolean)
-                              .join(' · ') || 'Desde expediente'}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {e.viewUrl ? (
-                              <button
-                                type="button"
-                                className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
-                                style={{ backgroundColor: SUITE.navy }}
-                                onClick={() => {
-                                  setViewerUrl(e.viewUrl!);
-                                  setViewerTitle(e.exam_type || 'Documento médico');
-                                }}
-                              >
-                                Ver
-                              </button>
-                            ) : null}
-                          </div>
+                  {(() => {
+                    const examRows = (data?.exams || []).filter(
+                      (e) => e.viewUrl || e.storage_path
+                    );
+                    const examFallbackRems = (data?.reimbursements || []).filter(
+                      (r) =>
+                        (r.viewUrl || r.storage_path) &&
+                        isExpedienteExamFallbackNote(r.notes)
+                    );
+                    if (!examRows.length && !examFallbackRems.length) {
+                      return (
+                        <li className="text-xs text-slate-400">
+                          Sin archivos médicos en el expediente
                         </li>
-                      ))
-                  )}
+                      );
+                    }
+                    return (
+                      <>
+                        {examRows.map((e) => (
+                          <li
+                            key={e.id}
+                            className="rounded-xl border border-slate-100 p-3 text-sm"
+                          >
+                            <p className="font-semibold">
+                              {e.exam_type}
+                              {e.test_date ? ` · ${e.test_date}` : ''}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {[
+                                e.result !== 'En expediente' ? e.result : null,
+                                e.notes,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ') || 'Desde expediente'}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {e.viewUrl ? (
+                                <button
+                                  type="button"
+                                  className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                                  style={{ backgroundColor: SUITE.navy }}
+                                  onClick={() => {
+                                    setViewerUrl(e.viewUrl!);
+                                    setViewerTitle(
+                                      e.exam_type || 'Documento médico'
+                                    );
+                                  }}
+                                >
+                                  Ver
+                                </button>
+                              ) : null}
+                            </div>
+                          </li>
+                        ))}
+                        {examFallbackRems.map((r) => (
+                          <li
+                            key={r.id}
+                            className="rounded-xl border border-slate-100 p-3 text-sm"
+                          >
+                            <p className="font-semibold">
+                              {r.description || 'Documento médico'}
+                              {r.expense_date ? ` · ${r.expense_date}` : ''}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {r.notes || 'Desde expediente'}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {r.viewUrl ? (
+                                <button
+                                  type="button"
+                                  className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                                  style={{ backgroundColor: SUITE.navy }}
+                                  onClick={() => {
+                                    setViewerUrl(r.viewUrl!);
+                                    setViewerTitle(
+                                      r.description || 'Documento médico'
+                                    );
+                                  }}
+                                >
+                                  Ver
+                                </button>
+                              ) : null}
+                            </div>
+                          </li>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </ul>
               </section>
 
@@ -1003,10 +1052,19 @@ export function RrhhEmployeeProfile({
                   expediente.
                 </p>
                 <ul className="space-y-2">
-                  {(data?.reimbursements || []).length === 0 ? (
-                    <li className="text-xs text-slate-400">Sin registros</li>
-                  ) : (
-                    data?.reimbursements.map((r) => (
+                  {(() => {
+                    const rems = (data?.reimbursements || []).filter(
+                      (r) => !isExpedienteExamFallbackNote(r.notes)
+                    );
+                    if (rems.length === 0) {
+                      return (
+                        <li className="text-xs text-slate-400">
+                          Sin registros — si hay PDFs en «Gastos médicos» del
+                          expediente Drive, se importan al abrir el perfil.
+                        </li>
+                      );
+                    }
+                    return rems.map((r) => (
                       <li
                         key={r.id}
                         className="rounded-xl border border-slate-100 p-3 text-sm"
@@ -1068,8 +1126,8 @@ export function RrhhEmployeeProfile({
                           ) : null}
                         </div>
                       </li>
-                    ))
-                  )}
+                    ));
+                  })()}
                 </ul>
               </section>
 

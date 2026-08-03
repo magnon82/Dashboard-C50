@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * Expedientes personales viven en Plantilla (filas + Bajas del año).
- * Este componente queda como acceso compacto a Drive / Biblioteca /
- * resguardos si se necesita fuera del listado unificado.
+ * Acceso compacto a Drive / Biblioteca / resguardos.
+ * Expedientes personales y Archivo / Bajas viven en Plantilla
+ * (`RrhhPlantilla` → botón Archivo / Bajas; desajustes Altas↔baja allí).
  */
 import { useEffect, useState } from 'react';
 import { SuiteCard } from '@/app/components/SuiteShell';
@@ -25,16 +25,27 @@ type IndexPayload = {
   error?: string;
 };
 
+type AuditRow = {
+  id: string;
+  full_name: string;
+  kind: string;
+  note: string;
+};
+
 export function RrhhExpedientes({
   onGoBiblioteca,
+  onGoPlantillaArchivo,
   initialShowResguardos = false,
 }: {
   onGoBiblioteca?: () => void;
+  /** Ir a Plantilla → Archivo / Bajas para CTA de desajustes. */
+  onGoPlantillaArchivo?: () => void;
   initialShowResguardos?: boolean;
 }) {
   const [index, setIndex] = useState<IndexPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [showResguardos, setShowResguardos] = useState(initialShowResguardos);
+  const [mismatches, setMismatches] = useState<AuditRow[]>([]);
 
   useEffect(() => {
     if (initialShowResguardos) setShowResguardos(true);
@@ -43,10 +54,16 @@ export function RrhhExpedientes({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch('/api/hr/expedientes', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((json: IndexPayload) => {
-        if (!cancelled) setIndex(json);
+    Promise.all([
+      fetch('/api/hr/expedientes', { cache: 'no-store' }).then((r) => r.json()),
+      fetch('/api/hr/expedientes?audit=1', { cache: 'no-store' }).then((r) =>
+        r.json()
+      ),
+    ])
+      .then(([idx, audit]: [IndexPayload, { mismatches?: AuditRow[] }]) => {
+        if (cancelled) return;
+        setIndex(idx);
+        setMismatches(audit.mismatches || []);
       })
       .catch(() => {
         if (!cancelled) {
@@ -70,6 +87,7 @@ export function RrhhExpedientes({
     (index?.linkedCount ?? 0) > 0;
   const localMounted =
     index?.rootExists === true && index?.exists === true;
+  const altasStuck = mismatches.filter((m) => m.kind === 'baja_still_in_altas');
 
   return (
     <div className="space-y-5">
@@ -81,11 +99,12 @@ export function RrhhExpedientes({
           Expedientes · solo RH
         </p>
         <h3 className="mt-2 text-xl font-bold" style={{ color: theme.title }}>
-          Carpetas en Drive
+          Índice en servidor
         </h3>
         <p className="mt-2 text-sm leading-relaxed" style={{ color: theme.muted }}>
-          Consulta el expediente de cada persona desde la plantilla vigente
-          (botón Expediente) o en Bajas del año. Aquí solo el acceso a Drive.
+          Prioridad: índice Supabase (`drive_folder_path` + status). Altas =
+          vigentes; Bajas = archivo. Consulta cada persona desde Plantilla
+          (Expediente) o Archivo / Bajas. Aquí: Drive y desajustes.
         </p>
         <p className="mt-2 font-mono text-[11px] text-slate-400">
           {loading
@@ -139,6 +158,39 @@ export function RrhhExpedientes({
           </p>
         ) : null}
       </SuiteCard>
+
+      {altasStuck.length > 0 ? (
+        <SuiteCard className="max-w-3xl border border-amber-200 bg-amber-50/80">
+          <p className="text-xs font-bold uppercase tracking-wide text-amber-900">
+            Archivado en sistema (carpeta aún en Altas) · {altasStuck.length}
+          </p>
+          <p className="mt-1 text-xs text-amber-900/80">
+            Corrige desde Archivo / Bajas (mover carpeta en Drive o reactivar).
+            No se da de baja automáticamente a activos.
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-amber-950">
+            {altasStuck.slice(0, 12).map((m) => (
+              <li key={m.id} className="font-semibold">
+                {m.full_name}
+              </li>
+            ))}
+          </ul>
+          {onGoPlantillaArchivo ? (
+            <button
+              type="button"
+              onClick={onGoPlantillaArchivo}
+              className="mt-3 rounded-lg px-3 py-1.5 text-xs font-bold text-white"
+              style={{ backgroundColor: SUITE.navy }}
+            >
+              Ir a Archivo / Bajas →
+            </button>
+          ) : (
+            <p className="mt-2 text-xs text-amber-900/80">
+              Abre Plantilla → Archivo / Bajas para corregir.
+            </p>
+          )}
+        </SuiteCard>
+      ) : null}
 
       {showResguardos ? <RrhhResguardosPanel /> : null}
     </div>

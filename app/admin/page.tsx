@@ -204,6 +204,18 @@ export default function AdminPage() {
     password: string;
   } | null>(null);
   const [credsCopied, setCredsCopied] = useState(false);
+  const [expAuditBusy, setExpAuditBusy] = useState(false);
+  const [expAuditMsg, setExpAuditMsg] = useState<string | null>(null);
+  const [expAuditRows, setExpAuditRows] = useState<
+    Array<{
+      id: string;
+      full_name: string;
+      kind: string;
+      note: string;
+      status: string;
+      fecha_baja: string | null;
+    }>
+  >([]);
 
   const load = useCallback(async () => {
     setError('');
@@ -863,6 +875,83 @@ export default function AdminPage() {
               </form>
             )}
           </div>
+        </div>
+      </AdminSection>
+
+      </AdminSection>
+
+      {/* 2b. RR.HH. higiene */}
+      <AdminSection
+        title="RR.HH. · expedientes"
+        description="Auditoría Altas↔status (solo lista). No da de baja a activos. Corregir en /rrhh → Plantilla → Archivo / Bajas."
+      >
+        <div
+          className="rounded-[24px] border border-slate-100 bg-white p-5 max-w-3xl"
+          style={{ boxShadow: SUITE.shadow }}
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={expAuditBusy}
+              className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: SUITE.navy }}
+              onClick={async () => {
+                setExpAuditBusy(true);
+                setExpAuditMsg(null);
+                setExpAuditRows([]);
+                try {
+                  const res = await fetch('/api/hr/expedientes?audit=1', {
+                    cache: 'no-store',
+                  });
+                  const json = (await res.json()) as {
+                    error?: string;
+                    message?: string;
+                    mismatches?: typeof expAuditRows;
+                  };
+                  if (!res.ok) {
+                    setExpAuditMsg(json.error || 'No se pudo auditar');
+                    return;
+                  }
+                  setExpAuditRows(json.mismatches || []);
+                  setExpAuditMsg(json.message || 'Listo');
+                } catch {
+                  setExpAuditMsg('Error de red al auditar expedientes');
+                } finally {
+                  setExpAuditBusy(false);
+                }
+              }}
+            >
+              {expAuditBusy ? 'Auditando…' : 'Reconciliar expedientes'}
+            </button>
+            <a
+              href="/rrhh"
+              className="text-sm font-semibold"
+              style={{ color: SUITE.orangeDeep }}
+            >
+              Abrir RR.HH. →
+            </a>
+          </div>
+          {expAuditMsg ? (
+            <p className="mt-3 text-sm text-slate-600">{expAuditMsg}</p>
+          ) : null}
+          {expAuditRows.length > 0 ? (
+            <ul className="mt-3 max-h-64 space-y-1.5 overflow-y-auto text-sm">
+              {expAuditRows.map((r) => (
+                <li
+                  key={`${r.id}-${r.kind}`}
+                  className="rounded-lg border border-slate-100 px-3 py-2"
+                >
+                  <span className="font-semibold text-slate-800">
+                    {r.full_name}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">
+                    {r.kind} · {r.note}
+                    {r.fecha_baja ? ` · baja ${r.fecha_baja}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </AdminSection>
 

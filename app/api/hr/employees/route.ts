@@ -84,12 +84,48 @@ async function maybeFillNacimientoFromBaseDatos(): Promise<{
     const { enrichEmployeesFromBaseDatos } = await import(
       '@/app/lib/hr-payroll-sync'
     );
-    const { rows } = await loadBaseDatosRows();
-    if (!rows.length) return { filled: false, message: 'base_datos_empty' };
+    const { fillEmptyEmployeeIdentity, isPlausibleDobIso } = await import(
+      '@/app/lib/hr-identity'
+    );
     const sb = getServiceSupabase();
-    await enrichEmployeesFromBaseDatos(sb, rows);
+    let fromBase = false;
+    try {
+      const { rows } = await loadBaseDatosRows();
+      if (rows.length) {
+        await enrichEmployeesFromBaseDatos(sb, rows);
+        fromBase = true;
+      }
+    } catch {
+      /* BASE DATOS opcional */
+    }
+
+    // Soft-fill DOB faltantes desde actas (y CURP) en plantilla vigente.
+    const plantilla = await resolvePlantillaVigente(sb);
+    const needDob = (plantilla.employees || [])
+      .filter((e) => !isPlausibleDobIso(e.fecha_nacimiento))
+      .map((e) => e.id);
+    let fromActa = 0;
+    if (needDob.length) {
+      const fills = await fillEmptyEmployeeIdentity(sb, needDob, {
+        extractFromDocs: true,
+        includeLeavePayloads: false,
+        maxDocExtracts: 80,
+      });
+      fromActa = fills.filter((f) => f.fechaNacimientoUpdated).length;
+    }
+
     invalidatePlantillaCache();
-    return { filled: true };
+    if (!fromBase && !fromActa) {
+      return { filled: false, message: 'nothing_to_fill' };
+    }
+    return {
+      filled: true,
+      message: fromBase
+        ? fromActa
+          ? `base_datos+acta:${fromActa}`
+          : 'base_datos'
+        : `acta:${fromActa}`,
+    };
   } catch (e) {
     return {
       filled: false,
@@ -105,7 +141,8 @@ async function maybeFillNacimientoFromBaseDatos(): Promise<{
  * Excluye baja / force_exclude / fecha_baja.
  * ?source=activos → fuerza lista de activos (Horarios / catálogo overrides).
  * ?seed=0 → no intenta seed local.
- * ?fill_nacimiento=1 → soft-fill fecha_nacimiento desde BASE DATOS PERSONAL.
+ * ?fill_nacimiento=1 → soft-fill fecha_nacimiento desde BASE DATOS PERSONAL
+ *   y/o actas de nacimiento en expediente (TTL 5 min).
  */
 export async function GET(request: Request) {
   const auth = await requireRrhhSession();

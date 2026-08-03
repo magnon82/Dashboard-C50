@@ -29,6 +29,7 @@ SQL_FILES = {
     "eventos_leads_source": ROOT / "supabase" / "eventos_leads_source.sql",
     "reportes": ROOT / "supabase" / "reportes_socios.sql",
     "tpv": ROOT / "supabase" / "tpv_cortes.sql",
+    "hr_nacimiento": ROOT / "supabase" / "hr_employee_nacimiento.sql",
 }
 
 DEFAULT_ORDER = ["eventos", "eventos_leads", "eventos_leads_source", "reportes", "tpv"]
@@ -176,14 +177,18 @@ def main() -> int:
         print("BLOCKED: need DATABASE_URL (or DIRECT_URL) OR SUPABASE_ACCESS_TOKEN.")
         print("One-shot (Dashboard):")
         print(f"  1. Open https://supabase.com/dashboard/project/{ref or '<ref>'}/sql/new")
-        print("  2. Paste & Run in order:")
-        for key in DEFAULT_ORDER:
+        print("  2. Paste & Run:")
+        keys = (
+            list(SQL_FILES.keys())
+            if args.only == "all"
+            else [args.only]
+        )
+        for key in keys:
             print(f"     - {SQL_FILES[key].relative_to(ROOT)}")
-        print("  3. Reload /eventos -> CRM -> Importar Excel seed")
-        print("  4. Optional CLI later:")
+        print("  3. Optional CLI later:")
         print("     npx supabase login")
         print("     set SUPABASE_ACCESS_TOKEN=...   # or DATABASE_URL=postgresql://...")
-        print("     python scripts/apply_supabase_sql.py")
+        print(f"     python scripts/apply_supabase_sql.py --only {args.only}")
         if url and service:
             print()
             print("Current table probe:")

@@ -142,6 +142,16 @@ export type HrEmployeeExam = {
   viewUrl?: string | null;
 };
 
+/**
+ * Reembolso usado como fallback de examen cuando falta `hr_employee_exams`
+ * (nota escrita por pullExpedienteMedical).
+ */
+export function isExpedienteExamFallbackNote(
+  notes: string | null | undefined
+): boolean {
+  return /Desde expediente \(examen\):/i.test(String(notes || ''));
+}
+
 /** Sugerencias de tipo de examen (texto libre en API/UI). */
 export const HR_EXAM_TYPE_SUGGESTIONS = [
   'Toxicológico',

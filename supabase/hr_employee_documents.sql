@@ -3,6 +3,13 @@
 -- =============================================================================
 -- IDEMPOTENTE. Supabase → SQL Editor → pegar TODO este archivo → Run.
 --
+-- TODO / diseño futuro (alta documental en DB — sin UX completa aún):
+--   · Al alta de interno con «requiere documentación», crear filas pending
+--     en hr_employee_documents (INE, acta, CURP, domicilio) y subir a Storage.
+--   · Checklist + verificación Master (status verified/rejected).
+--   · Esta migración prepara la forma de datos; la UI de alta solo marca el flag
+--     requiere_documentacion por ahora (ver RrhhPlantilla).
+--
 -- Crea:
 --   · columnas perfil en hr_employees (fecha_baja, phone, foto, nss, curp, emergencia)
 --   · public.hr_employee_documents  (checklist INE/acta/CURP/domicilio/CV…)
@@ -177,6 +184,33 @@ comment on table public.hr_employee_documents is
   'Checklist documental de alta/perfil; vista in-app vía Suite. Paquete Documentos.pdf se parte en storage_path distinto por doc_type (hr-docs-pack-split).';
 comment on table public.hr_medical_justifications is
   'Justificante médico ligado a falta y opcionalmente a periodo de nómina.';
+
+-- 5) Exámenes (toxicológico / aptitud / etc.) — también en hr_employee_exams.sql
+create table if not exists public.hr_employee_exams (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references public.hr_employees (id) on delete cascade,
+  exam_type text not null,
+  test_date date not null,
+  result text not null,
+  notes text,
+  storage_path text,
+  mime_type text,
+  created_by text not null,
+  updated_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists hr_employee_exams_employee_idx
+  on public.hr_employee_exams (employee_id);
+
+create index if not exists hr_employee_exams_test_date_idx
+  on public.hr_employee_exams (test_date desc);
+
+alter table public.hr_employee_exams enable row level security;
+
+comment on table public.hr_employee_exams is
+  'Resultados de exámenes por empleado (fecha de prueba + resultado) en perfil RH.';
 
 -- Verificación rápida (opcional): debe devolver true / true
 -- select

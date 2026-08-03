@@ -8,8 +8,8 @@
  *  4) Heurística de orden mexicano solo para páginas sin señal: INE→Acta→CURP→Domicilio→CV
  *
  * Reglas duras:
- *  - Página con layout de Acta de Nacimiento → acta (aunque cite CURP).
- *  - Constancia CURP / RENAPO sin layout de acta → curp (nunca acta).
+ *  - Marca constancia CURP / RENAPO / SEGOB → curp (nunca acta), aunque cite acta.
+ *  - Título/layout «Acta de Nacimiento» → acta (aunque traiga campo CURP).
  *  - Credencial INE/IFE → ine (nunca acta).
  */
 
@@ -81,15 +81,18 @@ const KEYWORD_RULES: Array<{
     docType: 'curp',
     weight: 4,
     patterns: [
-      /\bcurp\b/,
-      /\bclave\s+unica\b/,
-      /\bclave\s+unica\s+de\s+registro\b/,
+      // Marca de constancia (no el campo CURP de un acta).
       /\bconstancia\s+de\s+la\s+clave\s+unica\b/,
+      /\bconstancia\s+de\s+(?:la\s+)?curp\b/,
+      /\bclave\s+unica\s+de\s+registro\s+(?:de\s+)?poblacion\b/,
       /\brenapo\b/,
+      /\bsegob\b/,
+      /\bsecretaria\s+de\s+gobernacion\b/,
       /\bregistro\s+nacional\s+de\s+poblacion\b/,
       // OCR a menudo pierde "nacional"
       /\bregistro\s+de\s+poblacion\b/,
-      // Folio CURP 18 chars (texto, espacios OCR, o pegado)
+      /\bclave\s+unica\b/,
+      // Folio CURP 18 chars (texto, espacios OCR, o pegado) — peso vía regla, no decide solo.
       /\b[a-z]{4}\s*\d{6}\s*[hm]\s*[a-z]{2}[a-z0-9]{3}\s*[0-9a-z]\s*\d\b/,
       /[a-z]{4}\d{6}[hm][a-z]{5}[0-9a-z]\d/,
     ],
@@ -100,6 +103,8 @@ const KEYWORD_RULES: Array<{
     patterns: [
       /\bacta\s+de\s+nacimiento\b/,
       /\bcertificado\s+de\s+nacimiento\b/,
+      /\bestados\s+unidos\s+mexicanos\b/,
+      /\bidentificador\s+electronico\b/,
       /\bregistro\s+civil\b/,
       /\boficialia\b/,
       /\bnacido\s+en\b/,
@@ -158,13 +163,39 @@ function hasCurpCode(n: string): boolean {
   );
 }
 
-/** Layout / título de Acta (no basta citar “acta” en una constancia CURP). */
-export function clearlyActaSignals(nRaw: string): boolean {
+/** Título / marca de constancia CURP (SEGOB / RENAPO). Independiente del acta. */
+export function curpConstanciaBrandSignals(nRaw: string): boolean {
   const n = normalizeText(nRaw);
-  const titleActa =
+  return (
+    /\bconstancia\s+de\s+la\s+clave\s+unica\b/.test(n) ||
+    /\bconstancia\s+de\s+(?:la\s+)?curp\b/.test(n) ||
+    /\bconstancia\b.{0,80}\bclave\s+unica\b/.test(n) ||
+    /\bclave\s+unica\s+de\s+registro\s+(?:de\s+)?poblacion\b/.test(n) ||
+    /\bclave\s+unica\b.{0,40}\b(?:registro|poblacion|curp)\b/.test(n) ||
+    /\brenapo\b/.test(n) ||
+    (/\bsegob\b/.test(n) &&
+      (/\bcurp\b/.test(n) || /\bclave\s+unica\b/.test(n) || hasCurpCode(n))) ||
+    (/\bsecretaria\s+de\s+gobernacion\b/.test(n) &&
+      (/\bcurp\b/.test(n) ||
+        /\bclave\s+unica\b/.test(n) ||
+        /\bconstancia\b/.test(n) ||
+        hasCurpCode(n))) ||
+    (/\bcurp\b/.test(n) &&
+      /\bregistro\s+(nacional\s+de\s+)?poblacion\b/.test(n) &&
+      !/\bacta\s+de\s+nacimiento\b/.test(n))
+  );
+}
+
+function hasActaTitle(n: string): boolean {
+  return (
     /\bacta\s+de\s+nacimiento\b/.test(n) ||
-    /\bcertificado\s+de\s+nacimiento\b/.test(n);
-  const layout =
+    /\bcertificado\s+de\s+nacimiento\b/.test(n)
+  );
+}
+
+/** Layout / marca de acta electrónica o de registro civil. */
+function hasActaLayout(n: string): boolean {
+  return (
     /\bdatos\s+de\s+la\s+persona\s+registrada\b/.test(n) ||
     /\bdatos\s+de\s+filiacion\b/.test(n) ||
     /\bentidad\s+de\s+registro\b/.test(n) ||
@@ -172,16 +203,37 @@ export function clearlyActaSignals(nRaw: string): boolean {
     /\boficialia\b/.test(n) ||
     /\bfoja\b/.test(n) ||
     /\bdatos\s+de\s+la\s+acta\b/.test(n) ||
+    /\bidentificador\s+electronico\b/.test(n) ||
+    (/\bestados\s+unidos\s+mexicanos\b/.test(n) && hasActaTitle(n)) ||
     (/\bregistro\s+civil\b/.test(n) &&
-      (/\blibro\b/.test(n) || /\bnumero\s+de\s+acta\b/.test(n)));
-  const curpConstanciaBrand =
-    /\bconstancia\s+de\s+la\s+clave\s+unica\b/.test(n) ||
-    /\brenapo\b/.test(n);
+      (/\blibro\b/.test(n) || /\bnumero\s+de\s+acta\b/.test(n) || /\bfoja\b/.test(n)))
+  );
+}
+
+/**
+ * Layout / título de Acta.
+ * El acta moderna trae campo CURP — eso no la convierte en constancia.
+ * Si hay marca de constancia CURP, nunca es acta.
+ */
+export function clearlyActaSignals(nRaw: string): boolean {
+  const n = normalizeText(nRaw);
+  if (curpConstanciaBrandSignals(n)) return false;
+
+  const titleActa = hasActaTitle(n);
+  const layout = hasActaLayout(n);
 
   if (titleActa && layout) return true;
-  if (layout && !curpConstanciaBrand) return true;
-  // Título solo: ok salvo constancia CURP que cita el acta en el texto legal.
-  if (titleActa && !curpConstanciaBrand) return true;
+  // Título solo: actas escaneadas a menudo solo exponen el encabezado.
+  if (titleActa) return true;
+  // Layout fuerte sin título OCR (borde / folio electrónico).
+  if (
+    layout &&
+    (/\bidentificador\s+electronico\b/.test(n) ||
+      /\bdatos\s+de\s+filiacion\b/.test(n) ||
+      /\bdatos\s+de\s+la\s+persona\s+registrada\b/.test(n))
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -199,18 +251,24 @@ export function clearlyIneSignals(nRaw: string): boolean {
   );
 }
 
-/** Constancia CURP / RENAPO (sin layout de acta). */
+/**
+ * Constancia CURP / RENAPO / SEGOB.
+ * Marca de constancia gana aunque el texto legal cite “acta de nacimiento”.
+ * Un folio CURP suelto en un acta NO basta.
+ */
 export function clearlyCurpConstanciaSignals(nRaw: string): boolean {
   const n = normalizeText(nRaw);
+  if (curpConstanciaBrandSignals(n)) return true;
+  // Sin marca de constancia: no reclamar si el documento es claramente un acta.
   if (clearlyActaSignals(n)) return false;
   return (
-    /\bconstancia\s+de\s+la\s+clave\s+unica\b/.test(n) ||
-    /\brenapo\b/.test(n) ||
-    (/\bcurp\b/.test(n) &&
-      /\bregistro\s+(nacional\s+de\s+)?poblacion\b/.test(n)) ||
     (/\bclave\s+unica\b/.test(n) &&
       /\bregistro\s+(nacional\s+de\s+)?poblacion\b/.test(n) &&
-      !/\bacta\s+de\s+nacimiento\b/.test(n))
+      !hasActaTitle(n)) ||
+    (/\bconstancia\b/.test(n) &&
+      /\bcurp\b/.test(n) &&
+      !hasActaTitle(n) &&
+      !hasActaLayout(n))
   );
 }
 
@@ -228,52 +286,60 @@ function scorePageText(text: string): Map<HrDocTypeId, number> {
   const curp = scores.get('curp') || 0;
   const acta = scores.get('acta_nacimiento') || 0;
   const ine = scores.get('ine') || 0;
+  const brandCurp = curpConstanciaBrandSignals(n);
   const clearlyActa = clearlyActaSignals(n);
   const clearlyIne = clearlyIneSignals(n);
   const clearlyCurpDoc = clearlyCurpConstanciaSignals(n);
 
-  // Prioridad: Acta (layout) > INE (credencial) > CURP (constancia).
-  // El acta moderna incluye folio CURP; eso no la convierte en constancia CURP.
-  if (clearlyActa && !clearlyIne) {
+  // Prioridad: marca constancia CURP > Acta (título/layout) > INE > scores.
+  // El acta moderna incluye folio CURP; eso no la convierte en constancia.
+  if (brandCurp || (clearlyCurpDoc && !clearlyActa)) {
+    scores.delete('acta_nacimiento');
+    scores.delete('ine');
+    scores.set('curp', Math.max(curp, 12));
+  } else if (clearlyActa && !clearlyIne) {
     scores.delete('ine');
     scores.set('acta_nacimiento', Math.max(acta, 12));
-    if (curp > 0) scores.set('curp', Math.min(curp, 3));
+    // Campo CURP del acta: no competir con la constancia.
+    if (curp > 0) scores.set('curp', Math.min(curp, 2));
   } else if (clearlyIne && !clearlyActa) {
     scores.delete('acta_nacimiento');
     scores.set('ine', Math.max(ine, 12));
   } else if (clearlyActa && clearlyIne) {
-    if (/\bacta\s+de\s+nacimiento\b/.test(n)) {
+    if (hasActaTitle(n)) {
       scores.delete('ine');
       scores.set('acta_nacimiento', Math.max(acta, 12));
+      if (curp > 0) scores.set('curp', Math.min(curp, 2));
     } else {
       scores.delete('acta_nacimiento');
       scores.set('ine', Math.max(ine, 12));
     }
-  } else if (clearlyCurpDoc) {
-    scores.delete('acta_nacimiento');
-    scores.set('curp', Math.max(curp, 12));
   } else if (curp > 0 && acta > 0) {
-    // Constancia CURP a menudo cita “acta de nacimiento” sin ser el acta.
-    const clearlyCurpLoose =
-      /\bcurp\b/.test(n) ||
+    // Empate débil: preferir título de acta sobre folio CURP suelto.
+    if (hasActaTitle(n) || hasActaLayout(n)) {
+      scores.set('acta_nacimiento', Math.max(acta, 10));
+      scores.set('curp', Math.min(curp, 2));
+    } else if (
       /\brenapo\b/.test(n) ||
       /\bclave\s+unica\b/.test(n) ||
       /\bregistro\s+(nacional\s+de\s+)?poblacion\b/.test(n) ||
-      hasCurpCode(n);
-    if (clearlyCurpLoose) {
+      /\bsegob\b/.test(n) ||
+      /\bconstancia\b/.test(n)
+    ) {
       scores.delete('acta_nacimiento');
       scores.set('curp', Math.max(curp, acta) + 4);
     }
-  } else if (curp === 0 && acta > 0 && !clearlyActa) {
-    // OCR: folio CURP sin layout de acta → probablemente constancia.
+    // Folio CURP solo + keywords débiles de acta: no forzar curp ni acta.
+  } else if (acta > 0 && !clearlyActa && !brandCurp) {
+    // OCR: sin título de acta; folio CURP + registro población → constancia.
     if (
-      hasCurpCode(n) ||
-      /\bregistro\s+de\s+poblacion\b/.test(n)
+      (hasCurpCode(n) || /\bregistro\s+de\s+poblacion\b/.test(n)) &&
+      !/\bregistro\s+civil\b/.test(n) &&
+      !/\boficialia\b/.test(n) &&
+      !/\bidentificador\s+electronico\b/.test(n)
     ) {
-      scores.set('curp', 8);
-      if (!/\bregistro\s+civil\b/.test(n) && !/\boficialia\b/.test(n)) {
-        scores.delete('acta_nacimiento');
-      }
+      scores.set('curp', Math.max(curp, 8));
+      scores.delete('acta_nacimiento');
     }
   }
 
@@ -292,14 +358,15 @@ function scorePageText(text: string): Map<HrDocTypeId, number> {
 export function detectDocTypeFromText(text: string): HrDocTypeId | null {
   const scoresMap = scorePageText(text);
   const n = normalizeText(text);
+  // Constancia CURP primero: nunca debe caer en slot de acta.
+  if (clearlyCurpConstanciaSignals(n) || curpConstanciaBrandSignals(n)) {
+    return 'curp';
+  }
   if (clearlyActaSignals(n) && !clearlyIneSignals(n)) {
     return 'acta_nacimiento';
   }
   if (clearlyIneSignals(n) && !clearlyActaSignals(n)) {
     return 'ine';
-  }
-  if (clearlyCurpConstanciaSignals(n)) {
-    return 'curp';
   }
   return pickDocType(scoresMap, 3) || pickDocType(scoresMap, 2);
 }
@@ -739,13 +806,14 @@ function classifyPagesFromTexts(
     if (
       labels[i] === 'acta_nacimiento' &&
       detected === 'curp' &&
-      clearlyCurpConstanciaSignals(raw)
+      (clearlyCurpConstanciaSignals(raw) || curpConstanciaBrandSignals(raw))
     ) {
       labels[i] = 'curp';
     } else if (
       (labels[i] === 'ine' || labels[i] === 'curp') &&
       detected === 'acta_nacimiento' &&
-      clearlyActaSignals(raw)
+      clearlyActaSignals(raw) &&
+      !curpConstanciaBrandSignals(raw)
     ) {
       labels[i] = 'acta_nacimiento';
     } else if (
@@ -1004,16 +1072,19 @@ export async function splitPackPdf(
       if (
         (part.docType === 'acta_nacimiento' &&
           detected === 'curp' &&
-          clearlyCurpConstanciaSignals(partText)) ||
+          (clearlyCurpConstanciaSignals(partText) ||
+            curpConstanciaBrandSignals(partText))) ||
         (part.docType === 'ine' &&
           detected === 'acta_nacimiento' &&
-          clearlyActaSignals(partText)) ||
+          clearlyActaSignals(partText) &&
+          !curpConstanciaBrandSignals(partText)) ||
         (part.docType === 'acta_nacimiento' &&
           detected === 'ine' &&
           clearlyIneSignals(partText)) ||
         (part.docType === 'curp' &&
           detected === 'acta_nacimiento' &&
-          clearlyActaSignals(partText))
+          clearlyActaSignals(partText) &&
+          !curpConstanciaBrandSignals(partText))
       ) {
         for (const p of part.pages) fixedLabels[p] = detected;
         changed = true;

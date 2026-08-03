@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { existsSync } from 'fs';
 import { requireRrhhSession } from '@/app/lib/hr-api';
 import {
+  buildExpedientesFromEmployees,
+  formatSyncBanner,
+  upsertHrDriveSyncState,
+  auditExpedienteStatusMismatches,
+} from '@/app/lib/hr-drive-sync';
+import {
   HR_EXPEDIENTES_DIR,
   HR_EXPEDIENTES_DRIVE_FOLDER_ID,
   hrDriveFolderUrl,
@@ -15,11 +21,6 @@ import {
   isUnderHrRoot,
   listHrFolder,
 } from '@/app/lib/hr-biblioteca';
-import {
-  buildExpedientesFromEmployees,
-  formatSyncBanner,
-  upsertHrDriveSyncState,
-} from '@/app/lib/hr-drive-sync';
 import { localDriveFsEnabled } from '@/app/lib/local-fs';
 import {
   canonicalHrEmployeeName,
@@ -359,6 +360,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const bucketParam = (url.searchParams.get('bucket') || '').toLowerCase();
   const listPath = url.searchParams.get('path') || '';
+  const auditOnly = url.searchParams.get('audit') === '1';
 
   const root = getHrRoot();
   const rootExists = hrRootExists();
@@ -371,6 +373,22 @@ export async function GET(request: Request) {
   const allEmployees = await loadEmployees();
   const archivedFromDb = archivedOperational(allEmployees);
   const dbIndex = buildExpedientesFromEmployees(allEmployees);
+
+  if (auditOnly) {
+    const mismatches = auditExpedienteStatusMismatches(allEmployees);
+    return NextResponse.json({
+      ready: true,
+      source: 'supabase',
+      audit: true,
+      /** Solo lista; no auto-baja activos. */
+      mismatches,
+      count: mismatches.length,
+      message:
+        mismatches.length === 0
+          ? 'Sin desajustes Altas↔status.'
+          : `${mismatches.length} desajuste(s). No se modificó ninguna fila (sin auto-baja).`,
+    });
+  }
 
   if (!rootExists || !expedientesExists) {
     let people = dbIndex.people;

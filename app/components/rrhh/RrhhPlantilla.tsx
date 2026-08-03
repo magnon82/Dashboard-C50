@@ -18,6 +18,7 @@ import {
   formatHrDate,
   formatHrPuesto,
   groupPlantillaByTeam,
+  isMergedDuplicateShell,
   isPlantillaExterno,
   plantillaPositionKey,
   type HrEmployee,
@@ -152,26 +153,40 @@ function formatPeriodoTrabajado(
   return 'sin fechas';
 }
 
+function currentYearCdmx(): number {
+  return Number(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+    }).format(new Date())
+  );
+}
+
+function isBajaDelAno(a: ArchivedDb, year: number): boolean {
+  if (isMergedDuplicateShell(a.notes)) return false;
+  if (a.status !== 'baja' && !a.fecha_baja) return false;
+  if (a.fecha_baja) {
+    return Number(String(a.fecha_baja).slice(0, 4)) === year;
+  }
+  return a.status === 'baja';
+}
+
 function PlantillaPersonRow({
   employee,
   asOf,
   alt,
-  folderPath,
   busy,
   canEdit,
   docAlert,
-  onOpenExpediente,
   onOpenProfile,
   onEditProfile,
 }: {
   employee: HrEmployee;
   asOf: string | null;
   alt: boolean;
-  folderPath: string | null;
   busy: boolean;
   canEdit: boolean;
   docAlert: HrDocAlertSummary | null;
-  onOpenExpediente: (employee: HrEmployee, path: string) => void;
   onOpenProfile: (employee: HrEmployee) => void;
   onEditProfile: (employee: HrEmployee) => void;
 }) {
@@ -240,19 +255,14 @@ function PlantillaPersonRow({
         </div>
       </div>
       <div className="rrhh-plantilla__exp">
-        {folderPath ? (
-          <button
-            type="button"
-            className="rrhh-plantilla__exp-btn"
-            onClick={() => onOpenExpediente(employee, folderPath)}
-          >
-            Expediente
-          </button>
-        ) : (
-          <span className="rrhh-plantilla__exp-miss" title="Sin carpeta vinculada">
-            —
-          </span>
-        )}
+        <button
+          type="button"
+          className="rrhh-plantilla__exp-btn"
+          onClick={() => onOpenProfile(employee)}
+          title="Abrir perfil · documentos"
+        >
+          Expediente
+        </button>
       </div>
       <div className="rrhh-plantilla__actions">
         {canEdit ? (
@@ -316,6 +326,8 @@ export function RrhhPlantilla({
   const [viewer, setViewer] = useState<HrViewerTarget | null>(null);
   const [showResguardos, setShowResguardos] = useState(initialShowResguardos);
   const [showAlta, setShowAlta] = useState(false);
+  /** Archivo de bajas: fuera de la plantilla vigente (no como alerta). */
+  const [showArchivoBajas, setShowArchivoBajas] = useState(false);
   const [altaTipo, setAltaTipo] = useState<HrTipoEmpleo>('interno');
   const [altaRequiereDocs, setAltaRequiereDocs] = useState(true);
   const [altaName, setAltaName] = useState('');
@@ -520,7 +532,49 @@ export function RrhhPlantilla({
     [folderByEmployeeId, folderByName, folders]
   );
 
-  const openExpediente = useCallback(
+  const year = currentYearCdmx();
+
+  const bajasDelAno = useMemo(() => {
+    const list = (expIndex?.archivedFromDb ?? []).filter((a) =>
+      isBajaDelAno(a, year)
+    );
+    const byLabel = new Map<string, ArchivedDb>();
+    for (const a of list) {
+      const label = formatHrListName(a.full_name).toLocaleLowerCase('es-MX');
+      const prev = byLabel.get(label);
+      if (!prev) {
+        byLabel.set(label, a);
+        continue;
+      }
+      const aHas = Boolean(resolveFolderPath(a));
+      const prevHas = Boolean(resolveFolderPath(prev));
+      if (aHas && !prevHas) byLabel.set(label, a);
+      else if (aHas === prevHas && a.full_name.length > prev.full_name.length) {
+        byLabel.set(label, a);
+      }
+    }
+    return [...byLabel.values()].sort((a, b) => {
+      const da = a.fecha_baja || '';
+      const db = b.fecha_baja || '';
+      if (da !== db) return db.localeCompare(da);
+      return formatHrListName(a.full_name).localeCompare(
+        formatHrListName(b.full_name),
+        'es',
+        { sensitivity: 'base' }
+      );
+    });
+  }, [expIndex?.archivedFromDb, year, resolveFolderPath]);
+
+  /** Carpetas en Altas cuyo empleado ya está baja en sistema. */
+  const expedienteMismatches = useMemo(() => {
+    return folders.filter(
+      (f) =>
+        f.archiveStatus === 'baja' &&
+        (f.archiveNote || '').toLowerCase().includes('altas')
+    );
+  }, [folders]);
+
+  const openExpedienteFolder = useCallback(
     (
       emp: {
         full_name: string;
@@ -546,6 +600,12 @@ export function RrhhPlantilla({
     },
     [expIndex?.driveUrl]
   );
+
+  const openProfile = useCallback((emp: { id: string }) => {
+    setShowAlta(false);
+    setProfileTab('docs');
+    setProfileId(emp.id);
+  }, []);
 
   async function patchEmployee(
     id: string,
@@ -573,6 +633,18 @@ export function RrhhPlantilla({
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function reactivarBaja(a: ArchivedDb) {
+    if (
+      !confirm(
+        `¿Reactivar a ${formatHrListName(a.full_name)} en la plantilla vigente?`
+      )
+    ) {
+      return;
+    }
+    const ok = await patchEmployee(a.id, { action: 'alta' });
+    if (ok) void loadExpedientes();
   }
 
   async function submitAlta() {
@@ -735,6 +807,27 @@ export function RrhhPlantilla({
         >
           {showResguardos ? 'Ocultar inventario' : 'Ver resguardos'}
         </button>
+        <button
+          type="button"
+          className="rounded-full px-3 py-1 text-xs font-semibold border border-slate-200"
+          style={{ color: theme.title }}
+          onClick={() => setShowArchivoBajas((v) => !v)}
+          title="Bajas y desajustes de expediente — fuera de la plantilla vigente"
+        >
+          {showArchivoBajas
+            ? 'Ocultar archivo'
+            : `Archivo / Bajas${
+                bajasDelAno.length || expedienteMismatches.length
+                  ? ` (${bajasDelAno.length}${
+                      expedienteMismatches.length
+                        ? ` · ${expedienteMismatches.length} desajuste${
+                            expedienteMismatches.length === 1 ? '' : 's'
+                          }`
+                        : ''
+                    })`
+                  : ''
+              }`}
+        </button>
         {onGoBiblioteca ? (
           <button
             type="button"
@@ -785,7 +878,9 @@ export function RrhhPlantilla({
           </p>
           <p className="text-xs" style={{ color: theme.muted }}>
             Se agrega a la plantilla vigente. Luego abre el perfil (clic en el
-            nombre) para documentos, médico, resguardos y datos.
+            nombre o Expediente) para documentos, médico, resguardos y datos.
+            {/* TODO futuro: alta con checklist → hr_employee_documents + Storage
+                (ver supabase/hr_employee_documents.sql). Sin UX completa aún. */}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <fieldset className="sm:col-span-2">
@@ -1151,23 +1246,15 @@ export function RrhhPlantilla({
                     employee={e}
                     asOf={asOf}
                     alt={i % 2 === 1}
-                    folderPath={resolveFolderPath(e)}
                     busy={busyId === e.id}
                     canEdit={canEditEmp}
                     docAlert={docAlerts[e.id] ?? null}
-                    onOpenExpediente={(emp, path) =>
-                      openExpediente(emp, path)
-                    }
                     onEditProfile={(emp) => {
                       setShowAlta(false);
                       setProfileTab('datos');
                       setProfileId(emp.id);
                     }}
-                    onOpenProfile={(emp) => {
-                      setShowAlta(false);
-                      setProfileTab('docs');
-                      setProfileId(emp.id);
-                    }}
+                    onOpenProfile={openProfile}
                   />
                 ))}
 
@@ -1187,23 +1274,15 @@ export function RrhhPlantilla({
                         employee={e}
                         asOf={asOf}
                         alt={i % 2 === 1}
-                        folderPath={resolveFolderPath(e)}
                         busy={busyId === e.id}
                         canEdit={canEditEmp}
                         docAlert={docAlerts[e.id] ?? null}
-                        onOpenExpediente={(emp, path) =>
-                          openExpediente(emp, path)
-                        }
                         onEditProfile={(emp) => {
                           setShowAlta(false);
                           setProfileTab('datos');
                           setProfileId(emp.id);
                         }}
-                        onOpenProfile={(emp) => {
-                          setShowAlta(false);
-                          setProfileTab('docs');
-                          setProfileId(emp.id);
-                        }}
+                        onOpenProfile={openProfile}
                       />
                     ))}
                   </div>
@@ -1222,6 +1301,186 @@ export function RrhhPlantilla({
           </p>
         </div>
       )}
+
+      {showArchivoBajas && !showCatalog ? (
+        <section className="space-y-3 border-t border-slate-100 pt-4">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h3 className="text-lg font-bold" style={{ color: theme.title }}>
+              Archivo / Bajas
+            </h3>
+            <span className="text-xs text-slate-500">
+              No forma parte de la plantilla vigente · {year}
+            </span>
+          </div>
+          <p className="text-xs text-slate-500">
+            Altas = vigentes; Bajas = archivo. Si una carpeta sigue en Altas con
+            status baja en el sistema, aparece abajo como desajuste (mover
+            carpeta en Drive o reactivar).
+          </p>
+
+          {expedienteMismatches.length > 0 ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-900">
+                Reconciliar · mal marcados · {expedienteMismatches.length}{' '}
+                desajuste
+                {expedienteMismatches.length === 1 ? '' : 's'}
+              </p>
+              <p className="mt-1 text-[11px] text-amber-900/80">
+                En sistema figuran como baja pero su carpeta sigue en Altas. Si
+                siguen activos, usa «Corregir (reactivar)». No se da de baja
+                automáticamente a nadie marcado activo.
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {expedienteMismatches.map((f) => (
+                  <li
+                    key={f.path}
+                    className="flex flex-wrap items-center gap-2 text-sm text-amber-950"
+                  >
+                    <span className="font-semibold">
+                      {formatHrListName(f.matchedName || f.name)}
+                    </span>
+                    <span className="text-[11px] text-amber-800/80">
+                      {f.archiveNote || 'Baja con carpeta en Altas'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openExpedienteFolder(
+                          {
+                            full_name: f.matchedName || f.name,
+                            fecha_baja: f.fechaBaja,
+                          },
+                          f.path,
+                          { baja: true }
+                        )
+                      }
+                      className="text-xs font-semibold"
+                      style={{ color: SUITE.orangeDeep }}
+                    >
+                      Abrir carpeta
+                    </button>
+                    {f.employeeId ? (
+                      <button
+                        type="button"
+                        disabled={busyId === f.employeeId}
+                        onClick={() =>
+                          void reactivarBaja({
+                            id: f.employeeId!,
+                            full_name: f.matchedName || f.name,
+                            status: 'baja',
+                            fecha_baja: f.fechaBaja ?? null,
+                            puesto: null,
+                            force_exclude: true,
+                          })
+                        }
+                        className="text-xs font-semibold disabled:opacity-50"
+                        style={{ color: SUITE.navy }}
+                      >
+                        Corregir (reactivar)
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Sin desajustes Altas↔baja detectados en el índice actual.
+            </p>
+          )}
+
+          {bajasDelAno.length > 0 ? (
+            <>
+              <div className="flex flex-wrap items-baseline gap-2 pt-1">
+                <h4
+                  className="text-sm font-bold"
+                  style={{ color: theme.title }}
+                >
+                  Bajas del año
+                </h4>
+                <span className="text-xs text-slate-500">
+                  {bajasDelAno.length} persona
+                  {bajasDelAno.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <ul
+                className="overflow-hidden rounded-2xl bg-white"
+                style={{ boxShadow: SUITE.shadow }}
+              >
+                {bajasDelAno.map((a, i) => {
+                  const periodo = formatPeriodoTrabajado(
+                    a.fecha_ingreso,
+                    a.fecha_baja
+                  );
+                  const periodoMuted = periodo === 'sin fechas';
+                  return (
+                    <li
+                      key={a.id}
+                      className={`flex flex-wrap items-center gap-2 px-4 py-2.5 ${
+                        i > 0 ? 'border-t border-slate-100' : ''
+                      }`}
+                      style={{
+                        background:
+                          i % 2 === 1 ? 'rgba(15, 23, 42, 0.03)' : undefined,
+                      }}
+                    >
+                      <span className="rounded-md bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-700">
+                        Baja
+                      </span>
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left text-sm font-semibold"
+                        style={{ color: theme.title }}
+                        onClick={() => openProfile(a)}
+                        title="Abrir perfil"
+                      >
+                        {formatHrListName(a.full_name)}
+                      </button>
+                      {a.puesto ? (
+                        <span className="text-[11px] text-slate-500">
+                          {a.puesto}
+                        </span>
+                      ) : null}
+                      <span
+                        className={`text-[11px] ${
+                          periodoMuted ? 'text-slate-400' : 'text-slate-600'
+                        }`}
+                      >
+                        {periodo}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => openProfile(a)}
+                        className="text-xs font-semibold"
+                        style={{ color: SUITE.orangeDeep }}
+                        title="Abrir perfil · documentos"
+                      >
+                        Expediente
+                      </button>
+                      {canEditEmp ? (
+                        <button
+                          type="button"
+                          disabled={busyId === a.id}
+                          onClick={() => void reactivarBaja(a)}
+                          className="text-xs font-semibold disabled:opacity-50"
+                          style={{ color: SUITE.navy }}
+                          title="Volver a plantilla vigente"
+                        >
+                          Reactivar
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">
+              No hay bajas registradas en {year}.
+            </p>
+          )}
+        </section>
+      ) : null}
 
       {showResguardos ? <RrhhResguardosPanel /> : null}
 

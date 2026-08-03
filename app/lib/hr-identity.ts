@@ -1,9 +1,12 @@
 /**
- * Identidad de empleado vía CURP / NSS (campo, BASE DATOS, docs INE·CURP·NSS).
+ * Identidad de empleado vía CURP / NSS / fecha_nacimiento
+ * (campo, BASE DATOS, docs INE·CURP·Acta·NSS).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  clearlyActaSignals,
+  clearlyCurpConstanciaSignals,
   extractPdfTextWithOcr,
   extractTextFromPdfBytes,
 } from './hr-docs-pack-split';
@@ -194,6 +197,166 @@ export async function extractNssFromDocBytesAsync(
   return extractNssFromText(text);
 }
 
+/** Fecha civil plausible para personal (≈14–100 años). */
+export function isPlausibleDobIso(iso: string | null | undefined): boolean {
+  const s = String(iso || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const y = Number(s.slice(0, 4));
+  const m = Number(s.slice(5, 7));
+  const d = Number(s.slice(8, 10));
+  if (!y || m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== m - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return false;
+  }
+  const nowY = new Date().getFullYear();
+  const age = nowY - y;
+  return age >= 14 && age <= 100;
+}
+
+/** Normaliza ISO YYYY-MM-DD o null si no es DOB plausible. */
+export function normalizeFechaNacimiento(
+  raw: string | null | undefined
+): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim().slice(0, 10);
+  return isPlausibleDobIso(s) ? s : null;
+}
+
+/** dd/mm/yyyy · dd-mm-yyyy · dd.mm.yyyy → ISO (día/mes mexicanos). */
+export function parseMexicanDateToIso(raw: string): string | null {
+  const m = String(raw || '')
+    .trim()
+    .match(/^(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2,4})$/);
+  if (!m) return null;
+  let y = Number(m[3]);
+  const month = Number(m[2]);
+  const day = Number(m[1]);
+  if (m[3]!.length === 2) {
+    // Misma heurística que CURP: 00–(año%100) → 2000s, si no 1900s + edad.
+    const yy = y;
+    const nowY = new Date().getFullYear();
+    y = yy > nowY % 100 ? 1900 + yy : 2000 + yy;
+    if (!isPlausibleDobIso(
+      `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    )) {
+      const alt = y >= 2000 ? 1900 + yy : 2000 + yy;
+      y = alt;
+    }
+  }
+  const iso = `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return normalizeFechaNacimiento(iso);
+}
+
+/**
+ * DOB desde posiciones 5–10 del CURP (YYMMDD).
+ * Siglo: prefiere edad 14–100; si ambos caben, el más reciente ≤ hoy.
+ */
+export function dobIsoFromCurp(curp: string | null | undefined): string | null {
+  const c = normalizeCurp(curp);
+  if (!c || c.length < 10) return null;
+  const yy = Number(c.slice(4, 6));
+  const mm = Number(c.slice(6, 8));
+  const dd = Number(c.slice(8, 10));
+  if (!Number.isFinite(yy) || mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const nowY = new Date().getFullYear();
+  const candidates = [1900 + yy, 2000 + yy]
+    .map((y) => {
+      const iso = `${y}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+      return normalizeFechaNacimiento(iso);
+    })
+    .filter((x): x is string => !!x && Number(x.slice(0, 4)) <= nowY);
+  if (!candidates.length) return null;
+  // Preferir el más reciente (p. ej. 2005 sobre 1905).
+  candidates.sort((a, b) => b.localeCompare(a));
+  return candidates[0]!;
+}
+
+export type DobExtractSource = 'label' | 'curp';
+
+/**
+ * Extrae fecha de nacimiento de texto de Acta.
+ * Prioriza el campo «Fecha de Nacimiento»; si no, CURP embebido (pos. 5–10).
+ * Ignora constancias CURP (aunque citen el acta).
+ */
+export function extractFechaNacimientoFromActaText(
+  text: string | null | undefined
+): { iso: string; source: DobExtractSource } | null {
+  if (!text) return null;
+  const raw = String(text);
+  if (clearlyCurpConstanciaSignals(raw) && !clearlyActaSignals(raw)) {
+    return null;
+  }
+
+  const upper = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+
+  // Etiqueta Acta (evitar «Fecha de Registro»).
+  const labelRe = /FECHA\s*DE\s*NAC\w*\s*[:.#]?\s*/gi;
+  let labelMatch: RegExpExecArray | null;
+  while ((labelMatch = labelRe.exec(upper))) {
+    const tail = upper.slice(labelMatch.index + labelMatch[0].length, labelMatch.index + labelMatch[0].length + 80);
+    // No tomar «REGISTRO» si aparece antes de un número de fecha.
+    const dateM = tail.match(
+      /(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2,4})/
+    );
+    if (dateM) {
+      const iso = parseMexicanDateToIso(dateM[0]);
+      if (iso) return { iso, source: 'label' };
+    }
+  }
+
+  // Fallback: CURP en el acta (solo si parece acta o hay título).
+  const looksActa =
+    clearlyActaSignals(raw) ||
+    /\bACTA\s+DE\s+NACIMIENTO\b/i.test(upper) ||
+    /\bFECHA\s+DE\s+NACIMIENTO\b/i.test(upper);
+  if (!looksActa) return null;
+
+  const curp = extractCurpFromText(upper, { strict: true }) || extractCurpFromText(upper);
+  const fromCurp = dobIsoFromCurp(curp);
+  if (fromCurp) return { iso: fromCurp, source: 'curp' };
+  return null;
+}
+
+/** Capa texto PDF/imagen; sin OCR. */
+export function extractFechaNacimientoFromActaBytes(
+  bytes: Buffer,
+  mimeType?: string | null
+): { iso: string; source: DobExtractSource } | null {
+  if (isPdfBuffer(bytes, mimeType)) {
+    return extractFechaNacimientoFromActaText(extractTextFromPdfBytes(bytes));
+  }
+  return extractFechaNacimientoFromActaText(
+    bytes.toString('latin1').slice(0, 200_000)
+  );
+}
+
+/** Con OCR si la capa de texto no rinde (escaneos de acta). */
+export async function extractFechaNacimientoFromActaBytesAsync(
+  bytes: Buffer,
+  mimeType?: string | null
+): Promise<{ iso: string; source: DobExtractSource } | null> {
+  const sync = extractFechaNacimientoFromActaBytes(bytes, mimeType);
+  if (sync?.source === 'label') return sync;
+
+  if (!isPdfBuffer(bytes, mimeType)) {
+    return sync;
+  }
+
+  const { text } = await extractPdfTextWithOcr(bytes, { forceOcr: true });
+  const fromOcr = extractFechaNacimientoFromActaText(text);
+  if (fromOcr?.source === 'label') return fromOcr;
+  // Preferir etiqueta capa texto > CURP OCR > CURP capa
+  return fromOcr || sync;
+}
+
 export type CurpSource =
   | 'field'
   | 'base_datos'
@@ -204,6 +367,14 @@ export type CurpSource =
   | 'none';
 
 export type NssSource = 'field' | 'base_datos' | 'doc_nss' | 'none';
+
+export type FechaNacimientoSource =
+  | 'field'
+  | 'base_datos'
+  | 'doc_acta_label'
+  | 'doc_acta_curp'
+  | 'curp_field'
+  | 'none';
 
 export type EmployeeIdentity = {
   employeeId: string;
@@ -216,10 +387,15 @@ export type IdentityFillResult = {
   fullName?: string;
   curp: string | null;
   nss: string | null;
+  fechaNacimiento: string | null;
   curpSource: CurpSource;
   nssSource: NssSource;
+  fechaNacimientoSource: FechaNacimientoSource;
   curpUpdated: boolean;
   nssUpdated: boolean;
+  fechaNacimientoUpdated: boolean;
+  /** true si DOB se resolvió pero falta columna fecha_nacimiento en DB */
+  dobColumnMissing?: boolean;
 };
 
 type DocRow = {
@@ -271,11 +447,13 @@ export async function loadEmployeeCurpMap(
 export type BaseDatosIdentityHint = {
   curp?: string | null;
   nss?: string | null;
+  fecha_nacimiento?: string | null;
 };
 
 /**
- * Rellena CURP/NSS vacíos desde BASE DATOS (hints), documentos y/o leave payload.
- * Nunca sobrescribe un valor ya presente en hr_employees.
+ * Rellena CURP/NSS/fecha_nacimiento vacíos desde BASE DATOS (hints),
+ * actas de nacimiento (etiqueta o CURP embebido), docs CURP/INE/NSS y leave.
+ * Nunca sobrescribe un valor ya presente y plausible en hr_employees.
  */
 export async function fillEmptyEmployeeIdentity(
   sb: SupabaseClient,
@@ -304,33 +482,60 @@ export async function fillEmptyEmployeeIdentity(
       employeeId: id,
       curp: null,
       nss: null,
+      fechaNacimiento: null,
       curpSource: 'none',
       nssSource: 'none',
+      fechaNacimientoSource: 'none',
       curpUpdated: false,
       nssUpdated: false,
+      fechaNacimientoUpdated: false,
     };
     results.push(row);
     byId.set(id, row);
   }
   if (!employeeIds.length) return results;
 
-  const { data: emps } = await sb
+  const { data: emps, error: empErr } = await sb
     .from('hr_employees')
-    .select('id, full_name, curp, nss')
+    .select('id, full_name, curp, nss, fecha_nacimiento')
     .in('id', employeeIds);
 
-  for (const raw of emps || []) {
-    const row = raw as {
-      id: string;
-      full_name?: string | null;
-      curp: string | null;
-      nss: string | null;
-    };
+  let empRows = (emps || []) as Array<{
+    id: string;
+    full_name?: string | null;
+    curp: string | null;
+    nss: string | null;
+    fecha_nacimiento?: string | null;
+  }>;
+
+  const missingDobCol =
+    !!empErr &&
+    /fecha_nacimiento|column .* does not exist|42703/i.test(empErr.message || '');
+  if (missingDobCol) {
+    const { data: empsNoDob } = await sb
+      .from('hr_employees')
+      .select('id, full_name, curp, nss')
+      .in('id', employeeIds);
+    empRows = (empsNoDob || []).map((r) => ({
+      ...(r as {
+        id: string;
+        full_name?: string | null;
+        curp: string | null;
+        nss: string | null;
+      }),
+      fecha_nacimiento: null,
+    }));
+  }
+
+  for (const row of empRows) {
     const slot = byId.get(row.id);
     if (!slot) continue;
     slot.fullName = row.full_name || undefined;
     const curp = normalizeCurp(row.curp);
     const nss = normalizeNss(row.nss);
+    const dob = missingDobCol
+      ? null
+      : normalizeFechaNacimiento(row.fecha_nacimiento);
     if (curp) {
       slot.curp = curp;
       slot.curpSource = 'field';
@@ -339,7 +544,14 @@ export async function fillEmptyEmployeeIdentity(
       slot.nss = nss;
       slot.nssSource = 'field';
     }
+    if (dob) {
+      slot.fechaNacimiento = dob;
+      slot.fechaNacimientoSource = 'field';
+    }
   }
+
+  // Si falta la columna, aún calculamos DOB en memoria pero no persistimos.
+  const canWriteDob = !missingDobCol;
 
   // 1) BASE DATOS PERSONAL (hints ya matcheados)
   if (baseHints?.size) {
@@ -359,6 +571,13 @@ export async function fillEmptyEmployeeIdentity(
         if (n) {
           slot.nss = n;
           slot.nssSource = 'base_datos';
+        }
+      }
+      if (!slot.fechaNacimiento) {
+        const d = normalizeFechaNacimiento(hint.fecha_nacimiento);
+        if (d) {
+          slot.fechaNacimiento = d;
+          slot.fechaNacimientoSource = 'base_datos';
         }
       }
     }
@@ -390,22 +609,26 @@ export async function fillEmptyEmployeeIdentity(
     }
   }
 
-  // 3) Documentos en storage
+  // 3) Documentos en storage (CURP/NSS + Acta → fecha_nacimiento)
   if (extractFromDocs) {
     const needCurp = employeeIds.filter((id) => !byId.get(id)?.curp);
     const needNss = employeeIds.filter((id) => !byId.get(id)?.nss);
-    const needAny = [...new Set([...needCurp, ...needNss])];
+    const needDob = employeeIds.filter((id) => !byId.get(id)?.fechaNacimiento);
+    const needAny = [...new Set([...needCurp, ...needNss, ...needDob])];
 
     if (needAny.length) {
       const docTypes = [
         ...(needCurp.length ? ['curp', 'ine', 'acta_nacimiento'] : []),
         ...(needNss.length ? ['nss'] : []),
+        ...(needDob.length && !needCurp.length ? ['acta_nacimiento'] : []),
       ];
+      // Si ya pedimos acta por CURP, no duplicar; si solo DOB, asegurar acta.
+      const uniqueTypes = [...new Set(docTypes)];
       const { data: docs } = await sb
         .from('hr_employee_documents')
         .select('employee_id, doc_type, storage_path, mime_type, status')
         .in('employee_id', needAny)
-        .in('doc_type', docTypes)
+        .in('doc_type', uniqueTypes)
         .not('storage_path', 'is', null);
 
       const byEmp = new Map<string, DocRow[]>();
@@ -445,8 +668,23 @@ export async function fillEmptyEmployeeIdentity(
               if (curp) {
                 slot.curp = curp;
                 slot.curpSource = curpSourceFromDocType(String(doc.doc_type));
-                break;
               }
+              // Misma descarga de acta → DOB (etiqueta o CURP)
+              if (
+                !slot.fechaNacimiento &&
+                String(doc.doc_type) === 'acta_nacimiento'
+              ) {
+                const dob = await extractFechaNacimientoFromActaBytesAsync(
+                  buf,
+                  doc.mime_type
+                );
+                if (dob) {
+                  slot.fechaNacimiento = dob.iso;
+                  slot.fechaNacimientoSource =
+                    dob.source === 'label' ? 'doc_acta_label' : 'doc_acta_curp';
+                }
+              }
+              if (slot.curp) break;
             } catch {
               /* ignore */
             }
@@ -476,18 +714,66 @@ export async function fillEmptyEmployeeIdentity(
             }
           }
         }
+
+        // Acta → fecha_nacimiento si aún falta (CURP ya estaba en ficha)
+        if (!slot.fechaNacimiento) {
+          const actas = list.filter(
+            (d) => String(d.doc_type) === 'acta_nacimiento'
+          );
+          for (const doc of actas) {
+            if (extracts >= maxExtracts) break;
+            if (!doc.storage_path) continue;
+            extracts += 1;
+            try {
+              const dl = await sb.storage
+                .from(HR_DOCS_BUCKET)
+                .download(doc.storage_path);
+              if (dl.error || !dl.data) continue;
+              const buf = Buffer.from(await dl.data.arrayBuffer());
+              const dob = await extractFechaNacimientoFromActaBytesAsync(
+                buf,
+                doc.mime_type
+              );
+              if (dob) {
+                slot.fechaNacimiento = dob.iso;
+                slot.fechaNacimientoSource =
+                  dob.source === 'label' ? 'doc_acta_label' : 'doc_acta_curp';
+                break;
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
       }
     }
   }
 
-  // Persist only empty → filled (nunca sobrescribe valor existente)
+  // 4) Fallback DOB desde CURP ya resuelta (campo / docs / base) — sin re-OCR
+  for (const id of employeeIds) {
+    const slot = byId.get(id)!;
+    if (slot.fechaNacimiento || !slot.curp) continue;
+    const fromCurp = dobIsoFromCurp(slot.curp);
+    if (!fromCurp) continue;
+    slot.fechaNacimiento = fromCurp;
+    slot.fechaNacimientoSource =
+      slot.curpSource === 'doc_acta' ? 'doc_acta_curp' : 'curp_field';
+  }
+
+  // Persist only empty → filled (nunca sobrescribe valor existente plausible)
   for (const slot of results) {
     const wantCurp =
       !!slot.curp && slot.curpSource !== 'field' && slot.curpSource !== 'none';
     const wantNss =
       !!slot.nss && slot.nssSource !== 'field' && slot.nssSource !== 'none';
+    const wantDob =
+      canWriteDob &&
+      !!slot.fechaNacimiento &&
+      slot.fechaNacimientoSource !== 'field' &&
+      slot.fechaNacimientoSource !== 'none';
     slot.curpUpdated = wantCurp;
     slot.nssUpdated = wantNss;
+    slot.fechaNacimientoUpdated = wantDob;
     if (!write) continue;
 
     const now = new Date().toISOString();
@@ -498,6 +784,27 @@ export async function fillEmptyEmployeeIdentity(
     if (wantNss && slot.nss) {
       const ok = await updateIfBlank(sb, slot.employeeId, 'nss', slot.nss, now);
       if (!ok) slot.nssUpdated = false;
+    }
+    if (wantDob && slot.fechaNacimiento) {
+      const ok = await updateDobIfBlank(
+        sb,
+        slot.employeeId,
+        slot.fechaNacimiento,
+        now
+      );
+      if (!ok) slot.fechaNacimientoUpdated = false;
+    }
+  }
+
+  if (missingDobCol) {
+    for (const slot of results) {
+      if (
+        slot.fechaNacimiento &&
+        slot.fechaNacimientoSource !== 'field' &&
+        slot.fechaNacimientoSource !== 'none'
+      ) {
+        slot.dobColumnMissing = true;
+      }
     }
   }
 
@@ -526,6 +833,30 @@ async function updateIfBlank(
     .eq(column, '')
     .select('id');
   return !emptyRes.error && (emptyRes.data?.length || 0) > 0;
+}
+
+/** Solo escribe si falta o la fecha actual no es un DOB plausible. */
+async function updateDobIfBlank(
+  sb: SupabaseClient,
+  employeeId: string,
+  value: string,
+  updatedAt: string
+): Promise<boolean> {
+  const { data: cur, error: readErr } = await sb
+    .from('hr_employees')
+    .select('fecha_nacimiento')
+    .eq('id', employeeId)
+    .maybeSingle();
+  if (readErr) return false;
+  const existing = (cur as { fecha_nacimiento?: string | null } | null)
+    ?.fecha_nacimiento;
+  if (normalizeFechaNacimiento(existing)) return false;
+  const { data, error } = await sb
+    .from('hr_employees')
+    .update({ fecha_nacimiento: value, updated_at: updatedAt })
+    .eq('id', employeeId)
+    .select('id');
+  return !error && (data?.length || 0) > 0;
 }
 
 /** Agrupa employeeIds que comparten la misma CURP (2+). */

@@ -12,6 +12,7 @@
     "gcal:probe": "node scripts/gcal-probe.mjs",
     "hr:backfill-expedientes": "node --experimental-strip-types scripts/hr-backfill-expediente-links.mjs",
     "hr:reconcile-dupes": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-reconcile-duplicates.mjs",
+    "hr:reconcile-expedientes": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-reconcile-expedientes.mjs",
     "hr:import-horarios": "node scripts/hr-import-horarios-2026.mjs",
     "hr:sync-sueldo": "node --experimental-strip-types scripts/hr-sync-sueldo-diario.mjs",
     "hr:reimport-sueldo": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-reimport-sueldo-diario.mjs",

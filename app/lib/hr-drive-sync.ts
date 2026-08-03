@@ -6,7 +6,7 @@
 
 import { getServiceSupabase } from '@/app/lib/users';
 import { folderBasenameFromPath } from '@/app/lib/hr-person-match';
-import { HR_EXPEDIENTES_DIR } from '@/app/lib/hr';
+import { HR_EXPEDIENTES_DIR, isMergedDuplicateShell } from '@/app/lib/hr';
 import { hrRootExists } from '@/app/lib/hr-biblioteca';
 
 export type HrDriveSyncContentType =
@@ -311,6 +311,7 @@ export function buildExpedientesFromEmployees(
     const name =
       folderBasenameFromPath(e.drive_folder_path) || e.full_name;
     const bucket = inferExpedienteBucket(e.drive_folder_path, e.status);
+    const stillInAltas = e.status === 'baja' && bucket === 'altas';
     people.push({
       name,
       path: e.drive_folder_path,
@@ -320,9 +321,11 @@ export function buildExpedientesFromEmployees(
       employeeId: e.id,
       archiveNote:
         e.status === 'baja'
-          ? e.fecha_baja
-            ? `Baja desde ${e.fecha_baja}`
-            : 'Baja en sistema'
+          ? stillInAltas
+            ? 'Archivado en sistema (carpeta aún en Altas)'
+            : e.fecha_baja
+              ? `Baja desde ${e.fecha_baja}`
+              : 'Baja en sistema'
           : null,
       linkStatus: 'linked',
       matchConfidence: 'exact',
@@ -375,6 +378,87 @@ export function buildExpedientesFromEmployees(
   }
 
   return { people, buckets, linkedCount: people.length };
+}
+
+/** Desajuste Altas↔status (solo lectura; no auto-baja activos). */
+export type ExpedienteStatusMismatch = {
+  id: string;
+  full_name: string;
+  status: string;
+  fecha_baja: string | null;
+  drive_folder_path: string | null;
+  kind:
+    | 'baja_still_in_altas'
+    | 'activo_with_fecha_baja'
+    | 'baja_without_fecha'
+    | 'merged_shell';
+  note: string;
+};
+
+/**
+ * Auditoría de inconsistencias expediente/status.
+ * No muta filas: Master/script lista y RH decide (mover carpeta / reactivar).
+ */
+export function auditExpedienteStatusMismatches(
+  employees: Array<{
+    id: string;
+    full_name: string;
+    status: string;
+    fecha_baja: string | null;
+    drive_folder_path: string | null;
+    notes?: string | null;
+  }>
+): ExpedienteStatusMismatch[] {
+  const out: ExpedienteStatusMismatch[] = [];
+  for (const e of employees) {
+    const bucket = inferExpedienteBucket(e.drive_folder_path, e.status);
+    if (isMergedDuplicateShell(e.notes)) {
+      out.push({
+        id: e.id,
+        full_name: e.full_name,
+        status: e.status,
+        fecha_baja: e.fecha_baja,
+        drive_folder_path: e.drive_folder_path,
+        kind: 'merged_shell',
+        note: 'Cáscara de duplicado fusionado (revisar / limpiar)',
+      });
+      continue;
+    }
+    if (e.status === 'baja' && bucket === 'altas') {
+      out.push({
+        id: e.id,
+        full_name: e.full_name,
+        status: e.status,
+        fecha_baja: e.fecha_baja,
+        drive_folder_path: e.drive_folder_path,
+        kind: 'baja_still_in_altas',
+        note: 'Archivado en sistema (carpeta aún en Altas)',
+      });
+    }
+    if (e.status === 'activo' && e.fecha_baja) {
+      out.push({
+        id: e.id,
+        full_name: e.full_name,
+        status: e.status,
+        fecha_baja: e.fecha_baja,
+        drive_folder_path: e.drive_folder_path,
+        kind: 'activo_with_fecha_baja',
+        note: `Activo con fecha_baja ${e.fecha_baja} (no auto-baja)`,
+      });
+    }
+    if (e.status === 'baja' && !e.fecha_baja) {
+      out.push({
+        id: e.id,
+        full_name: e.full_name,
+        status: e.status,
+        fecha_baja: null,
+        drive_folder_path: e.drive_folder_path,
+        kind: 'baja_without_fecha',
+        note: 'Baja sin fecha_baja',
+      });
+    }
+  }
+  return out;
 }
 
 export function formatSyncBanner(opts: {
