@@ -878,7 +878,6 @@ export default function AdminPage() {
         </div>
       </AdminSection>
 
-      </AdminSection>
 
       {/* 2b. RR.HH. higiene */}
       <AdminSection
