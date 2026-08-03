@@ -18,6 +18,7 @@ import {
   type HrDocTypeId,
 } from '@/app/lib/hr-employee-profile';
 import {
+  contractDocTypeFromFilename,
   contractEffectiveFromFilename,
   contractTitleFromFilename,
   isContractFilename,
@@ -852,9 +853,13 @@ async function pullExpedienteContracts(opts: {
     .eq('employee_id', opts.employeeId);
 
   if (existErr) {
-    // Schema ausente: silencioso para no romper pull de documentos.
-    if (/does not exist|relation|42P01|schema cache/i.test(existErr.message)) {
-      return { imported: 0, skipped: 0, matched: [] };
+    // Schema ausente: fallback a hr_employee_documents (contrato__*).
+    if (
+      /does not exist|relation|42P01|schema cache|Could not find the table/i.test(
+        existErr.message
+      )
+    ) {
+      return pullExpedienteContractsViaDocuments(opts, contractFiles);
     }
     throw new Error(existErr.message);
   }
@@ -1000,6 +1005,131 @@ async function pullExpedienteContracts(opts: {
           })
           .eq('id', pick.id);
       }
+    }
+  }
+
+  return { imported, skipped, matched };
+}
+
+/**
+ * Fallback: guarda contratos en hr_employee_documents con doc_type `contrato__*`.
+ * Así Documentos/Contrato funcionan aunque falte supabase/hr_employee_contracts.sql.
+ */
+async function pullExpedienteContractsViaDocuments(
+  opts: {
+    employeeId: string;
+    who: string;
+    force: boolean;
+  },
+  contractFiles: Array<{ name: string; path: string; sizeBytes: number | null }>
+): Promise<{
+  imported: number;
+  skipped: number;
+  matched: Array<{ file: string; docType: 'contrato' }>;
+}> {
+  const sb = getServiceSupabase();
+  const { data: existingRows, error } = await sb
+    .from('hr_employee_documents')
+    .select('id, doc_type, storage_path, notes, status')
+    .eq('employee_id', opts.employeeId)
+    .like('doc_type', 'contrato__%');
+  if (error) throw new Error(error.message);
+
+  const byType = new Map(
+    (existingRows || []).map((r) => [String(r.doc_type), r])
+  );
+
+  const ranked = [...contractFiles].sort((a, b) => {
+    const ya = contractEffectiveFromFilename(a.name) || '';
+    const yb = contractEffectiveFromFilename(b.name) || '';
+    if (ya !== yb) return yb.localeCompare(ya);
+    return (b.sizeBytes || 0) - (a.sizeBytes || 0);
+  });
+
+  let imported = 0;
+  let skipped = 0;
+  const matched: Array<{ file: string; docType: 'contrato' }> = [];
+
+  for (let i = 0; i < ranked.length; i++) {
+    const file = ranked[i];
+    matched.push({ file: file.name, docType: 'contrato' });
+    const docType = contractDocTypeFromFilename(file.name);
+    const prev = byType.get(docType);
+
+    if (prev?.storage_path && !opts.force) {
+      skipped += 1;
+      continue;
+    }
+    if (file.sizeBytes != null && file.sizeBytes > CONTRACT_MAX_BYTES) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      const buf = await readFile(file.path);
+      if (buf.length > CONTRACT_MAX_BYTES) {
+        skipped += 1;
+        continue;
+      }
+      const { contentType } = hrBibliotecaContentType(file.path);
+      const mime =
+        contentType === 'application/octet-stream'
+          ? file.name.toLowerCase().endsWith('.pdf')
+            ? 'application/pdf'
+            : 'application/octet-stream'
+          : contentType.split(';')[0];
+      if (
+        !mime.includes('pdf') &&
+        !mime.startsWith('image/') &&
+        !/\.(pdf|jpe?g|png|webp|heic|heif)$/i.test(file.name)
+      ) {
+        skipped += 1;
+        continue;
+      }
+      const ext = extForMime(mime, file.name);
+      const storagePath = `${opts.employeeId}/contrato-exp-${Date.now()}-${i}.${ext}`;
+      const up = await sb.storage.from(HR_DOCS_BUCKET).upload(storagePath, buf, {
+        contentType: mime,
+        upsert: true,
+      });
+      if (up.error) throw new Error(up.error.message);
+
+      if (prev?.storage_path && prev.storage_path !== storagePath) {
+        await sb.storage.from(HR_DOCS_BUCKET).remove([prev.storage_path]);
+      }
+
+      const title = contractTitleFromFilename(file.name);
+      const row = {
+        employee_id: opts.employeeId,
+        doc_type: docType,
+        title,
+        storage_path: storagePath,
+        mime_type: mime,
+        byte_size: buf.length,
+        required: false,
+        status: 'uploaded' as HrDocStatus,
+        notes: `Desde expediente: ${file.name}`,
+        uploaded_by: opts.who,
+        verified_by: null,
+        verified_at: null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (prev?.id) {
+        const { error: updErr } = await sb
+          .from('hr_employee_documents')
+          .update(row)
+          .eq('id', prev.id);
+        if (updErr) throw new Error(updErr.message);
+      } else {
+        const { error: insErr } = await sb
+          .from('hr_employee_documents')
+          .insert(row);
+        if (insErr) throw new Error(insErr.message);
+      }
+      imported += 1;
+    } catch {
+      skipped += 1;
     }
   }
 
@@ -1409,14 +1539,26 @@ export async function shouldSoftPullContracts(
       .eq('employee_id', employeeId)
       .limit(20);
     if (error) {
-      if (/does not exist|relation|42P01|schema cache/i.test(error.message)) {
-        return false;
+      if (
+        /does not exist|relation|42P01|schema cache|Could not find the table/i.test(
+          error.message
+        )
+      ) {
+        // Fallback: ¿ya hay contrato__* en documents?
+        const docs = await sb
+          .from('hr_employee_documents')
+          .select('id, storage_path')
+          .eq('employee_id', employeeId)
+          .like('doc_type', 'contrato__%')
+          .limit(5);
+        if (docs.error) return false;
+        const rows = docs.data || [];
+        return !rows.length || rows.every((r) => !r.storage_path);
       }
       return false;
     }
     const rows = data || [];
     if (!rows.length) return true;
-    // Filas huérfanas (sin binario): reintentar import desde expediente.
     return rows.every((r) => !r.storage_path);
   } catch {
     return false;

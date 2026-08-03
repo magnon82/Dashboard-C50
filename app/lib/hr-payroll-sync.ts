@@ -2,6 +2,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  applyPaidRestIfSingleOff,
   computePayrollImporte,
   emptyDiasSemana,
   normalizeDiasSemana,
@@ -1459,8 +1460,9 @@ type PriorLineExtras = {
 
 /**
  * Al publicar un horario: crea/actualiza el periodo de nómina de esa semana
- * como borrador editable. Días = turnos con Ent/Sal (no DESCANSO);
- * Dom = 1.25 (prima). No pisa periodos pagado/cerrado.
+ * como borrador editable. Días trabajados = turnos con Ent/Sal;
+ * el único día sin turno (DESCANSO) → descanso pagado (−1 → Σ +1);
+ * Dom trabajado = 1.25 (prima). No pisa periodos pagado/cerrado.
  */
 export async function preparePayrollFromSchedule(
   sb: SupabaseClient,
@@ -1704,7 +1706,9 @@ export async function preparePayrollFromSchedule(
     if (!emp) continue;
     if (emp.status === 'baja') continue;
 
-    const dias = diasByEmp.get(empId) ?? emptyDiasSemana();
+    const diasRaw = diasByEmp.get(empId) ?? emptyDiasSemana();
+    // Jornada 48h: 6 turnos + 1 hueco → ese hueco es descanso pagado (Σ=7).
+    const dias = applyPaidRestIfSingleOff(diasRaw);
     const diasTrabajados = sumDiasSemana(dias);
     if (diasTrabajados <= 0) continue;
 

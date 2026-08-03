@@ -11,6 +11,7 @@ import {
   HrDocViewer,
   type HrViewerTarget,
 } from '@/app/components/rrhh/HrDocViewer';
+import { HrDocScanPicker } from '@/app/components/rrhh/HrDocScanPicker';
 import { RrhhEmployeeProfile } from '@/app/components/rrhh/RrhhEmployeeProfile';
 import { RrhhResguardosPanel } from '@/app/components/rrhh/RrhhResguardosPanel';
 import {
@@ -25,7 +26,11 @@ import {
   type HrTipoEmpleo,
   type PlantillaTeamGroup,
 } from '@/app/lib/hr';
-import type { HrDocAlertSummary } from '@/app/lib/hr-employee-profile';
+import {
+  HR_REQUIRED_DOC_TYPES,
+  type HrDocAlertSummary,
+  type HrDocTypeId,
+} from '@/app/lib/hr-employee-profile';
 import { formatHrListName, matchPerson } from '@/app/lib/hr-person-match';
 import {
   HR_PUESTO_CATALOG,
@@ -344,6 +349,10 @@ export function RrhhPlantilla({
       return '';
     }
   });
+  /** Escaneos/archivos de documentación capturados antes de registrar el alta. */
+  const [altaDocs, setAltaDocs] = useState<
+    Partial<Record<HrDocTypeId, File | null>>
+  >({});
   const [profileId, setProfileId] = useState<string | null>(null);
   const [profileTab, setProfileTab] = useState<
     'docs' | 'medico' | 'resguardos' | 'datos'
@@ -647,6 +656,43 @@ export function RrhhPlantilla({
     if (ok) void loadExpedientes();
   }
 
+  async function uploadAltaDocs(employeeId: string) {
+    const entries = HR_REQUIRED_DOC_TYPES.filter(
+      (d) => altaDocs[d.id] instanceof File
+    );
+    if (!entries.length) return { ok: 0, fail: 0 };
+    let ok = 0;
+    let fail = 0;
+    for (const d of entries) {
+      const file = altaDocs[d.id];
+      if (!(file instanceof File)) continue;
+      try {
+        const fd = new FormData();
+        fd.set('kind', 'document');
+        fd.set('doc_type', d.id);
+        fd.set('file', file);
+        fd.set('source', 'scan');
+        const res = await fetch(`/api/hr/employees/${employeeId}/profile`, {
+          method: 'POST',
+          body: fd,
+        });
+        if (res.ok) ok += 1;
+        else fail += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    return { ok, fail };
+  }
+
+  function resetAltaForm() {
+    setAltaTipo('interno');
+    setAltaRequiereDocs(true);
+    setAltaName('');
+    setAltaPuesto('');
+    setAltaDocs({});
+  }
+
   async function submitAlta() {
     const name = altaName.trim().replace(/\s+/g, ' ');
     if (name.length < 3) {
@@ -672,12 +718,32 @@ export function RrhhPlantilla({
         setToast(json.error || 'No se pudo dar de alta');
         return;
       }
-      setToast(json.message || 'Alta registrada');
+      const empId = (json.employee as HrEmployee | undefined)?.id;
+      let docsMsg = '';
+      if (empId && altaRequiereDocs) {
+        const staged = HR_REQUIRED_DOC_TYPES.filter(
+          (d) => altaDocs[d.id] instanceof File
+        ).length;
+        if (staged > 0) {
+          setToast('Alta ok · subiendo documentación…');
+          const up = await uploadAltaDocs(empId);
+          if (up.fail === 0 && up.ok > 0) {
+            docsMsg = ` · ${up.ok} doc${up.ok === 1 ? '' : 's'} en Documentos`;
+          } else if (up.ok > 0) {
+            docsMsg = ` · ${up.ok} subidos, ${up.fail} fallaron`;
+          } else if (up.fail > 0) {
+            docsMsg = ' · no se pudieron subir los docs (ábrelo en perfil)';
+          }
+        }
+      }
+      const baseMsg = `Alta registrada: ${name}`;
+      setToast(baseMsg + docsMsg);
       setShowAlta(false);
-      setAltaTipo('interno');
-      setAltaRequiereDocs(true);
-      setAltaName('');
-      setAltaPuesto('');
+      resetAltaForm();
+      if (empId) {
+        setProfileId(empId);
+        setProfileTab('docs');
+      }
       onChanged?.();
       void loadExpedientes();
     } catch {
@@ -876,12 +942,6 @@ export function RrhhPlantilla({
           <p className="text-sm font-semibold" style={{ color: theme.title }}>
             Alta de empleado
           </p>
-          <p className="text-xs" style={{ color: theme.muted }}>
-            Se agrega a la plantilla vigente. Luego abre el perfil (clic en el
-            nombre o Expediente) para documentos, médico, resguardos y datos.
-            {/* TODO futuro: alta con checklist → hr_employee_documents + Storage
-                (ver supabase/hr_employee_documents.sql). Sin UX completa aún. */}
-          </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <fieldset className="sm:col-span-2">
               <legend className="text-xs font-semibold text-slate-600">
@@ -908,6 +968,7 @@ export function RrhhPlantilla({
                     onChange={() => {
                       setAltaTipo('externo');
                       setAltaRequiereDocs(false);
+                      setAltaDocs({});
                     }}
                   />
                   Externo
@@ -919,7 +980,10 @@ export function RrhhPlantilla({
                 type="checkbox"
                 className="mt-0.5"
                 checked={altaRequiereDocs}
-                onChange={(e) => setAltaRequiereDocs(e.target.checked)}
+                onChange={(e) => {
+                  setAltaRequiereDocs(e.target.checked);
+                  if (!e.target.checked) setAltaDocs({});
+                }}
               />
               <span>
                 <span className="text-xs font-semibold text-slate-600 block">
@@ -927,8 +991,8 @@ export function RrhhPlantilla({
                 </span>
                 <span className="text-xs" style={{ color: theme.muted }}>
                   {altaRequiereDocs
-                    ? 'Se pedirán INE, acta, CURP y comprobante de domicilio.'
-                    : 'Sin alerta ni checklist obligatorio (típico en externos).'}
+                    ? 'INE, acta, CURP y domicilio — escanea o adjunta abajo.'
+                    : 'Sin checklist obligatorio.'}
                 </span>
               </span>
             </label>
@@ -973,6 +1037,25 @@ export function RrhhPlantilla({
               />
             </label>
           </div>
+          {altaRequiereDocs ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-600">
+                Documentación (escaneo)
+              </p>
+              {HR_REQUIRED_DOC_TYPES.map((d) => (
+                <HrDocScanPicker
+                  key={d.id}
+                  title={d.title}
+                  required
+                  disabled={busyId === '__alta__'}
+                  file={altaDocs[d.id] || null}
+                  onChange={(file) =>
+                    setAltaDocs((prev) => ({ ...prev, [d.id]: file }))
+                  }
+                />
+              ))}
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -987,7 +1070,10 @@ export function RrhhPlantilla({
               type="button"
               className="rounded-full px-4 py-1.5 text-xs font-semibold border border-slate-200"
               style={{ color: theme.muted }}
-              onClick={() => setShowAlta(false)}
+              onClick={() => {
+                setShowAlta(false);
+                resetAltaForm();
+              }}
             >
               Cancelar
             </button>

@@ -69,25 +69,54 @@ function parseIsoDateField(
 
 let lastNacimientoFillAt = 0;
 const NACIMIENTO_FILL_TTL_MS = 5 * 60_000;
+/** Soft-fill must not block Cumpleaños; Drive/OCR can stall for minutes. */
+const NACIMIENTO_FILL_TIMEOUT_MS = 6_000;
 
+async function probeFechaNacimientoColumn(
+  sb: ReturnType<typeof getServiceSupabase>
+): Promise<boolean> {
+  const { error } = await sb
+    .from('hr_employees')
+    .select('fecha_nacimiento')
+    .limit(1);
+  if (
+    error &&
+    /fecha_nacimiento|column .* does not exist|42703/i.test(error.message || '')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Soft-fill DOB from BASE DATOS PERSONAL only (no OCR).
+ * Doc/acta extraction belongs on profile load — doing it here hung Cumpleaños.
+ */
 async function maybeFillNacimientoFromBaseDatos(): Promise<{
   filled: boolean;
   message?: string;
+  columnMissing?: boolean;
 }> {
   const now = Date.now();
   if (now - lastNacimientoFillAt < NACIMIENTO_FILL_TTL_MS) {
     return { filled: false, message: 'skipped_ttl' };
   }
-  lastNacimientoFillAt = now;
   try {
+    const sb = getServiceSupabase();
+    const hasCol = await probeFechaNacimientoColumn(sb);
+    if (!hasCol) {
+      lastNacimientoFillAt = Date.now();
+      return {
+        filled: false,
+        message: 'column_missing',
+        columnMissing: true,
+      };
+    }
+
     const { loadBaseDatosRows } = await import('@/app/lib/hr-payroll-drive');
     const { enrichEmployeesFromBaseDatos } = await import(
       '@/app/lib/hr-payroll-sync'
     );
-    const { fillEmptyEmployeeIdentity, isPlausibleDobIso } = await import(
-      '@/app/lib/hr-identity'
-    );
-    const sb = getServiceSupabase();
     let fromBase = false;
     try {
       const { rows } = await loadBaseDatosRows();
@@ -99,39 +128,48 @@ async function maybeFillNacimientoFromBaseDatos(): Promise<{
       /* BASE DATOS opcional */
     }
 
-    // Soft-fill DOB faltantes desde actas (y CURP) en plantilla vigente.
-    const plantilla = await resolvePlantillaVigente(sb);
-    const needDob = (plantilla.employees || [])
-      .filter((e) => !isPlausibleDobIso(e.fecha_nacimiento))
-      .map((e) => e.id);
-    let fromActa = 0;
-    if (needDob.length) {
-      const fills = await fillEmptyEmployeeIdentity(sb, needDob, {
-        extractFromDocs: true,
-        includeLeavePayloads: false,
-        maxDocExtracts: 80,
-      });
-      fromActa = fills.filter((f) => f.fechaNacimientoUpdated).length;
-    }
-
+    lastNacimientoFillAt = Date.now();
     invalidatePlantillaCache();
-    if (!fromBase && !fromActa) {
+    if (!fromBase) {
       return { filled: false, message: 'nothing_to_fill' };
     }
-    return {
-      filled: true,
-      message: fromBase
-        ? fromActa
-          ? `base_datos+acta:${fromActa}`
-          : 'base_datos'
-        : `acta:${fromActa}`,
-    };
+    return { filled: true, message: 'base_datos' };
   } catch (e) {
+    lastNacimientoFillAt = Date.now();
     return {
       filled: false,
       message: e instanceof Error ? e.message : 'fill_error',
     };
   }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: T
+): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(fallback);
+    }, ms);
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
 }
 
 /**
@@ -142,7 +180,7 @@ async function maybeFillNacimientoFromBaseDatos(): Promise<{
  * ?source=activos → fuerza lista de activos (Horarios / catálogo overrides).
  * ?seed=0 → no intenta seed local.
  * ?fill_nacimiento=1 → soft-fill fecha_nacimiento desde BASE DATOS PERSONAL
- *   y/o actas de nacimiento en expediente (TTL 5 min).
+ *   (TTL 5 min; timeout 6s; sin OCR de expedientes).
  */
 export async function GET(request: Request) {
   const auth = await requireRrhhSession();
@@ -153,19 +191,46 @@ export async function GET(request: Request) {
   const seedDisabled = url.searchParams.get('seed') === '0';
   const fillNacimiento = url.searchParams.get('fill_nacimiento') === '1';
 
-  let nacimientoFill: { filled: boolean; message?: string } | null = null;
-  if (fillNacimiento) {
-    nacimientoFill = await maybeFillNacimientoFromBaseDatos();
-  }
+  let nacimientoFill: {
+    filled: boolean;
+    message?: string;
+    columnMissing?: boolean;
+  } | null = null;
 
   try {
     const sb = getServiceSupabase();
+
+    // Soft-fill en paralelo al probe; timeout evita colgar Cumpleaños.
+    const fillPromise = fillNacimiento
+      ? withTimeout(maybeFillNacimientoFromBaseDatos(), NACIMIENTO_FILL_TIMEOUT_MS, {
+          filled: false,
+          message: 'fill_timeout',
+        })
+      : Promise.resolve(null);
+
+    const [nacimientoColumnOk, fillResult] = await Promise.all([
+      probeFechaNacimientoColumn(sb),
+      fillPromise,
+    ]);
+    nacimientoFill = fillResult;
+    const nacimientoSchemaHint = !nacimientoColumnOk
+      ? 'Ejecuta supabase/hr_employee_nacimiento.sql en Supabase.'
+      : null;
+
+    if (nacimientoFill?.filled) {
+      invalidatePlantillaCache();
+    }
 
     if (!forceActivos) {
       const resolved = await resolvePlantillaVigente(sb, {
         allowSeed: !seedDisabled,
         username: auth.username,
       });
+
+      const code =
+        !nacimientoColumnOk
+          ? 'nacimiento_schema_missing'
+          : resolved.seedCode ?? 'ok';
 
       if (resolved.employees.length > 0) {
         return NextResponse.json({
@@ -181,9 +246,10 @@ export async function GET(request: Request) {
           scheduleWeekEnd: resolved.scheduleWeek?.week_end ?? null,
           scheduleWeekStatus: resolved.scheduleWeek?.status ?? null,
           seeded: resolved.seeded,
-          message: resolved.seedMessage,
-          code: resolved.seedCode ?? 'ok',
+          message: resolved.seedMessage || nacimientoSchemaHint,
+          code,
           nacimientoFill,
+          nacimientoColumnMissing: !nacimientoColumnOk,
         });
       }
 
@@ -202,9 +268,14 @@ export async function GET(request: Request) {
         seeded: false,
         message:
           resolved.seedMessage ||
+          nacimientoSchemaHint ||
           'Abre Nómina (cierra/paga) o importa horarios con turnos reales',
-        code: resolved.seedCode ?? 'empty',
+        code:
+          !nacimientoColumnOk
+            ? 'nacimiento_schema_missing'
+            : resolved.seedCode ?? 'empty',
         nacimientoFill,
+        nacimientoColumnMissing: !nacimientoColumnOk,
       });
     }
 
@@ -278,6 +349,7 @@ export async function GET(request: Request) {
         error: fallback.error.message,
         code: 'schema_missing',
         nacimientoFill,
+        nacimientoColumnMissing: !nacimientoColumnOk,
       });
     }
 
@@ -293,9 +365,10 @@ export async function GET(request: Request) {
       message:
         employees.length === 0
           ? 'No hay empleados activos en catálogo.'
-          : null,
-      code: 'ok',
+          : nacimientoSchemaHint,
+      code: !nacimientoColumnOk ? 'nacimiento_schema_missing' : 'ok',
       nacimientoFill,
+      nacimientoColumnMissing: !nacimientoColumnOk,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error';
@@ -578,7 +651,7 @@ export async function POST(request: Request) {
     }
 
     const docsHint = requiereDocumentacion
-      ? ' Completa el perfil (documentos) desde el nombre en plantilla.'
+      ? ' Puedes escanear docs en el alta o en el perfil → Documentos.'
       : ' Sin checklist documental (externo / docs no requeridos).';
 
     return NextResponse.json({

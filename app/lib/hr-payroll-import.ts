@@ -394,9 +394,15 @@ export function parseNominaSheetRows(
     const key = normalizePersonName(full_name);
     const prev = byName.get(key);
     const mergedDays = mergeDiasSemana(prev?.dias_semana, diasSemana);
+    const diasFromMerged = mergedDays ? sumDiasSemana(mergedDays) : 0;
+    // Dual rol: unir marcas (OR), no sumar columnas «días» de ambas filas.
     const diasSum =
-      (dias != null ? dias : hasDayMarks ? diasFromMarks : 0) +
-      (prev?.dias_trabajados ?? 0);
+      diasFromMerged > 0
+        ? diasFromMerged
+        : Math.max(
+            dias != null ? dias : hasDayMarks ? diasFromMarks : 0,
+            prev?.dias_trabajados ?? 0
+          );
     // Dual rol (p. ej. Mesero + Limpieza): conservar el SD más alto
     // (Mesero 315.04 > Limpieza 185.71), no el de la última fila.
     const prevSd =

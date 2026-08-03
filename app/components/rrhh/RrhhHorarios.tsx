@@ -878,7 +878,8 @@ export function RrhhHorarios() {
   }
 
   async function saveShifts() {
-    if (!weekDetail || pastLocked) return;
+    if (!weekDetail || pastLocked || !dirty) return;
+    if (!confirm('¿Guardar los cambios en el horario?')) return;
     const shifts = rowsToShifts(rows, dates);
     const dualIds = new Set(
       rows.filter((r) => r.dualLimpiezaServicio).map((r) => r.employee_id)
@@ -1424,15 +1425,17 @@ export function RrhhHorarios() {
 
               {!pastLocked && (
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={busy || !dirty}
-                    onClick={() => void saveShifts()}
-                    className="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                    style={{ backgroundColor: SUITE.navy }}
-                  >
-                    Guardar
-                  </button>
+                  {dirty && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void saveShifts()}
+                      className="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ backgroundColor: SUITE.navy }}
+                    >
+                      Guardar
+                    </button>
+                  )}
                   {weekDetail.status !== 'publicado' && (
                     <button
                       type="button"
@@ -1568,7 +1571,7 @@ export function RrhhHorarios() {
               <p className="text-xs" style={{ color: theme.muted }}>
                 {pastLocked
                   ? 'Semana pasada: solo consulta. No se pueden editar Ent./Sal. La columna h suma las horas de los turnos.'
-                  : 'Solo se editan hoy y días futuros (CDMX). Días pasados quedan bloqueados. Clic en DESCANSO o en una celda vacía para poner turno. Vaciar Ent./Sal. o el botón · marca descanso. La columna h suma las horas asignadas (Ent/Sal; DESCANSO = 0; nocturnos p. ej. 19:00–02:00 cuentan). Guardar publica si la semana aún no lo está.'}
+                  : 'Hoy y días futuros editables (CDMX). D = descanso; clic en DESCANSO para turno. Columna h = horas (nocturnos cruzan medianoche). Guardar aparece con cambios; en curso publica al guardar.'}
               </p>
             </>
           )}
@@ -1740,10 +1743,15 @@ function AreaFragment({
                       <button
                         type="button"
                         title="Marcar DESCANSO"
+                        aria-label="Marcar DESCANSO"
                         onClick={() => onToggleOff(p.employee_id, di)}
-                        className="shrink-0 text-[10px] font-bold text-amber-800 px-0.5"
+                        className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                        style={{
+                          backgroundColor: '#fef3c7',
+                          color: '#92400e',
+                        }}
                       >
-                        ·
+                        D
                       </button>
                     )}
                   </div>

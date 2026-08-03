@@ -133,6 +133,75 @@ export function contractEffectiveFromFilename(
   return null;
 }
 
+/** Prefijo de doc_type en hr_employee_documents cuando falta hr_employee_contracts. */
+export const CONTRACT_DOC_TYPE_PREFIX = 'contrato__';
+
+export function isContractDocType(docType: string): boolean {
+  const t = String(docType || '');
+  return t === 'contrato' || t.startsWith(CONTRACT_DOC_TYPE_PREFIX);
+}
+
+/** doc_type estable por nombre de archivo (único por empleado). */
+export function contractDocTypeFromFilename(filename: string): string {
+  const slug = normalizeFilename(filename)
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 80);
+  return `${CONTRACT_DOC_TYPE_PREFIX}${slug || 'archivo'}`;
+}
+
+/** Reconstruye contratos desde filas de hr_employee_documents (fallback). */
+export function contractsFromDocumentRows(
+  employeeId: string,
+  rows: Array<{
+    id: string;
+    doc_type: string;
+    title?: string | null;
+    storage_path?: string | null;
+    mime_type?: string | null;
+    byte_size?: number | null;
+    notes?: string | null;
+    uploaded_by?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+    viewUrl?: string | null;
+  }>
+): HrEmployeeContract[] {
+  const contractRows = rows.filter((r) => isContractDocType(r.doc_type));
+  if (!contractRows.length) return [];
+
+  const mapped: HrEmployeeContract[] = contractRows.map((r) => {
+    const fromNotes =
+      String(r.notes || '').match(/Desde expediente:\s*(.+)$/i)?.[1]?.trim() ||
+      null;
+    const source = fromNotes || null;
+    return {
+      id: r.id,
+      employee_id: employeeId,
+      title: r.title || contractTitleFromFilename(source || r.doc_type),
+      status: 'historico' as HrContractStatus,
+      effective_from: source ? contractEffectiveFromFilename(source) : null,
+      effective_to: null,
+      source_filename: source,
+      storage_path: r.storage_path ?? null,
+      mime_type: r.mime_type ?? null,
+      byte_size: r.byte_size ?? null,
+      notes: r.notes ?? null,
+      uploaded_by: r.uploaded_by ?? null,
+      created_at: r.created_at || undefined,
+      updated_at: r.updated_at || undefined,
+      viewUrl: r.viewUrl ?? null,
+    };
+  });
+
+  const sorted = sortContracts(mapped);
+  if (sorted.length && !sorted.some((c) => c.status === 'vigente')) {
+    sorted[0] = { ...sorted[0], status: 'vigente' };
+  }
+  return sorted;
+}
+
 /** Orden: vigente primero, luego fecha/más reciente. */
 export function sortContracts(
   rows: HrEmployeeContract[]

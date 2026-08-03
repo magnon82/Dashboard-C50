@@ -25,6 +25,7 @@ type Payload = {
   error?: string;
   code?: string | null;
   nacimientoFill?: { filled: boolean; message?: string } | null;
+  nacimientoColumnMissing?: boolean;
 };
 
 function monthLabel(year: number, month: number): string {
@@ -63,15 +64,31 @@ export function RrhhCumpleanos() {
     return { year: y!, month: m! };
   });
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { softFill?: boolean }) => {
     setLoading(true);
     setSaveMsg(null);
     try {
-      const res = await fetch('/api/hr/employees?fill_nacimiento=1', {
-        cache: 'no-store',
-      });
+      // Plantilla first (no fill) so Cumpleaños never hangs on Drive/OCR.
+      const res = await fetch('/api/hr/employees', { cache: 'no-store' });
       const json = (await res.json()) as Payload;
       setData(json);
+      setLoading(false);
+
+      if (opts?.softFill === false) return;
+      if (json.nacimientoColumnMissing || json.code === 'nacimiento_schema_missing') {
+        return;
+      }
+
+      void fetch('/api/hr/employees?fill_nacimiento=1', { cache: 'no-store' })
+        .then(async (fillRes) => {
+          const filled = (await fillRes.json()) as Payload;
+          if (filled.nacimientoFill?.filled || filled.employees?.length) {
+            setData(filled);
+          }
+        })
+        .catch(() => {
+          /* soft-fill opcional */
+        });
     } catch {
       setData({
         ready: false,
@@ -79,13 +96,12 @@ export function RrhhCumpleanos() {
         count: 0,
         message: 'Error de red al cargar plantilla',
       });
-    } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
   const employees = data?.employees ?? [];
@@ -189,7 +205,7 @@ export function RrhhCumpleanos() {
         delete next[employeeId];
         return next;
       });
-      await refresh();
+      await refresh({ softFill: false });
       setSaveMsg('Fecha de nacimiento guardada.');
     } catch {
       setSaveMsg('Error de red al guardar');
@@ -199,6 +215,8 @@ export function RrhhCumpleanos() {
   };
 
   const schemaHint =
+    data?.nacimientoColumnMissing === true ||
+    data?.code === 'nacimiento_schema_missing' ||
     data?.code === 'schema_missing' ||
     (typeof data?.error === 'string' &&
       /fecha_nacimiento/i.test(data.error || ''));
@@ -211,12 +229,12 @@ export function RrhhCumpleanos() {
             Cumpleaños del Staff
           </h2>
           <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-            Plantilla vigente · próximos primero (ciclo anual)
+            Plantilla vigente · próximos primero
           </p>
         </div>
         <button
           type="button"
-          onClick={() => refresh()}
+          onClick={() => void refresh()}
           disabled={loading}
           className="min-h-10 rounded-xl px-3.5 text-sm font-semibold"
           style={{
@@ -235,7 +253,7 @@ export function RrhhCumpleanos() {
             <code className="rounded bg-amber-50 px-1 text-xs">
               supabase/hr_employee_nacimiento.sql
             </code>{' '}
-            en Supabase y vuelve a actualizar.
+            en Supabase.
           </p>
         </SuiteCard>
       ) : null}
@@ -247,6 +265,75 @@ export function RrhhCumpleanos() {
       ) : null}
 
       <div className="grid gap-5 lg:grid-cols-2">
+        <SuiteCard>
+          <h3 className="text-base font-bold" style={{ color: theme.title }}>
+            Próximos cumpleaños
+          </h3>
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+            Del más cercano al más lejano
+          </p>
+
+          {loading ? (
+            <p className="mt-4 text-sm" style={{ color: theme.muted }}>
+              Cargando…
+            </p>
+          ) : upcoming.length === 0 ? (
+            <p className="mt-4 text-sm" style={{ color: theme.muted }}>
+              Sin fechas de nacimiento en plantilla. Captúralas abajo.
+            </p>
+          ) : (
+            <ul className="mt-4 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+              {upcoming.map((b) => {
+                const sameDay = byNextDate.get(b.next_date) || [];
+                return (
+                  <li
+                    key={b.employee_id}
+                    className="flex items-start justify-between gap-3 rounded-xl px-3 py-2.5"
+                    style={{
+                      backgroundColor:
+                        b.days_until === 0 ? SUITE.orangeSoft : '#f8fafc',
+                    }}
+                  >
+                    <div className="min-w-0">
+                      <p
+                        className="truncate text-sm font-semibold"
+                        style={{ color: theme.title }}
+                      >
+                        {formatHrListName(b.full_name)}
+                      </p>
+                      <p className="text-xs" style={{ color: theme.muted }}>
+                        {formatHrPuesto(b.puesto) || b.area || '—'}
+                        {sameDay.length > 1
+                          ? ` · ${sameDay.length} ese día`
+                          : ''}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p
+                        className="text-sm font-bold"
+                        style={{
+                          color:
+                            b.days_until <= 7
+                              ? SUITE.orangeDeep
+                              : SUITE.navy,
+                        }}
+                      >
+                        {formatBirthdayCountdown(b.days_until)}
+                      </p>
+                      <p
+                        className="text-xs capitalize"
+                        style={{ color: theme.muted }}
+                      >
+                        {formatHrDate(b.next_date).replace(/\s+\d{4}$/, '')}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </SuiteCard>
+
         <SuiteCard>
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-base font-bold" style={{ color: theme.title }}>
@@ -346,74 +433,6 @@ export function RrhhCumpleanos() {
             })}
           </div>
         </SuiteCard>
-
-        <SuiteCard>
-          <h3 className="text-base font-bold" style={{ color: theme.title }}>
-            Próximos cumpleaños
-          </h3>
-          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
-            Del más cercano al más lejano
-          </p>
-
-          {loading ? (
-            <p className="mt-4 text-sm" style={{ color: theme.muted }}>
-              Cargando…
-            </p>
-          ) : upcoming.length === 0 ? (
-            <p className="mt-4 text-sm" style={{ color: theme.muted }}>
-              Aún no hay fechas de nacimiento en la plantilla vigente. Captúralas
-              abajo o asegúrate de que exista «BASE DATOS PERSONAL C50.xlsx» con
-              la columna Fecha de Nacimiento.
-            </p>
-          ) : (
-            <ul className="mt-4 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
-              {upcoming.map((b) => {
-                const sameDay = byNextDate.get(b.next_date) || [];
-                return (
-                  <li
-                    key={b.employee_id}
-                    className="flex items-start justify-between gap-3 rounded-xl px-3 py-2.5"
-                    style={{
-                      backgroundColor:
-                        b.days_until === 0 ? SUITE.orangeSoft : '#f8fafc',
-                    }}
-                  >
-                    <div className="min-w-0">
-                      <p
-                        className="truncate text-sm font-semibold"
-                        style={{ color: theme.title }}
-                      >
-                        {formatHrListName(b.full_name)}
-                      </p>
-                      <p className="text-xs" style={{ color: theme.muted }}>
-                        {formatHrPuesto(b.puesto) || b.area || '—'}
-                        {sameDay.length > 1
-                          ? ` · ${sameDay.length} ese día`
-                          : ''}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p
-                        className="text-sm font-bold"
-                        style={{
-                          color:
-                            b.days_until <= 7
-                              ? SUITE.orangeDeep
-                              : SUITE.navy,
-                        }}
-                      >
-                        {formatBirthdayCountdown(b.days_until)}
-                      </p>
-                      <p className="text-xs capitalize" style={{ color: theme.muted }}>
-                        {formatHrDate(b.next_date).replace(/\s+\d{4}$/, '')}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </SuiteCard>
       </div>
 
       {missingDob.length > 0 ? (
@@ -422,8 +441,7 @@ export function RrhhCumpleanos() {
             Sin fecha de nacimiento
           </h3>
           <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-            {missingDob.length} en plantilla vigente. Captura la fecha para
-            incluirlos en el calendario.
+            {missingDob.length} en plantilla vigente.
           </p>
           <ul className="mt-4 space-y-3">
             {missingDob.map((e) => (

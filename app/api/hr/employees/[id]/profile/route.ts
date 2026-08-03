@@ -38,6 +38,8 @@ import {
   shouldSoftPullMedical,
 } from '@/app/lib/hr-expediente-docs-pull';
 import {
+  contractsFromDocumentRows,
+  isContractDocType,
   pickDefaultContract,
   sortContracts,
   type HrEmployeeContract,
@@ -434,6 +436,15 @@ export async function GET(_req: Request, ctx: Ctx) {
       }
       contracts = sortContracts(raw);
     }
+    // Fallback si falta hr_employee_contracts o está vacía: filas contrato__* en documents.
+    if (!contracts.length) {
+      contracts = contractsFromDocumentRows(
+        id,
+        docs.filter((d) => isContractDocType(d.doc_type))
+      );
+    }
+    // Checklist Documentos: sin filas contrato__* (van al bloque Contratos).
+    const checklistDocs = docs.filter((d) => !isContractDocType(d.doc_type));
 
     const emp = empRes.data as HrEmployee & {
       photo_storage_path?: string | null;
@@ -490,14 +501,14 @@ export async function GET(_req: Request, ctx: Ctx) {
       );
     }
 
-    const required = docs.filter((d) => d.required);
+    const required = checklistDocs.filter((d) => d.required);
     const done = required.filter((d) =>
       isRequiredDocSatisfied(d.status, d.storage_path)
     ).length;
     const verified = required.filter((d) => d.status === 'verified').length;
 
     let photoUrl: string | null = null;
-    const foto = docs.find((d) => d.doc_type === 'foto_perfil');
+    const foto = checklistDocs.find((d) => d.doc_type === 'foto_perfil');
     photoUrl = foto?.viewUrl || null;
     if (!photoUrl && emp.photo_storage_path) {
       photoUrl = await signedUrl(emp.photo_storage_path);
@@ -526,7 +537,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     return NextResponse.json({
       ready: true,
       employee: emp,
-      documents: docs,
+      documents: checklistDocs,
       docTypes: HR_DOC_TYPES,
       reimbursements,
       justifications,
@@ -1063,7 +1074,10 @@ export async function POST(request: Request, ctx: Ctx) {
       byte_size: file.size,
       required: def.required,
       status: 'uploaded' as HrDocStatus,
-      notes: def.hint,
+      notes:
+        String(form.get('source') || '').trim().toLowerCase() === 'scan'
+          ? `${def.hint} · Escaneo documentación`
+          : def.hint,
       uploaded_by: who,
       verified_by: null,
       verified_at: null,

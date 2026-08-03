@@ -22,8 +22,10 @@ import {
   type HrMedicalJustification,
   type HrMedicalReimbursement,
 } from '@/app/lib/hr-employee-profile';
+import { prepareDocumentScan } from '@/app/lib/hr-doc-scan';
 import {
   contractStatusLabelEs,
+  isContractDocType,
   pickDefaultContract,
   type HrEmployeeContract,
 } from '@/app/lib/hr-employee-contracts';
@@ -97,9 +99,16 @@ export function RrhhEmployeeProfile({
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [viewerTitle, setViewerTitle] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const scanRef = useRef<HTMLInputElement>(null);
+  const uploadTargetRef = useRef<{
+    kind: string;
+    doc_type?: string;
+    mode?: 'scan' | 'file';
+  } | null>(null);
   const [uploadTarget, setUploadTarget] = useState<{
     kind: string;
     doc_type?: string;
+    mode?: 'scan' | 'file';
   } | null>(null);
   const [showResguardoForm, setShowResguardoForm] = useState(false);
   const [editingResguardo, setEditingResguardo] =
@@ -215,21 +224,39 @@ export function RrhhEmployeeProfile({
     void load();
   }, [load]);
 
-  function pickFile(kind: string, doc_type?: string) {
-    setUploadTarget({ kind, doc_type });
-    fileRef.current?.click();
+  function pickFile(
+    kind: string,
+    doc_type?: string,
+    mode: 'scan' | 'file' = 'file'
+  ) {
+    const target = { kind, doc_type, mode };
+    uploadTargetRef.current = target;
+    setUploadTarget(target);
+    if (mode === 'scan') scanRef.current?.click();
+    else fileRef.current?.click();
   }
 
   async function onFileChosen(file: File | null) {
-    if (!file || !uploadTarget) return;
+    const target = uploadTargetRef.current || uploadTarget;
+    if (!file || !target) return;
     setBusy(true);
     setToast('');
     try {
+      const prepared =
+        target.kind === 'document'
+          ? await prepareDocumentScan(file)
+          : file;
       const fd = new FormData();
-      fd.set('kind', uploadTarget.kind);
-      fd.set('file', file);
-      if (uploadTarget.doc_type) fd.set('doc_type', uploadTarget.doc_type);
-      if (uploadTarget.kind === 'reimbursement') {
+      fd.set('kind', target.kind);
+      fd.set('file', prepared);
+      if (target.doc_type) fd.set('doc_type', target.doc_type);
+      if (
+        target.kind === 'document' &&
+        (target.mode === 'scan' || target.mode === 'file')
+      ) {
+        fd.set('source', target.mode === 'scan' ? 'scan' : 'file');
+      }
+      if (target.kind === 'reimbursement') {
         const amount = window.prompt('Monto del reembolso (MXN)', '0') || '0';
         const expense_date =
           window.prompt('Fecha del gasto (YYYY-MM-DD)', '') || '';
@@ -239,7 +266,7 @@ export function RrhhEmployeeProfile({
         if (expense_date) fd.set('expense_date', expense_date);
         if (description) fd.set('description', description);
       }
-      if (uploadTarget.kind === 'justification') {
+      if (target.kind === 'justification') {
         const absence_date =
           window.prompt('Fecha de ausencia (YYYY-MM-DD)', '') || '';
         if (!absence_date) {
@@ -251,7 +278,7 @@ export function RrhhEmployeeProfile({
           window.prompt('Notas (opcional)', '') || '';
         if (description) fd.set('description', description);
       }
-      if (uploadTarget.kind === 'contract') {
+      if (target.kind === 'contract') {
         const title =
           window.prompt('Título del contrato', file.name.replace(/\.[^.]+$/, '')) ||
           '';
@@ -277,8 +304,10 @@ export function RrhhEmployeeProfile({
       setToast('Error al subir');
     } finally {
       setBusy(false);
+      uploadTargetRef.current = null;
       setUploadTarget(null);
       if (fileRef.current) fileRef.current.value = '';
+      if (scanRef.current) scanRef.current.value = '';
     }
   }
 
@@ -468,10 +497,11 @@ export function RrhhEmployeeProfile({
   const canEdit = Boolean(data?.canEditEmployee);
   const isActivo = emp?.status !== 'baja' && !emp?.fecha_baja;
   const schemaBlocked = Boolean(data?.schemaMissing || data?.error);
-  const docsList =
+  const docsList = (
     data?.documents?.length
       ? data.documents
-      : placeholderDocuments(employeeId);
+      : placeholderDocuments(employeeId)
+  ).filter((d) => !isContractDocType(d.doc_type));
   const contracts = data?.contracts || [];
   const selectedContract =
     contracts.find((c) => c.id === selectedContractId) ||
@@ -497,6 +527,14 @@ export function RrhhEmployeeProfile({
           ref={fileRef}
           type="file"
           accept="image/*,application/pdf"
+          className="hidden"
+          onChange={(e) => void onFileChosen(e.target.files?.[0] || null)}
+        />
+        <input
+          ref={scanRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
           className="hidden"
           onChange={(e) => void onFileChosen(e.target.files?.[0] || null)}
         />
@@ -839,17 +877,38 @@ export function RrhhEmployeeProfile({
                         title={
                           schemaBlocked
                             ? 'Primero ejecuta hr_employee_documents.sql en Supabase'
-                            : undefined
+                            : 'Cámara · escaneo de documentación'
+                        }
+                        className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                        style={{ backgroundColor: SUITE.navy }}
+                        onClick={() =>
+                          pickFile(
+                            d.doc_type === 'foto_perfil' ? 'photo' : 'document',
+                            d.doc_type,
+                            'scan'
+                          )
+                        }
+                      >
+                        Escanear
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || schemaBlocked}
+                        title={
+                          schemaBlocked
+                            ? 'Primero ejecuta hr_employee_documents.sql en Supabase'
+                            : 'Galería o PDF'
                         }
                         className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
                         onClick={() =>
                           pickFile(
                             d.doc_type === 'foto_perfil' ? 'photo' : 'document',
-                            d.doc_type
+                            d.doc_type,
+                            'file'
                           )
                         }
                       >
-                        {d.storage_path ? 'Reemplazar' : 'Subir'}
+                        {d.storage_path ? 'Reemplazar' : 'Archivo'}
                       </button>
                       {data?.canVerify &&
                       !schemaBlocked &&

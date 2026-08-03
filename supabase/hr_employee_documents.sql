@@ -3,12 +3,10 @@
 -- =============================================================================
 -- IDEMPOTENTE. Supabase → SQL Editor → pegar TODO este archivo → Run.
 --
--- TODO / diseño futuro (alta documental en DB — sin UX completa aún):
---   · Al alta de interno con «requiere documentación», crear filas pending
---     en hr_employee_documents (INE, acta, CURP, domicilio) y subir a Storage.
---   · Checklist + verificación Master (status verified/rejected).
---   · Esta migración prepara la forma de datos; la UI de alta solo marca el flag
---     requiere_documentacion por ahora (ver RrhhPlantilla).
+-- Alta documental: UI en RrhhPlantilla (Escanear / Archivo) → Storage
+--   bucket hr-employee-docs path `{employeeId}/{doc_type}-{ts}.jpg|pdf`
+--   + filas en hr_employee_documents (checklist INE/acta/CURP/domicilio…).
+--   Verificación Master: status verified/rejected en perfil Documentos.
 --
 -- Crea:
 --   · columnas perfil en hr_employees (fecha_baja, phone, foto, nss, curp, emergencia)

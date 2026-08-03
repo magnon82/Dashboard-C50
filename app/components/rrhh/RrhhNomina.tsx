@@ -17,10 +17,13 @@ import { formatHrListName } from '@/app/lib/hr-person-match';
 import {
   HR_PAYROLL_CADENCE_LABELS,
   HR_PAYROLL_DAY_LETTERS,
+  HR_PAYROLL_MAX_DIAS_SEMANA,
   HR_PAYROLL_STATUS_LABELS,
+  computePayrollImporte,
+  cycleDiasSemanaDay,
   emptyDiasSemana,
   normalizeDiasSemana,
-  setDiasSemanaDay,
+  payrollDayKind,
   sumDiasSemana,
   type HrPayrollCadence,
   type HrPayrollDiasSemana,
@@ -135,8 +138,29 @@ function linesToDraft(lines: HrPayrollLine[]): DraftLine[] {
     const dias =
       normalizeDiasSemana(l.dias_semana) ?? emptyDiasSemana();
     const fromMarks = sumDiasSemana(dias);
-    const marksActive = fromMarks > 0 || dias.some((d) => d > 0);
-    const diasTrab = marksActive ? fromMarks : l.dias_trabajados;
+    const marksActive = dias.some((d) => d !== 0);
+    const stored = Number(l.dias_trabajados) || 0;
+    // Marcas mandan; Σ histórico absurdo (dual-rol ×2) se ignora sin marcas.
+    const diasTrab = marksActive
+      ? fromMarks
+      : stored > HR_PAYROLL_MAX_DIAS_SEMANA
+        ? 0
+        : stored;
+    const he = Number(l.horas_extra) || 0;
+    const bonos = Number(l.bonos) || 0;
+    const ret = Number(l.retenciones) || 0;
+    const expectedImporte = computePayrollImporte({
+      sueldo_diario: l.sueldo_diario,
+      dias_trabajados: diasTrab,
+      horas_extra: he,
+      bonos,
+      retenciones: ret,
+    });
+    // Si las marcas corrigen Σ (p. ej. 13→7), alinear importe a SD×días.
+    const useRecalc =
+      marksActive &&
+      (stored > HR_PAYROLL_MAX_DIAS_SEMANA ||
+        Math.abs(fromMarks - stored) > 0.05);
     return {
       key: l.id || `e-${l.employee_id || i}`,
       employee_id: l.employee_id,
@@ -150,7 +174,9 @@ function linesToDraft(lines: HrPayrollLine[]): DraftLine[] {
       horas_extra: numOrEmpty(l.horas_extra),
       bonos: numOrEmpty(l.bonos),
       retenciones: numOrEmpty(l.retenciones),
-      importe_pagado: numOrEmpty(l.importe_pagado),
+      importe_pagado: numOrEmpty(
+        useRecalc ? expectedImporte : l.importe_pagado
+      ),
       vacaciones_tomadas: numOrEmpty(l.vacaciones_tomadas),
       vacaciones_restantes: numOrEmpty(l.vacaciones_restantes),
       fecha_ingreso: l.fecha_ingreso ?? null,
@@ -164,7 +190,7 @@ function draftToInputs(rows: DraftLine[]): HrPayrollLineInput[] {
     .map((r) => {
       const dias = normalizeDiasSemana(r.dias_semana) ?? emptyDiasSemana();
       const fromMarks = sumDiasSemana(dias);
-      const useMarks = r.dias_marks_active;
+      const useMarks = r.dias_marks_active || dias.some((d) => d !== 0);
       return {
         full_name: r.full_name.trim(),
         puesto: r.puesto.trim() || null,
@@ -223,84 +249,96 @@ function DiasSemanaChecks({
   dayLabels,
   editable,
   fallbackTotal,
-  onToggle,
+  onCycle,
 }: {
   days: HrPayrollDiasSemana;
   dayLabels: string[];
   editable: boolean;
   /** Si no hay marcas (histórico previo), mostrar el número guardado. */
   fallbackTotal?: number | null;
-  onToggle?: (dayIndex: number, on: boolean) => void;
+  onCycle?: (dayIndex: number) => void;
 }) {
   const fromMarks = sumDiasSemana(days);
-  const total = fromMarks > 0 ? fromMarks : fallbackTotal && fallbackTotal > 0 ? fallbackTotal : 0;
+  const hasMarks = days.some((d) => d !== 0);
+  const rawFallback =
+    fallbackTotal != null &&
+    fallbackTotal > 0 &&
+    fallbackTotal <= HR_PAYROLL_MAX_DIAS_SEMANA
+      ? fallbackTotal
+      : 0;
+  const total = hasMarks ? fromMarks : rawFallback;
   return (
     <div className="flex items-center justify-end gap-1.5">
       <div
         className="flex items-center gap-0.5"
         role="group"
-        aria-label="Días trabajados"
+        aria-label="Asistencia Lun–Dom"
       >
         {HR_PAYROLL_DAY_LETTERS.map((letter, i) => {
-          const on = (days[i] || 0) > 0;
+          const kind = payrollDayKind(days[i] || 0);
           const isDom = letter === 'D';
-          const title = isDom
-            ? `${dayLabels[i] || letter} · prima 25% (1.25)`
-            : `${dayLabels[i] || letter}${
-                days[i] && days[i] !== 1 ? ` · ${days[i]}` : ''
-              }`;
+          const title =
+            kind === 'descanso'
+              ? `${dayLabels[i] || letter} · descanso pagado`
+              : kind === 'worked'
+                ? isDom
+                  ? `${dayLabels[i] || letter} · trabajado · prima 25% (1.25)`
+                  : `${dayLabels[i] || letter} · trabajado${
+                      days[i] && days[i] !== 1 ? ` · ${days[i]}` : ''
+                    }`
+                : `${dayLabels[i] || letter} · falta / sin marca`;
+          const style =
+            kind === 'worked'
+              ? {
+                  borderColor: TEAL.border,
+                  backgroundColor: TEAL.bg,
+                  color: TEAL.deep,
+                }
+              : kind === 'descanso'
+                ? {
+                    borderColor: '#F59E0B',
+                    backgroundColor: '#FFFBEB',
+                    color: '#92400E',
+                  }
+                : {
+                    borderColor: '#E2E8F0',
+                    backgroundColor: editable ? '#fff' : '#F8FAFC',
+                    color: '#94A3B8',
+                  };
+          const glyph =
+            kind === 'worked' ? '✓' : kind === 'descanso' ? 'R' : letter;
           if (!editable) {
             return (
               <span
                 key={letter}
                 title={title}
                 className="inline-flex h-5 w-5 items-center justify-center rounded border text-[10px] font-semibold"
-                style={{
-                  borderColor: on ? TEAL.border : '#E2E8F0',
-                  backgroundColor: on ? TEAL.bg : '#F8FAFC',
-                  color: on ? TEAL.deep : '#94A3B8',
-                }}
+                style={style}
                 aria-hidden
               >
-                {on ? '✓' : letter}
+                {glyph}
               </span>
             );
           }
           return (
-            <label
+            <button
               key={letter}
-              title={title}
-              className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded border"
-              style={{
-                borderColor: on ? TEAL.border : '#E2E8F0',
-                backgroundColor: on ? TEAL.bg : '#fff',
-              }}
+              type="button"
+              title={`${title} · clic: ciclo`}
+              aria-label={title}
+              onClick={() => onCycle?.(i)}
+              className="inline-flex h-6 w-6 items-center justify-center rounded border text-[10px] font-semibold"
+              style={style}
             >
-              <input
-                type="checkbox"
-                className="sr-only"
-                checked={on}
-                onChange={(e) => onToggle?.(i, e.target.checked)}
-                aria-label={
-                  isDom
-                    ? `${dayLabels[i] || letter} (prima 25%)`
-                    : dayLabels[i] || letter
-                }
-              />
-              <span
-                className="text-[10px] font-semibold"
-                style={{ color: on ? TEAL.deep : '#94A3B8' }}
-              >
-                {on ? '✓' : letter}
-              </span>
-            </label>
+              {glyph}
+            </button>
           );
         })}
       </div>
       <span
         className="min-w-[1.75rem] text-right text-sm font-semibold tabular-nums"
         style={{ color: SUITE.navy }}
-        title="Días trabajados (Dom = 1.25 si trabaja domingo)"
+        title="Σ pagable (trabajado + descanso; Dom trabajado = 1.25)"
       >
         {total > 0 ? total : '—'}
       </span>
@@ -686,6 +724,10 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
 
   async function saveLines() {
     if (!selectedId) return;
+    if (period?.status === 'pagado') {
+      setToast('Reabre borrador para editar asistencia e importes');
+      return;
+    }
     const lines = draftToInputs(draft);
     if (!lines.length) {
       setToast('Agrega al menos una línea con nombre');
@@ -786,26 +828,56 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
     }
   }
 
+  function recalcImporte(row: DraftLine, diasSum: number): string {
+    return numOrEmpty(
+      computePayrollImporte({
+        sueldo_diario: parseNum(row.sueldo_diario),
+        dias_trabajados: diasSum,
+        horas_extra: parseNum(row.horas_extra),
+        bonos: parseNum(row.bonos),
+        retenciones: parseNum(row.retenciones),
+      })
+    );
+  }
+
   function updateDraft(idx: number, patch: Partial<DraftLine>) {
     setDraft((rows) => {
       const next = [...rows];
-      next[idx] = { ...next[idx], ...patch };
+      const row = { ...next[idx], ...patch };
+      const moneyTouched =
+        patch.sueldo_diario != null ||
+        patch.horas_extra != null ||
+        patch.bonos != null ||
+        patch.retenciones != null ||
+        patch.dias_trabajados != null;
+      if (moneyTouched && patch.importe_pagado == null) {
+        const diasSum = row.dias_marks_active
+          ? sumDiasSemana(row.dias_semana)
+          : parseNum(row.dias_trabajados) ?? 0;
+        if (row.dias_marks_active) {
+          row.dias_trabajados = numOrEmpty(diasSum);
+        }
+        row.importe_pagado = recalcImporte(row, diasSum);
+      }
+      next[idx] = row;
       return next;
     });
     setDirty(true);
   }
 
-  function toggleDraftDay(idx: number, dayIndex: number, on: boolean) {
+  function cycleDraftDay(idx: number, dayIndex: number) {
     setDraft((rows) => {
       const next = [...rows];
       const row = next[idx];
       if (!row) return rows;
-      const dias = setDiasSemanaDay(row.dias_semana, dayIndex, on);
+      const dias = cycleDiasSemanaDay(row.dias_semana, dayIndex);
+      const sum = sumDiasSemana(dias);
       next[idx] = {
         ...row,
         dias_semana: dias,
         dias_marks_active: true,
-        dias_trabajados: numOrEmpty(sumDiasSemana(dias)),
+        dias_trabajados: numOrEmpty(sum),
+        importe_pagado: recalcImporte({ ...row, dias_semana: dias }, sum),
       };
       return next;
     });
@@ -864,6 +936,8 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
         : period?.label || '';
   const personCount =
     draft.length || period?.line_count || 0;
+  const linesLocked = period?.status === 'pagado';
+  const canEditLines = Boolean(period) && !linesLocked;
 
   return (
     <div className="space-y-4">
@@ -1243,12 +1317,21 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                 )}
                 <button
                   type="button"
-                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold"
+                  disabled={!canEditLines}
+                  title={
+                    linesLocked
+                      ? 'Periodo pagado: reabre borrador para editar asistencia'
+                      : undefined
+                  }
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
                   style={{
                     color: editing ? SUITE.orangeDeep : theme.title,
                     backgroundColor: editing ? SUITE.orangeSoft : '#fff',
                   }}
-                  onClick={() => setEditing((v) => !v)}
+                  onClick={() => {
+                    if (!canEditLines) return;
+                    setEditing((v) => !v);
+                  }}
                 >
                   {editing ? 'Salir de edición' : 'Editar líneas'}
                 </button>
@@ -1265,16 +1348,18 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                     >
                       + Línea
                     </button>
+                  </>
+                )}
+                {canEditLines && dirty && (
                     <button
                       type="button"
-                      disabled={busy || !dirty}
+                      disabled={busy}
                       className="rounded-full px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                       style={{ backgroundColor: SUITE.navy }}
                       onClick={() => void saveLines()}
                     >
                       Guardar cambios
                     </button>
-                  </>
                 )}
               </div>
 
@@ -1441,7 +1526,7 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                           })}
                           <span
                             className="inline-flex min-w-[1.75rem] justify-end text-[9px] opacity-70"
-                            title="Dom marcado = 1.25 (prima 25%)"
+                            title="Σ = trabajado + descanso (Dom trabajado = 1.25)"
                           >
                             Σ
                           </span>
@@ -1561,8 +1646,8 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                                         fallbackTotal={parseNum(
                                           row.dias_trabajados
                                         )}
-                                        onToggle={(dayIndex, on) =>
-                                          toggleDraftDay(idx, dayIndex, on)
+                                        onCycle={(dayIndex) =>
+                                          cycleDraftDay(idx, dayIndex)
                                         }
                                       />
                                     </td>
@@ -1619,10 +1704,16 @@ export function RrhhNomina({ onChanged }: { onChanged?: () => void }) {
                                       <DiasSemanaChecks
                                         days={row.dias_semana}
                                         dayLabels={dayLabels}
-                                        editable={false}
+                                        editable={canEditLines && idx >= 0}
                                         fallbackTotal={parseNum(
                                           row.dias_trabajados
                                         )}
+                                        onCycle={
+                                          canEditLines && idx >= 0
+                                            ? (dayIndex) =>
+                                                cycleDraftDay(idx, dayIndex)
+                                            : undefined
+                                        }
                                       />
                                     </td>
                                     <td

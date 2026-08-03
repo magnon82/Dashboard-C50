@@ -60,7 +60,17 @@ export const HR_PAYROLL_DAY_LETTERS = [
   'D',
 ] as const;
 
-/** Pesos por día (Lun–Dom). Excel: Lun–Sáb = 1; Dom = 1.25 (prima 25%). */
+/**
+ * Pesos / marcas por día (Lun–Dom) en `dias_semana`:
+ * - 0 = falta / sin marca (no paga)
+ * - >0 = trabajado (Lun–Sáb = 1; Dom = 1.25 prima dominical)
+ * - <0 = descanso semanal pagado (sentinel −1; al sumar cuenta 1)
+ *
+ * Jornada 48h (MX típica): 6 días laborables + 1 descanso semanal pagado.
+ * Σ pagable = suma de pesos; semana completa 6 trabajados + 1 descanso → Σ = 7
+ * (o 6.25+1 si el día trabajado extra es domingo con prima).
+ * Importe = sueldo_diario × Σ + HE + bonos − retenciones.
+ */
 export type HrPayrollDiasSemana = [
   number,
   number,
@@ -71,17 +81,38 @@ export type HrPayrollDiasSemana = [
   number,
 ];
 
+export type HrPayrollDayKind = 'off' | 'worked' | 'descanso';
+
 /** Índice Dom en `dias_semana` (Lun=0 … Dom=6). */
 export const HR_PAYROLL_SUNDAY_INDEX = 6;
 
-/** Prima dominical: Dom marcado cuenta 1.25 (solo quien trabaja domingo). */
+/** Prima dominical: Dom trabajado cuenta 1.25. */
 export const HR_PAYROLL_SUNDAY_WEIGHT = 1.25;
 
-/** Peso al marcar un día en UI (Lun–Sáb = 1; Dom = 1.25). */
+/** Sentinel: descanso semanal pagado (cuenta 1 en Σ; sin prima). */
+export const HR_PAYROLL_DESCANSO_MARK = -1;
+
+/** Techo razonable de Σ semanal (evita totales absurdos tipo dual-rol ×2). */
+export const HR_PAYROLL_MAX_DIAS_SEMANA = 8.75;
+
+/** Peso al marcar trabajado (Lun–Sáb = 1; Dom = 1.25). */
 export function payrollDayOnWeight(dayIndex: number): number {
   return dayIndex === HR_PAYROLL_SUNDAY_INDEX
     ? HR_PAYROLL_SUNDAY_WEIGHT
     : 1;
+}
+
+export function payrollDayKind(v: number): HrPayrollDayKind {
+  if (!Number.isFinite(v) || v === 0) return 'off';
+  if (v < 0) return 'descanso';
+  return 'worked';
+}
+
+/** Peso que suma a Σ / dias_trabajados. */
+export function dayPayWeight(v: number): number {
+  if (!Number.isFinite(v) || v === 0) return 0;
+  if (v < 0) return Math.abs(v);
+  return v;
 }
 
 export type HrPayrollLine = {
@@ -90,7 +121,7 @@ export type HrPayrollLine = {
   employee_id: string;
   sueldo_diario: number | null;
   dias_trabajados: number;
-  /** Marcas Lun–Dom (0 / 1 / fracciones). Suma → dias_trabajados. */
+  /** Marcas Lun–Dom (0 / trabajado / descanso−1). Suma pesos → dias_trabajados. */
   dias_semana: HrPayrollDiasSemana | null;
   horas_extra: number;
   bonos: number;
@@ -132,10 +163,19 @@ export function emptyDiasSemana(): HrPayrollDiasSemana {
   return [0, 0, 0, 0, 0, 0, 0];
 }
 
-/** Marca de celda Excel: 0, 1, 1.25…; valores >2 suelen ser sangrado del día del mes. */
+/**
+ * Marca de celda / DB: 0, 1, 1.25, −1 (descanso).
+ * Dual-rol 1+1 → 2 → 1; Dom 1.25+1.25 → 2.5 → 1.25.
+ * >2.6 → sangrado día-del-mes → 1.
+ */
 export function sanitizePayrollDayMark(n: number | null | undefined): number {
-  if (n == null || !Number.isFinite(n) || n <= 0) return 0;
-  if (n > 2) return 1;
+  if (n == null || !Number.isFinite(n) || n === 0) return 0;
+  if (n < 0) return HR_PAYROLL_DESCANSO_MARK;
+  if (n > 2) {
+    if (n >= 2.2 && n <= 2.6) return HR_PAYROLL_SUNDAY_WEIGHT;
+    return 1;
+  }
+  if (n > HR_PAYROLL_SUNDAY_WEIGHT) return 1;
   return Math.round(n * 100) / 100;
 }
 
@@ -162,8 +202,21 @@ export function normalizeDiasSemana(raw: unknown): HrPayrollDiasSemana | null {
 }
 
 export function sumDiasSemana(days: HrPayrollDiasSemana): number {
-  const s = days.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  const s = days.reduce((a, b) => a + dayPayWeight(b), 0);
   return Math.round(s * 100) / 100;
+}
+
+/** Une marcas del mismo empleado (dual rol): OR por día, no suma (evita Σ≈13). */
+function mergeDayMark(a: number, b: number): number {
+  const ka = payrollDayKind(a);
+  const kb = payrollDayKind(b);
+  if (ka === 'worked' && kb === 'worked') {
+    return sanitizePayrollDayMark(Math.max(a, b));
+  }
+  if (ka === 'worked') return sanitizePayrollDayMark(a);
+  if (kb === 'worked') return sanitizePayrollDayMark(b);
+  if (ka === 'descanso' || kb === 'descanso') return HR_PAYROLL_DESCANSO_MARK;
+  return 0;
 }
 
 /** Importe base: SD × días (+ extras/bonos − retenciones). HE se trata como monto. */
@@ -204,12 +257,12 @@ export function mergeDiasSemana(
   if (!b) return a;
   const out = emptyDiasSemana();
   for (let i = 0; i < 7; i++) {
-    out[i] = sanitizePayrollDayMark((a[i] || 0) + (b[i] || 0));
+    out[i] = mergeDayMark(a[i] || 0, b[i] || 0);
   }
   return out;
 }
 
-/** Activa/desactiva un día (Lun–Sáb → 1; Dom → 1.25; off → 0). */
+/** Activa/desactiva trabajado (Lun–Sáb → 1; Dom → 1.25; off → 0). */
 export function setDiasSemanaDay(
   days: HrPayrollDiasSemana | null | undefined,
   index: number,
@@ -218,6 +271,45 @@ export function setDiasSemanaDay(
   const next = days ? ([...days] as HrPayrollDiasSemana) : emptyDiasSemana();
   if (index < 0 || index > 6) return next;
   next[index] = on ? payrollDayOnWeight(index) : 0;
+  return next;
+}
+
+/** Ciclo asistencia: off → trabajado → descanso → off. */
+export function cycleDiasSemanaDay(
+  days: HrPayrollDiasSemana | null | undefined,
+  index: number
+): HrPayrollDiasSemana {
+  const next = days ? ([...days] as HrPayrollDiasSemana) : emptyDiasSemana();
+  if (index < 0 || index > 6) return next;
+  const kind = payrollDayKind(next[index]);
+  if (kind === 'off') next[index] = payrollDayOnWeight(index);
+  else if (kind === 'worked') next[index] = HR_PAYROLL_DESCANSO_MARK;
+  else next[index] = 0;
+  return next;
+}
+
+/**
+ * Si hay exactamente 1 día sin marca y ≥1 trabajado, ese hueco = descanso pagado.
+ * Heurística jornada 48h al sembrar desde horarios (DESCANSO no se guarda como turno).
+ */
+export function applyPaidRestIfSingleOff(
+  days: HrPayrollDiasSemana
+): HrPayrollDiasSemana {
+  const next = [...days] as HrPayrollDiasSemana;
+  let worked = 0;
+  let offIdx = -1;
+  let offCount = 0;
+  for (let i = 0; i < 7; i++) {
+    const k = payrollDayKind(next[i]);
+    if (k === 'worked') worked += 1;
+    else if (k === 'off') {
+      offCount += 1;
+      offIdx = i;
+    }
+  }
+  if (worked > 0 && worked <= 6 && offCount === 1 && offIdx >= 0) {
+    next[offIdx] = HR_PAYROLL_DESCANSO_MARK;
+  }
   return next;
 }
 
