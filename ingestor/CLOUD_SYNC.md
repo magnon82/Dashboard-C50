@@ -21,7 +21,7 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 
 | Workflow | Cadencia (CDMX) | Cron UTC | Qué hace |
 |----------|-----------------|----------|----------|
-| `sync-gmail.yml` | Cada ~3 h + anclas L–S 4:00/5:17 AM y Dom 20:00–21:00 | `5 */3 * * *` + anclas | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
+| `sync-gmail.yml` | Lun–Vie 2–6 AM cada hora; Dom 7–11 PM cada hora | `0 8-12 * * 1-5`, `0 1-5 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
 | `sync-saldos.yml` | Cada hora (:07) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
 | `sync-hr-drive.yml` | Diario 12:00 PM | `0 18 * * *` | Soft-check `hr_*` + `hr_drive_sync_state` |
 
@@ -33,7 +33,7 @@ Para **saber** que está bien (y no depender de pedirlo a mano):
 
 1. **Secrets Actions** (repo → Settings → Secrets): `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_OAUTH_CLIENT_JSON`, `GOOGLE_OAUTH_TOKEN_JSON`.
 2. **Notificaciones**: GitHub → Settings → Notifications → Actions → avisar si el workflow falla.
-3. **Suite**: hub / Socios muestran alerta si el último día Infocaja está atrasado (`/api/ventas-sync-status`).
+3. **Suite**: hub / Socios / Ventas muestran alerta si el último día Infocaja está atrasado (`/api/ventas-sync-status`).
 4. **Rescate**: Actions → Sync Gmail diario → **Run workflow** (o botón admin si configuras `GH_WORKFLOW_DISPATCH_TOKEN` en Vercel).
 5. Tras cambiar secrets o el YAML, corre **Run workflow** una vez y confirma en el log `OK YYYY-MM-DD: Venta Total=…`.
 

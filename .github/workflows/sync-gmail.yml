@@ -1,26 +1,18 @@
 name: Sync Gmail diario
 
 # CDMX sin DST desde 2022 (UTC-6).
-# GitHub cron es best-effort (puede retrasarse minutos/horas). Por eso:
-#   · cron cada 3 h UTC (cobertura continua)
-#   · anclas L–S madrugada + Dom noche
-# Infocaja (ventas) + CORTE → Supabase; CFDI → financial_records (best-effort).
-# Dashboard: Ventas · Socios · Finanzas/Facturas
-# Certeza: Actions → Notify me (fallos) + alerta en hub si Infocaja atrasada.
+# Horario pedido:
+#   · Lun–Vie 2:00–6:00 AM CDMX cada hora  → 8:00–12:00 UTC (cron weekdays 1–5)
+#   · Dom 7:00–11:00 PM CDMX cada hora     → lun 1:00–5:00 UTC (cron weekday 1)
+# GitHub cron es best-effort; la Suite alerta si Infocaja queda atrasada.
+# Infocaja + CORTE → Supabase; CFDI → financial_records (best-effort).
 
 on:
   schedule:
-    # Cada 3 h UTC (~cada 3 h CDMX). Minuto :05 para evitar colisión con otros workflows.
-    - cron: "5 */3 * * *"
-    # Lun–sáb 4:00 AM CDMX
-    - cron: "0 10 * * 1-6"
-    # Lun–sáb respaldo ~5:17 AM CDMX
-    - cron: "17 11 * * 1-6"
-    # Domingo 8:00 / 8:15 / 8:30 / 9:00 PM CDMX (lunes 02:00–03:00 UTC)
-    - cron: "0 2 * * 1"
-    - cron: "15 2 * * 1"
-    - cron: "30 2 * * 1"
-    - cron: "0 3 * * 1"
+    # Lun–Vie 2,3,4,5,6 AM CDMX
+    - cron: "0 8-12 * * 1-5"
+    # Dom 7,8,9,10,11 PM CDMX (= lun 1–5 UTC)
+    - cron: "0 1-5 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -30,7 +22,6 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Infocaja+CORTE + ventana CFDI; CFDI es paso aparte (no tumba ventas).
     timeout-minutes: 35
     defaults:
       run:
@@ -80,11 +71,9 @@ jobs:
           GOOGLE_OAUTH_TOKEN_JSON: ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}
           CI: "true"
           PYTHONUTF8: "1"
-        # Ventas primero; CFDI va en el paso siguiente (best-effort).
         run: python sync_gmail_diario.py --newer-than 7 --skip-facturas
 
       - name: Sync Facturas CFDI → Supabase
-        # Best-effort: no tumbar Infocaja/CORTE si Gmail/adjuntos fallan.
         continue-on-error: true
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -94,7 +83,6 @@ jobs:
           GOOGLE_OAUTH_TOKEN_JSON: ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}
           CI: "true"
           PYTHONUTF8: "1"
-          # En CI sin I: los adjuntos van a ingestor/data/facturas; el índice sí a ERP (financial_records).
           FACTURAS_PATH: ${{ github.workspace }}/ingestor/data/facturas
         run: python ingest_facturas_gmail.py --newer-than 7
 
