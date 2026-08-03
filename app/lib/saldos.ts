@@ -61,8 +61,12 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
 
   const delAnio = saldosEfectivo.filter((r) => r.parsed!.y === currentYear);
   const poolEfectivo = delAnio.length > 0 ? delAnio : saldosEfectivo;
+  // Same calendar day: prefer later row (end-of-day running balance). Ingest
+  // now stores one saldo per day; >= still wins if older duplicates remain.
   const saldoEfectivoHoy = poolEfectivo.length
-    ? poolEfectivo.reduce((best, cur) => (cur.parsed!.key > best.parsed!.key ? cur : best))
+    ? poolEfectivo.reduce((best, cur) =>
+        cur.parsed!.key >= best.parsed!.key ? cur : best
+      )
     : null;
 
   // Manual override wins over Excel presupuesto_saldos

@@ -301,6 +301,11 @@ def parse_concepto_week(
 
 
 def extract_saldos(path: Path, year: int) -> list[dict]:
+    """
+    Saldo diario = columna I (Saldo en Efectivo) al cierre del día.
+    Si hay varias filas la misma fecha, gana la última (saldo corrido final);
+    no la primera del día ni el encabezado I3 (sin fecha).
+    """
     wb = load_workbook(path, read_only=True, data_only=True)
     name = sheet_name_for_year(year)
     if name not in wb.sheetnames:
@@ -308,7 +313,8 @@ def extract_saldos(path: Path, year: int) -> list[dict]:
         return []
 
     ws = wb[name]
-    records: list[dict] = []
+    # date ISO → record; overwrite so last Excel row for that day wins
+    by_date: dict[str, dict] = {}
     for row in ws.iter_rows(min_row=3, max_col=COL_SALDO, values_only=True):
         cells = list(row) + [None] * COL_SALDO
         fecha = as_date(cells[COL_FECHA - 1])
@@ -322,18 +328,16 @@ def extract_saldos(path: Path, year: int) -> list[dict]:
             amount = float(saldo)
         except (TypeError, ValueError):
             continue
-        records.append(
-            {
-                "date": fecha.isoformat(),
-                "type": "income",
-                "category": "Saldo Efectivo",
-                "amount": amount,
-                "description": f"FLUJO EFECTIVO CARRANZA 50 · {concepto or 'movimiento'}",
-                "source_file": SOURCE_FILE,
-            }
-        )
+        by_date[fecha.isoformat()] = {
+            "date": fecha.isoformat(),
+            "type": "income",
+            "category": "Saldo Efectivo",
+            "amount": amount,
+            "description": f"FLUJO EFECTIVO CARRANZA 50 · {concepto or 'movimiento'}",
+            "source_file": SOURCE_FILE,
+        }
     wb.close()
-    return records
+    return [by_date[k] for k in sorted(by_date)]
 
 
 def extract_semana_efectivo(path: Path, year: int) -> list[dict]:
@@ -576,12 +580,16 @@ def main() -> None:
     path = resolve_flujo_path(args.file)
     years = [args.year] if args.year else None
     saldos, semanas, movs = extract_all(path, years)
+    # Ya dedupeado por fecha (cierre de día); max(date) = último día con saldo
     latest = max(saldos, key=lambda r: r["date"]) if saldos else None
     print(f"TOTAL registros saldo: {len(saldos)}")
     print(f"TOTAL registros semana efectivo: {len(semanas)}")
     print(f"TOTAL registros movimientos: {len(movs)}")
     if latest:
-        print(f"Último día en archivo: {latest['date']} = ${latest['amount']:,.2f}")
+        print(
+            f"Último día en archivo: {latest['date']} = ${latest['amount']:,.2f}"
+            f" (saldo cierre de día)"
+        )
     if semanas:
         print("Ejemplo semana:", semanas[-1])
     if movs:
