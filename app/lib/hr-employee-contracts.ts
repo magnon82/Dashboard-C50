@@ -26,17 +26,57 @@ export function contractStatusLabelEs(status: string): string {
   return status;
 }
 
-/** ¿Nombre de archivo parece contrato laboral? */
-export function isContractFilename(filename: string): boolean {
-  const n = filename
+function normalizeFilename(filename: string): string {
+  return filename
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
-  if (!/contrato/.test(n)) return false;
+}
+
+/** ¿Ruta bajo carpeta Contrato / CONTRATO / Contratos del expediente? */
+export function isUnderContratoFolder(absolutePath: string): boolean {
+  const n = normalizeFilename(absolutePath.replace(/\\/g, '/'));
+  return /(?:^|\/)contratos?(?:\/|$)/.test(n);
+}
+
+/**
+ * Archivos en carpeta Contrato que NO son el contrato laboral
+ * (políticas, vacaciones, finiquitos, etc. suelen vivir ahí).
+ */
+function isNonContractSiblingFilename(n: string): boolean {
+  return /vacacion|reglamento|politic|responsiva|resguardo|uniforme|vale\.|kit\s*20|justificant|incapacidad|examen|toxicolog|gastos?\s*medic|acta\s*administrativa|solicitud|finiquito|renuncia|privacidad|aviso\s*de|carta\s*compromiso|\bkpi\b|firma\s*de\s*activ|documentos\.pdf|\bdocs\b/.test(
+    n
+  );
+}
+
+/**
+ * ¿Nombre/ruta parece contrato laboral del expediente?
+ * · Nombre con contrato / contract / convenio / indeterminado
+ * · O PDF/imagen bajo carpeta Contrato/ (p. ej. «Roman Sanchez . 2024.pdf»)
+ */
+export function isContractFilename(
+  filename: string,
+  absolutePath?: string | null
+): boolean {
+  const n = normalizeFilename(filename);
+  if (!/\.(pdf|jpe?g|png|webp|heic|heif)$/.test(n)) return false;
+  if (/desktop\.ini$/.test(n)) return false;
+  if (isNonContractSiblingFilename(n)) return false;
+
   // Evitar políticas / reglamento / contrato de eventos en expediente RH.
-  if (/reglamento|politic|terraza|eventos?|renta/.test(n)) return false;
-  return true;
+  if (/terraza|eventos?|renta/.test(n)) return false;
+
+  if (/contrato|contract|convenio/.test(n)) return true;
+  // «Indeterminado 2024 Juan Pablo…» sin la palabra contrato.
+  if (/\bindeterminado\b/.test(n)) return true;
+
+  // Person-named PDFs live under Contrato/ (sin la palabra «Contrato»).
+  if (absolutePath && isUnderContratoFolder(absolutePath)) {
+    return true;
+  }
+
+  return false;
 }
 
 /** Título amigable desde el nombre del archivo. */
@@ -56,10 +96,7 @@ export function contractTitleFromFilename(filename: string): string {
 export function contractEffectiveFromFilename(
   filename: string
 ): string | null {
-  const n = filename
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
+  const n = normalizeFilename(filename);
   const ymd = n.match(/(20\d{2})[-_./](\d{1,2})[-_./](\d{1,2})/);
   if (ymd) {
     const y = ymd[1];
@@ -69,6 +106,30 @@ export function contractEffectiveFromFilename(
   }
   const year = n.match(/\b(20\d{2})\b/);
   if (year) return `${year[1]}-01-01`;
+  // Mes en español + año (p. ej. «Junio 2022», «Mayo 2024»).
+  const monthYear =
+    /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(20\d{2})\b/.exec(
+      n
+    );
+  if (monthYear) {
+    const months: Record<string, string> = {
+      enero: '01',
+      febrero: '02',
+      marzo: '03',
+      abril: '04',
+      mayo: '05',
+      junio: '06',
+      julio: '07',
+      agosto: '08',
+      septiembre: '09',
+      setiembre: '09',
+      octubre: '10',
+      noviembre: '11',
+      diciembre: '12',
+    };
+    const mm = months[monthYear[1]];
+    if (mm) return `${monthYear[2]}-${mm}-01`;
+  }
   return null;
 }
 

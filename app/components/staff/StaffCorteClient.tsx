@@ -140,7 +140,6 @@ function MoneyInput({
 
 export function StaffCorteClient() {
   const { user } = useSession();
-  const isMaster = Boolean(user?.canAccessAdmin);
   const localWindow = staffCorteDateWindow();
   const [corteDate, setCorteDate] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -170,6 +169,13 @@ export function StaffCorteClient() {
   const [adminLookback, setAdminLookback] = useState<AdminLookbackPayload | null>(
     null
   );
+  const [payload, setPayload] = useState<DayPayload | null>(null);
+  /** Session + API: evita bloquear el select Master mientras carga useSession. */
+  const isMaster = Boolean(
+    user?.canAccessAdmin ||
+      payload?.isMasterAdmin ||
+      adminLookback
+  );
   const opDay = dateWindow.opDay;
   const prevDay = dateWindow.prevDay;
   const isPrevDay = corteDate === prevDay;
@@ -179,7 +185,6 @@ export function StaffCorteClient() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [payload, setPayload] = useState<DayPayload | null>(null);
 
   const [activeTerminal, setActiveTerminal] = useState<TpvTerminalNumber>(1);
   const [activeKind, setActiveKind] = useState<TpvPhotoKind>('venta');
@@ -200,6 +205,10 @@ export function StaffCorteClient() {
     if (!adminLookback?.days?.length) return [];
     return adminLookback.days.filter((d) => !d.corteCompleto && !d.unknown);
   }, [adminLookback]);
+
+  const pendingSelectValue = pendingAdminDays.some((d) => d.date === corteDate)
+    ? corteDate
+    : '';
 
   // Mantener selección dentro de la ventana writable (staff: hoy/ayer; master: 7 días).
   useEffect(() => {
@@ -229,7 +238,14 @@ export function StaffCorteClient() {
       );
       setCorteDate((prev) => {
         if (prev === nextOp || prev === nextPrev) return prev;
-        if (isMaster && isAdminWritableCorteDate(prev)) return prev;
+        if (isAdminWritableCorteDate(prev)) {
+          // Master (o ?date= en ventana 7 días): no forzar hoy antes de resolver sesión.
+          if (isMaster) return prev;
+          const q = new URLSearchParams(window.location.search)
+            .get('date')
+            ?.slice(0, 10);
+          if (q === prev) return prev;
+        }
         return nextOp;
       });
     }
@@ -240,12 +256,12 @@ export function StaffCorteClient() {
 
   // Si llega ?date= y el usuario es Master, respetarlo dentro de la ventana.
   useEffect(() => {
-    if (!isMaster) return;
     const q = new URLSearchParams(window.location.search).get('date')?.slice(0, 10);
     if (!q || !/^\d{4}-\d{2}-\d{2}$/.test(q)) return;
     if (!isAdminWritableCorteDate(q)) return;
+    if (!isMaster && q !== opDay && q !== prevDay) return;
     setCorteDate((prev) => (prev === q ? prev : q));
-  }, [isMaster]);
+  }, [isMaster, opDay, prevDay]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -324,12 +340,13 @@ export function StaffCorteClient() {
     if (fileRef.current) fileRef.current.value = '';
   }
 
-  function selectCorteDate(next: string) {
+  function selectCorteDate(nextRaw: string) {
+    const next = nextRaw.slice(0, 10);
+    if (!next || !/^\d{4}-\d{2}-\d{2}$/.test(next)) return;
     if (next === corteDate) return;
+    const inAdminWindow = isAdminWritableCorteDate(next);
     if (!isMaster && next !== opDay && next !== prevDay) return;
-    if (isMaster && !isAdminWritableCorteDate(next) && next !== opDay && next !== prevDay) {
-      return;
-    }
+    if (isMaster && !inAdminWindow && next !== opDay && next !== prevDay) return;
     clearPending();
     setMsg(null);
     setError(null);
@@ -338,12 +355,18 @@ export function StaffCorteClient() {
     setEventos('');
     setEfectivoContado('');
     setNotes('');
+    setAckShortage(false);
     setActiveTerminal(1);
     setActiveKind('venta');
     setCorteDate(next);
-    if (typeof window !== 'undefined' && isMaster) {
+    if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
-      url.searchParams.set('date', next);
+      // Persistir día Master (incl. ayer) en ?date=; hoy usa default sin query.
+      if (isMaster && next !== opDay && inAdminWindow) {
+        url.searchParams.set('date', next);
+      } else {
+        url.searchParams.delete('date');
+      }
       window.history.replaceState({}, '', url.toString());
     }
   }
@@ -642,7 +665,9 @@ export function StaffCorteClient() {
 
   const prevIncomplete =
     !dateWindow.prev.unknown && !dateWindow.prev.corteCompleto;
-  const showPrevCatchUpBanner = !isPrevDay && prevIncomplete;
+  // Banner de ayer solo en Hoy (no pelear con un día pendiente Master más atrás).
+  const showPrevCatchUpBanner =
+    !isPrevDay && prevIncomplete && !isOutsideStaffWindow;
   const opStatusLabel = corteStatusLabel(dateWindow.op);
   const prevStatusLabel = corteStatusLabel(dateWindow.prev);
 
@@ -739,17 +764,18 @@ export function StaffCorteClient() {
               <label className="block text-xs font-semibold text-slate-600">
                 Pendientes (últimos 7)
                 <select
-                  value={
-                    pendingAdminDays.some((d) => d.date === corteDate)
-                      ? corteDate
-                      : pendingAdminDays[0].date
-                  }
+                  value={pendingSelectValue}
                   onChange={(e) => {
                     const v = e.target.value.slice(0, 10);
                     if (v) selectCorteDate(v);
                   }}
                   className="mt-1 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm capitalize"
                 >
+                  <option value="">
+                    {pendingSelectValue
+                      ? '— Elegir otro día —'
+                      : 'Elegir día pendiente'}
+                  </option>
                   {pendingAdminDays.map((d) => (
                     <option key={d.date} value={d.date}>
                       {formatCorteDateDisplay(d.date)} ·{' '}
@@ -765,7 +791,7 @@ export function StaffCorteClient() {
             )}
             {isOutsideStaffWindow ? (
               <p className="text-xs font-medium text-amber-900">
-                Editando día pendiente · {formatCorteDateDisplay(corteDate)}
+                Editando · {formatCorteDateDisplay(corteDate)}
               </p>
             ) : null}
             <Link
@@ -823,7 +849,11 @@ export function StaffCorteClient() {
           className="text-[11px] font-bold uppercase tracking-[0.16em]"
           style={{ color: SUITE.orange }}
         >
-          {isPrevDay ? 'Corte del día anterior' : 'Corte del día'}
+          {isOutsideStaffWindow
+            ? 'Corte día pendiente'
+            : isPrevDay
+              ? 'Corte del día anterior'
+              : 'Corte del día'}
         </p>
         <h2
           className="mt-1 text-xl font-bold capitalize"
@@ -831,11 +861,13 @@ export function StaffCorteClient() {
         >
           {formatCorteDateDisplay(corteDate)}
         </h2>
-        <p className="mt-1 text-xs text-slate-500">
-          {isPrevDay
-            ? 'Estás cargando el corte del día anterior respecto al día operativo (CDMX). El flujo de madrugada (00:00–05:59) sigue usando el día de operación nocturno.'
-            : TPV_CORTE_DATE_HELP}
-        </p>
+        {!isOutsideStaffWindow ? (
+          <p className="mt-1 text-xs text-slate-500">
+            {isPrevDay
+              ? 'Estás cargando el corte del día anterior respecto al día operativo (CDMX). El flujo de madrugada (00:00–05:59) sigue usando el día de operación nocturno.'
+              : TPV_CORTE_DATE_HELP}
+          </p>
+        ) : null}
 
         <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
           <div className="rounded-xl bg-slate-50 px-2 py-3">

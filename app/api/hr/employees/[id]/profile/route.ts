@@ -37,7 +37,6 @@ import {
   shouldSoftPullExpediente,
   shouldSoftPullMedical,
 } from '@/app/lib/hr-expediente-docs-pull';
-import { localDriveFsEnabled } from '@/app/lib/local-fs';
 import {
   pickDefaultContract,
   sortContracts,
@@ -278,19 +277,17 @@ export async function GET(_req: Request, ctx: Ctx) {
     // Soft-pull: sin archivos en DB + File Stream → jala del expediente.
     // Reparación: paquete legado (mismo storage_path) o slots mal etiquetados (CURP en Acta).
     // Contratos / médico: también si checklist ya lleno pero esas secciones vacías.
+    // En Vercel no hay I:\ → soft-pull no corre; hay que abrir el perfil en PC admin.
     try {
       const needDocs = docsRequired && (await shouldSoftPullExpediente(id));
       const needContracts = await shouldSoftPullContracts(id);
       const needMedical = await shouldSoftPullMedical(id);
-      const localFs = localDriveFsEnabled();
-      let folderResolved = false;
       if (needDocs || needContracts || needMedical) {
         const folder = await resolveExpedienteFolder({
           employeeId: id,
           fullName: String(empEarly.full_name || ''),
           driveFolderPath: empEarly.drive_folder_path,
         });
-        folderResolved = Boolean(folder);
         if (folder) {
           await pullExpedienteDocuments({
             employeeId: id,

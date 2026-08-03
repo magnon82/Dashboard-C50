@@ -6,7 +6,8 @@
 -- Archivos en bucket hr-employee-docs (hr_employee_documents.sql).
 --
 -- Un solo contrato con status = 'vigente' por empleado (índice parcial).
--- El resto queda en 'historico'. Import desde expediente: archivos Contrato*.
+-- El resto queda en 'historico'. Import desde expediente: carpeta Contrato/
+-- o nombres contrato/contract/convenio/indeterminado/N meses.
 -- =============================================================================
 
 create table if not exists public.hr_employee_contracts (
@@ -46,4 +47,4 @@ create unique index if not exists hr_employee_contracts_emp_source_uidx
 alter table public.hr_employee_contracts enable row level security;
 
 comment on table public.hr_employee_contracts is
-  'Contrato laboral vigente e historial; PDF/imagen en hr-employee-docs. Soft-pull desde expediente (Contrato*).';
+  'Contrato laboral vigente e historial; PDF/imagen en hr-employee-docs. Soft-pull desde expediente (carpeta Contrato/ o nombre contrato*).';

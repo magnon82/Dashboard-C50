@@ -50,6 +50,8 @@ import { localDriveFsEnabled } from '@/app/lib/local-fs';
 import { getServiceSupabase } from '@/app/lib/users';
 
 const MAX_BYTES = 10 * 1024 * 1024;
+/** Contratos escaneados suelen superar 10 MB (p. ej. Contrato.pdf ~13–15 MB). */
+const CONTRACT_MAX_BYTES = 35 * 1024 * 1024;
 
 const REQUIRED_FROM_PACK: HrDocTypeId[] = [...PACK_DOC_ORDER];
 
@@ -327,8 +329,8 @@ async function listFilesRecursive(
       path: it.path,
       sizeBytes: it.sizeBytes,
     }));
-  // Hasta 2 niveles (ej. Expediente/Documentos/*.pdf; a veces una subcarpeta más).
-  if (depth >= 2) return files;
+  // Hasta 3 niveles (p. ej. DOCUMENTOS CAJA/Contrato/*.pdf).
+  if (depth >= 3) return files;
   for (const folder of listed.items.filter((it) => it.kind === 'folder')) {
     try {
       const inner = await listFilesRecursive(folder.path, depth + 1);
@@ -625,6 +627,8 @@ export async function pullExpedienteDocuments(opts: {
   };
   const classified: Classified[] = [];
   for (const f of files) {
+    // Contratos (carpeta Contrato/ o nombre) no van al checklist de alta.
+    if (isContractFilename(f.name, f.path)) continue;
     const kind = classifyExpedienteFile(f.name);
     if (!kind) continue;
     if (f.sizeBytes != null && f.sizeBytes > MAX_BYTES) continue;
@@ -818,7 +822,9 @@ type LoadBufFn = (
 ) => Promise<{ buf: Buffer; mime: string }>;
 
 /**
- * Importa PDFs/imágenes Contrato* del expediente → hr_employee_contracts.
+ * Importa PDFs/imágenes de contrato del expediente → hr_employee_contracts.
+ * Detecta por nombre (contrato/contract/convenio/indeterminado/N meses) o
+ * por carpeta Contrato/ (archivos con el nombre del empleado).
  * El más reciente (año en nombre / tamaño) queda vigente si aún no hay uno.
  */
 async function pullExpedienteContracts(opts: {
@@ -833,7 +839,9 @@ async function pullExpedienteContracts(opts: {
   matched: Array<{ file: string; docType: 'contrato' }>;
 }> {
   const sb = getServiceSupabase();
-  const contractFiles = opts.files.filter((f) => isContractFilename(f.name));
+  const contractFiles = opts.files.filter((f) =>
+    isContractFilename(f.name, f.path)
+  );
   if (!contractFiles.length) {
     return { imported: 0, skipped: 0, matched: [] };
   }
@@ -879,13 +887,25 @@ async function pullExpedienteContracts(opts: {
       skipped += 1;
       continue;
     }
-    if (file.sizeBytes != null && file.sizeBytes > MAX_BYTES) {
+    if (file.sizeBytes != null && file.sizeBytes > CONTRACT_MAX_BYTES) {
       skipped += 1;
       continue;
     }
 
     try {
-      const { buf, mime } = await opts.loadBuf(file.path, file.name);
+      // Lectura propia: el loadBuf general corta a 10 MB y varios contratos lo superan.
+      const buf = await readFile(file.path);
+      if (buf.length > CONTRACT_MAX_BYTES) {
+        skipped += 1;
+        continue;
+      }
+      const { contentType } = hrBibliotecaContentType(file.path);
+      const mime =
+        contentType === 'application/octet-stream'
+          ? file.name.toLowerCase().endsWith('.pdf')
+            ? 'application/pdf'
+            : 'application/octet-stream'
+          : contentType.split(';')[0];
       if (
         !mime.includes('pdf') &&
         !mime.startsWith('image/') &&
@@ -1047,6 +1067,17 @@ async function pullExpedienteMedical(opts: {
   const examsTableMissing = Boolean(
     examsRes.error && schemaMissing(examsRes.error.message)
   );
+
+  type MedPullRow = {
+    id: string;
+    notes: string | null;
+    storage_path: string | null;
+  };
+  // Mutable caches: untyped Supabase tables infer Postgrest data as never.
+  const remRows: MedPullRow[] = [...((remRes.data || []) as MedPullRow[])];
+  const jusRows: MedPullRow[] = [...((jusRes.data || []) as MedPullRow[])];
+  const examRows: MedPullRow[] = [...((examsRes.data || []) as MedPullRow[])];
+
   const matchedExamKinds = medicalFiles.some(
     (f) => f.kind === 'examen' || f.kind === 'medico_doc'
   );
@@ -1071,10 +1102,10 @@ async function pullExpedienteMedical(opts: {
       : expedienteNote(file.name);
     const existingRows =
       kind === 'reembolso' || useExamFallback
-        ? remRes.data || []
+        ? remRows
         : kind === 'justificante'
-          ? jusRes.data || []
-          : examsRes.data || [];
+          ? jusRows
+          : examRows;
 
     const prev = existingRows.find((r) =>
       alreadyFromExpediente(r.notes, file.name)
@@ -1148,8 +1179,7 @@ async function pullExpedienteMedical(opts: {
             .from('hr_medical_reimbursements')
             .insert(row);
           if (error) throw new Error(error.message);
-          if (!remRes.data) remRes.data = [];
-          remRes.data.push({
+          remRows.push({
             id: 'new',
             notes: note,
             storage_path: storagePath,
@@ -1366,7 +1396,7 @@ export async function shouldSoftPullExpediente(
   }
 }
 
-/** Soft-pull de contratos si la tabla está vacía para este empleado. */
+/** Soft-pull de contratos si aún no hay archivo en sistema para este empleado. */
 export async function shouldSoftPullContracts(
   employeeId: string
 ): Promise<boolean> {
@@ -1375,16 +1405,19 @@ export async function shouldSoftPullContracts(
     const sb = getServiceSupabase();
     const { data, error } = await sb
       .from('hr_employee_contracts')
-      .select('id')
+      .select('id, storage_path')
       .eq('employee_id', employeeId)
-      .limit(1);
+      .limit(20);
     if (error) {
       if (/does not exist|relation|42P01|schema cache/i.test(error.message)) {
         return false;
       }
       return false;
     }
-    return !data?.length;
+    const rows = data || [];
+    if (!rows.length) return true;
+    // Filas huérfanas (sin binario): reintentar import desde expediente.
+    return rows.every((r) => !r.storage_path);
   } catch {
     return false;
   }

@@ -577,11 +577,7 @@ export function RrhhEmployeeProfile({
               </h3>
             </div>
             {contracts.length === 0 ? (
-              <p className="text-xs text-slate-500">
-                Sin contrato en sistema. Si hay archivo{' '}
-                <span className="font-semibold">Contrato*</span> en el
-                expediente Drive, se importa al abrir el perfil (PC admin).
-              </p>
+              <p className="text-xs text-slate-500">Sin contrato</p>
             ) : (
               <div className="rounded-xl border border-slate-200 bg-slate-50/90 p-3">
                 {contracts.length > 1 ? (
@@ -749,6 +745,56 @@ export function RrhhEmployeeProfile({
 
           {!loading && tab === 'docs' ? (
             <div className="space-y-3">
+            {contracts.length > 0 ? (
+              <section
+                className="rounded-xl border border-teal-100 bg-teal-50/40 p-3"
+                aria-label="Contratos en Documentos"
+              >
+                <h3
+                  className="mb-2 text-xs font-bold uppercase tracking-wide"
+                  style={{ color: SUITE.navy }}
+                >
+                  Contratos laborales
+                </h3>
+                <ul className="space-y-2">
+                  {contracts.map((c) => (
+                    <li
+                      key={c.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-white/90 p-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: theme.title }}>
+                          {c.title}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {contractStatusLabelEs(c.status)}
+                          {c.effective_from
+                            ? ` · ${formatHrDate(c.effective_from)}`
+                            : ''}
+                          {c.source_filename ? ` · ${c.source_filename}` : ''}
+                        </p>
+                      </div>
+                      {c.viewUrl ? (
+                        <button
+                          type="button"
+                          className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                          style={{ backgroundColor: SUITE.navy }}
+                          onClick={() => {
+                            setViewerUrl(c.viewUrl!);
+                            setViewerTitle(c.title);
+                            setSelectedContractId(c.id);
+                          }}
+                        >
+                          Ver
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">Sin archivo</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
             <ul className="space-y-2">
               {docsList.map((d) => (
                 <li
@@ -841,13 +887,9 @@ export function RrhhEmployeeProfile({
               <section>
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-bold" style={{ color: SUITE.navy }}>
-                    Documentos médicos del expediente
+                    Documentos médicos
                   </h3>
                 </div>
-                <p className="mb-2 text-[11px] text-slate-500">
-                  Exámenes y archivos médicos importados de la carpeta del
-                  empleado (p. ej. Examen.pdf).
-                </p>
                 <ul className="space-y-2">
                   {(() => {
                     const examRows = (data?.exams || []).filter(
@@ -861,7 +903,7 @@ export function RrhhEmployeeProfile({
                     if (!examRows.length && !examFallbackRems.length) {
                       return (
                         <li className="text-xs text-slate-400">
-                          Sin archivos médicos en el expediente
+                          Sin archivos médicos
                         </li>
                       );
                     }
@@ -1047,10 +1089,6 @@ export function RrhhEmployeeProfile({
                     + Reembolso
                   </button>
                 </div>
-                <p className="mb-2 text-[11px] text-slate-500">
-                  Incluye comprobantes de la carpeta «Gastos médicos» del
-                  expediente.
-                </p>
                 <ul className="space-y-2">
                   {(() => {
                     const rems = (data?.reimbursements || []).filter(
@@ -1059,8 +1097,7 @@ export function RrhhEmployeeProfile({
                     if (rems.length === 0) {
                       return (
                         <li className="text-xs text-slate-400">
-                          Sin registros — si hay PDFs en «Gastos médicos» del
-                          expediente Drive, se importan al abrir el perfil.
+                          Sin registros
                         </li>
                       );
                     }
