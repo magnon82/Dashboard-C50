@@ -102,7 +102,10 @@ export function SemanaEnCursoChart({
     return {
       dia: shortWeekday(d.weekday),
       actual: omitActual ? null : d.total > 0 ? d.total : null,
-      anterior: omitAnterior ? null : (d.prevTotal ?? null) > 0 ? d.prevTotal! : null,
+      anterior:
+        omitAnterior || d.prevTotal == null || d.prevTotal <= 0
+          ? null
+          : d.prevTotal,
     };
   });
 

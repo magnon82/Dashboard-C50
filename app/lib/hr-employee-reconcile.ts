@@ -856,12 +856,12 @@ export async function loadActiveEmployees(
     .select(EMP_COLS)
     .order('full_name', { ascending: true });
   if (res.error && /curp/i.test(res.error.message)) {
-    res = await sb
+    res = (await sb
       .from('hr_employees')
       .select(
         'id, full_name, status, puesto, area, fecha_ingreso, drive_folder_path, suite_username, force_include, force_exclude, notes, email, phone'
       )
-      .order('full_name', { ascending: true });
+      .order('full_name', { ascending: true })) as typeof res;
   }
   if (res.error) throw new Error(res.error.message);
   return ((res.data || []) as unknown as Record<string, unknown>[]).map(asEmp);

@@ -1197,8 +1197,14 @@ export function resolveSueldoQuincenal(e: {
 }): number | null {
   const fromNotes = parseSueldoQuincenalFromNotes(e.notes);
   if (fromNotes != null) return fromNotes;
-  if (employeePayCadence(e) !== 'quincenal') return null;
-  if (!isLeaveExemptEmployee(e)) return null;
+  const roleFields = {
+    puesto: e.puesto ?? null,
+    area: e.area ?? null,
+    notes: e.notes ?? null,
+    puestos_secundarios: e.puestos_secundarios ?? null,
+  };
+  if (employeePayCadence(roleFields) !== 'quincenal') return null;
+  if (!isLeaveExemptEmployee(roleFields)) return null;
   const sd =
     e.sueldo_diario != null && Number.isFinite(Number(e.sueldo_diario))
       ? Number(e.sueldo_diario)

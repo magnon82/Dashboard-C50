@@ -115,7 +115,7 @@ export async function GET(request: Request) {
           const chunk = ids.slice(i, i + CHUNK);
           const res = await sb
             .from('hr_employees')
-            .select(sel)
+            .select(sel as string)
             .in('id', chunk);
           if (res.error) {
             metaErr = res.error.message;
@@ -123,7 +123,8 @@ export async function GET(request: Request) {
             break;
           }
           for (const r of res.data || []) {
-            const row = r as {
+            // Columns may be absent from generated Supabase types; cast via unknown.
+            const row = r as unknown as {
               id: string;
               full_name: string;
               notes?: string | null;
