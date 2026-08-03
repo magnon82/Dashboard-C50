@@ -22,8 +22,23 @@ export interface SaldosAlDiaData {
   cxpSaldo: number | null;
 }
 
+/** Round to centavos — avoids float noise like 107378800.36999999. */
+export function moneyCents(v: unknown): number {
+  const n = Number(v || 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
 function moneyAmount(v: unknown): number {
-  return Number(v || 0);
+  return moneyCents(v);
+}
+
+/** TOTAL disponible = efectivo (0 si null) + bancos. Same inputs as the cards. */
+export function totalEfectivoMasBancos(
+  efectivo: number | null | undefined,
+  bancos: number
+): number {
+  return moneyCents((efectivo ?? 0) + moneyCents(bancos));
 }
 
 function pickBancosFromSource(
@@ -76,7 +91,7 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
 
   const mifel = bancosPick?.mifel ?? 0;
   const bbva = bancosPick?.bbva ?? 0;
-  const bancos = mifel + bbva;
+  const bancos = moneyCents(mifel + bbva);
   const efectivo = saldoEfectivoHoy ? moneyAmount(saldoEfectivoHoy.amount) : null;
 
   const totales = records.filter(
@@ -115,7 +130,7 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
     bancos,
     bancosFecha: bancosPick?.fecha ?? null,
     bancosFuente: bancosManual ? 'manual' : bancosPresupuesto ? 'presupuesto' : null,
-    totalDisponible: (efectivo ?? 0) + bancos,
+    totalDisponible: totalEfectivoMasBancos(efectivo, bancos),
     cxpTotal,
     cxpProgramado,
     cxpSaldo,

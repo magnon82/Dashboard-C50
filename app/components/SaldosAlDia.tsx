@@ -2,12 +2,18 @@
 
 import { formatShort } from '@/app/lib/ventas-semana';
 import { getTheme, SUITE } from '@/app/lib/themes';
-import type { SaldosAlDiaData } from '@/app/lib/saldos';
+import {
+  totalEfectivoMasBancos,
+  type SaldosAlDiaData,
+} from '@/app/lib/saldos';
 
 const theme = getTheme('suite');
 
 function money(v: number) {
-  return `$${v.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
+  return `$${v.toLocaleString('es-MX', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 interface Props {
@@ -16,6 +22,11 @@ interface Props {
 }
 
 export function SaldosAlDia({ data, loading }: Props) {
+  // Live from the same card inputs — never a stale/separate total field alone.
+  const efectivoAmt = data.efectivo ?? 0;
+  const bancosAmt = data.bancos;
+  const total = totalEfectivoMasBancos(data.efectivo, data.bancos);
+
   return (
     <section className="mb-8">
       <p
@@ -38,7 +49,10 @@ export function SaldosAlDia({ data, loading }: Props) {
             >
               Efectivo
             </p>
-            <p className="mt-2 text-2xl font-bold md:text-3xl" style={{ color: theme.title }}>
+            <p
+              className="mt-2 text-2xl font-bold tabular-nums md:text-3xl"
+              style={{ color: theme.title }}
+            >
               {data.efectivo != null ? money(data.efectivo) : '—'}
             </p>
             <p className="mt-2 text-xs" style={{ color: theme.muted }}>
@@ -53,7 +67,10 @@ export function SaldosAlDia({ data, loading }: Props) {
             >
               Bancos
             </p>
-            <p className="mt-2 text-2xl font-bold md:text-3xl" style={{ color: theme.title }}>
+            <p
+              className="mt-2 text-2xl font-bold tabular-nums md:text-3xl"
+              style={{ color: theme.title }}
+            >
               {data.bancos > 0 ? money(data.bancos) : '—'}
             </p>
             <p className="mt-2 text-xs" style={{ color: theme.muted }}>
@@ -80,11 +97,17 @@ export function SaldosAlDia({ data, loading }: Props) {
             <p className="text-xs font-semibold uppercase tracking-wide text-white/70">
               Total
             </p>
-            <p className="mt-2 text-2xl font-bold md:text-3xl">
-              {data.totalDisponible > 0 ? money(data.totalDisponible) : '—'}
+            <p className="mt-2 text-2xl font-bold tabular-nums md:text-3xl">
+              {total > 0 ? money(total) : '—'}
             </p>
             <p className="mt-2 text-xs text-white/55">
-              Efectivo + bancos
+              {total > 0 ? (
+                <>
+                  Efectivo {money(efectivoAmt)} + Bancos {money(bancosAmt)}
+                </>
+              ) : (
+                'Efectivo + bancos'
+              )}
             </p>
           </div>
 
@@ -95,7 +118,10 @@ export function SaldosAlDia({ data, loading }: Props) {
             >
               Cuentas por pagar
             </p>
-            <p className="mt-2 text-2xl font-bold md:text-3xl" style={{ color: theme.title }}>
+            <p
+              className="mt-2 text-2xl font-bold tabular-nums md:text-3xl"
+              style={{ color: theme.title }}
+            >
               {data.cxpTotal != null ? money(data.cxpTotal) : '—'}
             </p>
             <p className="mt-2 text-xs" style={{ color: theme.muted }}>
