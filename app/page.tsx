@@ -9,6 +9,7 @@ import {
   calmNoAlert,
   formatEventosHubAlert,
   isHubAlertModule,
+  pickNearestUpcomingEvent,
   pickRrhhHubAlert,
   type HubAlertModuleId,
   type HubModuleAlert,
@@ -140,15 +141,16 @@ export default function HubPage() {
                 };
                 const n = Number(json.kpis?.anticipoSinOs ?? 0);
                 const upcoming = json.upcomingEvents || [];
-                const nextEv =
-                  upcoming.find((ev) => ev.event_date) ?? null;
-                const anticipoEv =
-                  upcoming.find(
+                // Countdown = fecha civil más próxima (≥ hoy CDMX), no el anticipo lejano.
+                const nextEv = pickNearestUpcomingEvent(upcoming);
+                const anticipoEv = pickNearestUpcomingEvent(
+                  upcoming.filter(
                     (ev) =>
                       Boolean(ev.has_anticipo) &&
                       !ev.has_os &&
                       ev.status !== 'cancelado'
-                  ) ?? null;
+                  )
+                );
                 next.eventos = formatEventosHubAlert(
                   Number.isFinite(n) ? n : 0,
                   nextEv,
@@ -316,28 +318,38 @@ export default function HubPage() {
           {canSeeAdmin(user) && (
             <Link href="/admin" className="group block">
               <SuiteCard
-                accent
                 className="h-full transition-transform group-hover:-translate-y-0.5"
+                style={{
+                  /* Forest charcoal — distinct from navy ACTIVO + white PRÓXIMO */
+                  backgroundColor: '#1F3530',
+                  color: '#fff',
+                  border: `1px solid rgba(232, 163, 23, 0.45)`,
+                  borderTop: `4px solid ${SUITE.orange}`,
+                  boxShadow: '0 10px 30px rgba(31, 53, 48, 0.28)',
+                }}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <h2 className="text-lg font-bold">Master Panel</h2>
+                  <h2 className="text-lg font-bold text-white">Master Panel</h2>
                   <span
                     className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                     style={{
-                      backgroundColor: SUITE.orangeSoft,
-                      color: SUITE.orangeDeep,
+                      backgroundColor: 'rgba(232, 163, 23, 0.22)',
+                      color: '#F6D48A',
                     }}
                   >
                     Admin
                   </span>
                 </div>
-                <p className="mt-3 text-sm" style={{ color: theme.muted }}>
+                <p
+                  className="mt-3 text-sm"
+                  style={{ color: 'rgba(255, 255, 255, 0.72)' }}
+                >
                   Usuarios, módulos y funciones (capabilities) del ERP · app
                   instalable.
                 </p>
                 <p
                   className="mt-5 text-sm font-bold"
-                  style={{ color: SUITE.orangeDeep }}
+                  style={{ color: SUITE.orange }}
                 >
                   Abrir administración →
                 </p>

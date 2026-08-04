@@ -445,7 +445,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           {
             label: 'Documentación vigente',
             kind: 'path',
-            note: 'Metadatos hr_doc_links · Abrir local = File Stream',
+            note: 'Catálogo hr_doc_links · Abrir en Drive / Cultura in-app',
             copyValue: 'I:\\Mi unidad\\RH\\Documentación vigente 2023',
             updateFrequency: 'Diario 12:00 PM CDMX (Actions soft-sync)',
           },

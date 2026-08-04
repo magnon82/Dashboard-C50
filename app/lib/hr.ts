@@ -598,7 +598,7 @@ export const HR_DOC_LINK_DEFAULTS: Omit<HrDocLink, 'id' | 'active'>[] = [
     title: 'Manual de contratación y baja de personal',
     description: 'Proceso de alta y baja de colaboradores',
     local_path: `${HR_DOCS_VIGENTE_DIR}\\Manual de contratación y baja de personal.docx`,
-    drive_url: null,
+    drive_url: hrDriveFolderUrl(HR_DOCS_VIGENTE_DRIVE_FOLDER_ID),
     sort_order: 45,
   },
   {
@@ -606,7 +606,7 @@ export const HR_DOC_LINK_DEFAULTS: Omit<HrDocLink, 'id' | 'active'>[] = [
     title: 'Manual para postular vacantes',
     description: 'Guía para publicar y postular vacantes',
     local_path: `${HR_DOCS_VIGENTE_DIR}\\Manual para postular vacantes.docx`,
-    drive_url: null,
+    drive_url: hrDriveFolderUrl(HR_DOCS_VIGENTE_DRIVE_FOLDER_ID),
     sort_order: 46,
   },
   {
@@ -622,7 +622,7 @@ export const HR_DOC_LINK_DEFAULTS: Omit<HrDocLink, 'id' | 'active'>[] = [
     title: 'Política de vacaciones',
     description: 'Anticipación, tope de días y reglas de goce',
     local_path: HR_VACACIONES_POLITICA_PATH,
-    drive_url: null,
+    drive_url: hrDriveFolderUrl(HR_DOCS_VIGENTE_DRIVE_FOLDER_ID),
     sort_order: 51,
   },
   {
@@ -630,7 +630,7 @@ export const HR_DOC_LINK_DEFAULTS: Omit<HrDocLink, 'id' | 'active'>[] = [
     title: 'Política de puntualidad y asistencia',
     description: 'Asistencia, retardos y faltas',
     local_path: HR_PUNTUALIDAD_POLITICA_PATH,
-    drive_url: null,
+    drive_url: hrDriveFolderUrl(HR_DOCS_VIGENTE_DRIVE_FOLDER_ID),
     sort_order: 52,
   },
   {
@@ -638,7 +638,7 @@ export const HR_DOC_LINK_DEFAULTS: Omit<HrDocLink, 'id' | 'active'>[] = [
     title: 'Reglamento Interior de Trabajo',
     description: 'RIT vigente C50',
     local_path: HR_RIT_PATH,
-    drive_url: null,
+    drive_url: hrDriveFolderUrl(HR_DOCS_VIGENTE_DRIVE_FOLDER_ID),
     sort_order: 53,
   },
   {
@@ -646,7 +646,7 @@ export const HR_DOC_LINK_DEFAULTS: Omit<HrDocLink, 'id' | 'active'>[] = [
     title: 'Reglamento C50 No fumar',
     description: 'Espacios libres de humo (archivo: «NO  FUMAR», doble espacio)',
     local_path: `${HR_DOCS_VIGENTE_DIR}\\Reglamento C50 NO  FUMAR.docx`,
-    drive_url: null,
+    drive_url: hrDriveFolderUrl(HR_DOCS_VIGENTE_DRIVE_FOLDER_ID),
     sort_order: 54,
   },
 ];

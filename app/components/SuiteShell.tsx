@@ -214,11 +214,13 @@ export function SuiteCard({
   className = '',
   accent,
   dark,
+  style,
 }: {
   children: React.ReactNode;
   className?: string;
   accent?: boolean;
   dark?: boolean;
+  style?: React.CSSProperties;
 }) {
   return (
     <div
@@ -228,6 +230,7 @@ export function SuiteCard({
         color: dark ? '#fff' : SUITE.text,
         boxShadow: SUITE.shadow,
         borderTop: accent ? `4px solid ${SUITE.orange}` : undefined,
+        ...style,
       }}
     >
       {children}

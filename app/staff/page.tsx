@@ -40,8 +40,8 @@ export default function StaffPage() {
       subtitle="Operación de piso · Carranza 50"
     >
       <p className="mb-6 max-w-2xl text-sm" style={{ color: theme.muted }}>
-        Herramientas de piso: cierre diario, propinas, horario y resguardos
-        asignados.
+        Herramientas de piso: cierre diario, propinas, horario, resguardos y
+        cumpleaños del equipo.
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2 max-w-3xl">
@@ -182,6 +182,39 @@ export default function StaffPage() {
               style={{ color: SUITE.orangeDeep }}
             >
               Ver resguardos →
+            </p>
+          </SuiteCard>
+        </Link>
+
+        <Link href="/staff/cumpleanos" className="group block">
+          <SuiteCard
+            className="h-full transition-transform group-hover:-translate-y-0.5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-lg font-bold" style={{ color: SUITE.navy }}>
+                Cumpleaños
+              </h2>
+              <span
+                className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                style={{
+                  backgroundColor: SUITE.orangeSoft,
+                  color: SUITE.navy,
+                }}
+              >
+                Equipo
+              </span>
+            </div>
+            <p
+              className="mt-3 text-sm leading-relaxed"
+              style={{ color: SUITE.muted }}
+            >
+              Próximos cumpleaños del staff, del más cercano al más lejano
+            </p>
+            <p
+              className="mt-5 text-sm font-bold"
+              style={{ color: SUITE.orangeDeep }}
+            >
+              Ver cumpleaños →
             </p>
           </SuiteCard>
         </Link>

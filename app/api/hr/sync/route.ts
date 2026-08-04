@@ -230,7 +230,7 @@ export async function POST(request: Request) {
       driveMounted,
       localFsEnabled: localDriveFsEnabled(),
       message:
-        'Metadatos de biblioteca en Supabase. Binarios: Abrir en Drive o Cultura in-app.',
+        'Catálogo de biblioteca en Supabase. Abre documentos en Drive o Cultura in-app.',
     });
   }
 

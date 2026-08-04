@@ -86,8 +86,8 @@ function extBadge(doc: DocEnriched) {
 
 function previewHint(doc: DocEnriched): string {
   if (isHrCulturaConsultDoc(doc)) return 'Consulta en pantalla';
-  if (!doc.exists && doc.drive_url) return 'Abrir en Suite o Drive';
-  if (!doc.exists) return 'Solo metadatos en servidor';
+  if (doc.drive_url && !doc.exists) return 'Abrir en Drive';
+  if (!doc.exists) return 'Consulta en Drive o Cultura';
   switch (doc.preview) {
     case 'pdf':
       return 'Vista previa en pantalla';
@@ -98,7 +98,7 @@ function previewHint(doc: DocEnriched): string {
     case 'download':
       return 'Descargar / abrir';
     default:
-      return 'Solo ruta';
+      return doc.drive_url ? 'Abrir en Drive' : 'Consultar';
   }
 }
 
@@ -430,10 +430,9 @@ export function RrhhBiblioteca({
                           >
                             Abrir en Drive
                           </a>
-                        ) : null}
-                        {missingLocal ? (
+                        ) : missingLocal ? (
                           <span className="text-xs font-semibold text-slate-500">
-                            Solo metadatos
+                            Disponible en Cultura / Drive
                           </span>
                         ) : null}
                       </div>

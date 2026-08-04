@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { SuiteCard } from '@/app/components/SuiteShell';
+import { UpcomingBirthdaysList } from '@/app/components/hr/UpcomingBirthdaysList';
 import {
-  formatBirthdayCountdown,
-  formatHrDate,
   formatHrPuesto,
   todayIsoCdmx,
   upcomingBirthdays,
@@ -111,16 +110,6 @@ export function RrhhCumpleanos() {
     [employees, today]
   );
 
-  const byNextDate = useMemo(() => {
-    const map = new Map<string, typeof upcoming>();
-    for (const b of upcoming) {
-      const list = map.get(b.next_date) || [];
-      list.push(b);
-      map.set(b.next_date, list);
-    }
-    return map;
-  }, [upcoming]);
-
   /** Cumpleaños en el mes del calendario (mes/día del DOB, año del cursor). */
   const birthdaysInMonth = useMemo(() => {
     const map = new Map<number, typeof upcoming>();
@@ -223,27 +212,13 @@ export function RrhhCumpleanos() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold" style={{ color: theme.title }}>
-            Cumpleaños del Staff
-          </h2>
-          <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-            Plantilla vigente · próximos primero
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={loading}
-          className="min-h-10 rounded-xl px-3.5 text-sm font-semibold"
-          style={{
-            backgroundColor: SUITE.orangeSoft,
-            color: SUITE.navy,
-          }}
-        >
-          {loading ? 'Cargando…' : 'Actualizar'}
-        </button>
+      <div>
+        <h2 className="text-xl font-bold" style={{ color: theme.title }}>
+          Cumpleaños del Staff
+        </h2>
+        <p className="mt-1 text-sm" style={{ color: theme.muted }}>
+          Plantilla vigente · próximos primero · fecha desde alta / expediente
+        </p>
       </div>
 
       {schemaHint ? (
@@ -273,65 +248,11 @@ export function RrhhCumpleanos() {
             Del más cercano al más lejano
           </p>
 
-          {loading ? (
-            <p className="mt-4 text-sm" style={{ color: theme.muted }}>
-              Cargando…
-            </p>
-          ) : upcoming.length === 0 ? (
-            <p className="mt-4 text-sm" style={{ color: theme.muted }}>
-              Sin fechas de nacimiento en plantilla. Captúralas abajo.
-            </p>
-          ) : (
-            <ul className="mt-4 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
-              {upcoming.map((b) => {
-                const sameDay = byNextDate.get(b.next_date) || [];
-                return (
-                  <li
-                    key={b.employee_id}
-                    className="flex items-start justify-between gap-3 rounded-xl px-3 py-2.5"
-                    style={{
-                      backgroundColor:
-                        b.days_until === 0 ? SUITE.orangeSoft : '#f8fafc',
-                    }}
-                  >
-                    <div className="min-w-0">
-                      <p
-                        className="truncate text-sm font-semibold"
-                        style={{ color: theme.title }}
-                      >
-                        {formatHrListName(b.full_name)}
-                      </p>
-                      <p className="text-xs" style={{ color: theme.muted }}>
-                        {formatHrPuesto(b.puesto) || b.area || '—'}
-                        {sameDay.length > 1
-                          ? ` · ${sameDay.length} ese día`
-                          : ''}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p
-                        className="text-sm font-bold"
-                        style={{
-                          color:
-                            b.days_until <= 7
-                              ? SUITE.orangeDeep
-                              : SUITE.navy,
-                        }}
-                      >
-                        {formatBirthdayCountdown(b.days_until)}
-                      </p>
-                      <p
-                        className="text-xs capitalize"
-                        style={{ color: theme.muted }}
-                      >
-                        {formatHrDate(b.next_date).replace(/\s+\d{4}$/, '')}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <UpcomingBirthdaysList
+            upcoming={upcoming}
+            loading={loading}
+            emptyMessage="Sin fechas de nacimiento en plantilla. Captúralas abajo."
+          />
         </SuiteCard>
 
         <SuiteCard>

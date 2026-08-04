@@ -68,14 +68,10 @@ export function attachDefaultDriveUrls<T extends HrDocLink>(docs: T[]): T[] {
     if (d.drive_url) return d;
     const lp = (d.local_path || '').replace(/\//g, '\\');
     const title = norm(d.title || '');
-    if (
-      vigenteUrl &&
-      (lp.includes('Documentación vigente') ||
-        title.includes('documentacion vigente') ||
-        title.includes('politica') ||
-        title.includes('reglamento') ||
-        title.includes('manual'))
-    ) {
+    const cat = String(d.category || '');
+
+    // Cultura: consulta in-app; enlace vigente como respaldo de carpeta
+    if (cat === 'cultura' && vigenteUrl) {
       return { ...d, drive_url: vigenteUrl };
     }
     if (
@@ -92,6 +88,21 @@ export function attachDefaultDriveUrls<T extends HrDocLink>(docs: T[]): T[] {
     ) {
       return { ...d, drive_url: examenesUrl };
     }
+    // Políticas / manuales / docs bajo Documentación vigente
+    if (
+      vigenteUrl &&
+      (lp.includes('Documentación vigente') ||
+        cat === 'politicas' ||
+        cat === 'manuales' ||
+        title.includes('documentacion vigente') ||
+        title.includes('politica') ||
+        title.includes('reglamento') ||
+        title.includes('manual'))
+    ) {
+      return { ...d, drive_url: vigenteUrl };
+    }
+    // Último recurso en producción: carpeta vigente si existe
+    if (vigenteUrl) return { ...d, drive_url: vigenteUrl };
     return d;
   });
 }

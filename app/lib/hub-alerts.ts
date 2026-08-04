@@ -1,4 +1,4 @@
-import { daysUntilEventMexico } from '@/app/lib/eventos';
+import { daysUntilEventMexico, mexicoTodayIso } from '@/app/lib/eventos';
 import type { ModuleId } from '@/app/lib/modules';
 
 export type HubAlertSeverity = 'warn' | 'ok' | 'neutral';
@@ -103,8 +103,31 @@ export function formatAnticipoSinOsAlert(count: number): HubModuleAlert {
 }
 
 /**
- * Alerta hub Eventos: anticipo sin OS + identidad/countdown.
- * Si hay un solo anticipoSinOs, prioriza ese evento; si no, el próximo en puerta.
+ * Evento con la fecha más próxima (YYYY-MM-DD). Omite cancelados y sin fecha.
+ */
+export function pickNearestUpcomingEvent<
+  T extends { event_date?: string | null; status?: string | null },
+>(events: T[], from = new Date()): T | null {
+  const today = mexicoTodayIso(from);
+  let best: T | null = null;
+  let bestDay = '';
+  for (const ev of events) {
+    if (!ev?.event_date || ev.status === 'cancelado') continue;
+    const day = String(ev.event_date).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day < today) continue;
+    if (!best || day < bestDay) {
+      best = ev;
+      bestDay = day;
+    }
+  }
+  return best;
+}
+
+/**
+ * Alerta hub Eventos: anticipo sin OS (texto) + identidad/countdown del
+ * próximo evento cronológico (fecha ≥ hoy CDMX). No sustituir el countdown
+ * por un anticipo-sin-OS lejano: el aviso de OS va en `text`; el detalle
+ * siempre refleja cuánto falta para el evento más cercano.
  */
 export function formatEventosHubAlert(
   anticipoSinOs: number,
@@ -116,10 +139,8 @@ export function formatEventosHubAlert(
     typeof nextEvent === 'string'
       ? { event_date: nextEvent }
       : nextEvent ?? null;
-  const focus =
-    anticipoSinOs === 1 && anticipoEvent
-      ? anticipoEvent
-      : nextRef || anticipoEvent || null;
+  // Countdown/identidad = fecha más próxima; anticipoEvent solo como fallback.
+  const focus = nextRef || anticipoEvent || null;
   const detail = formatEventosHubDetail(focus);
   return detail ? { ...base, detail } : base;
 }
