@@ -11,6 +11,12 @@ import {
 } from '@/app/lib/eventos-activity';
 import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
 import { localDriveFsEnabled } from '@/app/lib/local-fs';
+import {
+  normalizeFolioKey,
+  parseFolio,
+} from '@/app/lib/eventos-os-shared';
+
+export { normalizeFolioKey, parseFolio } from '@/app/lib/eventos-os-shared';
 
 const MI_UNIDAD = process.env.DRIVE_MI_UNIDAD_PATH?.trim() || 'I:\\Mi unidad';
 
@@ -105,37 +111,9 @@ function cleanOsLabel(stem: string): string | null {
 }
 
 /**
- * Folio desde nombre/etiqueta:
- * - «FOLIO 12 …», «G7», «G1-26»
- * - leading «01 ORDEN DE SERVICIO …» (sin prefijo FOLIO)
- * - trailing «ORDEN DE SERVICIO 02» (numérico, no G-codes)
+ * Folio helpers live in `eventos-os-shared.ts` (no fs) so client code
+ * cannot accidentally pull Node builtins into the browser bundle.
  */
-export function parseFolio(stem: string): string | null {
-  const folioM = stem.match(/FOLIO\s*(\d+)/i);
-  if (folioM) return folioM[1];
-  const gM = stem.match(/\bG\s*[-]?\s*(\d+(?:-\d+)?)\b/i);
-  if (gM) return `G${gM[1]}`.toUpperCase();
-  const lead = stem.match(/^\s*(\d{1,2})\s+(?:ORDEN|FOLIO)\b/i);
-  if (lead) return lead[1];
-  const trail = stem.match(/orden\s*de?\s*servicio\s+(\d{1,2})\b/i);
-  if (trail) return trail[1];
-  return null;
-}
-
-/** Clave estable de folio: «02»/«2»/«2-2027» → «2»; «G7» → «G7». */
-export function normalizeFolioKey(
-  raw: string | null | undefined
-): string | null {
-  if (!raw) return null;
-  const s = String(raw).trim();
-  if (!s) return null;
-  if (/^G\d+(?:-\d+)?$/i.test(s)) return s.toUpperCase();
-  const parsed = parseFolio(s);
-  if (parsed && /^G/i.test(parsed)) return parsed.toUpperCase();
-  const num = (parsed || s).match(/^(\d{1,4})(?:-\d{4})?$/);
-  if (num) return String(Number(num[1]));
-  return parsed ? parsed.toUpperCase() : null;
-}
 
 function toIsoDate(year: number, month: number, day: number): string | null {
   if (!year || !month || !day) return null;

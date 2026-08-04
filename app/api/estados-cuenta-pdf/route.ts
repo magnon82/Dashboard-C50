@@ -237,7 +237,8 @@ async function walkEstadoPdfs(
       return;
     }
     for (const ent of entries) {
-      const full = path.join(dir, ent.name);
+      // turbopackIgnore: keep NFT scoped to runtime paths, not the whole repo.
+      const full = path.join(/* turbopackIgnore: true */ dir, ent.name);
       if (ent.isDirectory()) {
         const yFromName = /^20\d{2}$/.test(ent.name)
           ? Number(ent.name)
@@ -268,7 +269,11 @@ async function walkEstadoPdfs(
   }
 
   // Prefer Mifel\Estados de cuenta (main archive); also scan root for other PDFs
-  const estadosRoot = path.join(root, 'Mifel', 'Estados de cuenta');
+  const estadosRoot = path.join(
+    /* turbopackIgnore: true */ root,
+    'Mifel',
+    'Estados de cuenta'
+  );
   if (existsSync(estadosRoot)) {
     await walk(estadosRoot, null);
   } else {

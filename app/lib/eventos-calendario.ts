@@ -3,7 +3,8 @@ import {
   normalizeClientKey,
 } from '@/app/lib/eventos-activity';
 import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
-import { listEventOs, normalizeFolioKey, parseFolio } from '@/app/lib/eventos-os';
+import { listEventOs } from '@/app/lib/eventos-os';
+import { normalizeFolioKey, parseFolio } from '@/app/lib/eventos-os-shared';
 import { getServiceSupabase } from '@/app/lib/users';
 import type {
   CalendarEventItem,

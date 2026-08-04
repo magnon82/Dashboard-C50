@@ -64,6 +64,52 @@ function missingAcceptedCols(message: string | undefined | null): boolean {
 }
 
 /**
+ * Select resguardos with legacy fallback when accepted_* cols are missing.
+ * Returns rows as records so full vs legacy selects stay assignable under TS.
+ */
+async function fetchResguardoRows(
+  sb: ReturnType<typeof getServiceSupabase>,
+  opts: { employeeId: string | null; limit: number }
+): Promise<{ rows: Record<string, unknown>[]; error: string | null }> {
+  let q = sb
+    .from('hr_resguardo_requests')
+    .select(HR_RESGUARDO_SELECT)
+    .order('created_at', { ascending: false })
+    .limit(opts.limit);
+  q =
+    opts.employeeId == null
+      ? q.is('employee_id', null)
+      : q.eq('employee_id', opts.employeeId);
+  const full = await q;
+  if (!full.error) {
+    return {
+      rows: (full.data || []) as Record<string, unknown>[],
+      error: null,
+    };
+  }
+  if (!missingAcceptedCols(full.error.message)) {
+    return { rows: [], error: full.error.message };
+  }
+  let q2 = sb
+    .from('hr_resguardo_requests')
+    .select(HR_RESGUARDO_SELECT_LEGACY)
+    .order('created_at', { ascending: false })
+    .limit(opts.limit);
+  q2 =
+    opts.employeeId == null
+      ? q2.is('employee_id', null)
+      : q2.eq('employee_id', opts.employeeId);
+  const legacy = await q2;
+  if (legacy.error) {
+    return { rows: [], error: legacy.error.message };
+  }
+  return {
+    rows: (legacy.data || []) as Record<string, unknown>[],
+    error: null,
+  };
+}
+
+/**
  * Cascada si faltan columnas. Importante: conservar `sueldo_diario` al quitar
  * `fecha_nacimiento` / `puestos_secundarios` — si no, el perfil Datos muestra
  * placeholder 0.00 aunque la ficha ya tenga SD en DB.
@@ -424,47 +470,21 @@ export async function GET(req: Request, ctx: Ctx) {
 
     let resguardos: HrResguardoRequest[] = [];
     const seenResguardoIds = new Set<string>();
-    let resg = await sb
-      .from('hr_resguardo_requests')
-      .select(HR_RESGUARDO_SELECT)
-      .eq('employee_id', id)
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (resg.error && missingAcceptedCols(resg.error.message)) {
-      // Legacy select omits accepted_* cols; cast keeps TS happy across schema versions.
-      resg = (await sb
-        .from('hr_resguardo_requests')
-        .select(HR_RESGUARDO_SELECT_LEGACY)
-        .eq('employee_id', id)
-        .order('created_at', { ascending: false })
-        .limit(100)) as typeof resg;
-    }
-    if (!resg.error && resg.data) {
-      for (const row of resg.data) {
-        const req = asResguardoRequest(row as Record<string, unknown>);
-        seenResguardoIds.add(req.id);
-        resguardos.push(req);
-      }
+    const resg = await fetchResguardoRows(sb, { employeeId: id, limit: 100 });
+    for (const row of resg.rows) {
+      const req = asResguardoRequest(row);
+      seenResguardoIds.add(req.id);
+      resguardos.push(req);
     }
     // Cartas antiguas a veces no tienen employee_id: emparejar por nombre.
-    let unlinked = await sb
-      .from('hr_resguardo_requests')
-      .select(HR_RESGUARDO_SELECT)
-      .is('employee_id', null)
-      .order('created_at', { ascending: false })
-      .limit(200);
-    if (unlinked.error && missingAcceptedCols(unlinked.error.message)) {
-      unlinked = (await sb
-        .from('hr_resguardo_requests')
-        .select(HR_RESGUARDO_SELECT_LEGACY)
-        .is('employee_id', null)
-        .order('created_at', { ascending: false })
-        .limit(200)) as typeof unlinked;
-    }
-    if (!unlinked.error && unlinked.data) {
+    const unlinked = await fetchResguardoRows(sb, {
+      employeeId: null,
+      limit: 200,
+    });
+    if (unlinked.rows.length) {
       const candidate = [{ id, full_name: emp.full_name || '' }];
-      for (const row of unlinked.data) {
-        const req = asResguardoRequest(row as Record<string, unknown>);
+      for (const row of unlinked.rows) {
+        const req = asResguardoRequest(row);
         if (seenResguardoIds.has(req.id)) continue;
         const nombre =
           req.payload?.nombre ||
