@@ -176,6 +176,41 @@ def parse_date_any(value) -> str | None:
     return None
 
 
+def parse_folio(stem: str) -> str | None:
+    """Paridad con app/lib/eventos-os.ts parseFolio."""
+    folio_m = re.search(r"FOLIO\s*(\d+)", stem, re.I)
+    if folio_m:
+        return folio_m.group(1)
+    g_m = re.search(r"\bG\s*[-]?\s*(\d+(?:-\d+)?)\b", stem, re.I)
+    if g_m:
+        return f"G{g_m.group(1)}".upper()
+    lead = re.match(r"^\s*(\d{1,2})\s+(?:ORDEN|FOLIO)\b", stem, re.I)
+    if lead:
+        return lead.group(1)
+    trail = re.search(r"orden\s*de?\s*servicio\s+(\d{1,2})\b", stem, re.I)
+    if trail:
+        return trail.group(1)
+    return None
+
+
+def normalize_folio_key(raw: str | None) -> str | None:
+    """Paridad con app/lib/eventos-os.ts normalizeFolioKey («02»↔«2»)."""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if re.fullmatch(r"G\d+(?:-\d+)?", s, re.I):
+        return s.upper()
+    parsed = parse_folio(s)
+    if parsed and parsed.upper().startswith("G"):
+        return parsed.upper()
+    num = re.fullmatch(r"(\d{1,4})(?:-\d{4})?", parsed or s)
+    if num:
+        return str(int(num.group(1)))
+    return parsed.upper() if parsed else None
+
+
 def clean_os_label(stem: str) -> str | None:
     label = PARENS.sub("", stem).strip()
     label = re.sub(r"(?i)orden\s*de?\s*servicio", " ", label)
@@ -358,7 +393,10 @@ def backfill_os_event_dates(events: list[dict]) -> int:
     def push_folio(folio: str | None, ed: str) -> None:
         if not folio or not ed:
             return
-        by_folio_year[f"{folio.upper()}|{ed[:4]}"] = ed
+        key = normalize_folio_key(folio)
+        if not key:
+            return
+        by_folio_year[f"{key}|{ed[:4]}"] = ed
 
     for ev in events:
         ed = ev.get("event_date")
@@ -390,9 +428,9 @@ def backfill_os_event_dates(events: list[dict]) -> int:
         folder_year = (
             int(detail[:4]) if len(detail) >= 4 and detail[:4].isdigit() else None
         )
-        folio = ev.get("folio")
-        if folio and folder_year:
-            from_folio = by_folio_year.get(f"{str(folio).upper()}|{folder_year}")
+        folio_key = normalize_folio_key(ev.get("folio"))
+        if folio_key and folder_year:
+            from_folio = by_folio_year.get(f"{folio_key}|{folder_year}")
             if from_folio:
                 ev["event_date"] = from_folio
                 ev["activity_date"] = from_folio
@@ -425,13 +463,7 @@ def scan_os_folder(folder: Path) -> list[dict]:
         parts = path.relative_to(folder).parts
         year = int(parts[0]) if parts and parts[0].isdigit() and len(parts[0]) == 4 else None
         stem = path.stem
-        folio_m = re.search(r"FOLIO\s*(\d+)", stem, re.I)
-        g_m = re.search(r"\bG\s*[-]?\s*(\d+(?:-\d+)?)\b", stem, re.I)
-        folio = (
-            folio_m.group(1)
-            if folio_m
-            else (f"G{g_m.group(1)}" if g_m else None)
-        )
+        folio = parse_folio(stem)
         label = clean_os_label(stem)
         mtime = datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
         event_date = event_date_from_stem(stem, year)

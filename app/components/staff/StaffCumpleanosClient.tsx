@@ -86,27 +86,13 @@ export function StaffCumpleanosClient() {
       ) : null}
 
       <SuiteCard>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold" style={{ color: theme.title }}>
-              Próximos cumpleaños
-            </h2>
-            <p className="mt-1 text-xs" style={{ color: theme.muted }}>
-              Del más cercano al más lejano
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            className="min-h-10 rounded-xl px-3.5 text-sm font-semibold"
-            style={{
-              backgroundColor: SUITE.orangeSoft,
-              color: SUITE.navy,
-            }}
-          >
-            {loading ? 'Cargando…' : 'Actualizar'}
-          </button>
+        <div>
+          <h2 className="text-base font-bold" style={{ color: theme.title }}>
+            Próximos cumpleaños
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+            Del más cercano al más lejano
+          </p>
         </div>
 
         <UpcomingBirthdaysList

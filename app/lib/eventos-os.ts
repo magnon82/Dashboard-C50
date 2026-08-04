@@ -104,13 +104,37 @@ function cleanOsLabel(stem: string): string | null {
   return label;
 }
 
-/** Folio numérico («FOLIO 12») o G («G7», «G1-26») desde nombre/etiqueta. */
+/**
+ * Folio desde nombre/etiqueta:
+ * - «FOLIO 12 …», «G7», «G1-26»
+ * - leading «01 ORDEN DE SERVICIO …» (sin prefijo FOLIO)
+ * - trailing «ORDEN DE SERVICIO 02» (numérico, no G-codes)
+ */
 export function parseFolio(stem: string): string | null {
   const folioM = stem.match(/FOLIO\s*(\d+)/i);
   if (folioM) return folioM[1];
   const gM = stem.match(/\bG\s*[-]?\s*(\d+(?:-\d+)?)\b/i);
   if (gM) return `G${gM[1]}`.toUpperCase();
+  const lead = stem.match(/^\s*(\d{1,2})\s+(?:ORDEN|FOLIO)\b/i);
+  if (lead) return lead[1];
+  const trail = stem.match(/orden\s*de?\s*servicio\s+(\d{1,2})\b/i);
+  if (trail) return trail[1];
   return null;
+}
+
+/** Clave estable de folio: «02»/«2»/«2-2027» → «2»; «G7» → «G7». */
+export function normalizeFolioKey(
+  raw: string | null | undefined
+): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (/^G\d+(?:-\d+)?$/i.test(s)) return s.toUpperCase();
+  const parsed = parseFolio(s);
+  if (parsed && /^G/i.test(parsed)) return parsed.toUpperCase();
+  const num = (parsed || s).match(/^(\d{1,4})(?:-\d{4})?$/);
+  if (num) return String(Number(num[1]));
+  return parsed ? parsed.toUpperCase() : null;
 }
 
 function toIsoDate(year: number, month: number, day: number): string | null {
@@ -326,8 +350,10 @@ async function enrichEventDatesFromActivity(
 
   const pushFolioDate = (folio: string | null | undefined, date: string) => {
     if (!folio || !date) return;
+    const key = normalizeFolioKey(folio);
+    if (!key) return;
     const y = date.slice(0, 4);
-    byFolioYear.set(`${String(folio).toUpperCase()}|${y}`, date);
+    byFolioYear.set(`${key}|${y}`, date);
   };
 
   for (const client of payload.clients) {
@@ -372,9 +398,10 @@ async function enrichEventDatesFromActivity(
     }
 
     if (it.folio && it.year) {
-      const fromFolio = byFolioYear.get(
-        `${String(it.folio).toUpperCase()}|${it.year}`
-      );
+      const folioKey = normalizeFolioKey(it.folio);
+      const fromFolio = folioKey
+        ? byFolioYear.get(`${folioKey}|${it.year}`)
+        : null;
       if (fromFolio) {
         return { ...it, event_date: fromFolio, activity_date: fromFolio };
       }
@@ -601,7 +628,8 @@ export async function listEventOs(opts?: {
     const covered = new Set<string>();
     for (const it of items) {
       if (it.event_date && it.folio) {
-        covered.add(`${it.event_date}|${String(it.folio).toUpperCase()}`);
+        const fk = normalizeFolioKey(it.folio);
+        if (fk) covered.add(`${it.event_date}|${fk}`);
       }
       if (it.rel_path) {
         covered.add(`rel:${it.rel_path.replace(/\\/g, '/')}`);
@@ -610,7 +638,10 @@ export async function listEventOs(opts?: {
     for (const s of seed) {
       if (!s.event_date) continue;
       const folioKey = s.folio
-        ? `${s.event_date}|${String(s.folio).toUpperCase()}`
+        ? (() => {
+            const fk = normalizeFolioKey(s.folio);
+            return fk ? `${s.event_date}|${fk}` : null;
+          })()
         : null;
       const relKey = s.rel_path
         ? `rel:${s.rel_path.replace(/\\/g, '/')}`

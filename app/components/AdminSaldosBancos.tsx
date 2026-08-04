@@ -20,6 +20,7 @@ type Snapshot = {
 };
 
 export function AdminSaldosBancos() {
+  const [open, setOpen] = useState(false);
   const [mifel, setMifel] = useState('');
   const [bbva, setBbva] = useState('');
   const [date, setDate] = useState(() => todayCdmxIso());
@@ -61,8 +62,9 @@ export function AdminSaldosBancos() {
   }, []);
 
   useEffect(() => {
+    if (!open) return;
     load();
-  }, [load]);
+  }, [load, open]);
 
   async function onSave(e: FormEvent) {
     e.preventDefault();
@@ -104,115 +106,131 @@ export function AdminSaldosBancos() {
       className="mb-8 rounded-[24px] border border-slate-100 bg-white p-5"
       style={{ boxShadow: SUITE.shadow, borderTop: `4px solid ${SUITE.orange}` }}
     >
-      <div className="mb-1">
-        <h2 className="text-lg font-bold" style={{ color: theme.title }}>
-          Saldos bancarios
-        </h2>
-        <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-          Actualiza Mifel y BBVA tras revisar la banca en línea. El valor manual reemplaza el
-          Excel en Finanzas → Saldos al día (
-          <code className="text-xs">saldos_bancos_manual</code>).
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold" style={{ color: theme.title }}>
+            Saldos bancarios
+          </h2>
+          <p className="mt-1 text-sm" style={{ color: theme.muted }}>
+            Actualiza Mifel y BBVA tras revisar la banca en línea. El valor manual reemplaza el
+            Excel en Finanzas → Saldos al día (
+            <code className="text-xs">saldos_bancos_manual</code>).
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="rounded-lg px-4 py-2 text-sm font-semibold text-white"
+          style={{ backgroundColor: SUITE.navy }}
+          aria-expanded={open}
+        >
+          {open ? 'Ocultar' : 'Mostrar'}
+        </button>
       </div>
 
-      {error && (
-        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-      {okMsg && (
-        <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {okMsg}
-        </div>
-      )}
-
-      {loading ? (
-        <p className="mt-4 text-sm" style={{ color: theme.muted }}>
-          Cargando saldos…
-        </p>
-      ) : (
+      {open ? (
         <>
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                Manual (activo)
-              </p>
-              {manual ? (
-                <p className="mt-1 text-sm text-slate-700">
-                  {money(manual.mifel ?? 0)} Mifel + {money(manual.bbva ?? 0)} BBVA
-                  <span className="mt-0.5 block text-xs text-slate-500">Al {manual.date}</span>
-                </p>
-              ) : (
-                <p className="mt-1 text-sm text-slate-500">Sin override manual</p>
-              )}
+          {error && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
             </div>
-            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                Excel presupuesto
-              </p>
-              {presupuesto ? (
-                <p className="mt-1 text-sm text-slate-700">
-                  {money(presupuesto.mifel ?? 0)} Mifel + {money(presupuesto.bbva ?? 0)} BBVA
-                  <span className="mt-0.5 block text-xs text-slate-500">
-                    Al {presupuesto.date}
-                  </span>
-                </p>
-              ) : (
-                <p className="mt-1 text-sm text-slate-500">Sin datos de Excel</p>
-              )}
+          )}
+          {okMsg && (
+            <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              {okMsg}
             </div>
-          </div>
+          )}
 
-          <form onSubmit={onSave} className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="block text-sm font-semibold text-slate-700">
-              Mifel
-              <input
-                required
-                inputMode="decimal"
-                value={mifel}
-                onChange={(e) => setMifel(e.target.value)}
-                placeholder="0.00"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
-              />
-            </label>
-            <label className="block text-sm font-semibold text-slate-700">
-              BBVA
-              <input
-                required
-                inputMode="decimal"
-                value={bbva}
-                onChange={(e) => setBbva(e.target.value)}
-                placeholder="0.00"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
-              />
-            </label>
-            <label className="block text-sm font-semibold text-slate-700">
-              Fecha
-              <input
-                required
-                type="date"
-                value={date}
-                max={maxDate}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setDate(next > maxDate ? maxDate : next);
-                }}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
-              />
-            </label>
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={saving}
-                className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-                style={{ backgroundColor: SUITE.navy }}
-              >
-                {saving ? 'Guardando…' : 'Guardar'}
-              </button>
-            </div>
-          </form>
+          {loading ? (
+            <p className="mt-4 text-sm" style={{ color: theme.muted }}>
+              Cargando saldos…
+            </p>
+          ) : (
+            <>
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Manual (activo)
+                  </p>
+                  {manual ? (
+                    <p className="mt-1 text-sm text-slate-700">
+                      {money(manual.mifel ?? 0)} Mifel + {money(manual.bbva ?? 0)} BBVA
+                      <span className="mt-0.5 block text-xs text-slate-500">Al {manual.date}</span>
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-slate-500">Sin override manual</p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Excel presupuesto
+                  </p>
+                  {presupuesto ? (
+                    <p className="mt-1 text-sm text-slate-700">
+                      {money(presupuesto.mifel ?? 0)} Mifel + {money(presupuesto.bbva ?? 0)} BBVA
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        Al {presupuesto.date}
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-slate-500">Sin datos de Excel</p>
+                  )}
+                </div>
+              </div>
+
+              <form onSubmit={onSave} className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="block text-sm font-semibold text-slate-700">
+                  Mifel
+                  <input
+                    required
+                    inputMode="decimal"
+                    value={mifel}
+                    onChange={(e) => setMifel(e.target.value)}
+                    placeholder="0.00"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
+                  />
+                </label>
+                <label className="block text-sm font-semibold text-slate-700">
+                  BBVA
+                  <input
+                    required
+                    inputMode="decimal"
+                    value={bbva}
+                    onChange={(e) => setBbva(e.target.value)}
+                    placeholder="0.00"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
+                  />
+                </label>
+                <label className="block text-sm font-semibold text-slate-700">
+                  Fecha
+                  <input
+                    required
+                    type="date"
+                    value={date}
+                    max={maxDate}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setDate(next > maxDate ? maxDate : next);
+                    }}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
+                  />
+                </label>
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    style={{ backgroundColor: SUITE.navy }}
+                  >
+                    {saving ? 'Guardando…' : 'Guardar'}
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
         </>
-      )}
+      ) : null}
     </section>
   );
 }
+

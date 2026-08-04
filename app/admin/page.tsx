@@ -167,29 +167,46 @@ function AdminSection({
   title,
   description,
   children,
+  defaultOpen = false,
 }: {
   title: string;
   description: string;
   children: ReactNode;
+  defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <section className="mb-12">
-      <header className="mb-5 flex gap-3">
-        <span
-          className="mt-1 h-10 w-1 shrink-0 rounded-full"
-          style={{ backgroundColor: SUITE.orange }}
-          aria-hidden
-        />
-        <div className="min-w-0">
-          <h2 className="text-xl font-bold tracking-tight" style={{ color: theme.title }}>
-            {title}
-          </h2>
-          <p className="mt-1 text-sm leading-relaxed" style={{ color: theme.muted }}>
-            {description}
-          </p>
-        </div>
+      <header className="mb-5">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-start gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-4 text-left transition-shadow hover:shadow-sm"
+          style={{ boxShadow: open ? SUITE.shadow : undefined }}
+          aria-expanded={open}
+        >
+          <span
+            className="mt-1 h-10 w-1 shrink-0 rounded-full"
+            style={{ backgroundColor: SUITE.orange }}
+            aria-hidden
+          />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-bold tracking-tight" style={{ color: theme.title }}>
+              {title}
+            </h2>
+            <p className="mt-1 text-sm leading-relaxed" style={{ color: theme.muted }}>
+              {description}
+            </p>
+          </div>
+          <span
+            className="mt-1 shrink-0 rounded-lg px-3 py-2 text-sm font-semibold text-white"
+            style={{ backgroundColor: SUITE.navy }}
+          >
+            {open ? 'Ocultar' : 'Mostrar'}
+          </span>
+        </button>
       </header>
-      <div className="space-y-6 [&>*]:!mb-0">{children}</div>
+      {open ? <div className="space-y-6 [&>*]:!mb-0">{children}</div> : null}
     </section>
   );
 }
@@ -455,7 +472,7 @@ export default function AdminPage() {
   return (
     <SuiteShell
       title="Master Panel"
-      subtitle="Financieros, usuarios, datos e inventario — herramientas de administración del suite."
+      subtitle="Financieros, RR.HH., usuarios, datos e inventario — herramientas de administración del suite."
     >
       {/* 1. Financieros */}
       <AdminSection
@@ -468,7 +485,82 @@ export default function AdminPage() {
         <AdminPresupuestoAjustes />
       </AdminSection>
 
-      {/* 2. Usuarios */}
+      {/* 2. RR.HH. · expedientes */}
+      <AdminSection
+        title="RR.HH. · expedientes"
+        description="Auditoría Altas↔status (solo lista). No da de baja a activos. Corregir en /rrhh → Plantilla → Archivo / Bajas."
+      >
+        <div
+          className="rounded-[24px] border border-slate-100 bg-white p-5 max-w-3xl"
+          style={{ boxShadow: SUITE.shadow }}
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={expAuditBusy}
+              className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: SUITE.navy }}
+              onClick={async () => {
+                setExpAuditBusy(true);
+                setExpAuditMsg(null);
+                setExpAuditRows([]);
+                try {
+                  const res = await fetch('/api/hr/expedientes?audit=1', {
+                    cache: 'no-store',
+                  });
+                  const json = (await res.json()) as {
+                    error?: string;
+                    message?: string;
+                    mismatches?: typeof expAuditRows;
+                  };
+                  if (!res.ok) {
+                    setExpAuditMsg(json.error || 'No se pudo auditar');
+                    return;
+                  }
+                  setExpAuditRows(json.mismatches || []);
+                  setExpAuditMsg(json.message || 'Listo');
+                } catch {
+                  setExpAuditMsg('Error de red al auditar expedientes');
+                } finally {
+                  setExpAuditBusy(false);
+                }
+              }}
+            >
+              {expAuditBusy ? 'Auditando…' : 'Reconciliar expedientes'}
+            </button>
+            <a
+              href="/rrhh"
+              className="text-sm font-semibold"
+              style={{ color: SUITE.orangeDeep }}
+            >
+              Abrir RR.HH. →
+            </a>
+          </div>
+          {expAuditMsg ? (
+            <p className="mt-3 text-sm text-slate-600">{expAuditMsg}</p>
+          ) : null}
+          {expAuditRows.length > 0 ? (
+            <ul className="mt-3 max-h-64 space-y-1.5 overflow-y-auto text-sm">
+              {expAuditRows.map((r) => (
+                <li
+                  key={`${r.id}-${r.kind}`}
+                  className="rounded-lg border border-slate-100 px-3 py-2"
+                >
+                  <span className="font-semibold text-slate-800">
+                    {r.full_name}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">
+                    {r.kind} · {r.note}
+                    {r.fecha_baja ? ` · baja ${r.fecha_baja}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </AdminSection>
+
+      {/* 3. Usuarios */}
       <AdminSection
         title="Usuarios"
         description="Cada cuenta del ERP tiene módulos (qué ve) y funciones (palomitas, p. ej. corte). Al instalar la app en el celular, el usuario entra con su sesión y solo ve lo asignado aquí."
@@ -948,82 +1040,7 @@ export default function AdminPage() {
       </AdminSection>
 
 
-      {/* 2b. RR.HH. higiene */}
-      <AdminSection
-        title="RR.HH. · expedientes"
-        description="Auditoría Altas↔status (solo lista). No da de baja a activos. Corregir en /rrhh → Plantilla → Archivo / Bajas."
-      >
-        <div
-          className="rounded-[24px] border border-slate-100 bg-white p-5 max-w-3xl"
-          style={{ boxShadow: SUITE.shadow }}
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled={expAuditBusy}
-              className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              style={{ backgroundColor: SUITE.navy }}
-              onClick={async () => {
-                setExpAuditBusy(true);
-                setExpAuditMsg(null);
-                setExpAuditRows([]);
-                try {
-                  const res = await fetch('/api/hr/expedientes?audit=1', {
-                    cache: 'no-store',
-                  });
-                  const json = (await res.json()) as {
-                    error?: string;
-                    message?: string;
-                    mismatches?: typeof expAuditRows;
-                  };
-                  if (!res.ok) {
-                    setExpAuditMsg(json.error || 'No se pudo auditar');
-                    return;
-                  }
-                  setExpAuditRows(json.mismatches || []);
-                  setExpAuditMsg(json.message || 'Listo');
-                } catch {
-                  setExpAuditMsg('Error de red al auditar expedientes');
-                } finally {
-                  setExpAuditBusy(false);
-                }
-              }}
-            >
-              {expAuditBusy ? 'Auditando…' : 'Reconciliar expedientes'}
-            </button>
-            <a
-              href="/rrhh"
-              className="text-sm font-semibold"
-              style={{ color: SUITE.orangeDeep }}
-            >
-              Abrir RR.HH. →
-            </a>
-          </div>
-          {expAuditMsg ? (
-            <p className="mt-3 text-sm text-slate-600">{expAuditMsg}</p>
-          ) : null}
-          {expAuditRows.length > 0 ? (
-            <ul className="mt-3 max-h-64 space-y-1.5 overflow-y-auto text-sm">
-              {expAuditRows.map((r) => (
-                <li
-                  key={`${r.id}-${r.kind}`}
-                  className="rounded-lg border border-slate-100 px-3 py-2"
-                >
-                  <span className="font-semibold text-slate-800">
-                    {r.full_name}
-                  </span>
-                  <span className="mt-0.5 block text-[11px] text-slate-500">
-                    {r.kind} · {r.note}
-                    {r.fecha_baja ? ` · baja ${r.fecha_baja}` : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      </AdminSection>
-
-      {/* 3. Datos e inventario */}
+      {/* 4. Datos e inventario */}
       <AdminSection
         title="Datos e inventario"
         description="Mapa de orígenes y catálogo de lo que vive en almacenamiento, APIs y bases del suite."

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AdminHrPuestosMap } from '@/app/components/AdminHrPuestosMap';
 import { ALL_SOURCE_FILES } from '@/app/lib/admin-resources';
 import {
   lastUpdateForMapNode,
@@ -658,7 +659,7 @@ const NODES: MapNode[] = [
       'app/staff/horario/page.tsx',
     ],
     detail:
-      'Módulo rrhh activo: Plantilla (incluye expedientes), Horarios, Nómina, Vacaciones, Biblioteca. Staff: /staff/horario (publicado). /staff/vacaciones oculto hasta usuarios por empleado. Prefs disponibilidad Staff = pendiente.',
+      'Módulo rrhh activo: Plantilla (incluye expedientes), Horarios, Nómina, Vacaciones, Biblioteca. Red de recursos: Plantilla → Puesto → Perfil/KPI (Drive Perfiles por posición). Staff: /staff/horario (publicado). /staff/vacaciones oculto hasta usuarios por empleado.',
   },
   {
     id: 'staff-horario',
@@ -1916,6 +1917,7 @@ export function AdminDataMap() {
                   )}
                 </div>
               </div>
+              {selected.id === 'rrhh' ? <AdminHrPuestosMap compact /> : null}
             </div>
           ) : (
             <p className="text-sm" style={{ color: theme.muted }}>

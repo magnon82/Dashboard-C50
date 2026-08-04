@@ -5,6 +5,7 @@ import { SuiteCard } from '@/app/components/SuiteShell';
 import {
   LEAD_STAGE_LABELS,
   PIPELINE_CLOSED_COUNT_FROM,
+  daysUntilEventMexico,
   formatMxn,
   type LeadStage,
 } from '@/app/lib/eventos';
@@ -78,21 +79,24 @@ function formatEventDate(iso: string | null | undefined): string {
   });
 }
 
+/** Días civiles hasta el evento (hoy CDMX = 0). */
+function daysUntil(iso: string | null | undefined): number | null {
+  return daysUntilEventMexico(iso);
+}
+
 function daysUntilLabel(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
-  if (!y || !m || !d) return '';
-  const [ty, tm, td] = new Date()
-    .toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' })
-    .split('-')
-    .map(Number);
-  const days = Math.round(
-    (Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86_400_000
-  );
+  const days = daysUntil(iso);
+  if (days === null) return '';
   if (days === 0) return 'Hoy';
   if (days === 1) return 'Mañana';
   if (days > 1 && days <= 14) return `En ${days} días`;
   return '';
+}
+
+/** Evento en menos de 7 días (hoy CDMX → día 6 inclusive). */
+function isNearEvent(iso: string | null | undefined): boolean {
+  const days = daysUntil(iso);
+  return days !== null && days >= 0 && days < 7;
 }
 
 function stageOrSourceLabel(ev: UpcomingEvent): string {
@@ -241,9 +245,6 @@ export function EventosTablero({
               </span>
             )}
           </div>
-          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
-            Eventos en puerta: CRM, cotizaciones, OS e historial (hoy CDMX+).
-          </p>
           {upcoming.length === 0 ? (
             <p className="mt-3 text-sm" style={{ color: theme.muted }}>
               {loading
@@ -254,6 +255,8 @@ export function EventosTablero({
             <ul className="mt-3 space-y-2">
               {upcoming.map((ev) => {
                 const when = daysUntilLabel(ev.event_date);
+                const near =
+                  ev.status !== 'cancelado' && isNearEvent(ev.event_date);
                 const showCompany =
                   ev.company &&
                   ev.company.trim().toLowerCase() !==
@@ -274,16 +277,20 @@ export function EventosTablero({
                   status: ev.status || null,
                   source: (ev.source as 'crm' | 'os' | 'activity') || 'activity',
                 });
+                const cardClass =
+                  ev.status === 'cancelado'
+                    ? 'border-rose-200 bg-rose-50/60'
+                    : anticipoSinOs && near
+                      ? 'border-amber-300 border-l-[5px] border-l-orange-500 bg-amber-50/70 shadow-sm shadow-orange-100/80'
+                      : anticipoSinOs
+                        ? 'border-amber-200 bg-amber-50/50'
+                        : near
+                          ? 'border-orange-300 border-l-[5px] border-l-orange-500 bg-orange-50/90 shadow-sm shadow-orange-100/80'
+                          : 'border-slate-100 bg-white';
                 return (
                   <li
                     key={ev.id}
-                    className={`rounded-xl border px-3 py-2 text-sm ${
-                      ev.status === 'cancelado'
-                        ? 'border-rose-200 bg-rose-50/60'
-                        : anticipoSinOs
-                          ? 'border-amber-200 bg-amber-50/50'
-                          : 'border-slate-100'
-                    }`}
+                    className={`rounded-xl border px-3 py-2 text-sm ${cardClass}`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
@@ -319,7 +326,17 @@ export function EventosTablero({
                           <span className="font-semibold text-slate-700">
                             {formatEventDate(ev.event_date)}
                           </span>
-                          {when && ev.status !== 'cancelado' ? ` · ${when}` : ''}
+                          {when && ev.status !== 'cancelado' ? (
+                            <span
+                              className={
+                                near
+                                  ? 'font-bold text-orange-800'
+                                  : undefined
+                              }
+                            >
+                              {` · ${when}`}
+                            </span>
+                          ) : null}
                           {showCompany ? ` · ${ev.company}` : ''}
                           {' · '}
                           {stageOrSourceLabel(ev)}

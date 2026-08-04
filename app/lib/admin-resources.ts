@@ -459,7 +459,32 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           {
             label: 'Perfiles por posición',
             kind: 'path',
-            note: 'Biblioteca · categoría perfiles',
+            note: 'Biblioteca · mapa puesto→perfil/KPI en /admin (drive-rh). Ver app/lib/hr-puesto-perfiles-map.ts',
+            copyValue: 'I:\\Mi unidad\\RH\\Perfiles por posición',
+          },
+          {
+            label: 'Puesto · Capitan / Meserx Encargadx',
+            kind: 'path',
+            note: 'Perfil+KPI · Encargadx usa Capitán (provisional)',
+            copyValue: 'I:\\Mi unidad\\RH\\Perfiles por posición\\Piso\\Capitán',
+          },
+          {
+            label: 'Puesto · Encargado de Cocina',
+            kind: 'path',
+            note: '→ Cocina/CHEF (no Sub-Chef)',
+            copyValue: 'I:\\Mi unidad\\RH\\Perfiles por posición\\Cocina\\CHEF',
+          },
+          {
+            label: 'Puesto · Compras y Administración',
+            kind: 'path',
+            note: '→ Administración/Administrador',
+            copyValue:
+              'I:\\Mi unidad\\RH\\Perfiles por posición\\Administración\\Administrador',
+          },
+          {
+            label: 'Puesto · Socios / Limpieza / RP',
+            kind: 'path',
+            note: 'Sin perfil (Socios, Limpieza); RP–Eventos vacante/legacy',
             copyValue: 'I:\\Mi unidad\\RH\\Perfiles por posición',
           },
           {

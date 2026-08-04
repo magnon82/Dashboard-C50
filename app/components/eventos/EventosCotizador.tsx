@@ -24,7 +24,6 @@ import {
   computeQuoteTotals,
   defaultEventDateIso,
   earliestSelectableEventDateIso,
-  formatIsoDateEs,
   formatMxn,
   formatQuoteLineDescription,
   missingOptionalMenuChoiceLabels,
@@ -32,7 +31,6 @@ import {
   isEventosDrinkMenu,
   isPaxAllocationLine,
   isQuoteLockedByEventDate,
-  optionalMenuChoiceDeadlineCopy,
   quoteHasFoodLines,
   quoteLineIsDrink,
   quoteLockMessage,
@@ -360,11 +358,6 @@ export function EventosCotizador({
     () =>
       computeOptionalMenuChoiceDeadline(anticipoDate, eventDate || null),
     [anticipoDate, eventDate]
-  );
-
-  const optionalChoiceCopy = useMemo(
-    () => optionalMenuChoiceDeadlineCopy(optionalChoiceDeadline),
-    [optionalChoiceDeadline]
   );
 
   const optionalChoicesForced = optionalChoiceDeadline.isRequired;
@@ -1876,29 +1869,6 @@ export function EventosCotizador({
                 {choiceGroups.some((g) => g.affects_price)
                   ? ` · Precio unitario: ${formatMxn(previewUnitPrice)}`
                   : ''}
-              </p>
-              <p
-                className="mt-2 rounded-lg border px-3 py-2 text-xs"
-                style={{
-                  borderColor:
-                    optionalChoiceCopy.tone === 'danger'
-                      ? '#FECACA'
-                      : optionalChoiceCopy.tone === 'warn'
-                        ? '#FDE68A'
-                        : SUITE.border,
-                  backgroundColor:
-                    optionalChoiceCopy.tone === 'danger'
-                      ? '#FEF2F2'
-                      : optionalChoiceCopy.tone === 'warn'
-                        ? '#FFFBEB'
-                        : '#fff',
-                  color: SUITE.navySoft,
-                }}
-              >
-                {optionalChoiceCopy.text}
-                {anticipoDate
-                  ? ` Anticipo registrado: ${formatIsoDateEs(anticipoDate)}.`
-                  : ' Sin fecha de anticipo confiable en CRM (no se inventa).'}
               </p>
               <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end">
                 <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

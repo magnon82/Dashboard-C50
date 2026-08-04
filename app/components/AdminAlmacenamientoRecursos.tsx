@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AdminHrPuestosMap } from '@/app/components/AdminHrPuestosMap';
 import {
   ADMIN_STORAGE_PLATFORMS,
   ALL_SOURCE_FILES,
@@ -424,6 +425,7 @@ function ResourceAccordion({
   areaLast?: AreaLastUpdate | null;
 }) {
   const [open, setOpen] = useState(Boolean(defaultOpen));
+  const showHrPuestosMap = branch.id === 'drive-rh';
   const hasDetail =
     Boolean(branch.note) ||
     Boolean(branch.updateFrequency) ||
@@ -432,7 +434,8 @@ function ResourceAccordion({
     Boolean(branch.sourceFiles?.length) ||
     Boolean(branch.scripts?.length) ||
     Boolean(branch.routes?.length) ||
-    Boolean(driveStat);
+    Boolean(driveStat) ||
+    showHrPuestosMap;
 
   const sizeLabel =
     platform.id === 'drive' && driveStat
@@ -586,6 +589,8 @@ function ResourceAccordion({
               </ul>
             </div>
           ) : null}
+
+          {showHrPuestosMap ? <AdminHrPuestosMap /> : null}
 
           <ChipSection
             title="source_file"

@@ -16,12 +16,20 @@ export default function StaffPage() {
   );
 
   useEffect(() => {
+    if (loading || !user) return;
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch('/api/hr/resguardo/mine', { cache: 'no-store' });
-        const json = await res.json();
-        if (cancelled || !res.ok) return;
+        const json = (await res.json()) as {
+          pendingCount?: number;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          setPendingResguardos(null);
+          return;
+        }
         setPendingResguardos(
           typeof json.pendingCount === 'number' ? json.pendingCount : 0
         );
@@ -32,7 +40,10 @@ export default function StaffPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loading, user]);
+
+  const hasPendingResguardo =
+    pendingResguardos != null && pendingResguardos > 0;
 
   return (
     <SuiteShell
@@ -143,21 +154,27 @@ export default function StaffPage() {
         <Link href="/staff/resguardo" className="group block">
           <SuiteCard
             className="h-full transition-transform group-hover:-translate-y-0.5"
+            style={
+              hasPendingResguardo
+                ? {
+                    boxShadow: `0 0 0 2px ${SUITE.orange}, ${SUITE.shadow}`,
+                  }
+                : undefined
+            }
           >
             <div className="flex items-start justify-between gap-3">
               <h2 className="text-lg font-bold" style={{ color: SUITE.navy }}>
                 Mis resguardos
               </h2>
-              {pendingResguardos != null && pendingResguardos > 0 ? (
+              {hasPendingResguardo ? (
                 <span
                   className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                   style={{
-                    backgroundColor: SUITE.orange,
+                    backgroundColor: '#DC2626',
                     color: '#fff',
                   }}
                 >
-                  {pendingResguardos} pendiente
-                  {pendingResguardos === 1 ? '' : 's'}
+                  {pendingResguardos} por confirmar
                 </span>
               ) : (
                 <span
@@ -177,11 +194,30 @@ export default function StaffPage() {
             >
               Acepta el equipo o material que RH te asignó
             </p>
+            {hasPendingResguardo ? (
+              <p
+                className="mt-3 rounded-lg px-3 py-2 text-xs font-semibold leading-snug"
+                style={{
+                  backgroundColor: '#FEF2F2',
+                  color: '#B91C1C',
+                  border: '1px solid #FECACA',
+                }}
+              >
+                Tienes {pendingResguardos} resguardo
+                {pendingResguardos === 1 ? '' : 's'} pendiente
+                {pendingResguardos === 1 ? '' : 's'} de confirmar. Entra y
+                acéptalo{pendingResguardos === 1 ? '' : 's'}.
+              </p>
+            ) : null}
             <p
               className="mt-5 text-sm font-bold"
-              style={{ color: SUITE.orangeDeep }}
+              style={{
+                color: hasPendingResguardo ? '#B91C1C' : SUITE.orangeDeep,
+              }}
             >
-              Ver resguardos →
+              {hasPendingResguardo
+                ? 'Confirmar resguardos →'
+                : 'Ver resguardos →'}
             </p>
           </SuiteCard>
         </Link>

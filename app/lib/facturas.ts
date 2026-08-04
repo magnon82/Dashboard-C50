@@ -272,7 +272,8 @@ export function findComprobanteForFacturaLike(
 ): PdfComprobanteHit | null {
   const pdfs = pdfsPrecomputed ?? listPdfComprobantes(records);
   if (!pdfs.length || !opts.amount) return null;
-  const [y, mo] = opts.date.split('-').map(Number);
+  const facturaDate = String(opts.date || '').slice(0, 10);
+  const [y, mo] = facturaDate.split('-').map(Number);
   const vendorQ = (opts.vendor || '').toLowerCase().trim();
   const vendorIsGov = isGobiernoGasto(vendorQ);
   let best: PdfComprobanteHit | null = null;
@@ -280,15 +281,42 @@ export function findComprobanteForFacturaLike(
 
   for (const p of pdfs) {
     if (!amountClose(opts.amount, p.amount)) continue;
-    const [py, pm] = p.date.split('-').map(Number);
+    const payDate = String(p.date || '').slice(0, 10);
+    // Operación habitual: llega la factura y luego se paga.
+    // No ligar un comprobante con fecha anterior a la factura/gasto.
+    if (
+      /^\d{4}-\d{2}-\d{2}$/.test(facturaDate) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(payDate) &&
+      payDate < facturaDate
+    ) {
+      continue;
+    }
+    const [py, pm] = payDate.split('-').map(Number);
     if (y && py && y !== py) continue;
-    // Prefer same month; allow ±1 month (±2 for government tax calendars)
+    // Prefer same month; allow +N months after invoice (gov tax calendars wider)
     const monthTol = vendorIsGov ? 2 : 1;
-    if (mo && pm && Math.abs(mo - pm) > monthTol) continue;
+    if (mo && pm) {
+      const monthDelta = (py - y) * 12 + (pm - mo);
+      if (monthDelta < 0 || monthDelta > monthTol) continue;
+    }
 
     const hay = `${p.vendor} ${p.concepto} ${p.body} ${p.filename}`.toLowerCase();
     let score = 1;
     if (mo && pm && mo === pm) score += 1;
+    // Prefer payment on/near the invoice date (same day best)
+    if (
+      /^\d{4}-\d{2}-\d{2}$/.test(facturaDate) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(payDate)
+    ) {
+      const daysAfter = Math.round(
+        (new Date(payDate + 'T12:00:00').getTime() -
+          new Date(facturaDate + 'T12:00:00').getTime()) /
+          86400000
+      );
+      if (daysAfter === 0) score += 3;
+      else if (daysAfter <= 7) score += 2;
+      else if (daysAfter <= 31) score += 1;
+    }
     if (opts.week != null && /sem\s*(\d+)/i.test(p.body || p.concepto || '')) {
       const wm = (p.body || p.concepto || '').match(/sem\s*(\d+)/i);
       if (wm && Number(wm[1]) === opts.week) score += 2;

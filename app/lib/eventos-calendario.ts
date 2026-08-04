@@ -3,7 +3,7 @@ import {
   normalizeClientKey,
 } from '@/app/lib/eventos-activity';
 import { loadEventClientActivity } from '@/app/lib/eventos-activity.server';
-import { listEventOs, parseFolio } from '@/app/lib/eventos-os';
+import { listEventOs, normalizeFolioKey, parseFolio } from '@/app/lib/eventos-os';
 import { getServiceSupabase } from '@/app/lib/users';
 import type {
   CalendarEventItem,
@@ -53,16 +53,7 @@ function paxFromText(...parts: Array<string | null | undefined>): number | null 
 
 /** Normaliza folio para clave (G7; 01 / 1 / 1-2027 → «1»). */
 function normalizeFolio(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const s = String(raw).trim();
-  if (!s) return null;
-  const fromParse = parseFolio(s);
-  if (fromParse) return fromParse.toUpperCase();
-  if (/^G\d+(?:-\d+)?$/i.test(s)) return s.toUpperCase();
-  // Numérico con año opcional: «01», «1», «1-2027» → misma clave
-  const num = s.match(/^(\d{1,4})(?:-\d{4})?$/);
-  if (num) return String(Number(num[1]));
-  return null;
+  return normalizeFolioKey(raw);
 }
 
 function resolveFolio(

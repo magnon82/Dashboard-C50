@@ -231,6 +231,7 @@ type Props = {
  * Reporte admin Cortes TPV: listado por fecha, detalle expandible y edición.
  */
 export function AdminCortesTpvReport({ compact = false }: Props) {
+  const [panelOpen, setPanelOpen] = useState(!compact);
   const [days, setDays] = useState<TpvAdminReportDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -313,8 +314,9 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
   }, []);
 
   useEffect(() => {
+    if (compact && !panelOpen) return;
     void loadList();
-  }, [loadList]);
+  }, [loadList, compact, panelOpen]);
 
   async function toggleDay(date: string) {
     if (expanded === date) {
@@ -593,19 +595,31 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void loadList()}
-              disabled={loading}
-              className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-            >
-              {loading ? 'Cargando…' : 'Actualizar'}
-            </button>
+            {compact ? (
+              <button
+                type="button"
+                onClick={() => setPanelOpen((v) => !v)}
+                className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-bold text-white"
+                style={{ backgroundColor: SUITE.navy }}
+                aria-expanded={panelOpen}
+              >
+                {panelOpen ? 'Ocultar' : 'Mostrar'}
+              </button>
+            ) : null}
+            {panelOpen || !compact ? (
+              <button
+                type="button"
+                onClick={() => void loadList()}
+                disabled={loading}
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {loading ? 'Cargando…' : 'Actualizar'}
+              </button>
+            ) : null}
             {compact ? (
               <Link
                 href="/admin/cortes-tpv"
-                className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-bold text-white"
-                style={{ backgroundColor: SUITE.navy }}
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 Abrir reporte completo
               </Link>
@@ -627,6 +641,8 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
           </div>
         </div>
 
+        {panelOpen || !compact ? (
+        <>
         <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
           <p
             className="text-[11px] font-bold uppercase tracking-[0.14em]"
@@ -1041,6 +1057,8 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
               Ver reporte completo
             </Link>
           </p>
+        ) : null}
+        </>
         ) : null}
       </div>
     </div>
