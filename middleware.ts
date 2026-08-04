@@ -28,6 +28,16 @@ const MODULE_PREFIXES = [
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // PWA assets must stay public (Chrome fetches SW + manifest without session)
+  if (
+    pathname === '/sw.js' ||
+    pathname === '/offline.html' ||
+    pathname === '/manifest.webmanifest' ||
+    pathname === '/manifest.webmanifest/'
+  ) {
+    return NextResponse.next();
+  }
+
   // Público: cotización /c/{token} + API lectura/aceptación por token (sin sesión)
   if (
     pathname.startsWith('/c/') ||
@@ -112,6 +122,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|icons/|brand/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|icons/|brand/|sw\\.js|offline\\.html|manifest\\.webmanifest).*)',
   ],
 };

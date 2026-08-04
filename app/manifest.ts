@@ -3,10 +3,12 @@ import { PRODUCT_NAME, PRODUCT_ORG, PRODUCT_TAGLINE } from '@/app/lib/product';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: '/',
     name: `${PRODUCT_NAME} · Carranza 50`,
     short_name: 'C50 Suite',
     description: `${PRODUCT_TAGLINE} · ${PRODUCT_ORG}`,
     start_url: '/',
+    scope: '/',
     display: 'standalone',
     background_color: '#0B1F3A',
     theme_color: '#0B1F3A',

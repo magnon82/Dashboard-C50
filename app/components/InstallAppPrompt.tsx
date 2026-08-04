@@ -13,8 +13,8 @@ const PROD_URL = 'https://admin.carranza50.com.mx';
 
 /**
  * CTA para instalar el Suite como app en el celular (PWA).
- * No hay App Store: el usuario abre el sitio con su cuenta y lo instala desde el navegador.
- * Android/Chrome: beforeinstallprompt → botón. iOS: guía «Añadir a inicio».
+ * Android/Chrome: beforeinstallprompt → botón (requiere service worker público).
+ * iOS/Safari: no hay beforeinstallprompt — guía Compartir → Añadir a inicio.
  */
 export function InstallAppPrompt({
   className = '',
@@ -34,6 +34,7 @@ export function InstallAppPrompt({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
     const standalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       Boolean(
@@ -59,9 +60,14 @@ export function InstallAppPrompt({
       e.preventDefault();
       setDeferred(e as BeforeInstallPromptEvent);
     };
+    const onInstalled = () => setInstalled(true);
+
     window.addEventListener('beforeinstallprompt', onBip);
-    window.addEventListener('appinstalled', () => setInstalled(true));
-    return () => window.removeEventListener('beforeinstallprompt', onBip);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBip);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
   }, []);
 
   if (installed) return null;
@@ -88,6 +94,12 @@ export function InstallAppPrompt({
     }
   }
 
+  const step3 = iosHint
+    ? 'En Safari: Compartir → «Añadir a pantalla de inicio» (no hay botón Instalar).'
+    : deferred
+      ? 'Pulsa «Instalar app» abajo, o menú ⋮ → Instalar aplicación.'
+      : 'En Chrome: menú ⋮ → Instalar aplicación / Añadir a pantalla de inicio.';
+
   return (
     <div
       className={`rounded-2xl border border-slate-200 bg-white p-4 ${className}`}
@@ -102,7 +114,9 @@ export function InstallAppPrompt({
       <p className="mt-1 text-sm font-semibold" style={{ color: SUITE.navy }}>
         {deferred
           ? `Instalar ${PRODUCT_NAME}`
-          : 'Cómo obtener la app en el teléfono'}
+          : iosHint
+            ? 'Añadir a pantalla de inicio (iPhone)'
+            : 'Cómo obtener la app en el teléfono'}
       </p>
       <p className="mt-1 text-xs text-slate-500">
         No se descarga de Play Store ni App Store. Es este mismo sitio, instalado
@@ -117,11 +131,7 @@ export function InstallAppPrompt({
             <span className="font-semibold text-slate-800">{PROD_URL}</span>
           </li>
           <li>Inicia sesión con tu usuario y contraseña.</li>
-          <li>
-            {iosHint
-              ? 'Safari → Compartir → Añadir a pantalla de inicio.'
-              : 'Pulsa «Instalar app» abajo (o menú del navegador → Instalar aplicación).'}
-          </li>
+          <li>{step3}</li>
         </ol>
       ) : null}
 
@@ -136,24 +146,45 @@ export function InstallAppPrompt({
           {busy ? 'Abriendo…' : 'Instalar app en este teléfono'}
         </button>
       ) : iosHint ? (
-        <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700">
-          En iPhone usa <strong>Safari</strong> → botón Compartir →{' '}
-          <strong>Añadir a pantalla de inicio</strong>.
-        </p>
+        <div className="mt-3 space-y-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700">
+          <p>
+            En <strong>iPhone/iPad no existe</strong> el botón «Instalar app». Usa
+            solo <strong>Safari</strong> (no Chrome):
+          </p>
+          <ol className="list-decimal space-y-1 pl-4">
+            <li>
+              Toca el botón <strong>Compartir</strong> (cuadrado con flecha).
+            </li>
+            <li>
+              Elige <strong>Añadir a pantalla de inicio</strong>.
+            </li>
+            <li>
+              Confirma con <strong>Añadir</strong>.
+            </li>
+          </ol>
+        </div>
       ) : likelyMobile ? (
         <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          En Chrome/Edge: menú ⋮ → <strong>Instalar aplicación</strong> o{' '}
-          <strong>Añadir a pantalla de inicio</strong>. El botón automático
-          aparece cuando el navegador lo permite.
+          En <strong>Chrome/Edge (Android)</strong>: menú <strong>⋮</strong> →{' '}
+          <strong>Instalar aplicación</strong> o{' '}
+          <strong>Añadir a pantalla de inicio</strong>. El botón automático aparece
+          cuando Chrome marca el sitio como instalable (tras cargar el service
+          worker).
         </p>
       ) : (
-        <button
-          type="button"
-          onClick={() => void copyLink()}
-          className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800"
-        >
-          {copied ? 'Enlace copiado' : 'Copiar enlace para el celular'}
-        </button>
+        <div className="mt-3 space-y-2">
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Desde la PC: copia el enlace y ábrelo en el teléfono. En Android usa
+            Chrome; en iPhone usa Safari → Compartir → Añadir a pantalla de inicio.
+          </p>
+          <button
+            type="button"
+            onClick={() => void copyLink()}
+            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800"
+          >
+            {copied ? 'Enlace copiado' : 'Copiar enlace para el celular'}
+          </button>
+        </div>
       )}
     </div>
   );
