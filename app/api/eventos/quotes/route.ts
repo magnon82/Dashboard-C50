@@ -25,6 +25,15 @@ import {
 } from '@/app/lib/eventos';
 import { isPersistedMenuItemId } from '@/app/lib/eventos-menus-seed';
 import { ensureLeadForQuote } from '@/app/lib/eventos-quote-lead';
+import {
+  allocateNextQuoteFolio,
+  ensureQuoteFolio,
+} from '@/app/lib/eventos-quote-folio';
+import {
+  ensureQuotePublicToken,
+  generateQuotePublicToken,
+  publicQuotePath,
+} from '@/app/lib/eventos-quote-public';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -105,12 +114,27 @@ export async function GET() {
       }
     }
 
+    const enriched = [];
+    for (const q of quotes) {
+      const id = String(q.id);
+      let public_token =
+        typeof (q as { public_token?: string | null }).public_token === 'string'
+          ? (q as { public_token?: string | null }).public_token
+          : null;
+      if (!public_token) {
+        public_token = await ensureQuotePublicToken(sb, id, null);
+      }
+      enriched.push({
+        ...q,
+        public_token,
+        public_path: public_token ? publicQuotePath(public_token) : null,
+        service_order_id: osByQuote.get(id) || null,
+      });
+    }
+
     return NextResponse.json({
       ready: true,
-      quotes: quotes.map((q) => ({
-        ...q,
-        service_order_id: osByQuote.get(String(q.id)) || null,
-      })),
+      quotes: enriched,
     });
   } catch (e) {
     return NextResponse.json({
@@ -262,56 +286,95 @@ export async function POST(request: Request) {
       }
     }
 
-    const quoteNumber = `EVT-${now.slice(0, 10).replace(/-/g, '')}-${Math.floor(
-      Math.random() * 900 + 100
-    )}`;
-
-    const baseRow = {
-      quote_number: quoteNumber,
-      client_id: clientId,
-      lead_id: body.lead_id || null,
-      status: 'borrador' as const,
-      event_date: body.event_date || null,
-      pax,
-      celebration,
-      subtotal: totals.subtotal,
-      servicio_pct: totals.servicioPct,
-      servicio_amount: totals.servicioAmount,
-      total: totals.total,
-      apply_servicio: totals.applyServicio,
-      owner_username: auth.username,
-      notes,
-      hold_until,
-      created_at: now,
-      updated_at: now,
-    };
-
+    const publicToken = generateQuotePublicToken();
     let quote: Record<string, unknown> | null = null;
     let insertError: { message: string } | null = null;
+    let quoteNumber = '';
 
-    {
-      const { data, error } = await sb
-        .from('event_quotes')
-        .insert(baseRow)
-        .select('*')
-        .single();
-      quote = data;
-      insertError = error;
-    }
+    // Folio COT-YYYY-### al guardar; reintento si hay colisión unique
+    for (let attempt = 0; attempt < 5; attempt++) {
+      quoteNumber = await allocateNextQuoteFolio(sb);
+      const baseRow = {
+        quote_number: quoteNumber,
+        client_id: clientId,
+        lead_id: body.lead_id || null,
+        status: 'borrador' as const,
+        event_date: body.event_date || null,
+        pax,
+        celebration,
+        subtotal: totals.subtotal,
+        servicio_pct: totals.servicioPct,
+        servicio_amount: totals.servicioAmount,
+        total: totals.total,
+        apply_servicio: totals.applyServicio,
+        owner_username: auth.username,
+        notes,
+        hold_until,
+        public_token: publicToken,
+        created_at: now,
+        updated_at: now,
+      };
 
-    // DB sin columna celebration → reintentar sin ella
-    if (insertError && /celebration/i.test(insertError.message)) {
-      const { celebration: _c, ...withoutCelebration } = baseRow;
-      const notesFallback = [celebration ? `Celebración: ${celebration}` : '', notes]
-        .filter(Boolean)
-        .join('\n') || null;
-      const { data, error } = await sb
-        .from('event_quotes')
-        .insert({ ...withoutCelebration, notes: notesFallback })
-        .select('*')
-        .single();
-      quote = data;
-      insertError = error;
+      {
+        const { data, error } = await sb
+          .from('event_quotes')
+          .insert(baseRow)
+          .select('*')
+          .single();
+        quote = data;
+        insertError = error;
+      }
+
+      // DB sin columna public_token → reintentar sin ella
+      if (insertError && /public_token/i.test(insertError.message)) {
+        const { public_token: _t, ...withoutToken } = baseRow;
+        const { data, error } = await sb
+          .from('event_quotes')
+          .insert(withoutToken)
+          .select('*')
+          .single();
+        quote = data;
+        insertError = error;
+      }
+
+      // DB sin columna celebration → reintentar sin ella
+      if (insertError && /celebration/i.test(insertError.message)) {
+        const { celebration: _c, public_token: maybeToken, ...rest } = baseRow;
+        const notesFallback =
+          [celebration ? `Celebración: ${celebration}` : '', notes]
+            .filter(Boolean)
+            .join('\n') || null;
+        const rowWithoutCelebration = {
+          ...rest,
+          notes: notesFallback,
+          ...(maybeToken ? { public_token: maybeToken } : {}),
+        };
+        const { data, error } = await sb
+          .from('event_quotes')
+          .insert(rowWithoutCelebration)
+          .select('*')
+          .single();
+        quote = data;
+        insertError = error;
+        if (insertError && /public_token/i.test(insertError.message)) {
+          const { public_token: _t2, ...noToken } = rowWithoutCelebration;
+          const retry = await sb
+            .from('event_quotes')
+            .insert(noToken)
+            .select('*')
+            .single();
+          quote = retry.data;
+          insertError = retry.error;
+        }
+      }
+
+      if (!insertError && quote) break;
+
+      const uniqueHit =
+        insertError &&
+        /duplicate|unique|quote_number/i.test(insertError.message);
+      if (uniqueHit) continue;
+      break;
     }
 
     if (insertError || !quote) {
@@ -323,11 +386,22 @@ export async function POST(request: Request) {
           error: msg,
           ready: false,
           hint: missing
-            ? 'Ejecuta supabase/eventos_module.sql en el SQL Editor de Supabase.'
+            ? 'Ejecuta supabase/eventos_module.sql (o eventos_quote_folio.sql) en el SQL Editor de Supabase.'
             : undefined,
         },
         { status: 500 }
       );
+    }
+
+    // Por si el insert omitió quote_number (columna ausente en un intento raro)
+    if (!quote.quote_number) {
+      const ensured = await ensureQuoteFolio(sb, String(quote.id), null);
+      if (ensured) {
+        quote = { ...quote, quote_number: ensured };
+        quoteNumber = ensured;
+      }
+    } else {
+      quoteNumber = String(quote.quote_number);
     }
 
     const quoteId = String(quote.id);
@@ -393,6 +467,12 @@ export async function POST(request: Request) {
       'warn'
     );
 
+    const savedToken =
+      (typeof (full || quote)?.public_token === 'string'
+        ? String((full || quote)?.public_token)
+        : null) ||
+      (await ensureQuotePublicToken(sb, quoteId, publicToken));
+
     return NextResponse.json(
       {
         quote: full || quote,
@@ -401,6 +481,8 @@ export async function POST(request: Request) {
         follow_up_synced: leadResult.followUpSynced || false,
         lead_error: leadResult.error || null,
         optional_menu_warning: optionalCheck.message,
+        public_token: savedToken,
+        public_path: savedToken ? publicQuotePath(savedToken) : null,
       },
       { status: 201 }
     );

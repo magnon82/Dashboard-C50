@@ -7,23 +7,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SEED = ROOT / "supabase" / "seed_event_menus.json"
 BEBIDAS = ROOT / "docs" / "eventos-menus" / "bebidas-c50-items.json"
+ALIMENTOS = ROOT / "docs" / "eventos-menus" / "alimentos-c50-items.json"
 
 
 def main() -> None:
     seed = json.loads(SEED.read_text(encoding="utf-8"))
     bebidas_items = json.loads(BEBIDAS.read_text(encoding="utf-8"))
+    alimentos_items = json.loads(ALIMENTOS.read_text(encoding="utf-8"))
 
     seed["source"] = (
         "I:\\Mi unidad\\Eventos\\Menús\\Menús eventos vigentes "
-        "+ I:\\Mi unidad\\Menú C50\\Menú C50 Esp.pdf (solo bebidas)"
+        "+ I:\\Mi unidad\\Menú C50\\Menú C50 Esp.pdf"
     )
     seed["generated_from"] = (
         "PDFs definitivos (pypdf) 2025: Menú 3 tiempos, Barra libre eventos, "
-        "Menú desayunos; bebidas add-on desde Menú C50 Esp (sin alimentos)."
+        "Menú desayunos; Menú regular + bebidas desde Menú C50 Esp."
     )
     seed["notes"] = [
-        "Única fuente de alimentos/barra: carpeta Menús eventos vigentes.",
-        "Bebidas a la carta = solo bebidas de Menú C50 Esp.pdf (alimentos C50 ignorados).",
+        "Alimentos eventos: carpeta Menús eventos vigentes (3 tiempos, desayunos, barra).",
+        "Menú regular = alimentos de Menú C50 Esp.pdf (carta restaurante).",
+        "Bebidas a la carta = bebidas de Menú C50 Esp.pdf.",
         "Fallback local cuando public.event_menus no existe aún.",
         "Menú 3 tiempos: un ítem con choice_groups (plato_fuerte requerido; entrada/postre opcionales).",
         "Barra libre solo con alimentos (requiere_food). Pack desayunos ≥50 = $30000.",
@@ -185,16 +188,57 @@ def main() -> None:
                 "(sin cerveza) · hora extra $90"
             )
 
+    # --- Menú regular (alimentos C50) ---
+    reg = by_code.get("menu_regular_c50")
+    if not reg:
+        reg = {
+            "id": "local-menu-regular-c50",
+            "code": "menu_regular_c50",
+            "name": "Menú regular (C50)",
+            "category": "carta",
+            "description": (
+                "Carta de alimentos del restaurante (Menú C50 Esp). "
+                "Precio por platillo / persona. Grupos desde 10 personas."
+            ),
+            "min_pax": 10,
+            "requires_food": False,
+            "includes_servicio": False,
+            "active": True,
+            "sort_order": 15,
+            "notes": (
+                "Fuente: I:\\Mi unidad\\Menú C50\\Menú C50 Esp.pdf — "
+                "entradas, fuertes, postres y guarniciones."
+            ),
+            "items": [],
+        }
+        seed["menus"].append(reg)
+        by_code["menu_regular_c50"] = reg
+    reg["name"] = "Menú regular (C50)"
+    reg["category"] = "carta"
+    reg["min_pax"] = 10
+    reg["sort_order"] = 15
+    reg["description"] = (
+        "Carta de alimentos del restaurante (Menú C50 Esp). "
+        "Precio por platillo / persona. Grupos desde 10 personas."
+    )
+    reg["notes"] = (
+        "Fuente: I:\\Mi unidad\\Menú C50\\Menú C50 Esp.pdf — "
+        "entradas, fuertes, postres y guarniciones."
+    )
+    reg["items"] = [
+        {**it, "menu_id": reg["id"], "choice_groups": None} for it in alimentos_items
+    ]
+
     # --- Bebidas from C50 ---
     beb = by_code["bebidas_a_la_carta"]
     beb["name"] = "Bebidas (Menú C50)"
     beb["description"] = (
-        "Consumo por pieza / botella según Menú C50 Esp.pdf (solo bebidas; "
-        "sin alimentos de la carta). Edita precio unitario si aplica."
+        "Consumo por pieza / botella según Menú C50 Esp.pdf (solo bebidas). "
+        "Edita precio unitario si aplica."
     )
     beb["notes"] = (
         "Fuente: I:\\Mi unidad\\Menú C50\\Menú C50 Esp.pdf — secciones VINOS, "
-        "CAFÉ, COCTELERÍA, DESTILADOS, CERVEZAS, SIN ALCOHOL. Alimentos ignorados. "
+        "CAFÉ, COCTELERÍA, DESTILADOS, CERVEZAS, SIN ALCOHOL. "
         "Vinos: mapeo copeo/botella por orden de layout PDF."
     )
     beb["items"] = bebidas_items
@@ -202,6 +246,7 @@ def main() -> None:
     SEED.write_text(json.dumps(seed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Updated {SEED}")
     print(f"Bebidas items: {len(bebidas_items)}")
+    print(f"Menú regular items: {len(alimentos_items)}")
 
 
 if __name__ == "__main__":

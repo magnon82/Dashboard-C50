@@ -46,3 +46,35 @@ export function driveFileWebUrl(
   if (!id) return null;
   return `https://drive.google.com/file/d/${id}/view`;
 }
+
+/** True si parece ruta Windows / File Stream (no enviar al cliente en Vercel). */
+export function isLikelyLocalDrivePath(p: string | null | undefined): boolean {
+  const s = String(p || '').trim();
+  if (!s) return false;
+  if (/^[a-zA-Z]:[\\/]/.test(s)) return true;
+  if (s.includes('Mi unidad') || s.includes('Mi Unidad')) return true;
+  if (/\\\\/.test(s) && /FACTURAS|COMPROBANTES|Bancos|\\RH\\|Eventos/i.test(s))
+    return true;
+  return false;
+}
+
+/**
+ * Rutas locales al cliente solo cuando File Stream está habilitado.
+ * En línea: null (el UI usa filename / Abrir en Drive / signed URL).
+ */
+export function clientSafeLocalPath(
+  p: string | null | undefined
+): string | null {
+  if (!p) return null;
+  if (!localDriveFsEnabled()) return null;
+  return p;
+}
+
+/** Root path para JSON de listados: null en serverless / FS off. */
+export function clientSafeRoot(
+  root: string | null | undefined
+): string | null {
+  if (!root) return null;
+  if (!localDriveFsEnabled()) return null;
+  return root;
+}

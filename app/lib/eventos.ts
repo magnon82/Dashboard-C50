@@ -27,9 +27,18 @@ export type OptionalMenuChoiceId =
 /** Categorías de alimentos cuya cantidad (unit=persona) reparte invitados del pax total. */
 export const EVENTOS_PAX_ALLOC_CATEGORIES = [
   'tres_tiempos',
+  'carta',
   'desayunos',
   'parejas',
   'paquete',
+] as const;
+
+/**
+ * Líneas de comida (desbloquean bebidas). Misma base que pax-alloc
+ * (3 tiempos, carta/menú regular, desayunos, etc.).
+ */
+export const EVENTOS_FOOD_LINE_CATEGORIES = [
+  ...EVENTOS_PAX_ALLOC_CATEGORIES,
 ] as const;
 
 /**
@@ -43,6 +52,9 @@ export const EVENTOS_DRINK_MENU_CODES = [
   'barra_libre_2025',
   'bebidas_a_la_carta',
 ] as const;
+
+/** Código del menú regular / carta C50 (alternativa al 3 tiempos). */
+export const EVENTOS_MENU_REGULAR_CODE = 'menu_regular_c50' as const;
 
 export function isEventosDrinkMenu(menu: {
   category?: string | null;
@@ -76,7 +88,7 @@ export function quoteHasFoodLines(
   return lines.some((l) => {
     const cat = String(l.category || '').trim();
     if (!cat) return false;
-    return (EVENTOS_PAX_ALLOC_CATEGORIES as readonly string[]).includes(cat);
+    return (EVENTOS_FOOD_LINE_CATEGORIES as readonly string[]).includes(cat);
   });
 }
 
@@ -386,22 +398,27 @@ export function eventDateMinusHoursIso(
 }
 
 /**
- * Primera fecha de evento (YYYY-MM-DD CDMX) con al menos
- * EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT horas de anticipación
- * (inicio del día del evento estrictamente después de now+72h).
+ * Primera fecha de evento seleccionable: mañana civil CDMX
+ * (hoy no; el día siguiente sí).
  */
 export function earliestSelectableEventDateIso(from = new Date()): string {
-  const hours = EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT;
-  const threshold = from.getTime() + hours * 3_600_000;
-  let day = mexicoTodayIso(new Date(threshold));
-  for (let i = 0; i < 8; i++) {
-    const start = mexicoCityDayStartUtc(day);
-    if (start && start.getTime() > threshold) return day;
-    const next = addCalendarDaysIso(day, 1);
-    if (!next) break;
-    day = next;
-  }
-  return day;
+  const today = mexicoTodayIso(from);
+  return addCalendarDaysIso(today, 1) || today;
+}
+
+/** Días por defecto al abrir una cotización nueva (hoy CDMX + N). */
+export const EVENTOS_DEFAULT_EVENT_DATE_OFFSET_DAYS = 10;
+
+/**
+ * Fecha sugerida al crear cotización: hoy CDMX +
+ * EVENTOS_DEFAULT_EVENT_DATE_OFFSET_DAYS (siempre ≥ mañana).
+ */
+export function defaultEventDateIso(from = new Date()): string {
+  const today = mexicoTodayIso(from);
+  const suggested =
+    addCalendarDaysIso(today, EVENTOS_DEFAULT_EVENT_DATE_OFFSET_DAYS) || today;
+  const min = earliestSelectableEventDateIso(from);
+  return suggested < min ? min : suggested;
 }
 
 export function formatIsoDateEs(iso: string | null | undefined): string {

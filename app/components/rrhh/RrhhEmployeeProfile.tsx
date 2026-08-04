@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  employeeAreas,
+  employeeNeedsSecondarySalary,
   employeePayCadence,
   formatAntiguedad,
+  formatEmployeeAreas,
   formatHrDate,
   formatHrPuesto,
+  HR_AREA_CATALOG,
   isLeaveExemptEmployee,
   resolveSueldoQuincenal,
   type HrEmployee,
@@ -22,7 +26,11 @@ import {
   type HrMedicalJustification,
   type HrMedicalReimbursement,
 } from '@/app/lib/hr-employee-profile';
-import { prepareDocumentScan } from '@/app/lib/hr-doc-scan';
+import {
+  prepareHrCapture,
+  preparePhoto,
+  type HrCaptureMode,
+} from '@/app/lib/hr-doc-scan';
 import {
   contractStatusLabelEs,
   isContractDocType,
@@ -30,8 +38,9 @@ import {
   type HrEmployeeContract,
 } from '@/app/lib/hr-employee-contracts';
 import {
+  HR_RESGUARDO_ACCEPT_LABELS,
   HR_RESGUARDO_KIND_LABELS,
-  HR_RESGUARDO_STATUS_LABELS,
+  resguardoAcceptBadge,
   type HrResguardoRequest,
 } from '@/app/lib/hr-resguardo';
 import { RrhhResguardoForm } from '@/app/components/rrhh/RrhhResguardoForm';
@@ -50,6 +59,7 @@ const theme = getTheme('suite');
 type ProfilePayload = {
   ready?: boolean;
   schemaMissing?: boolean;
+  softPullPending?: boolean;
   error?: string;
   hint?: string;
   detail?: string;
@@ -58,6 +68,7 @@ type ProfilePayload = {
     curp?: string | null;
     emergency_contact?: string | null;
     emergency_phone?: string | null;
+    domicilio?: string | null;
   };
   documents: HrEmployeeDocument[];
   docTypes: HrDocTypeDef[];
@@ -92,7 +103,9 @@ export function RrhhEmployeeProfile({
   const [data, setData] = useState<ProfilePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [syncingDocs, setSyncingDocs] = useState(false);
   const [toast, setToast] = useState('');
+  const softPullStartedRef = useRef<string | null>(null);
   const [tab, setTab] = useState<'docs' | 'medico' | 'resguardos' | 'datos'>(
     initialTab
   );
@@ -103,12 +116,12 @@ export function RrhhEmployeeProfile({
   const uploadTargetRef = useRef<{
     kind: string;
     doc_type?: string;
-    mode?: 'scan' | 'file';
+    mode?: HrCaptureMode;
   } | null>(null);
   const [uploadTarget, setUploadTarget] = useState<{
     kind: string;
     doc_type?: string;
-    mode?: 'scan' | 'file';
+    mode?: HrCaptureMode;
   } | null>(null);
   const [showResguardoForm, setShowResguardoForm] = useState(false);
   const [editingResguardo, setEditingResguardo] =
@@ -135,11 +148,15 @@ export function RrhhEmployeeProfile({
     setShowResguardoForm(false);
     setEditingResguardo(null);
     setSelectedContractId(null);
+    softPullStartedRef.current = null;
   }, [employeeId, initialTab]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setToast('');
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setLoading(true);
+      setToast('');
+    }
     try {
       const res = await fetch(`/api/hr/employees/${employeeId}/profile`, {
         cache: 'no-store',
@@ -180,6 +197,7 @@ export function RrhhEmployeeProfile({
           photoUrl: json.photoUrl ?? null,
           canVerify: Boolean(json.canVerify),
           canEditEmployee: Boolean(json.canEditEmployee),
+          softPullPending: false,
           schemaMissing: true,
           error: json.error || 'No se pudo cargar el perfil',
           hint:
@@ -195,9 +213,10 @@ export function RrhhEmployeeProfile({
         contracts,
         defaultContractId: defaultId,
         checklist,
+        softPullPending: Boolean(json.softPullPending),
       });
     } catch {
-      setToast('Error de red');
+      if (!silent) setToast('Error de red');
       setData({
         employee: { id: employeeId, full_name: '—' } as HrEmployee,
         documents: placeholderDocuments(employeeId),
@@ -211,12 +230,13 @@ export function RrhhEmployeeProfile({
         photoUrl: null,
         canVerify: false,
         canEditEmployee: false,
+        softPullPending: false,
         schemaMissing: true,
         error: 'Error de red al cargar el perfil',
         hint: 'Revisa la conexión e intenta de nuevo',
       });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [employeeId]);
 
@@ -224,15 +244,109 @@ export function RrhhEmployeeProfile({
     void load();
   }, [load]);
 
+  // Tras primer paint: sync expediente en background (nunca bloquea "Cargando…").
+  useEffect(() => {
+    if (loading || !data?.softPullPending || !data.canEditEmployee) return;
+    if (softPullStartedRef.current === employeeId) return;
+    softPullStartedRef.current = employeeId;
+    let cancelled = false;
+    setSyncingDocs(true);
+    setToast('Sincronizando expediente…');
+    void (async () => {
+      try {
+        const res = await fetch(`/api/hr/employees/${employeeId}/profile`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: 'pull_expediente' }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          message?: string;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (res.ok) {
+          setToast(json.message || 'Expediente actualizado');
+          await load({ silent: true });
+          onChanged?.();
+        } else if (json.error) {
+          setToast(json.error);
+        }
+      } catch {
+        if (!cancelled) setToast('No se pudo sincronizar el expediente');
+      } finally {
+        if (!cancelled) setSyncingDocs(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    loading,
+    data?.softPullPending,
+    data?.canEditEmployee,
+    employeeId,
+    load,
+    onChanged,
+  ]);
+
+  // Refresca la lista de resguardos al volver a la pestaña (p. ej. tras aceptar en Staff).
+  useEffect(() => {
+    if (tab !== 'resguardos') return;
+    const onFocus = () => {
+      void load({ silent: true });
+    };
+    window.addEventListener('focus', onFocus);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load({ silent: true });
+    }, 20000);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.clearInterval(id);
+    };
+  }, [tab, load]);
+
+  async function openDocView(
+    storagePath: string | null | undefined,
+    title: string,
+    cachedUrl?: string | null
+  ) {
+    if (cachedUrl) {
+      setViewerUrl(cachedUrl);
+      setViewerTitle(title);
+      return;
+    }
+    if (!storagePath) return;
+    setBusy(true);
+    setToast('');
+    try {
+      const res = await fetch(
+        `/api/hr/employees/${employeeId}/profile?sign=${encodeURIComponent(storagePath)}`,
+        { cache: 'no-store' }
+      );
+      const json = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !json.url) {
+        setToast(json.error || 'No se pudo abrir el archivo');
+        return;
+      }
+      setViewerUrl(json.url);
+      setViewerTitle(title);
+    } catch {
+      setToast('Error al abrir el archivo');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function pickFile(
     kind: string,
     doc_type?: string,
-    mode: 'scan' | 'file' = 'file'
+    mode: HrCaptureMode = 'file'
   ) {
     const target = { kind, doc_type, mode };
     uploadTargetRef.current = target;
     setUploadTarget(target);
-    if (mode === 'scan') scanRef.current?.click();
+    // Escanear y Foto abren cámara; Archivo abre galería/PDF.
+    if (mode === 'scan' || mode === 'photo') scanRef.current?.click();
     else fileRef.current?.click();
   }
 
@@ -242,19 +356,32 @@ export function RrhhEmployeeProfile({
     setBusy(true);
     setToast('');
     try {
-      const prepared =
-        target.kind === 'document'
-          ? await prepareDocumentScan(file)
-          : file;
+      const mode: HrCaptureMode = target.mode || 'file';
+      let prepared = file;
+      if (target.kind === 'document') {
+        // Docs de alta: siempre pipeline de escaneo (incluso desde Archivo).
+        prepared = await prepareHrCapture(file, 'scan');
+      } else if (
+        target.kind === 'justification' ||
+        target.kind === 'reimbursement'
+      ) {
+        prepared = await prepareHrCapture(file, mode);
+      } else if (target.kind === 'photo') {
+        prepared = await preparePhoto(file);
+      }
       const fd = new FormData();
       fd.set('kind', target.kind);
       fd.set('file', prepared);
       if (target.doc_type) fd.set('doc_type', target.doc_type);
       if (
-        target.kind === 'document' &&
-        (target.mode === 'scan' || target.mode === 'file')
+        target.kind === 'document' ||
+        target.kind === 'justification' ||
+        target.kind === 'reimbursement'
       ) {
-        fd.set('source', target.mode === 'scan' ? 'scan' : 'file');
+        fd.set(
+          'source',
+          mode === 'scan' ? 'scan' : mode === 'photo' ? 'photo' : 'file'
+        );
       }
       if (target.kind === 'reimbursement') {
         const amount = window.prompt('Monto del reembolso (MXN)', '0') || '0';
@@ -418,6 +545,10 @@ export function RrhhEmployeeProfile({
       .map((v) => String(v).trim())
       .filter(Boolean)
       .filter((s) => !primary || s.toLowerCase() !== primary.toLowerCase());
+    const areas = fd
+      .getAll('areas')
+      .map((v) => String(v).trim())
+      .filter(Boolean);
     setBusy(true);
     try {
       const res = await fetch(`/api/hr/employees/${employeeId}/profile`, {
@@ -426,12 +557,15 @@ export function RrhhEmployeeProfile({
         body: JSON.stringify({
           puesto: primary,
           puestos_secundarios: secondary,
-          area: fd.get('area'),
+          areas,
+          area: formatEmployeeAreas(areas),
           fecha_ingreso: fd.get('fecha_ingreso'),
           sueldo_diario: fd.get('sueldo_diario'),
+          sueldo_diario_secundario: fd.get('sueldo_diario_secundario'),
           notes: fd.get('notes'),
           phone: fd.get('phone'),
           email: fd.get('email'),
+          domicilio: fd.get('domicilio'),
           curp: fd.get('curp'),
           nss: fd.get('nss'),
           emergency_contact: fd.get('emergency_contact'),
@@ -584,6 +718,11 @@ export function RrhhEmployeeProfile({
                 .filter((x) => x && x !== '—')
                 .join(' · ')}
             </p>
+            {syncingDocs ? (
+              <p className="mt-1 text-[11px] font-semibold text-teal-700">
+                Sincronizando expediente en segundo plano…
+              </p>
+            ) : null}
             {data?.checklist ? (
               <p className="mt-1 text-[11px] font-semibold text-slate-600">
                 Alta documental: {data.checklist.requiredUploaded}/
@@ -671,26 +810,33 @@ export function RrhhEmployeeProfile({
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedContract.viewUrl ? (
+                        {selectedContract.viewUrl ||
+                        selectedContract.storage_path ? (
                           <>
                             <button
                               type="button"
-                              className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                              disabled={busy}
+                              className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
                               style={{ backgroundColor: SUITE.navy }}
-                              onClick={() => {
-                                setViewerUrl(selectedContract.viewUrl!);
-                                setViewerTitle(selectedContract.title);
-                              }}
+                              onClick={() =>
+                                void openDocView(
+                                  selectedContract.storage_path,
+                                  selectedContract.title,
+                                  selectedContract.viewUrl
+                                )
+                              }
                             >
                               Ver
                             </button>
-                            <a
-                              href={selectedContract.viewUrl}
-                              download
-                              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
-                            >
-                              Descargar
-                            </a>
+                            {selectedContract.viewUrl ? (
+                              <a
+                                href={selectedContract.viewUrl}
+                                download
+                                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                              >
+                                Descargar
+                              </a>
+                            ) : null}
                           </>
                         ) : (
                           <span className="text-[11px] text-slate-400">
@@ -812,15 +958,15 @@ export function RrhhEmployeeProfile({
                           {c.source_filename ? ` · ${c.source_filename}` : ''}
                         </p>
                       </div>
-                      {c.viewUrl ? (
+                      {c.viewUrl || c.storage_path ? (
                         <button
                           type="button"
-                          className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                          disabled={busy}
+                          className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
                           style={{ backgroundColor: SUITE.navy }}
                           onClick={() => {
-                            setViewerUrl(c.viewUrl!);
-                            setViewerTitle(c.title);
                             setSelectedContractId(c.id);
+                            void openDocView(c.storage_path, c.title, c.viewUrl);
                           }}
                         >
                           Ver
@@ -858,15 +1004,15 @@ export function RrhhEmployeeProfile({
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {d.viewUrl ? (
+                      {d.viewUrl || d.storage_path ? (
                         <button
                           type="button"
-                          className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                          disabled={busy}
+                          className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
                           style={{ backgroundColor: SUITE.navy }}
-                          onClick={() => {
-                            setViewerUrl(d.viewUrl!);
-                            setViewerTitle(d.title);
-                          }}
+                          onClick={() =>
+                            void openDocView(d.storage_path, d.title, d.viewUrl)
+                          }
                         >
                           Ver
                         </button>
@@ -986,17 +1132,19 @@ export function RrhhEmployeeProfile({
                                 .join(' · ') || 'Desde expediente'}
                             </p>
                             <div className="mt-2 flex flex-wrap gap-1.5">
-                              {e.viewUrl ? (
+                              {e.viewUrl || e.storage_path ? (
                                 <button
                                   type="button"
-                                  className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                                  disabled={busy}
+                                  className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
                                   style={{ backgroundColor: SUITE.navy }}
-                                  onClick={() => {
-                                    setViewerUrl(e.viewUrl!);
-                                    setViewerTitle(
-                                      e.exam_type || 'Documento médico'
-                                    );
-                                  }}
+                                  onClick={() =>
+                                    void openDocView(
+                                      e.storage_path,
+                                      e.exam_type || 'Documento médico',
+                                      e.viewUrl
+                                    )
+                                  }
                                 >
                                   Ver
                                 </button>
@@ -1017,17 +1165,19 @@ export function RrhhEmployeeProfile({
                               {r.notes || 'Desde expediente'}
                             </p>
                             <div className="mt-2 flex flex-wrap gap-1.5">
-                              {r.viewUrl ? (
+                              {r.viewUrl || r.storage_path ? (
                                 <button
                                   type="button"
-                                  className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                                  disabled={busy}
+                                  className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
                                   style={{ backgroundColor: SUITE.navy }}
-                                  onClick={() => {
-                                    setViewerUrl(r.viewUrl!);
-                                    setViewerTitle(
-                                      r.description || 'Documento médico'
-                                    );
-                                  }}
+                                  onClick={() =>
+                                    void openDocView(
+                                      r.storage_path,
+                                      r.description || 'Documento médico',
+                                      r.viewUrl
+                                    )
+                                  }
                                 >
                                   Ver
                                 </button>
@@ -1042,19 +1192,43 @@ export function RrhhEmployeeProfile({
               </section>
 
               <section>
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-bold" style={{ color: SUITE.navy }}>
                     Justificantes médicos
                   </h3>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    className="rounded-full px-3 py-1 text-[11px] font-bold text-white disabled:opacity-50"
-                    style={{ backgroundColor: SUITE.orangeDeep }}
-                    onClick={() => pickFile('justification')}
-                  >
-                    + Justificante
-                  </button>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title="Cámara · escaneo de documentación"
+                      className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                      style={{ backgroundColor: SUITE.navy }}
+                      onClick={() => pickFile('justification', undefined, 'scan')}
+                    >
+                      Escanear
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title="Cámara · fotografía"
+                      className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
+                      onClick={() =>
+                        pickFile('justification', undefined, 'photo')
+                      }
+                    >
+                      Foto
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title="Galería o PDF"
+                      className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                      style={{ backgroundColor: SUITE.orangeDeep }}
+                      onClick={() => pickFile('justification', undefined, 'file')}
+                    >
+                      Archivo
+                    </button>
+                  </div>
                 </div>
                 <p className="mb-2 text-[11px] text-slate-500">
                   Sustento de falta · se liga a nómina al aceptar (pago de
@@ -1076,19 +1250,27 @@ export function RrhhEmployeeProfile({
                             : ''}{' '}
                           · {statusLabelEs(j.status)}
                         </p>
-                        {j.description ? (
-                          <p className="text-xs text-slate-500">{j.description}</p>
+                        {j.description || j.notes ? (
+                          <p className="text-xs text-slate-500">
+                            {[j.description, j.notes]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
                         ) : null}
                         <div className="mt-2 flex flex-wrap gap-1.5">
-                          {j.viewUrl ? (
+                          {j.viewUrl || j.storage_path ? (
                             <button
                               type="button"
-                              className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                              disabled={busy}
+                              className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
                               style={{ backgroundColor: SUITE.navy }}
-                              onClick={() => {
-                                setViewerUrl(j.viewUrl!);
-                                setViewerTitle('Justificante médico');
-                              }}
+                              onClick={() =>
+                                void openDocView(
+                                  j.storage_path,
+                                  'Justificante médico',
+                                  j.viewUrl
+                                )
+                              }
                             >
                               Ver
                             </button>
@@ -1134,19 +1316,47 @@ export function RrhhEmployeeProfile({
               </section>
 
               <section>
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-bold" style={{ color: SUITE.navy }}>
                     Reembolsos médicos
                   </h3>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    className="rounded-full px-3 py-1 text-[11px] font-bold text-white disabled:opacity-50"
-                    style={{ backgroundColor: SUITE.orangeDeep }}
-                    onClick={() => pickFile('reimbursement')}
-                  >
-                    + Reembolso
-                  </button>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title="Cámara · escaneo de documentación"
+                      className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                      style={{ backgroundColor: SUITE.navy }}
+                      onClick={() =>
+                        pickFile('reimbursement', undefined, 'scan')
+                      }
+                    >
+                      Escanear
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title="Cámara · fotografía"
+                      className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
+                      onClick={() =>
+                        pickFile('reimbursement', undefined, 'photo')
+                      }
+                    >
+                      Foto
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title="Galería o PDF"
+                      className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                      style={{ backgroundColor: SUITE.orangeDeep }}
+                      onClick={() =>
+                        pickFile('reimbursement', undefined, 'file')
+                      }
+                    >
+                      Archivo
+                    </button>
+                  </div>
                 </div>
                 <ul className="space-y-2">
                   {(() => {
@@ -1170,20 +1380,24 @@ export function RrhhEmployeeProfile({
                           {statusLabelEs(r.status)}
                         </p>
                         <p className="text-xs text-slate-500">
-                          {[r.expense_date, r.description]
+                          {[r.expense_date, r.description, r.notes]
                             .filter(Boolean)
                             .join(' · ')}
                         </p>
                         <div className="mt-2 flex flex-wrap gap-1.5">
-                          {r.viewUrl ? (
+                          {r.viewUrl || r.storage_path ? (
                             <button
                               type="button"
-                              className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white"
+                              disabled={busy}
+                              className="rounded-full px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
                               style={{ backgroundColor: SUITE.navy }}
-                              onClick={() => {
-                                setViewerUrl(r.viewUrl!);
-                                setViewerTitle('Comprobante reembolso');
-                              }}
+                              onClick={() =>
+                                void openDocView(
+                                  r.storage_path,
+                                  'Comprobante reembolso',
+                                  r.viewUrl
+                                )
+                              }
                             >
                               Ver
                             </button>
@@ -1238,7 +1452,8 @@ export function RrhhEmployeeProfile({
             <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[11px] text-slate-500">
-                  Cartas de resguardo C50 de esta ficha.
+                  Cartas C50. Estado: Pendiente (sin aceptar en Staff) o
+                  Recibido (aceptado por el colaborador).
                 </p>
                 <button
                   type="button"
@@ -1270,6 +1485,9 @@ export function RrhhEmployeeProfile({
                         ? formatHrPuesto(emp.puesto || emp.area)
                         : emp.puesto || emp.area || ''
                     }
+                    defaultEmail={emp.email}
+                    defaultPhone={emp.phone}
+                    defaultDomicilio={emp.domicilio}
                     onCreated={() => {
                       setShowResguardoForm(false);
                       setEditingResguardo(null);
@@ -1289,7 +1507,16 @@ export function RrhhEmployeeProfile({
                 ) : null
               ) : (
                 <ul className="space-y-2">
-                  {(data?.resguardos || []).map((r) => (
+                  {(data?.resguardos || []).map((r) => {
+                    const badge = resguardoAcceptBadge(r);
+                    const badgeLabel = HR_RESGUARDO_ACCEPT_LABELS[badge];
+                    const badgeStyle =
+                      badge === 'recibido'
+                        ? { bg: '#ecfdf5', color: '#065f46' }
+                        : badge === 'pendiente'
+                          ? { bg: SUITE.orangeSoft, color: SUITE.navy }
+                          : { bg: '#f1f5f9', color: '#475569' };
+                    return (
                     <li
                       key={r.id}
                       className="rounded-xl border border-slate-100 bg-slate-50/80 p-3"
@@ -1303,10 +1530,13 @@ export function RrhhEmployeeProfile({
                           {HR_RESGUARDO_KIND_LABELS[r.kind]}
                         </p>
                         <span
-                          className="text-[11px] font-bold uppercase tracking-wide"
-                          style={{ color: SUITE.orangeDeep }}
+                          className="rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide"
+                          style={{
+                            backgroundColor: badgeStyle.bg,
+                            color: badgeStyle.color,
+                          }}
                         >
-                          {HR_RESGUARDO_STATUS_LABELS[r.status]}
+                          {badgeLabel}
                         </span>
                       </div>
                       <p className="mt-1 text-[11px] text-slate-500">
@@ -1319,6 +1549,11 @@ export function RrhhEmployeeProfile({
                             : null,
                           r.requested_by ? `@${r.requested_by}` : null,
                           new Date(r.created_at).toLocaleDateString('es-MX'),
+                          r.accepted_at
+                            ? `Recibido ${new Date(r.accepted_at).toLocaleDateString('es-MX')}${
+                                r.accepted_by ? ` · @${r.accepted_by}` : ''
+                              }`
+                            : null,
                         ]
                           .filter(Boolean)
                           .join(' · ')}
@@ -1365,7 +1600,8 @@ export function RrhhEmployeeProfile({
                         </button>
                       </div>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -1373,7 +1609,7 @@ export function RrhhEmployeeProfile({
 
           {!loading && tab === 'datos' && emp ? (
             <form
-              key={`${emp.id}-${emp.puesto ?? ''}-${(emp.puestos_secundarios || []).join(',')}-${emp.sueldo_diario ?? ''}-${emp.fecha_ingreso ?? ''}-${emp.phone ?? ''}-${emp.fecha_nacimiento ?? ''}`}
+              key={`${emp.id}-${emp.puesto ?? ''}-${(emp.puestos_secundarios || []).join(',')}-${(emp.areas || employeeAreas(emp)).join(',')}-${emp.sueldo_diario ?? ''}-${emp.sueldo_diario_secundario ?? ''}-${emp.fecha_ingreso ?? ''}-${emp.phone ?? ''}-${emp.fecha_nacimiento ?? ''}`}
               onSubmit={(e) => void saveDatos(e)}
               className="space-y-4"
             >
@@ -1394,17 +1630,7 @@ export function RrhhEmployeeProfile({
                   Posición principal (plantilla) + roles secundarios sin
                   duplicar ficha. Ingreso y sueldo diario igual que nómina.
                 </p>
-                <PuestoMultiSelect emp={emp} canEdit={canEdit} />
-                <label className="block text-xs font-semibold text-slate-600">
-                  Área
-                  <input
-                    name="area"
-                    defaultValue={emp.area || ''}
-                    placeholder="Piso, Cocina, Administrativo…"
-                    disabled={!canEdit}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
-                  />
-                </label>
+                <EmpleoDatosFields emp={emp} canEdit={canEdit} />
                 <label className="block text-xs font-semibold text-slate-600">
                   Fecha de ingreso
                   <input
@@ -1418,53 +1644,6 @@ export function RrhhEmployeeProfile({
                     disabled={!canEdit}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
                   />
-                </label>
-                <label className="block text-xs font-semibold text-slate-600">
-                  Sueldo diario (MXN)
-                  <input
-                    name="sueldo_diario"
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step="0.01"
-                    defaultValue={
-                      emp.sueldo_diario != null &&
-                      Number.isFinite(Number(emp.sueldo_diario))
-                        ? String(emp.sueldo_diario)
-                        : ''
-                    }
-                    placeholder="0.00"
-                    disabled={!canEdit}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
-                  />
-                  {(() => {
-                    const cadence = employeePayCadence(emp);
-                    if (cadence === 'semanal') {
-                      return (
-                        <span className="mt-1 block text-[11px] font-normal text-slate-500">
-                          Pago semanal (plantilla operativa).
-                        </span>
-                      );
-                    }
-                    const q = resolveSueldoQuincenal(emp);
-                    if (q == null) {
-                      return (
-                        <span className="mt-1 block text-[11px] font-normal text-slate-500">
-                          Pago quincenal (Administrativo).
-                        </span>
-                      );
-                    }
-                    return (
-                      <span className="mt-1 block text-[11px] font-normal text-slate-500">
-                        Pago quincenal: $
-                        {q.toLocaleString('es-MX', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}{' '}
-                        (diario × 15)
-                      </span>
-                    );
-                  })()}
                 </label>
                 {isLeaveExemptEmployee(emp) ? (
                   <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
@@ -1495,6 +1674,7 @@ export function RrhhEmployeeProfile({
                   [
                     ['phone', 'Teléfono', emp.phone],
                     ['email', 'Email', emp.email],
+                    ['domicilio', 'Domicilio', emp.domicilio],
                     ['curp', 'CURP', emp.curp],
                     ['nss', 'NSS', emp.nss],
                     [
@@ -1629,14 +1809,18 @@ export function RrhhEmployeeProfile({
 function PuestoMultiSelect({
   emp,
   canEdit,
+  primary,
+  secondary,
+  onPrimaryChange,
+  onSecondaryChange,
 }: {
   emp: HrEmployee & { puestos_secundarios?: string[] | null };
   canEdit: boolean;
+  primary: string;
+  secondary: string[];
+  onPrimaryChange: (next: string) => void;
+  onSecondaryChange: (next: string[]) => void;
 }) {
-  const initial = resolveEmployeeRoles(emp);
-  const [primary, setPrimary] = useState(initial.primary || '');
-  const [secondary, setSecondary] = useState<string[]>(initial.secondary);
-
   const legacy =
     emp.puesto &&
     !HR_PUESTO_CATALOG.some(
@@ -1653,10 +1837,11 @@ function PuestoMultiSelect({
   });
 
   function toggleSecondary(label: string) {
-    setSecondary((prev) => {
-      if (prev.includes(label)) return prev.filter((x) => x !== label);
-      return [...prev, label];
-    });
+    onSecondaryChange(
+      secondary.includes(label)
+        ? secondary.filter((x) => x !== label)
+        : [...secondary, label]
+    );
   }
 
   return (
@@ -1669,8 +1854,8 @@ function PuestoMultiSelect({
           disabled={!canEdit}
           onChange={(e) => {
             const next = e.target.value;
-            setPrimary(next);
-            setSecondary((prev) => prev.filter((s) => s !== next));
+            onPrimaryChange(next);
+            onSecondaryChange(secondary.filter((s) => s !== next));
           }}
           className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
         >
@@ -1721,6 +1906,211 @@ function PuestoMultiSelect({
           solapados el mismo día.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** Checkboxes de área (Piso / Cocina / Barra / Administrativo + legado). */
+function AreaMultiSelect({
+  selected,
+  canEdit,
+  onChange,
+}: {
+  selected: string[];
+  canEdit: boolean;
+  onChange: (next: string[]) => void;
+}) {
+  const extras = selected.filter(
+    (a) =>
+      !HR_AREA_CATALOG.some((c) => c.toLowerCase() === a.toLowerCase())
+  );
+  const options = [...HR_AREA_CATALOG, ...extras];
+
+  function toggle(label: string) {
+    onChange(
+      selected.some((x) => x.toLowerCase() === label.toLowerCase())
+        ? selected.filter((x) => x.toLowerCase() !== label.toLowerCase())
+        : [...selected, label]
+    );
+  }
+
+  return (
+    <fieldset disabled={!canEdit} className="space-y-1.5">
+      <legend className="text-xs font-semibold text-slate-600">Área</legend>
+      <p className="text-[11px] text-slate-500">
+        Puedes marcar más de una (ej. Piso + Cocina).
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((a) => {
+          const checked = selected.some(
+            (x) => x.toLowerCase() === a.toLowerCase()
+          );
+          return (
+            <label
+              key={a}
+              className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${
+                checked
+                  ? 'border-slate-400 bg-slate-100 font-semibold text-slate-800'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <input
+                type="checkbox"
+                name="areas"
+                value={a}
+                checked={checked}
+                disabled={!canEdit}
+                onChange={() => toggle(a)}
+                className="rounded border-slate-300"
+              />
+              <span>{a}</span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+/** Puesto + área + sueldos (el 2.º aparece con dual / ≥2 roles o áreas). */
+function EmpleoDatosFields({
+  emp,
+  canEdit,
+}: {
+  emp: HrEmployee & {
+    puestos_secundarios?: string[] | null;
+    areas?: string[] | null;
+    sueldo_diario_secundario?: number | null;
+  };
+  canEdit: boolean;
+}) {
+  const initial = resolveEmployeeRoles(emp);
+  const [primary, setPrimary] = useState(initial.primary || '');
+  const [secondary, setSecondary] = useState<string[]>(initial.secondary);
+  const [areas, setAreas] = useState<string[]>(() => employeeAreas(emp));
+
+  const showSd2 =
+    employeeNeedsSecondarySalary({
+      puesto: primary || null,
+      puestos_secundarios: secondary,
+      notes: emp.notes,
+      full_name: emp.full_name,
+      area: formatEmployeeAreas(areas),
+      areas,
+    }) ||
+    hasDualLimpiezaServicio({
+      puesto: primary || null,
+      puestos_secundarios: secondary,
+      notes: emp.notes,
+      full_name: emp.full_name,
+    });
+
+  const secondaryLabel =
+    secondary[0] ||
+    areas.find((a) => a.toLowerCase() !== (areas[0] || '').toLowerCase()) ||
+    'rol 2';
+
+  return (
+    <div className="space-y-3">
+      <PuestoMultiSelect
+        emp={emp}
+        canEdit={canEdit}
+        primary={primary}
+        secondary={secondary}
+        onPrimaryChange={setPrimary}
+        onSecondaryChange={setSecondary}
+      />
+      <AreaMultiSelect
+        selected={areas}
+        canEdit={canEdit}
+        onChange={setAreas}
+      />
+      <label className="block text-xs font-semibold text-slate-600">
+        {showSd2 ? 'Sueldo diario rol 1 (MXN)' : 'Sueldo diario (MXN)'}
+        <input
+          name="sueldo_diario"
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step="0.01"
+          defaultValue={
+            emp.sueldo_diario != null &&
+            Number.isFinite(Number(emp.sueldo_diario))
+              ? String(emp.sueldo_diario)
+              : ''
+          }
+          placeholder="0.00"
+          disabled={!canEdit}
+          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
+        />
+        {(() => {
+          const cadence = employeePayCadence({
+            ...emp,
+            puesto: primary || null,
+            puestos_secundarios: secondary,
+            area: formatEmployeeAreas(areas),
+            areas,
+          });
+          if (cadence === 'semanal') {
+            return (
+              <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                Pago semanal (plantilla operativa).
+              </span>
+            );
+          }
+          const q = resolveSueldoQuincenal({
+            ...emp,
+            puesto: primary || null,
+            puestos_secundarios: secondary,
+            area: formatEmployeeAreas(areas),
+            areas,
+          });
+          if (q == null) {
+            return (
+              <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                Pago quincenal (Administrativo).
+              </span>
+            );
+          }
+          return (
+            <span className="mt-1 block text-[11px] font-normal text-slate-500">
+              Pago quincenal: $
+              {q.toLocaleString('es-MX', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              (diario × 15)
+            </span>
+          );
+        })()}
+      </label>
+      {showSd2 ? (
+        <label className="block text-xs font-semibold text-slate-600">
+          Sueldo diario rol 2 (MXN)
+          <input
+            name="sueldo_diario_secundario"
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step="0.01"
+            defaultValue={
+              emp.sueldo_diario_secundario != null &&
+              Number.isFinite(Number(emp.sueldo_diario_secundario))
+                ? String(emp.sueldo_diario_secundario)
+                : ''
+            }
+            placeholder="0.00"
+            disabled={!canEdit}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
+          />
+          <span className="mt-1 block text-[11px] font-normal text-slate-500">
+            Para el segundo rol ({secondaryLabel}). Se guarda en ficha; nómina
+            sigue usando el principal hasta que el cálculo dual lo consuma.
+          </span>
+        </label>
+      ) : (
+        <input type="hidden" name="sueldo_diario_secundario" value="" />
+      )}
     </div>
   );
 }

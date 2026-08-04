@@ -54,6 +54,14 @@ const DRINK_MENU_SEED_CODES = [
   'bebidas_a_la_carta',
 ] as const;
 
+/** Catálogos de alimentos aportados desde seed si faltan en DB (menú regular C50). */
+const FOOD_SEED_APPEND_CODES = ['menu_regular_c50'] as const;
+
+const SEED_APPEND_CODES = [
+  ...DRINK_MENU_SEED_CODES,
+  ...FOOD_SEED_APPEND_CODES,
+] as const;
+
 /** Ítems de barra libre / Bebidas C50 desde seed, reusando ids de DB por SKU. */
 function overlayDrinkItemsFromSeed(
   m: MenuRow,
@@ -112,28 +120,26 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
     (m) => String(m.code || '') === 'menu_3_tiempos_2025'
   );
   const presentCodes = new Set(menus.map((m) => String(m.code || '')));
-  const missingDrinkCodes = DRINK_MENU_SEED_CODES.filter(
+  const missingAppendCodes = SEED_APPEND_CODES.filter(
     (c) => !presentCodes.has(c)
   );
   try {
     const seed = await loadEventMenusSeed();
     const byCode = new Map(seed.map((m) => [m.code, m]));
     /** Catálogo presente en DB pero con menos ítems que el seed (vacío / stub). */
-    const needsDrinkItemsOverlay = menus.some((m) => {
+    const needsSeedItemsOverlay = menus.some((m) => {
       const code = String(m.code || '');
-      if (
-        !(DRINK_MENU_SEED_CODES as readonly string[]).includes(code)
-      ) {
+      if (!(SEED_APPEND_CODES as readonly string[]).includes(code)) {
         return false;
       }
       const seedMenu = byCode.get(code);
       const seedLen = seedMenu?.items?.length || 0;
       return seedLen > 0 && seedLen > (m.items || []).length;
     });
-    const appendMissingDrinks = (base: MenuRow[]): MenuRow[] => {
-      if (!missingDrinkCodes.length) return base;
+    const appendMissingFromSeed = (base: MenuRow[]): MenuRow[] => {
+      if (!missingAppendCodes.length) return base;
       const extras: MenuRow[] = [];
-      for (const code of missingDrinkCodes) {
+      for (const code of missingAppendCodes) {
         const seedMenu = byCode.get(code);
         if (!seedMenu) continue;
         extras.push({
@@ -155,33 +161,34 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
       if (!seedMenu) return m;
       return {
         ...m,
+        name: seedMenu.name ?? m.name,
         min_pax: seedMenu.min_pax ?? m.min_pax,
         requires_food: seedMenu.requires_food ?? m.requires_food,
       };
     });
     if (
       !needsChoiceGroups &&
-      !needsDrinkItemsOverlay &&
+      !needsSeedItemsOverlay &&
       !needsTresTiemposOverlay &&
-      !missingDrinkCodes.length
+      !missingAppendCodes.length
     ) {
       return withSeedRules;
     }
     if (
       !needsChoiceGroups &&
-      !needsDrinkItemsOverlay &&
+      !needsSeedItemsOverlay &&
       !needsTresTiemposOverlay
     ) {
-      return appendMissingDrinks(withSeedRules);
+      return appendMissingFromSeed(withSeedRules);
     }
     const enriched = withSeedRules.map((m) => {
       const seedMenu = m.code ? byCode.get(String(m.code)) : undefined;
       if (!seedMenu?.items?.length) return m;
 
-      // Barra libre / Bebidas C50: seed completo si DB vacía, stub o parcial
+      // Barra libre / Bebidas C50 / Menú regular: seed completo si DB vacía, stub o parcial
       const code = String(m.code || '');
       if (
-        (DRINK_MENU_SEED_CODES as readonly string[]).includes(code) &&
+        (SEED_APPEND_CODES as readonly string[]).includes(code) &&
         seedMenu.items.length > (m.items || []).length
       ) {
         return overlayDrinkItemsFromSeed(m, seedMenu);
@@ -282,7 +289,7 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
       }
       return { ...m, items };
     });
-    return appendMissingDrinks(enriched);
+    return appendMissingFromSeed(enriched);
   } catch {
     return menus;
   }

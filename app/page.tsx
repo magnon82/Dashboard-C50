@@ -7,7 +7,7 @@ import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
 import { InstallAppPrompt } from '@/app/components/InstallAppPrompt';
 import {
   calmNoAlert,
-  formatAnticipoSinOsAlert,
+  formatEventosHubAlert,
   isHubAlertModule,
   pickRrhhHubAlert,
   type HubAlertModuleId,
@@ -122,10 +122,37 @@ export default function HubPage() {
                 }
                 const json = (await res.json()) as {
                   kpis?: { anticipoSinOs?: number };
+                  upcomingEvents?: {
+                    event_date?: string | null;
+                    title?: string | null;
+                    celebration?: string | null;
+                    company?: string | null;
+                    folio?: string | null;
+                    has_anticipo?: boolean;
+                    has_os?: boolean;
+                    os_path?: string | null;
+                    digital_os_id?: string | null;
+                    source?: string | null;
+                    os_filename?: string | null;
+                    source_label?: string | null;
+                    status?: string | null;
+                  }[];
                 };
                 const n = Number(json.kpis?.anticipoSinOs ?? 0);
-                next.eventos = formatAnticipoSinOsAlert(
-                  Number.isFinite(n) ? n : 0
+                const upcoming = json.upcomingEvents || [];
+                const nextEv =
+                  upcoming.find((ev) => ev.event_date) ?? null;
+                const anticipoEv =
+                  upcoming.find(
+                    (ev) =>
+                      Boolean(ev.has_anticipo) &&
+                      !ev.has_os &&
+                      ev.status !== 'cancelado'
+                  ) ?? null;
+                next.eventos = formatEventosHubAlert(
+                  Number.isFinite(n) ? n : 0,
+                  nextEv,
+                  anticipoEv
                 );
               } catch {
                 next.eventos = calmNoAlert();
@@ -255,10 +282,24 @@ export default function HubPage() {
                           }}
                           aria-hidden
                         />
-                        <span>{line}</span>
+                        <span>
+                          <span className="block">{line}</span>
+                          {alert.detail ? (
+                            <span className="mt-1 block text-[13px] font-normal opacity-90">
+                              {alert.detail}
+                            </span>
+                          ) : null}
+                        </span>
                       </span>
                     ) : (
-                      line
+                      <>
+                        <span className="block">{line}</span>
+                        {useLiveAlert && alert?.detail ? (
+                          <span className="mt-1 block text-[13px] opacity-90">
+                            {alert.detail}
+                          </span>
+                        ) : null}
+                      </>
                     )}
                   </p>
                   <p

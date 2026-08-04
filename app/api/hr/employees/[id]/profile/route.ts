@@ -21,21 +21,16 @@ import {
   type HrMedicalReimbursement,
 } from '@/app/lib/hr-employee-profile';
 import {
-  normalizeResguardoItems,
-  type HrResguardoKind,
-  type HrResguardoPayload,
+  HR_RESGUARDO_SELECT,
+  HR_RESGUARDO_SELECT_LEGACY,
+  asResguardoRequest,
   type HrResguardoRequest,
 } from '@/app/lib/hr-resguardo';
 import {
   pullExpedienteDocuments,
+  profileSoftPullPending,
   repairMislabeledPackFromStorage,
   repairSharedPackFromStorage,
-  resolveExpedienteFolder,
-  shouldRepairMislabeledPack,
-  shouldRepairSharedPack,
-  shouldSoftPullContracts,
-  shouldSoftPullExpediente,
-  shouldSoftPullMedical,
 } from '@/app/lib/hr-expediente-docs-pull';
 import {
   contractsFromDocumentRows,
@@ -46,6 +41,8 @@ import {
 } from '@/app/lib/hr-employee-contracts';
 import {
   employeeRequiresDocumentation,
+  formatEmployeeAreas,
+  parseEmployeeAreas,
   plantillaTeamGroup,
   type HrEmployee,
 } from '@/app/lib/hr';
@@ -56,35 +53,14 @@ import {
 } from '@/app/lib/hr-puestos';
 import { matchPerson } from '@/app/lib/hr-person-match';
 import { invalidatePlantillaCache } from '@/app/lib/hr-plantilla';
-import {
-  fillEmptyEmployeeIdentity,
-  isPlausibleDobIso,
-  normalizeCurp,
-  normalizeNss,
-} from '@/app/lib/hr-identity';
+import { fillEmptyEmployeeIdentity } from '@/app/lib/hr-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const RESGUARDO_SELECT =
-  'id, folio, employee_id, kind, status, payload, items, requested_by, reviewed_by, reviewed_at, notes, created_at, updated_at';
-
-function asResguardoRequest(row: Record<string, unknown>): HrResguardoRequest {
-  return {
-    id: String(row.id),
-    folio: row.folio != null ? String(row.folio) : null,
-    employee_id: row.employee_id != null ? String(row.employee_id) : null,
-    kind: (row.kind as HrResguardoKind) || 'equipo',
-    status: (row.status as HrResguardoRequest['status']) || 'pendiente',
-    payload: (row.payload || {}) as HrResguardoPayload,
-    items: normalizeResguardoItems(row.items),
-    requested_by: row.requested_by != null ? String(row.requested_by) : null,
-    reviewed_by: row.reviewed_by != null ? String(row.reviewed_by) : null,
-    reviewed_at: row.reviewed_at != null ? String(row.reviewed_at) : null,
-    notes: row.notes != null ? String(row.notes) : null,
-    created_at: String(row.created_at),
-    updated_at: String(row.updated_at),
-  };
+function missingAcceptedCols(message: string | undefined | null): boolean {
+  if (!message) return false;
+  return /accepted_at|accepted_by|schema cache|42703/i.test(message);
 }
 
 /**
@@ -93,6 +69,9 @@ function asResguardoRequest(row: Record<string, unknown>): HrResguardoRequest {
  * placeholder 0.00 aunque la ficha ya tenga SD en DB.
  */
 const EMP_SELECTS = [
+  'id, full_name, status, puesto, puestos_secundarios, areas, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, sueldo_diario_secundario, email, phone, domicilio, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone, tipo_empleo, requiere_documentacion',
+  'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, sueldo_diario_secundario, email, phone, domicilio, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone, tipo_empleo, requiere_documentacion',
+  'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, domicilio, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone, tipo_empleo, requiere_documentacion',
   'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone, tipo_empleo, requiere_documentacion',
   'id, full_name, status, puesto, puestos_secundarios, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone',
   'id, full_name, status, puesto, area, fecha_ingreso, fecha_baja, fecha_nacimiento, sueldo_diario, email, phone, drive_folder_path, suite_username, force_include, force_exclude, notes, photo_storage_path, nss, curp, emergency_contact, emergency_phone',
@@ -163,6 +142,12 @@ async function signedUrl(
   return data?.signedUrl ?? null;
 }
 
+/** Solo paths del empleado (`{id}/…`) — evita firmar archivos ajenos. */
+function isEmployeeStoragePath(employeeId: string, path: string): boolean {
+  const p = path.replace(/^\/+/, '');
+  return p.startsWith(`${employeeId}/`);
+}
+
 async function ensureChecklist(
   employeeId: string
 ): Promise<{ error: string | null }> {
@@ -207,14 +192,31 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * GET /api/hr/employees/[id]/profile
- * Perfil + documentos + médico + resguardos.
+ * Perfil + checklist ligero (metadata). Soft-pull / OCR / firmas masivas NO bloquean.
+ * ?sign={storage_path} → URL firmada on-demand (previews).
  */
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: Ctx) {
   const auth = await requireRrhhSession();
   if (auth instanceof NextResponse) return auth;
   const { id } = await ctx.params;
   if (!id) {
     return NextResponse.json({ error: 'id requerido' }, { status: 400 });
+  }
+
+  // Preview under demand: no descarga/OCR, solo firma Storage.
+  const signPath = new URL(req.url).searchParams.get('sign');
+  if (signPath) {
+    if (!isEmployeeStoragePath(id, signPath)) {
+      return NextResponse.json({ error: 'path inválido' }, { status: 400 });
+    }
+    const url = await signedUrl(signPath);
+    if (!url) {
+      return NextResponse.json(
+        { error: 'No se pudo firmar el archivo' },
+        { status: 404 }
+      );
+    }
+    return NextResponse.json({ url });
   }
 
   try {
@@ -250,6 +252,7 @@ export async function GET(_req: Request, ctx: Ctx) {
           {
             ready: false,
             schemaMissing: true,
+            softPullPending: false,
             error:
               'Falta el schema de documentos en Supabase (tabla o bucket).',
             hint:
@@ -276,47 +279,11 @@ export async function GET(_req: Request, ctx: Ctx) {
       }
     }
 
-    // Soft-pull: sin archivos en DB + File Stream → jala del expediente.
-    // Reparación: paquete legado (mismo storage_path) o slots mal etiquetados (CURP en Acta).
-    // Contratos / médico: también si checklist ya lleno pero esas secciones vacías.
-    // En Vercel no hay I:\ → soft-pull no corre; hay que abrir el perfil en PC admin.
-    try {
-      const needDocs = docsRequired && (await shouldSoftPullExpediente(id));
-      const needContracts = await shouldSoftPullContracts(id);
-      const needMedical = await shouldSoftPullMedical(id);
-      if (needDocs || needContracts || needMedical) {
-        const folder = await resolveExpedienteFolder({
-          employeeId: id,
-          fullName: String(empEarly.full_name || ''),
-          driveFolderPath: empEarly.drive_folder_path,
-        });
-        if (folder) {
-          await pullExpedienteDocuments({
-            employeeId: id,
-            driveFolderPath: folder,
-            fullName: String(empEarly.full_name || ''),
-            who: auth.username,
-            force: false,
-          });
-        }
-      } else if (await shouldRepairSharedPack(id)) {
-        await repairSharedPackFromStorage({
-          employeeId: id,
-          who: auth.username,
-          force: false,
-        });
-      }
-      const shouldRepair = await shouldRepairMislabeledPack(id);
-      if (shouldRepair) {
-        await repairMislabeledPackFromStorage({
-          employeeId: id,
-          who: auth.username,
-          force: false,
-        });
-      }
-    } catch (softPullErr) {
-      /* best-effort */
-    }
+    // Soft-pull / pack-repair / OCR: NO aquí — bloqueaban "Cargando perfil…".
+    // El cliente dispara POST pull_expediente tras el primer paint si softPullPending.
+    const softPullPending = await profileSoftPullPending(id, {
+      docsRequired,
+    });
 
     const docsRes = await sb
       .from('hr_employee_documents')
@@ -330,6 +297,7 @@ export async function GET(_req: Request, ctx: Ctx) {
         {
           ready: false,
           schemaMissing: true,
+          softPullPending: false,
           error: docsRes.error.message,
           hint:
             schemaHint(docsRes.error.message) ||
@@ -351,6 +319,7 @@ export async function GET(_req: Request, ctx: Ctx) {
       );
     }
 
+    // Metadata only — firmas Storage on-demand (?sign=) al abrir preview.
     const docs: HrEmployeeDocument[] = [];
     for (const row of docsRes.data || []) {
       const d = row as HrEmployeeDocument;
@@ -360,7 +329,7 @@ export async function GET(_req: Request, ctx: Ctx) {
         // Catálogo manda sobre filas viejas (p. ej. CV ya no es obligatorio).
         // Externos / sin docs: nada es obligatorio de alta.
         required: docsRequired ? (def ? def.required : d.required) : false,
-        viewUrl: await signedUrl(d.storage_path),
+        viewUrl: null,
       });
     }
 
@@ -370,68 +339,67 @@ export async function GET(_req: Request, ctx: Ctx) {
       (a, b) => (order.get(a.doc_type as never) ?? 99) - (order.get(b.doc_type as never) ?? 99)
     );
 
-    let reimbursements: HrMedicalReimbursement[] = [];
-    let justifications: HrMedicalJustification[] = [];
-    let exams: HrEmployeeExam[] = [];
+    const [rem, jus, ex, contractsRes] = await Promise.all([
+      sb
+        .from('hr_medical_reimbursements')
+        .select('*')
+        .eq('employee_id', id)
+        .order('created_at', { ascending: false }),
+      sb
+        .from('hr_medical_justifications')
+        .select('*')
+        .eq('employee_id', id)
+        .order('absence_date', { ascending: false }),
+      sb
+        .from('hr_employee_exams')
+        .select('*')
+        .eq('employee_id', id)
+        .order('test_date', { ascending: false }),
+      sb.from('hr_employee_contracts').select('*').eq('employee_id', id),
+    ]);
 
-    const rem = await sb
-      .from('hr_medical_reimbursements')
-      .select('*')
-      .eq('employee_id', id)
-      .order('created_at', { ascending: false });
+    let reimbursements: HrMedicalReimbursement[] = [];
     if (!rem.error && rem.data) {
       for (const row of rem.data) {
         const r = row as HrMedicalReimbursement;
         reimbursements.push({
           ...r,
           amount: Number(r.amount),
-          viewUrl: await signedUrl(r.storage_path),
+          viewUrl: null,
         });
       }
     }
 
-    const jus = await sb
-      .from('hr_medical_justifications')
-      .select('*')
-      .eq('employee_id', id)
-      .order('absence_date', { ascending: false });
+    let justifications: HrMedicalJustification[] = [];
     if (!jus.error && jus.data) {
       for (const row of jus.data) {
         const j = row as HrMedicalJustification;
         justifications.push({
           ...j,
-          viewUrl: await signedUrl(j.storage_path),
+          viewUrl: null,
         });
       }
     }
 
-    const ex = await sb
-      .from('hr_employee_exams')
-      .select('*')
-      .eq('employee_id', id)
-      .order('test_date', { ascending: false });
+    let exams: HrEmployeeExam[] = [];
     if (!ex.error && ex.data) {
       for (const row of ex.data) {
         const e = row as HrEmployeeExam;
         exams.push({
           ...e,
-          viewUrl: await signedUrl(e.storage_path),
+          viewUrl: null,
         });
       }
     }
 
     let contracts: HrEmployeeContract[] = [];
-    const contractsRes = await sb
-      .from('hr_employee_contracts')
-      .select('*')
-      .eq('employee_id', id);
     if (!contractsRes.error && contractsRes.data) {
       const raw: HrEmployeeContract[] = [];
       for (const row of contractsRes.data) {
         const c = row as HrEmployeeContract;
         raw.push({
           ...c,
-          viewUrl: await signedUrl(c.storage_path),
+          viewUrl: null,
         });
       }
       contracts = sortContracts(raw);
@@ -456,12 +424,20 @@ export async function GET(_req: Request, ctx: Ctx) {
 
     let resguardos: HrResguardoRequest[] = [];
     const seenResguardoIds = new Set<string>();
-    const resg = await sb
+    let resg = await sb
       .from('hr_resguardo_requests')
-      .select(RESGUARDO_SELECT)
+      .select(HR_RESGUARDO_SELECT)
       .eq('employee_id', id)
       .order('created_at', { ascending: false })
       .limit(100);
+    if (resg.error && missingAcceptedCols(resg.error.message)) {
+      resg = await sb
+        .from('hr_resguardo_requests')
+        .select(HR_RESGUARDO_SELECT_LEGACY)
+        .eq('employee_id', id)
+        .order('created_at', { ascending: false })
+        .limit(100);
+    }
     if (!resg.error && resg.data) {
       for (const row of resg.data) {
         const req = asResguardoRequest(row as Record<string, unknown>);
@@ -470,12 +446,20 @@ export async function GET(_req: Request, ctx: Ctx) {
       }
     }
     // Cartas antiguas a veces no tienen employee_id: emparejar por nombre.
-    const unlinked = await sb
+    let unlinked = await sb
       .from('hr_resguardo_requests')
-      .select(RESGUARDO_SELECT)
+      .select(HR_RESGUARDO_SELECT)
       .is('employee_id', null)
       .order('created_at', { ascending: false })
       .limit(200);
+    if (unlinked.error && missingAcceptedCols(unlinked.error.message)) {
+      unlinked = await sb
+        .from('hr_resguardo_requests')
+        .select(HR_RESGUARDO_SELECT_LEGACY)
+        .is('employee_id', null)
+        .order('created_at', { ascending: false })
+        .limit(200);
+    }
     if (!unlinked.error && unlinked.data) {
       const candidate = [{ id, full_name: emp.full_name || '' }];
       for (const row of unlinked.data) {
@@ -507,35 +491,18 @@ export async function GET(_req: Request, ctx: Ctx) {
     ).length;
     const verified = required.filter((d) => d.status === 'verified').length;
 
+    // Solo foto del header (1 firma). Previews de docs: ?sign= on click.
     let photoUrl: string | null = null;
     const foto = checklistDocs.find((d) => d.doc_type === 'foto_perfil');
-    photoUrl = foto?.viewUrl || null;
-    if (!photoUrl && emp.photo_storage_path) {
+    if (foto?.storage_path) {
+      photoUrl = await signedUrl(foto.storage_path);
+    } else if (emp.photo_storage_path) {
       photoUrl = await signedUrl(emp.photo_storage_path);
-    }
-
-    // Soft-fill CURP/NSS/fecha_nacimiento vacíos desde docs / leave / acta (no sobrescribe ficha).
-    if (
-      !normalizeCurp(emp.curp) ||
-      !normalizeNss(emp.nss) ||
-      !isPlausibleDobIso(emp.fecha_nacimiento)
-    ) {
-      try {
-        const [filled] = await fillEmptyEmployeeIdentity(sb, [id], {
-          extractFromDocs: true,
-          includeLeavePayloads: true,
-          maxDocExtracts: 8,
-        });
-        if (filled?.curp) emp.curp = filled.curp;
-        if (filled?.nss) emp.nss = filled.nss;
-        if (filled?.fechaNacimiento) emp.fecha_nacimiento = filled.fechaNacimiento;
-      } catch {
-        /* best-effort */
-      }
     }
 
     return NextResponse.json({
       ready: true,
+      softPullPending,
       employee: emp,
       documents: checklistDocs,
       docTypes: HR_DOC_TYPES,
@@ -587,6 +554,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
   for (const key of [
     'phone',
     'email',
+    'domicilio',
     'nss',
     'curp',
     'emergency_contact',
@@ -622,15 +590,31 @@ export async function PATCH(request: Request, ctx: Ctx) {
     ) {
       patch.puestos_secundarios = rolesParsed.roles.secondary;
     }
-    if (!('area' in body) && patch.puesto) {
+    if (!('area' in body) && !('areas' in body) && patch.puesto) {
       const inferred = areaFromPuesto(String(patch.puesto));
-      if (inferred) patch.area = inferred;
+      if (inferred) {
+        patch.area = inferred;
+        patch.areas = [inferred];
+      }
     }
   }
-  if ('area' in body) {
-    const v = body.area;
-    patch.area =
-      v == null || String(v).trim() === '' ? null : String(v).trim().replace(/\s+/g, ' ');
+  if ('area' in body || 'areas' in body) {
+    let list: string[] = [];
+    if (Array.isArray(body.areas)) {
+      list = parseEmployeeAreas(null, body.areas.map((x) => String(x ?? '')));
+    } else if (Array.isArray(body.area)) {
+      list = parseEmployeeAreas(
+        body.area.map((x) => String(x ?? '')),
+        null
+      );
+    } else {
+      list = parseEmployeeAreas(
+        body.area == null ? null : String(body.area),
+        null
+      );
+    }
+    patch.area = formatEmployeeAreas(list);
+    patch.areas = list;
   }
   if ('fecha_nacimiento' in body) {
     const raw = String(body.fecha_nacimiento || '').trim();
@@ -661,6 +645,15 @@ export async function PATCH(request: Request, ctx: Ctx) {
     return NextResponse.json({ error: sueldo.error }, { status: 400 });
   }
   if (sueldo.set) patch.sueldo_diario = sueldo.value;
+
+  const sueldo2 = parseSueldoDiario(body.sueldo_diario_secundario);
+  if (!sueldo2.ok) {
+    return NextResponse.json(
+      { error: sueldo2.error.replace('sueldo_diario', 'sueldo_diario_secundario') },
+      { status: 400 }
+    );
+  }
+  if (sueldo2.set) patch.sueldo_diario_secundario = sueldo2.value;
 
   if (Object.keys(patch).length <= 1) {
     return NextResponse.json({ error: 'Nada que actualizar' }, { status: 400 });
@@ -724,6 +717,15 @@ export async function PATCH(request: Request, ctx: Ctx) {
         { status: 503 }
       );
     }
+    if (/sueldo_diario_secundario/i.test(msg) && sueldo2.set) {
+      return NextResponse.json(
+        {
+          error: 'Falta columna sueldo_diario_secundario en hr_employees.',
+          hint: 'Ejecuta supabase/hr_employee_sueldo_secundario.sql en Supabase',
+        },
+        { status: 503 }
+      );
+    }
     if (/sueldo_diario/i.test(msg) && sueldo.set) {
       return NextResponse.json(
         {
@@ -739,9 +741,30 @@ export async function PATCH(request: Request, ctx: Ctx) {
       working = rest;
       continue;
     }
+    if (/domicilio/i.test(msg) && working.domicilio !== undefined) {
+      return NextResponse.json(
+        {
+          error: 'Falta columna domicilio en hr_employees.',
+          hint: 'Ejecuta supabase/hr_employee_documents.sql (o el ALTER domicilio) en Supabase',
+        },
+        { status: 503 }
+      );
+    }
     if (/puestos_secundarios/i.test(msg)) {
       const { puestos_secundarios: _ps, ...rest } = working;
       void _ps;
+      working = rest;
+      continue;
+    }
+    if (/\bareas\b/i.test(msg) && working.areas !== undefined) {
+      const { areas: _ar, ...rest } = working;
+      void _ar;
+      working = rest;
+      continue;
+    }
+    if (/sueldo_diario_secundario/i.test(msg)) {
+      const { sueldo_diario_secundario: _sd2, ...rest } = working;
+      void _sd2;
       working = rest;
       continue;
     }
@@ -876,6 +899,16 @@ export async function POST(request: Request, ctx: Ctx) {
           },
           { status: 400 }
         );
+      }
+      // Identity fill diferido (antes bloqueaba GET del perfil).
+      try {
+        await fillEmptyEmployeeIdentity(sb, [id], {
+          extractFromDocs: true,
+          includeLeavePayloads: true,
+          maxDocExtracts: 8,
+        });
+      } catch {
+        /* best-effort */
       }
       return NextResponse.json({
         ready: true,
@@ -1074,10 +1107,15 @@ export async function POST(request: Request, ctx: Ctx) {
       byte_size: file.size,
       required: def.required,
       status: 'uploaded' as HrDocStatus,
-      notes:
-        String(form.get('source') || '').trim().toLowerCase() === 'scan'
-          ? `${def.hint} · Escaneo documentación`
-          : def.hint,
+      notes: (() => {
+        const src = String(form.get('source') || '')
+          .trim()
+          .toLowerCase();
+        if (src === 'scan') return `${def.hint} · Escaneo documentación`;
+        if (src === 'photo') return `${def.hint} · Fotografía`;
+        return def.hint;
+      })(),
+
       uploaded_by: who,
       verified_by: null,
       verified_at: null,
@@ -1116,6 +1154,15 @@ export async function POST(request: Request, ctx: Ctx) {
     const amount = Number(String(form.get('amount') || '0').replace(/,/g, ''));
     const expenseDate = String(form.get('expense_date') || '').trim() || null;
     const description = String(form.get('description') || '').trim() || null;
+    const source = String(form.get('source') || '')
+      .trim()
+      .toLowerCase();
+    const captureNote =
+      source === 'scan'
+        ? 'Escaneo documentación'
+        : source === 'photo'
+          ? 'Fotografía'
+          : null;
     const path = `${id}/reembolso-${Date.now()}.${ext}`;
     const up = await sb.storage.from(HR_DOCS_BUCKET).upload(path, buf, {
       contentType: mime,
@@ -1132,6 +1179,7 @@ export async function POST(request: Request, ctx: Ctx) {
       storage_path: path,
       mime_type: mime,
       status: 'solicitado',
+      notes: captureNote,
       created_by: who,
     });
     if (error) {
@@ -1150,6 +1198,15 @@ export async function POST(request: Request, ctx: Ctx) {
     }
     const absenceEnd = String(form.get('absence_end_date') || '').trim() || null;
     const description = String(form.get('description') || '').trim() || null;
+    const source = String(form.get('source') || '')
+      .trim()
+      .toLowerCase();
+    const captureNote =
+      source === 'scan'
+        ? 'Escaneo documentación'
+        : source === 'photo'
+          ? 'Fotografía'
+          : null;
     const path = `${id}/justificante-${Date.now()}.${ext}`;
     const up = await sb.storage.from(HR_DOCS_BUCKET).upload(path, buf, {
       contentType: mime,
@@ -1167,6 +1224,7 @@ export async function POST(request: Request, ctx: Ctx) {
       mime_type: mime,
       status: 'pendiente',
       pays_absence: true,
+      notes: captureNote,
       created_by: who,
     });
     if (error) {

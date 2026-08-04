@@ -8,7 +8,7 @@ import {
 } from '@/app/lib/hr-api';
 import {
   isLeaveExemptEmployee,
-  leaveInclusiveDays,
+  leaveLaborDays,
   todayIsoCdmx,
   type HrLeavePago,
   type HrLeaveRequest,
@@ -239,7 +239,7 @@ export async function POST(request: Request) {
   const days =
     daysInput != null && Number.isFinite(daysInput) && daysInput > 0
       ? daysInput
-      : leaveInclusiveDays(dateFrom, dateTo);
+      : leaveLaborDays(dateFrom, dateTo);
 
   if (days <= 0) {
     return NextResponse.json(

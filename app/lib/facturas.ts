@@ -576,16 +576,49 @@ export function findFacturaForMovimiento(
   return best;
 }
 
-/** URL de descarga de un archivo de factura vía `?open=` + `download=1`. */
-export function facturaOpenHref(filePath: string): string {
-  return `/api/facturas?open=${encodeURIComponent(filePath)}&download=1`;
+/** Companion PDF next to an XML (same stem, .pdf). */
+export function companionPdfPathFromXml(xmlPath: string | null | undefined): string | null {
+  if (!xmlPath) return null;
+  const lower = xmlPath.toLowerCase();
+  if (!lower.endsWith('.xml')) return null;
+  return xmlPath.slice(0, -4) + '.pdf';
+}
+
+/** Effective PDF path: stored pdf_path, else companion beside xml_path. */
+export function facturaEffectivePdfPath(f: {
+  pdf_path?: string | null;
+  xml_path?: string | null;
+  has_pdf?: boolean;
+}): string | null {
+  if (f.pdf_path) return f.pdf_path;
+  // has_pdf without path is rare; still try companion from XML
+  return companionPdfPathFromXml(f.xml_path);
+}
+
+/** URL de archivo de factura vía `?open=`. `download: true` fuerza attachment. */
+export function facturaOpenHref(
+  filePath: string,
+  opts?: { download?: boolean }
+): string {
+  const base = `/api/facturas?open=${encodeURIComponent(filePath)}`;
+  return opts?.download ? `${base}&download=1` : base;
+}
+
+/** URL para ver PDF en el navegador (Content-Disposition: inline). */
+export function facturaPdfViewHref(f: FacturaItem): string | null {
+  const pdf = facturaEffectivePdfPath(f);
+  if (pdf) return facturaOpenHref(pdf);
+  if (f.id && f.has_pdf) {
+    return `/api/facturas?id=${encodeURIComponent(f.id)}&format=pdf`;
+  }
+  return null;
 }
 
 /** URL de descarga PDF (preferido) o XML vía API existente. */
 export function facturaDownloadHref(f: FacturaItem): string | null {
-  const filePath = f.pdf_path || f.xml_path;
+  const filePath = facturaEffectivePdfPath(f) || f.xml_path;
   if (filePath) {
-    return facturaOpenHref(filePath);
+    return facturaOpenHref(filePath, { download: true });
   }
   if (f.id) {
     return `/api/facturas?id=${encodeURIComponent(f.id)}&download=1`;
@@ -594,11 +627,12 @@ export function facturaDownloadHref(f: FacturaItem): string | null {
 }
 
 export function facturaXmlHref(f: FacturaItem): string | null {
-  return f.xml_path ? facturaOpenHref(f.xml_path) : null;
+  return f.xml_path ? facturaOpenHref(f.xml_path, { download: true }) : null;
 }
 
 export function facturaPdfHref(f: FacturaItem): string | null {
-  return f.pdf_path ? facturaOpenHref(f.pdf_path) : null;
+  const pdf = facturaEffectivePdfPath(f);
+  return pdf ? facturaOpenHref(pdf, { download: true }) : null;
 }
 
 export function facturaLabel(f: FacturaItem): string {

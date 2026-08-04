@@ -35,10 +35,51 @@ export type CotizacionDoc = {
   hold_until: string | null;
   lines: CotizacionDocLine[];
   issued_at?: string | null;
+  /** Cliente aceptó vía /c/{token} */
+  accepted_at?: string | null;
+  payment_method?: string | null;
+  client_accept_note?: string | null;
+  /** Link de pago pegado por staff (tarjeta_link). */
+  payment_link_url?: string | null;
 };
 
 /** Browser localStorage key — must be localStorage (not sessionStorage) so preview in a new tab can read it. */
 export const COTIZACION_DRAFT_STORAGE_KEY = 'eventos_cotizacion_draft_v1';
+
+/**
+ * Payload para POST /api/eventos/quotes desde la vista previa.
+ * Se escribe junto al doc al pulsar «Vista previa» en el Cotizador.
+ */
+export const COTIZACION_DRAFT_SAVE_KEY = 'eventos_cotizacion_draft_save_v1';
+
+/** Ping para que el Cotizador limpie líneas tras guardar desde preview. */
+export const COTIZACION_DRAFT_SAVED_PING_KEY = 'eventos_cotizacion_draft_saved_ping_v1';
+
+export type CotizacionDraftSaveLine = {
+  menu_item_id: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  unit?: string | null;
+  category?: string;
+  min_pax?: number | null;
+  requires_food?: boolean;
+  options?: QuoteLineOptions | null;
+};
+
+export type CotizacionDraftSavePayload = {
+  client_id: string;
+  event_date: string | null;
+  pax: number;
+  celebration: string | null;
+  notes: string | null;
+  phone: string | null;
+  email: string | null;
+  contact_name: string | null;
+  apply_servicio: boolean;
+  place_hold: boolean;
+  lines: CotizacionDraftSaveLine[];
+};
 
 export function buildCotizacionTotals(doc: CotizacionDoc) {
   return computeQuoteTotals(

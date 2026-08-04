@@ -186,7 +186,7 @@ export function friendlyDriveError(err: unknown): string {
     lower.includes('not found') ||
     lower.includes('insufficient')
   ) {
-    return 'No se pudo conectar con Drive: sin acceso a la carpeta de Nóminas. Comparte la carpeta con la cuenta de servicio o usa OAuth con acceso a esa carpeta.';
+    return 'No se pudo conectar con Drive: sin acceso a la carpeta. Comparte la carpeta RH (nóminas/expedientes/docs) con la cuenta de servicio o usa OAuth con acceso a esa carpeta.';
   }
   if (lower.includes('faltan credenciales') || lower.includes('scopes')) {
     return raw;

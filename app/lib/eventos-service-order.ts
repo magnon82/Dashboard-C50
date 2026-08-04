@@ -53,8 +53,11 @@ function buildOsNumber(eventDate: string | null, quoteNumber: string | null): st
     /-/g,
     ''
   );
-  const suffix = quoteNumber
-    ? String(quoteNumber).replace(/^EVT-?/i, '').slice(-6)
+  // Sufijo desde el folio de cotización (COT-2026-017 → 017; legacy EVT-… → últimos dígitos).
+  // No reutiliza el folio COT como folio de OS.
+  const digits = quoteNumber?.match(/(\d+)\s*$/)?.[1];
+  const suffix = digits
+    ? digits.padStart(3, '0').slice(-6)
     : String(Math.floor(Math.random() * 900 + 100));
   return `OS-${day}-${suffix}`;
 }

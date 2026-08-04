@@ -72,7 +72,8 @@ export function ComprobantesIndex({
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<string>('');
   const [rootExists, setRootExists] = useState(false);
-  /** When true, force Supabase index even if I: is mounted (sparse). Default: disk scan. */
+  const [localFsEnabled, setLocalFsEnabled] = useState(false);
+  /** When true, force Supabase index even if local Drive is mounted (sparse). Default: disk scan. */
   const [preferIndex, setPreferIndex] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -104,6 +105,7 @@ export function ComprobantesIndex({
       setItems(json.items || []);
       setSource(json.source || '');
       setRootExists(Boolean(json.rootExists));
+      setLocalFsEnabled(Boolean(json.localFsEnabled));
       setLoadedOnce(true);
     } catch {
       setError('No se pudo cargar el índice de comprobantes');
@@ -222,12 +224,15 @@ export function ComprobantesIndex({
             </label>
             <button
               type="button"
-              className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700"
+              className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!localFsEnabled && !rootExists}
               onClick={() => setPreferIndex((v) => !v)}
               title={
-                preferIndex
-                  ? 'Volver a listar desde la carpeta local I: (completo, más reciente primero)'
-                  : 'Forzar índice Supabase (puede estar incompleto)'
+                !localFsEnabled && !rootExists
+                  ? 'Escaneo local no disponible en la nube'
+                  : preferIndex
+                    ? 'Volver a listar desde la carpeta local (completo, más reciente primero)'
+                    : 'Forzar índice Supabase (puede estar incompleto)'
               }
             >
               {preferIndex ? 'Escanear disco' : 'Usar índice'}
@@ -244,7 +249,9 @@ export function ComprobantesIndex({
                 : source === 'index+scan'
                   ? 'disco + índice'
                   : source || '—'}
-            {rootExists ? '' : ' · carpeta I: no visible en este servidor'}.
+            {rootExists
+              ? ''
+              : ' · vista previa PDF solo en PC de admin (en línea: solo índice)'}.
             {!showAll && sortedItems.length > PAGE_SIZE
               ? ` · mostrando ${PAGE_SIZE} de ${sortedItems.length}`
               : sortedItems.length
@@ -343,6 +350,13 @@ export function ComprobantesIndex({
                             >
                               Abrir
                             </a>
+                          ) : !rootExists ? (
+                            <span
+                              className="text-xs text-slate-400"
+                              title="Indexado; abrir PDF requiere PC de admin o Storage/Drive API"
+                            >
+                              Solo índice
+                            </span>
                           ) : null}
                         </div>
                       </td>

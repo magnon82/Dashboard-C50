@@ -21,6 +21,13 @@ import {
   listHrFolder,
 } from '@/app/lib/hr-biblioteca';
 import {
+  attachDefaultDriveUrls,
+  bibliotecaDriveApiAvailable,
+  browseBibliotecaDriveFolder,
+  downloadBibliotecaDriveByToken,
+  findAndDownloadBibliotecaFile,
+} from '@/app/lib/hr-biblioteca-drive';
+import {
   formatSyncBanner,
   upsertHrDriveSyncState,
 } from '@/app/lib/hr-drive-sync';
@@ -89,17 +96,79 @@ export async function GET(request: Request) {
   const textPath = url.searchParams.get('text') || '';
 
   if (openPath) {
+    const decoded = decodeURIComponent(openPath);
+
+    if (decoded.startsWith('drive:file:')) {
+      try {
+        const dl = await downloadBibliotecaDriveByToken(decoded);
+        if (!dl) {
+          return NextResponse.json(
+            {
+              error: 'Archivo Drive no descargable',
+              code: 'drive_unavailable',
+            },
+            { status: 404 }
+          );
+        }
+        const asAttachment = url.searchParams.get('download') === '1';
+        const { contentType, inline } = hrBibliotecaContentType(dl.name);
+        const disposition =
+          asAttachment || !inline ? 'attachment' : 'inline';
+        return new NextResponse(new Uint8Array(dl.buffer), {
+          headers: {
+            'Content-Type': dl.mimeType || contentType,
+            'Content-Disposition': `${disposition}; filename="${encodeURIComponent(dl.name)}"`,
+            'Cache-Control': 'private, max-age=120',
+          },
+        });
+      } catch (e) {
+        return NextResponse.json(
+          {
+            error: e instanceof Error ? e.message : 'Error Drive',
+            code: 'drive_unavailable',
+          },
+          { status: 502 }
+        );
+      }
+    }
+
     if (!localDriveFsEnabled()) {
+      if (bibliotecaDriveApiAvailable()) {
+        try {
+          const dl = await findAndDownloadBibliotecaFile(decoded);
+          if (dl) {
+            const asAttachment = url.searchParams.get('download') === '1';
+            const { contentType, inline } = hrBibliotecaContentType(dl.name);
+            const disposition =
+              asAttachment || !inline ? 'attachment' : 'inline';
+            return new NextResponse(new Uint8Array(dl.buffer), {
+              headers: {
+                'Content-Type': dl.mimeType || contentType,
+                'Content-Disposition': `${disposition}; filename="${encodeURIComponent(dl.name)}"`,
+                'Cache-Control': 'private, max-age=120',
+              },
+            });
+          }
+        } catch (e) {
+          return NextResponse.json(
+            {
+              error: e instanceof Error ? e.message : 'Error Drive',
+              code: 'drive_unavailable',
+              hint: 'Revisa HR_DOCS_VIGENTE_DRIVE_FOLDER_ID + credenciales Google, o usa «Abrir en Drive».',
+            },
+            { status: 502 }
+          );
+        }
+      }
       return NextResponse.json(
         {
           error:
-            'Archivos locales no disponibles en este servidor. Usa «Abrir en Drive» si hay enlace.',
+            'Archivo no disponible en este servidor. Usa «Abrir en Drive» o configura Drive API + HR_DOCS_VIGENTE_DRIVE_FOLDER_ID.',
           code: 'local_fs_unavailable',
         },
         { status: 404 }
       );
     }
-    const decoded = decodeURIComponent(openPath);
     if (!isUnderHrRoot(decoded)) {
       return NextResponse.json(
         { error: 'Ruta fuera de la biblioteca RH' },
@@ -140,11 +209,43 @@ export async function GET(request: Request) {
   }
 
   if (browsePath) {
+    const decoded = decodeURIComponent(browsePath);
+
+    if (
+      decoded.startsWith('drive:folder:') ||
+      (!localDriveFsEnabled() && bibliotecaDriveApiAvailable())
+    ) {
+      try {
+        const listed = await browseBibliotecaDriveFolder(decoded);
+        return NextResponse.json({
+          ready: true,
+          root: null,
+          rootExists: false,
+          ...listed,
+          source: 'drive_api',
+        });
+      } catch (e) {
+        return NextResponse.json(
+          {
+            error:
+              e instanceof Error
+                ? e.message
+                : 'No se pudo listar la carpeta en Drive',
+            code: 'drive_unavailable',
+            ready: false,
+            items: [],
+            rootExists: false,
+          },
+          { status: 502 }
+        );
+      }
+    }
+
     if (!localDriveFsEnabled() || !hrRootExists()) {
       return NextResponse.json(
         {
           error:
-            'Explorar carpeta local no disponible en línea. Usa «Abrir en Drive».',
+            'Explorar carpeta no disponible. Configura Drive API + HR_DOCS_VIGENTE_DRIVE_FOLDER_ID o usa «Abrir en Drive».',
           code: 'local_fs_unavailable',
           ready: false,
           items: [],
@@ -153,7 +254,6 @@ export async function GET(request: Request) {
         { status: 404 }
       );
     }
-    const decoded = decodeURIComponent(browsePath);
     if (!isUnderHrRoot(decoded)) {
       return NextResponse.json(
         { error: 'Ruta fuera de la biblioteca RH' },
@@ -184,7 +284,7 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           error:
-            'Vista de texto local no disponible en línea. Usa «Abrir en Drive».',
+            'Vista de texto local no disponible en línea. Usa «Abrir en Drive» o Abrir/Descargar.',
           code: 'local_fs_unavailable',
         },
         { status: 404 }
@@ -265,7 +365,9 @@ export async function GET(request: Request) {
       void patchLegacyDocTitles();
     }
 
-    docs = normalizeDocTitles(docs).filter((d) => !isHrBibliotecaHiddenDoc(d));
+    docs = attachDefaultDriveUrls(
+      normalizeDocTitles(docs).filter((d) => !isHrBibliotecaHiddenDoc(d))
+    );
     const enriched = await enrichHrDocLinks(docs);
     const root = getHrRoot();
     const rootExists = hrRootExists();
@@ -304,8 +406,10 @@ export async function GET(request: Request) {
       error,
     });
   } catch (e) {
-    const docs = normalizeDocTitles(
-      seedDocs().filter((d) => !isHrBibliotecaHiddenDoc(d))
+    const docs = attachDefaultDriveUrls(
+      normalizeDocTitles(
+        seedDocs().filter((d) => !isHrBibliotecaHiddenDoc(d))
+      )
     );
     const enriched = await enrichHrDocLinks(docs);
     return NextResponse.json({

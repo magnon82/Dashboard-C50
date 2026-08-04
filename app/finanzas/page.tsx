@@ -179,61 +179,6 @@ export default function FinanzasPage() {
         </div>
       )}
 
-      <SaldosAlDia data={saldos} loading={loading} />
-
-      <ResumenBancosSemanal
-        weeks={weeks}
-        loading={loading}
-        filters={
-          <>
-            <label className={filterControlClass}>
-              <span className="text-slate-500">Año</span>
-              <select
-                className={filterSelectClass}
-                value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
-              >
-                {yearsAvailable.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={filterControlClass}>
-              <span className="text-slate-500">Mes</span>
-              <select
-                className={filterSelectClass}
-                value={month}
-                onChange={(e) => setMonth(Number(e.target.value))}
-              >
-                {ALL_MONTHS.map((m) => {
-                  const hasData = monthsWithData.has(m);
-                  return (
-                    <option
-                      key={m}
-                      value={m}
-                      style={hasData ? undefined : { color: '#94a3b8' }}
-                    >
-                      {MESES[m - 1]}
-                      {hasData ? '' : ' · sin datos'}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-          </>
-        }
-      />
-      <PresupuestoRubros
-        rows={rubros}
-        meta={meta}
-        loading={loading}
-        records={records}
-        year={year}
-        month={month}
-      />
-
       {/* Listas de consulta: 10 + Mostrar más + año/mes/día + buscar (salvo indicación contraria). */}
       <section className="mb-8">
         <p
@@ -319,6 +264,61 @@ export default function FinanzasPage() {
           Se abren en una ventana independiente con búsqueda y filtros.
         </p>
       </section>
+
+      <SaldosAlDia data={saldos} loading={loading} />
+
+      <ResumenBancosSemanal
+        weeks={weeks}
+        loading={loading}
+        filters={
+          <>
+            <label className={filterControlClass}>
+              <span className="text-slate-500">Año</span>
+              <select
+                className={filterSelectClass}
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+              >
+                {yearsAvailable.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={filterControlClass}>
+              <span className="text-slate-500">Mes</span>
+              <select
+                className={filterSelectClass}
+                value={month}
+                onChange={(e) => setMonth(Number(e.target.value))}
+              >
+                {ALL_MONTHS.map((m) => {
+                  const hasData = monthsWithData.has(m);
+                  return (
+                    <option
+                      key={m}
+                      value={m}
+                      style={hasData ? undefined : { color: '#94a3b8' }}
+                    >
+                      {MESES[m - 1]}
+                      {hasData ? '' : ' · sin datos'}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+          </>
+        }
+      />
+      <PresupuestoRubros
+        rows={rubros}
+        meta={meta}
+        loading={loading}
+        records={records}
+        year={year}
+        month={month}
+      />
     </SuiteShell>
   );
 }

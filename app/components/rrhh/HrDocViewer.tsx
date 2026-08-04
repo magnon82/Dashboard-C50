@@ -104,8 +104,10 @@ export function HrDocViewer({
       if (!res.ok) {
         setError(
           json.code === 'local_fs_unavailable'
-            ? 'Carpeta local no disponible en línea. Usa «Abrir en Drive».'
-            : json.error || `Error ${res.status}`
+            ? 'Sin carpeta local en el servidor. Usa «Abrir en Drive» o configura Drive API (HR_DOCS_VIGENTE_DRIVE_FOLDER_ID).'
+            : json.code === 'drive_unavailable'
+              ? json.error || 'No se pudo listar en Drive'
+              : json.error || `Error ${res.status}`
         );
         setBrowseItems([]);
         return;
@@ -133,8 +135,10 @@ export function HrDocViewer({
       if (!res.ok) {
         setError(
           json.code === 'local_fs_unavailable'
-            ? 'Documento local no disponible en línea. Usa «Abrir en Drive».'
-            : json.error || `Error ${res.status}`
+            ? 'Sin archivo local en el servidor. Usa «Abrir en Drive» o Abrir/Descargar si Drive API está configurado.'
+            : json.code === 'drive_unavailable'
+              ? json.error || 'No se pudo abrir en Drive'
+              : json.error || `Error ${res.status}`
         );
         setDocxText(null);
         return;

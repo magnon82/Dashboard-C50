@@ -6,6 +6,9 @@ import {
 } from '@/app/lib/hr-api';
 import {
   HR_RESGUARDO_FORM_VERSION,
+  HR_RESGUARDO_SELECT,
+  HR_RESGUARDO_SELECT_LEGACY,
+  asResguardoRequest,
   buildResguardoFolio,
   normalizeResguardoItems,
   type HrResguardoKind,
@@ -24,25 +27,40 @@ const KINDS = new Set<HrResguardoKind>([
   'llaves',
 ]);
 
-const SELECT =
-  'id, folio, employee_id, kind, status, payload, items, requested_by, reviewed_by, reviewed_at, notes, created_at, updated_at';
+function missingAcceptedCols(message: string | undefined | null): boolean {
+  if (!message) return false;
+  return /accepted_at|accepted_by|schema cache|42703/i.test(message);
+}
 
-function asRequest(row: Record<string, unknown>): HrResguardoRequest {
-  return {
-    id: String(row.id),
-    folio: row.folio != null ? String(row.folio) : null,
-    employee_id: row.employee_id != null ? String(row.employee_id) : null,
-    kind: (row.kind as HrResguardoKind) || 'equipo',
-    status: (row.status as HrResguardoRequest['status']) || 'pendiente',
-    payload: (row.payload || {}) as HrResguardoPayload,
-    items: normalizeResguardoItems(row.items),
-    requested_by: row.requested_by != null ? String(row.requested_by) : null,
-    reviewed_by: row.reviewed_by != null ? String(row.reviewed_by) : null,
-    reviewed_at: row.reviewed_at != null ? String(row.reviewed_at) : null,
-    notes: row.notes != null ? String(row.notes) : null,
-    created_at: String(row.created_at),
-    updated_at: String(row.updated_at),
-  };
+async function selectResguardos(
+  sb: ReturnType<typeof getServiceSupabase>,
+  opts: { statusFilter: string | null; limit: number }
+) {
+  let q = sb
+    .from('hr_resguardo_requests')
+    .select(HR_RESGUARDO_SELECT)
+    .order('created_at', { ascending: false })
+    .limit(opts.limit);
+  if (opts.statusFilter) q = q.eq('status', opts.statusFilter);
+  const res = await q;
+  if (!res.error) {
+    return { data: res.data, error: null as string | null, legacy: false };
+  }
+  if (missingAcceptedCols(res.error.message)) {
+    let q2 = sb
+      .from('hr_resguardo_requests')
+      .select(HR_RESGUARDO_SELECT_LEGACY)
+      .order('created_at', { ascending: false })
+      .limit(opts.limit);
+    if (opts.statusFilter) q2 = q2.eq('status', opts.statusFilter);
+    const legacy = await q2;
+    return {
+      data: legacy.data,
+      error: legacy.error?.message ?? null,
+      legacy: true,
+    };
+  }
+  return { data: null, error: res.error.message, legacy: false };
 }
 
 /**
@@ -61,34 +79,23 @@ export async function GET(request: Request) {
 
   try {
     const sb = getServiceSupabase();
-    let q = sb
-      .from('hr_resguardo_requests')
-      .select(SELECT)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (statusFilter) {
-      q = q.eq('status', statusFilter);
-    }
-
-    const res = await q;
+    const res = await selectResguardos(sb, { statusFilter, limit });
 
     if (res.error) {
       const missing =
-        res.error.message?.includes('does not exist') ||
-        res.error.code === '42P01';
+        /does not exist|42P01/i.test(res.error) || /schema cache/i.test(res.error);
       return NextResponse.json({
         ready: false,
         scope: 'rrhh',
         requests: [] as HrResguardoRequest[],
         error: missing
           ? 'Tabla hr_resguardo_requests no migrada. Ejecuta supabase/hr_resguardo.sql.'
-          : res.error.message,
+          : res.error,
       });
     }
 
     const requests = (res.data || []).map((r) =>
-      asRequest(r as Record<string, unknown>)
+      asResguardoRequest(r as Record<string, unknown>)
     );
 
     return NextResponse.json({
@@ -111,6 +118,7 @@ export async function GET(request: Request) {
 
 /**
  * POST /api/hr/resguardo — RR.HH. captura carta de resguardo.
+ * Queda pendiente de aceptación del colaborador (Staff).
  */
 export async function POST(request: Request) {
   const auth = await requireRrhhSession();
@@ -210,7 +218,6 @@ export async function POST(request: Request) {
         employeeId = String(empRes.data.id);
       }
     } else {
-      // Resolver ficha por nombre del responsable (misma lógica de plantilla).
       const empList = await sb
         .from('hr_employees')
         .select('id, full_name')
@@ -242,13 +249,24 @@ export async function POST(request: Request) {
       items,
       requested_by: auth.username,
       notes: String(body.notes ?? '').trim() || null,
+      accepted_at: null,
+      accepted_by: null,
     };
 
-    const res = await sb
+    let res = await sb
       .from('hr_resguardo_requests')
       .insert(insert)
-      .select(SELECT)
+      .select(HR_RESGUARDO_SELECT)
       .single();
+
+    if (res.error && missingAcceptedCols(res.error.message)) {
+      const { accepted_at: _a, accepted_by: _b, ...legacyInsert } = insert;
+      res = await sb
+        .from('hr_resguardo_requests')
+        .insert(legacyInsert)
+        .select(HR_RESGUARDO_SELECT_LEGACY)
+        .single();
+    }
 
     if (res.error) {
       const missing =
@@ -266,7 +284,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      request: asRequest(res.data as Record<string, unknown>),
+      request: asResguardoRequest(res.data as Record<string, unknown>),
     });
   } catch (e) {
     return NextResponse.json(
@@ -356,6 +374,10 @@ export async function PATCH(request: Request) {
       acepta_danio_parcial: Boolean(payloadIn.acepta_danio_parcial),
       acepta_perdida_total: Boolean(payloadIn.acepta_perdida_total),
       observaciones: String(payloadIn.observaciones ?? '').trim() || undefined,
+      empleado_aceptado_at:
+        String(payloadIn.empleado_aceptado_at ?? '').trim() || undefined,
+      empleado_aceptado_por:
+        String(payloadIn.empleado_aceptado_por ?? '').trim() || undefined,
     };
   }
 
@@ -392,12 +414,21 @@ export async function PATCH(request: Request) {
 
   try {
     const sb = getServiceSupabase();
-    const res = await sb
+    let res = await sb
       .from('hr_resguardo_requests')
       .update(patch)
       .eq('id', id)
-      .select(SELECT)
+      .select(HR_RESGUARDO_SELECT)
       .single();
+
+    if (res.error && missingAcceptedCols(res.error.message)) {
+      res = await sb
+        .from('hr_resguardo_requests')
+        .update(patch)
+        .eq('id', id)
+        .select(HR_RESGUARDO_SELECT_LEGACY)
+        .single();
+    }
 
     if (res.error) {
       const missing =
@@ -415,7 +446,7 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      request: asRequest(res.data as Record<string, unknown>),
+      request: asResguardoRequest(res.data as Record<string, unknown>),
     });
   } catch (e) {
     return NextResponse.json(

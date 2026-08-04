@@ -18,10 +18,15 @@ import {
 const inputClass =
   'mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm';
 
+const autoInputClass =
+  'mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700';
+
 const KINDS = Object.keys(HR_RESGUARDO_KIND_LABELS) as HrResguardoKind[];
 const STATUSES = Object.keys(
   HR_RESGUARDO_STATUS_LABELS
 ) as HrResguardoStatus[];
+
+const NO_DISPONIBLE = 'no disponible';
 
 function todayIso(): string {
   return new Date().toLocaleDateString('en-CA', {
@@ -29,10 +34,25 @@ function todayIso(): string {
   });
 }
 
+/** Perfil primero; si vacío → «no disponible». */
+function autoFromProfile(
+  profileVal?: string | null,
+  fallbackPayload?: string | null
+): string {
+  for (const c of [profileVal, fallbackPayload]) {
+    const t = String(c || '').trim();
+    if (t && t.toLowerCase() !== NO_DISPONIBLE) return t;
+  }
+  return NO_DISPONIBLE;
+}
+
 export function RrhhResguardoForm({
   employeeId,
   defaultNombre,
   defaultPuesto,
+  defaultEmail,
+  defaultPhone,
+  defaultDomicilio,
   existing,
   onCreated,
   onCancel,
@@ -41,6 +61,12 @@ export function RrhhResguardoForm({
   employeeId?: string | null;
   defaultNombre?: string;
   defaultPuesto?: string;
+  /** Desde hr_employees.email (ficha Datos). */
+  defaultEmail?: string | null;
+  /** Desde hr_employees.phone (ficha Datos). */
+  defaultPhone?: string | null;
+  /** Desde hr_employees.domicilio (ficha Datos). */
+  defaultDomicilio?: string | null;
   /** Si se pasa, el formulario edita esa carta (PATCH). */
   existing?: HrResguardoRequest | null;
   onCreated?: () => void;
@@ -60,13 +86,12 @@ export function RrhhResguardoForm({
   const [nombre, setNombre] = useState(
     () => p?.nombre || defaultNombre || ''
   );
-  const [rfc, setRfc] = useState(() => p?.rfc || '');
   const [puesto, setPuesto] = useState(
     () => p?.puesto || defaultPuesto || ''
   );
-  const [email, setEmail] = useState(() => p?.email || '');
-  const [telefono, setTelefono] = useState(() => p?.telefono || '');
-  const [domicilio, setDomicilio] = useState(() => p?.domicilio || '');
+  const email = autoFromProfile(defaultEmail, p?.email);
+  const telefono = autoFromProfile(defaultPhone, p?.telefono);
+  const domicilio = autoFromProfile(defaultDomicilio, p?.domicilio);
   const [fechaAsignacion, setFechaAsignacion] = useState(
     () => p?.fecha_asignacion || todayIso()
   );
@@ -119,12 +144,8 @@ export function RrhhResguardoForm({
   function resetForm() {
     setKind('equipo');
     setLugarFecha(defaultLugarFecha());
-    setNombre('');
-    setRfc('');
-    setPuesto('');
-    setEmail('');
-    setTelefono('');
-    setDomicilio('');
+    setNombre(defaultNombre || '');
+    setPuesto(defaultPuesto || '');
     setFechaAsignacion(todayIso());
     setFechaResguardo(todayIso());
     setEmisorNombre('');
@@ -145,7 +166,6 @@ export function RrhhResguardoForm({
       const payload = {
         lugar_fecha: lugarFecha,
         nombre,
-        rfc,
         puesto,
         email,
         telefono,
@@ -300,30 +320,27 @@ export function RrhhResguardoForm({
             />
           </label>
           <label className="block">
-            <span className="text-sm font-semibold text-slate-700">RFC</span>
-            <input
-              className={inputClass}
-              value={rfc}
-              onChange={(e) => setRfc(e.target.value)}
-            />
-          </label>
-          <label className="block">
             <span className="text-sm font-semibold text-slate-700">
               Correo electrónico
             </span>
             <input
-              type="email"
-              className={inputClass}
+              type="text"
+              className={autoInputClass}
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              readOnly
+              aria-readonly="true"
+              title="Se toma de la ficha del empleado (Datos)"
             />
           </label>
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">Teléfono</span>
             <input
-              className={inputClass}
+              type="text"
+              className={autoInputClass}
               value={telefono}
-              onChange={(e) => setTelefono(e.target.value)}
+              readOnly
+              aria-readonly="true"
+              title="Se toma de la ficha del empleado (Datos)"
             />
           </label>
           <label className="block sm:col-span-2">
@@ -331,9 +348,12 @@ export function RrhhResguardoForm({
               Domicilio
             </span>
             <input
-              className={inputClass}
+              type="text"
+              className={autoInputClass}
               value={domicilio}
-              onChange={(e) => setDomicilio(e.target.value)}
+              readOnly
+              aria-readonly="true"
+              title="Se toma de la ficha del empleado (Datos)"
             />
           </label>
         </div>

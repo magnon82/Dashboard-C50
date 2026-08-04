@@ -217,6 +217,8 @@ export const HR_TABLES: string[] = [
   'hr_schedule_shifts',
   'hr_availability',
   'hr_leave_balances',
+  'hr_leave_accrual_state',
+  'hr_leave_renewal_alerts',
   'hr_leave_requests',
   'hr_doc_links',
   'hr_resguardo_requests',
@@ -250,7 +252,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         id: 'supabase-hr',
         label: 'Recursos Humanos (hr_*)',
         role: 'Plantilla, nómina, horarios, vacaciones, biblioteca y resguardos. No usa source_file.',
-        note: 'Migración: supabase/hr_module.sql (+ hr_resguardo.sql / hr_leave_request_form.sql si aplica)',
+        note: 'Migración: supabase/hr_module.sql (+ hr_leave_accrual.sql / hr_resguardo.sql / hr_leave_request_form.sql si aplica)',
         updateFrequency: 'Suite + soft-sync Actions diario 12:00 PM CDMX',
         leaves: HR_TABLES.map((t) => ({
           label: t,

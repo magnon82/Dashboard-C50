@@ -10,6 +10,7 @@ import {
   formatHrPuesto,
   isGenericPisoArea,
   isPlantillaExterno,
+  isVacationScheduleShift,
   meseroWithinFamilyRank,
   plantillaPositionKey,
   scheduleSectionFromPosition,
@@ -56,6 +57,7 @@ type DayCell = {
   start: string;
   end: string;
   off: boolean;
+  vacation?: boolean;
   extra?: DaySegment[];
 };
 
@@ -191,7 +193,11 @@ function toHhmm(t: string | null | undefined): string {
 }
 
 function emptyDay(): DayCell {
-  return { start: '', end: '', off: true };
+  return { start: '', end: '', off: true, vacation: false };
+}
+
+function vacationDay(): DayCell {
+  return { start: '', end: '', off: true, vacation: true };
 }
 
 function buildRowsFromShifts(
@@ -251,12 +257,16 @@ function buildRowsFromShifts(
     }
     const di = dates.indexOf(s.shift_date);
     if (di < 0) continue;
+    if (isVacationScheduleShift(s)) {
+      row.days[di] = vacationDay();
+      continue;
+    }
     const start = toHhmm(s.start_time);
     const end = toHhmm(s.end_time);
     if (!start || !end) continue;
     const cur = row.days[di];
     if (cur.off || !cur.start || !cur.end) {
-      row.days[di] = { start, end, off: false };
+      row.days[di] = { start, end, off: false, vacation: false };
     } else if (cur.start === start && cur.end === end) {
       // duplicate
     } else {
@@ -264,7 +274,7 @@ function buildRowsFromShifts(
       if (!extras.some((e) => e.start === start && e.end === end)) {
         extras.push({ start, end });
       }
-      row.days[di] = { ...cur, off: false, extra: extras };
+      row.days[di] = { ...cur, off: false, vacation: false, extra: extras };
     }
   }
 
@@ -459,12 +469,19 @@ function TeamScheduleTable({
                         >
                           <span
                             className="inline-block w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide"
-                            style={{
-                              backgroundColor: '#fef3c7',
-                              color: '#92400e',
-                            }}
+                            style={
+                              d.vacation
+                                ? {
+                                    backgroundColor: '#e0f2fe',
+                                    color: '#075985',
+                                  }
+                                : {
+                                    backgroundColor: '#fef3c7',
+                                    color: '#92400e',
+                                  }
+                            }
                           >
-                            DESCANSO
+                            {d.vacation ? 'VACACIONES' : 'DESCANSO'}
                           </span>
                         </td>
                       ) : (

@@ -12,6 +12,7 @@ import { hashPassword, verifyPassword } from '@/app/lib/password';
 import {
   createUser,
   ensureStaffCorteCapabilitySeed,
+  getServiceSupabase,
   listUsers,
   toPublicUser,
   type UserRole,
@@ -59,6 +60,34 @@ export async function GET() {
     const rows = await listUsers();
     const bootstrapUser = getDashboardUser();
     const bootstrapPass = getDashboardPassword();
+
+    // Enlaces Suite → ficha RH (suite_username)
+    const linkByUser = new Map<
+      string,
+      { id: string; full_name: string; puesto: string | null }
+    >();
+    try {
+      const sb = getServiceSupabase();
+      const { data: emps } = await sb
+        .from('hr_employees')
+        .select('id, full_name, puesto, suite_username')
+        .not('suite_username', 'is', null)
+        .limit(500);
+      for (const e of emps || []) {
+        const u = String(e.suite_username || '')
+          .trim()
+          .toLowerCase();
+        if (!u) continue;
+        linkByUser.set(u, {
+          id: String(e.id),
+          full_name: String(e.full_name || ''),
+          puesto: e.puesto != null ? String(e.puesto) : null,
+        });
+      }
+    } catch {
+      // HR opcional
+    }
+
     return NextResponse.json({
       users: rows.map((r) => {
         const pub = toPublicUser(r);
@@ -72,6 +101,7 @@ export async function GET() {
         ) {
           password = bootstrapPass;
         }
+        const linked = linkByUser.get(pub.username.trim().toLowerCase()) || null;
         return {
           id: pub.id,
           username: pub.username,
@@ -84,6 +114,7 @@ export async function GET() {
           createdAt: r.created_at,
           /** Solo en respuesta admin: contraseña recuperable si está guardada. */
           password,
+          linkedEmployee: linked,
         };
       }),
     });

@@ -11,6 +11,10 @@ import {
 } from '@/app/lib/auth';
 import { SOURCE_ESTADO_CUENTA_PDF_INDEX } from '@/app/lib/estados-cuenta';
 import { getServiceSupabase } from '@/app/lib/users';
+import {
+  clientSafeRoot,
+  localDriveFsEnabled,
+} from '@/app/lib/local-fs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -450,7 +454,10 @@ export async function GET(request: Request) {
       const resolved = await resolveReadablePdf(decoded, root);
       if (!resolved) {
         return NextResponse.json(
-          { error: 'Archivo no legible en este servidor', path: decoded },
+          {
+            error: 'Archivo no legible en este servidor',
+            ...(localDriveFsEnabled() ? { path: decoded } : {}),
+          },
           { status: 404 }
         );
       }
@@ -461,14 +468,17 @@ export async function GET(request: Request) {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `inline; filename="${encodeURIComponent(path.basename(resolved))}"`,
           'Cache-Control': 'private, max-age=120',
-          ...(resolved !== decoded
+          ...(resolved !== decoded && localDriveFsEnabled()
             ? { 'X-Resolved-Path': encodeURIComponent(resolved) }
             : {}),
         },
       });
     } catch {
       return NextResponse.json(
-        { error: 'Archivo no legible en este servidor', path: decoded },
+        {
+          error: 'Archivo no legible en este servidor',
+          ...(localDriveFsEnabled() ? { path: decoded } : {}),
+        },
         { status: 404 }
       );
     }
@@ -491,6 +501,8 @@ export async function GET(request: Request) {
   try {
     let items: EstadoCuentaPdfItem[] = [];
     let source: 'index' | 'scan' = 'index';
+    const localFs = localDriveFsEnabled();
+    const rootExists = localFs && existsSync(root);
 
     if (!forceScan) {
       try {
@@ -500,9 +512,18 @@ export async function GET(request: Request) {
       }
     }
 
-    if (forceScan || items.length === 0) {
-      items = await walkEstadoPdfs(root, years);
-      source = 'scan';
+    if ((forceScan && rootExists) || items.length === 0) {
+      if (rootExists) {
+        items = await walkEstadoPdfs(root, years);
+        source = 'scan';
+      } else if (!items.length) {
+        try {
+          items = await loadFromIndex();
+          source = 'index';
+        } catch {
+          items = [];
+        }
+      }
     }
 
     const filtered = filterItems(items, { year, month, day, bank, q });
@@ -511,12 +532,22 @@ export async function GET(request: Request) {
       return a.filename.localeCompare(b.filename, 'es');
     });
 
+    const itemsOut = localFs
+      ? filtered
+      : filtered.map((it) => ({
+          ...it,
+          path: '',
+          rel_path: '',
+        }));
+
     return NextResponse.json({
-      items: filtered,
-      count: filtered.length,
+      items: itemsOut,
+      count: itemsOut.length,
       source,
-      root,
-      rootExists: existsSync(root),
+      root: clientSafeRoot(root),
+      rootExists,
+      localFsEnabled: localFs,
+      canOpenFiles: rootExists,
     });
   } catch (e) {
     return NextResponse.json(

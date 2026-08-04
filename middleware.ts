@@ -28,6 +28,14 @@ const MODULE_PREFIXES = [
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Público: cotización /c/{token} + API lectura/aceptación por token (sin sesión)
+  if (
+    pathname.startsWith('/c/') ||
+    pathname.startsWith('/api/eventos/quotes/public/')
+  ) {
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith('/login') || pathname.startsWith('/api/auth')) {
     if (pathname.startsWith('/login')) {
       const token = request.cookies.get(SESSION_COOKIE)?.value;

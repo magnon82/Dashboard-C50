@@ -185,6 +185,7 @@ function mapUpcomingRow(ev: {
   os_filename?: string | null;
   has_os?: boolean;
   has_anticipo?: boolean;
+  folio?: string | null;
   quote_id: string | null;
 }) {
   return {
@@ -212,6 +213,7 @@ function mapUpcomingRow(ev: {
     has_anticipo: Boolean(
       ev.has_anticipo || /Anticipos\s*C50/i.test(ev.source_label || '')
     ),
+    folio: ev.folio || null,
     quote_id: ev.quote_id,
   };
 }

@@ -104,7 +104,7 @@ create table if not exists public.event_menus (
   name text not null,
   category text not null
     check (category in (
-      'tres_tiempos', 'desayunos', 'parejas', 'barra_libre', 'paquete', 'extra'
+      'tres_tiempos', 'carta', 'desayunos', 'parejas', 'barra_libre', 'paquete', 'extra'
     )),
   description text,
   min_pax integer,
@@ -174,12 +174,55 @@ create table if not exists public.event_quotes (
   notes text,
   valid_until date,
   hold_until timestamptz,
+  public_token text,
+  accepted_at timestamptz,
+  payment_method text,
+  client_accept_note text,
+  payment_link_url text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table public.event_quotes
   add column if not exists celebration text;
+
+alter table public.event_quotes
+  add column if not exists public_token text;
+
+alter table public.event_quotes
+  add column if not exists accepted_at timestamptz;
+
+alter table public.event_quotes
+  add column if not exists payment_method text;
+
+alter table public.event_quotes
+  add column if not exists client_accept_note text;
+
+alter table public.event_quotes
+  add column if not exists payment_link_url text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'event_quotes_payment_method_check'
+  ) then
+    alter table public.event_quotes
+      add constraint event_quotes_payment_method_check
+      check (
+        payment_method is null
+        or payment_method in (
+          'efectivo_restaurante',
+          'tarjeta_terminal',
+          'tarjeta_link',
+          'transferencia_bbva'
+        )
+      );
+  end if;
+end $$;
+
+create unique index if not exists event_quotes_public_token_uidx
+  on public.event_quotes (public_token)
+  where public_token is not null;
 
 create table if not exists public.event_quote_lines (
   id uuid primary key default gen_random_uuid(),
@@ -200,11 +243,17 @@ alter table public.event_quote_lines
 create index if not exists event_quotes_status_idx on public.event_quotes (status);
 create index if not exists event_quote_lines_quote_idx on public.event_quote_lines (quote_id);
 
+create unique index if not exists event_quotes_quote_number_uidx
+  on public.event_quotes (quote_number)
+  where quote_number is not null;
+
 alter table public.event_quotes enable row level security;
 alter table public.event_quote_lines enable row level security;
 
 comment on table public.event_quotes is
   'Cotizaciones: total = subtotal + (servicio 15% si apply_servicio).';
+comment on column public.event_quotes.quote_number is
+  'Folio de cotización para el cliente (COT-YYYY-###). Independiente de event_service_orders.os_number.';
 
 -- ---------------------------------------------------------------------------
 -- Stubs Fase 2
@@ -335,6 +384,17 @@ values
     false,
     10,
     'Fuente definitiva: I:\Mi unidad\Eventos\Menús\Menús eventos vigentes\Menú 3 tiempos 2025.pdf — solo 7 fuertes del PDF (sin extras OS/carta C50).'
+  ),
+  (
+    'menu_regular_c50',
+    'Menú regular (C50)',
+    'carta',
+    'Carta de alimentos del restaurante (Menú C50 Esp). Precio por platillo / persona. Grupos desde 10 personas.',
+    10,
+    false,
+    false,
+    15,
+    'Fuente: I:\Mi unidad\Menú C50\Menú C50 Esp.pdf — entradas, fuertes, postres y guarniciones. Ítems vía seed JSON / soft-load API.'
   ),
   (
     'desayunos_2025',

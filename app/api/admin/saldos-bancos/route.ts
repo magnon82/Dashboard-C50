@@ -11,6 +11,7 @@ import {
   CAT_SALDO_MIFEL,
   SOURCE_SALDOS_BANCOS_MANUAL,
   SOURCE_SALDOS_PRESUPUESTO,
+  todayCdmxIso,
 } from '@/app/lib/saldos';
 import { getServiceSupabase } from '@/app/lib/users';
 import { parseIsoDate } from '@/app/lib/ventas-semana';
@@ -34,14 +35,6 @@ async function requireAdmin(): Promise<SessionUser | NextResponse> {
     );
   }
   return session;
-}
-
-function todayIso(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
 }
 
 function parseAmount(v: unknown): number | null {
@@ -106,7 +99,7 @@ export async function GET() {
     const presupuesto = latestPair(rows, SOURCE_SALDOS_PRESUPUESTO);
 
     return NextResponse.json({
-      today: todayIso(),
+      today: todayCdmxIso(),
       manual,
       presupuesto,
       display: manual ?? presupuesto,
@@ -130,9 +123,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Solicitud inválida' }, { status: 400 });
   }
 
-  const date = String(body.date || todayIso()).trim();
+  const today = todayCdmxIso();
+  const date = String(body.date || today).trim();
   if (!isIsoDate(date)) {
     return NextResponse.json({ error: 'Fecha inválida (YYYY-MM-DD)' }, { status: 400 });
+  }
+  if (date > today) {
+    return NextResponse.json(
+      {
+        error: `No se puede capturar saldo con fecha futura (máximo hoy CDMX: ${today})`,
+      },
+      { status: 400 }
+    );
   }
 
   const mifel = parseAmount(body.mifel);

@@ -86,7 +86,7 @@ function extBadge(doc: DocEnriched) {
 
 function previewHint(doc: DocEnriched): string {
   if (isHrCulturaConsultDoc(doc)) return 'Consulta en pantalla';
-  if (!doc.exists && doc.drive_url) return 'Abrir en Drive';
+  if (!doc.exists && doc.drive_url) return 'Abrir en Suite o Drive';
   if (!doc.exists) return 'Solo metadatos en servidor';
   switch (doc.preview) {
     case 'pdf':
@@ -329,7 +329,7 @@ export function RrhhBiblioteca({
                   const isCultura = isHrCulturaConsultDoc(doc);
                   const canConsultLocal =
                     Boolean(doc.local_path) &&
-                    doc.exists !== false &&
+                    (doc.exists === true || Boolean(doc.drive_url)) &&
                     (doc.openable ||
                       doc.preview === 'folder' ||
                       doc.preview === 'pdf' ||
@@ -344,9 +344,8 @@ export function RrhhBiblioteca({
                   const updated = formatMtime(doc.mtimeMs);
                   const size = formatBytes(doc.sizeBytes);
                   const canExploreFolder =
-                    isCultura &&
                     Boolean(doc.local_path) &&
-                    doc.exists !== false &&
+                    (doc.exists === true || Boolean(doc.drive_url)) &&
                     (doc.kind === 'folder' || doc.preview === 'folder');
 
                   return (

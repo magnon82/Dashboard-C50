@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import {
   Cormorant_Garamond,
   Source_Sans_3,
@@ -34,9 +35,18 @@ const body = Source_Sans_3({
 export function EventosCotizacionDocument({
   doc,
   showActions = true,
+  publicShare = false,
+  shareUrl,
+  actionsExtra,
 }: {
   doc: CotizacionDoc;
   showActions?: boolean;
+  /** Vista cliente (/c/…): sin chrome de Suite. */
+  publicShare?: boolean;
+  /** Enlace público absoluto; en /c/ se usa la URL actual. */
+  shareUrl?: string | null;
+  /** Acciones extra (p. ej. Guardar desde vista previa). */
+  actionsExtra?: ReactNode;
 }) {
   const totals = buildCotizacionTotals(doc);
   const terms = shortTermsEs();
@@ -54,6 +64,9 @@ export function EventosCotizacionDocument({
           eventDate={doc.event_date}
           recipientEmail={doc.email}
           recipientPhone={doc.phone}
+          shareUrl={shareUrl}
+          publicShare={publicShare}
+          extra={actionsExtra}
         />
       )}
 
@@ -89,8 +102,7 @@ export function EventosCotizacionDocument({
                 Carranza 50
               </h1>
               <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">
-                Propuesta gastronómica para tu celebración · Menús, servicio y
-                atención Cluster Culinario
+                Propuesta para tu celebración
               </p>
             </div>
             <div className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-right text-xs text-white/80">
@@ -108,9 +120,9 @@ export function EventosCotizacionDocument({
           </div>
           <div className="mt-5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-white/70">
             <span>
-              Folio{' '}
+              Folio cotización{' '}
               <strong className="text-white">
-                {doc.quote_number || 'Borrador'}
+                {doc.quote_number || 'Pendiente'}
               </strong>
             </span>
             <span>

@@ -25,6 +25,7 @@ export type HrResguardoPayload = {
   form_version: string;
   lugar_fecha?: string;
   nombre: string;
+  /** @deprecated Ya no se captura en UI; se conserva por cartas antiguas. */
   rfc?: string;
   puesto?: string;
   email?: string;
@@ -40,6 +41,9 @@ export type HrResguardoPayload = {
   acepta_danio_parcial?: boolean;
   acepta_perdida_total?: boolean;
   observaciones?: string;
+  /** Fallback si columnas accepted_* no existen aún. */
+  empleado_aceptado_at?: string;
+  empleado_aceptado_por?: string;
 };
 
 export type HrResguardoRequest = {
@@ -53,10 +57,83 @@ export type HrResguardoRequest = {
   requested_by: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  /** Aceptación del colaborador (Staff). Null = pendiente de aceptar. */
+  accepted_at: string | null;
+  accepted_by: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export const HR_RESGUARDO_SELECT =
+  'id, folio, employee_id, kind, status, payload, items, requested_by, reviewed_by, reviewed_at, accepted_at, accepted_by, notes, created_at, updated_at';
+
+export const HR_RESGUARDO_SELECT_LEGACY =
+  'id, folio, employee_id, kind, status, payload, items, requested_by, reviewed_by, reviewed_at, notes, created_at, updated_at';
+
+export function asResguardoRequest(row: Record<string, unknown>): HrResguardoRequest {
+  const payload = (row.payload || {}) as HrResguardoPayload;
+  const acceptedAtCol =
+    row.accepted_at != null ? String(row.accepted_at) : null;
+  const acceptedByCol =
+    row.accepted_by != null ? String(row.accepted_by) : null;
+  const acceptedAtFallback =
+    payload.empleado_aceptado_at != null
+      ? String(payload.empleado_aceptado_at)
+      : null;
+  const acceptedByFallback =
+    payload.empleado_aceptado_por != null
+      ? String(payload.empleado_aceptado_por)
+      : null;
+  return {
+    id: String(row.id),
+    folio: row.folio != null ? String(row.folio) : null,
+    employee_id: row.employee_id != null ? String(row.employee_id) : null,
+    kind: (row.kind as HrResguardoKind) || 'equipo',
+    status: (row.status as HrResguardoStatus) || 'pendiente',
+    payload,
+    items: normalizeResguardoItems(row.items),
+    requested_by: row.requested_by != null ? String(row.requested_by) : null,
+    reviewed_by: row.reviewed_by != null ? String(row.reviewed_by) : null,
+    reviewed_at: row.reviewed_at != null ? String(row.reviewed_at) : null,
+    accepted_at: acceptedAtCol || acceptedAtFallback,
+    accepted_by: acceptedByCol || acceptedByFallback,
+    notes: row.notes != null ? String(row.notes) : null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
+}
+
+/** Pendiente de aceptación del colaborador (asignado por RH, aún no aceptado). */
+export function isResguardoAwaitingAcceptance(req: HrResguardoRequest): boolean {
+  if (req.accepted_at) return false;
+  if (req.status === 'cancelado' || req.status === 'devuelto') return false;
+  return true;
+}
+
+export function isResguardoAcceptedByEmployee(req: HrResguardoRequest): boolean {
+  return Boolean(req.accepted_at);
+}
+
+/** Badge RH/Staff: Recibido | Pendiente (aceptación del colaborador). */
+export type HrResguardoAcceptBadge = 'recibido' | 'pendiente' | 'cancelado' | 'devuelto';
+
+export function resguardoAcceptBadge(
+  req: HrResguardoRequest
+): HrResguardoAcceptBadge {
+  if (req.status === 'cancelado') return 'cancelado';
+  if (req.status === 'devuelto') return 'devuelto';
+  if (isResguardoAcceptedByEmployee(req)) return 'recibido';
+  return 'pendiente';
+}
+
+export const HR_RESGUARDO_ACCEPT_LABELS: Record<HrResguardoAcceptBadge, string> =
+  {
+    recibido: 'Recibido',
+    pendiente: 'Pendiente',
+    cancelado: 'Cancelado',
+    devuelto: 'Devuelto',
+  };
 
 export const HR_RESGUARDO_FORM_VERSION = 'c50-resguardo-xlsx-2023';
 
@@ -73,6 +150,11 @@ export const HR_RESGUARDO_STATUS_LABELS: Record<HrResguardoStatus, string> = {
   devuelto: 'Devuelto',
   cancelado: 'Cancelado',
 };
+
+/** Etiqueta de UI en perfil/Staff: Recibido / Pendiente. */
+export function resguardoDisplayStatus(req: HrResguardoRequest): string {
+  return HR_RESGUARDO_ACCEPT_LABELS[resguardoAcceptBadge(req)];
+}
 
 /** Vigentes para inventario: pendientes de entrega + ya entregados (no devueltos/cancelados). */
 export const HR_RESGUARDO_ACTIVE_STATUSES: readonly HrResguardoStatus[] = [

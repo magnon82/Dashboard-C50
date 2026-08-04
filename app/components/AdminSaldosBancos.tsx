@@ -1,17 +1,10 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { todayCdmxIso } from '@/app/lib/saldos';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
-
-function todayLocalIso(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 function money(v: number) {
   return `$${v.toLocaleString('es-MX', {
@@ -29,13 +22,14 @@ type Snapshot = {
 export function AdminSaldosBancos() {
   const [mifel, setMifel] = useState('');
   const [bbva, setBbva] = useState('');
-  const [date, setDate] = useState(todayLocalIso);
+  const [date, setDate] = useState(() => todayCdmxIso());
   const [manual, setManual] = useState<Snapshot | null>(null);
   const [presupuesto, setPresupuesto] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [okMsg, setOkMsg] = useState('');
+  const maxDate = todayCdmxIso();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,11 +52,7 @@ export function AdminSaldosBancos() {
       // Campos de captura vacíos por defecto; el resumen arriba muestra el saldo activo.
       setMifel('');
       setBbva('');
-      if (json.today) {
-        setDate(json.today);
-      } else if (json.manual?.date) {
-        setDate(json.manual.date);
-      }
+      setDate(json.today || todayCdmxIso());
     } catch {
       setError('Error de red al cargar saldos');
     } finally {
@@ -79,6 +69,12 @@ export function AdminSaldosBancos() {
     setSaving(true);
     setError('');
     setOkMsg('');
+    const today = todayCdmxIso();
+    if (date > today) {
+      setError(`No se puede capturar saldo con fecha futura (máximo hoy CDMX: ${today})`);
+      setSaving(false);
+      return;
+    }
     try {
       const res = await fetch('/api/admin/saldos-bancos', {
         method: 'POST',
@@ -196,7 +192,11 @@ export function AdminSaldosBancos() {
                 required
                 type="date"
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                max={maxDate}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setDate(next > maxDate ? maxDate : next);
+                }}
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
               />
             </label>

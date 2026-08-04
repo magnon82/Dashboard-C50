@@ -12,6 +12,7 @@ import {
   deleteUser,
   findUserById,
   findUserByUsername,
+  getServiceSupabase,
   updateUser,
   type UserRole,
   toPublicUser,
@@ -55,6 +56,8 @@ export async function PATCH(
     modules?: string[];
     capabilities?: string[];
     active?: boolean;
+    /** Vincular a hr_employees.id; null limpia el enlace. */
+    employeeId?: string | null;
   };
   try {
     body = await request.json();
@@ -120,6 +123,12 @@ export async function PATCH(
       : undefined;
 
   try {
+    const before = await findUserById(id);
+    if (!before) {
+      return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
+    }
+    const oldUsername = before.username.trim().toLowerCase();
+
     const user = await updateUser(id, {
       username,
       displayName: body.displayName,
@@ -130,6 +139,130 @@ export async function PATCH(
       capabilities,
       active: body.active,
     });
+    const finalUsername = user.username.trim().toLowerCase();
+
+    let linkedEmployee: {
+      id: string;
+      full_name: string;
+      puesto: string | null;
+    } | null = null;
+
+    // Enlace Suite ↔ empleado (suite_username)
+    if (body.employeeId !== undefined || (username !== undefined && username !== oldUsername)) {
+      try {
+        const sb = getServiceSupabase();
+        const now = new Date().toISOString();
+
+        if (body.employeeId !== undefined) {
+          // Limpiar enlace previo de este username
+          await sb
+            .from('hr_employees')
+            .update({ suite_username: null, updated_at: now })
+            .ilike('suite_username', oldUsername);
+          if (finalUsername !== oldUsername) {
+            await sb
+              .from('hr_employees')
+              .update({ suite_username: null, updated_at: now })
+              .ilike('suite_username', finalUsername);
+          }
+
+          const empId =
+            body.employeeId == null || String(body.employeeId).trim() === ''
+              ? null
+              : String(body.employeeId).trim();
+
+          if (empId) {
+            // Quitar el username de cualquier otra ficha y asignar
+            await sb
+              .from('hr_employees')
+              .update({ suite_username: null, updated_at: now })
+              .ilike('suite_username', finalUsername);
+
+            const { data: linked, error: linkErr } = await sb
+              .from('hr_employees')
+              .update({
+                suite_username: finalUsername,
+                updated_at: now,
+              })
+              .eq('id', empId)
+              .select('id, full_name, puesto')
+              .single();
+
+            if (linkErr) {
+              const dup = /unique|duplicate|suite_username/i.test(
+                linkErr.message || ''
+              );
+              return NextResponse.json(
+                {
+                  error: dup
+                    ? 'Ese colaborador ya tiene otro usuario o el username está tomado.'
+                    : linkErr.message,
+                  user: {
+                    id: toPublicUser(user).id,
+                    username: toPublicUser(user).username,
+                    displayName: toPublicUser(user).displayName,
+                    role: toPublicUser(user).role,
+                    modules: user.modules || [],
+                    capabilities: toPublicUser(user).capabilities,
+                    active: toPublicUser(user).active,
+                    canEdit: toPublicUser(user).canEdit,
+                    password: user.password,
+                    linkedEmployee: null,
+                  },
+                },
+                { status: dup ? 409 : 400 }
+              );
+            }
+            if (linked) {
+              linkedEmployee = {
+                id: String(linked.id),
+                full_name: String(linked.full_name || ''),
+                puesto: linked.puesto != null ? String(linked.puesto) : null,
+              };
+            }
+          }
+        } else if (username !== undefined && username !== oldUsername) {
+          // Solo renombraron el usuario: mover el suite_username
+          await sb
+            .from('hr_employees')
+            .update({ suite_username: finalUsername, updated_at: now })
+            .ilike('suite_username', oldUsername);
+          const { data: moved } = await sb
+            .from('hr_employees')
+            .select('id, full_name, puesto')
+            .ilike('suite_username', finalUsername)
+            .maybeSingle();
+          if (moved) {
+            linkedEmployee = {
+              id: String(moved.id),
+              full_name: String(moved.full_name || ''),
+              puesto: moved.puesto != null ? String(moved.puesto) : null,
+            };
+          }
+        }
+      } catch {
+        // HR schema opcional
+      }
+    } else {
+      try {
+        const sb = getServiceSupabase();
+        const { data: cur } = await sb
+          .from('hr_employees')
+          .select('id, full_name, puesto')
+          .ilike('suite_username', finalUsername)
+          .maybeSingle();
+        if (cur) {
+          linkedEmployee = {
+            id: String(cur.id),
+            full_name: String(cur.full_name || ''),
+            puesto: cur.puesto != null ? String(cur.puesto) : null,
+          };
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     const pub = toPublicUser(user);
     return NextResponse.json({
       user: {
@@ -142,6 +275,7 @@ export async function PATCH(
         active: pub.active,
         canEdit: pub.canEdit,
         password: user.password,
+        linkedEmployee,
       },
     });
   } catch (e) {

@@ -14,13 +14,13 @@ import {
 } from '@/app/lib/hr-employee-profile';
 import { resolvePlantillaVigente } from '@/app/lib/hr-plantilla';
 import {
+  expedientePullSourceAvailable,
   pullExpedienteDocuments,
   repairMislabeledPackFromStorage,
   repairSharedPackFromStorage,
   resolveExpedienteFolder,
   shouldSoftPullExpediente,
 } from '@/app/lib/hr-expediente-docs-pull';
-import { localDriveFsEnabled } from '@/app/lib/local-fs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,7 +46,7 @@ function parseIds(raw: string | null): string[] {
  * GET /api/hr/employees/doc-alerts
  * Resumen de documentos obligatorios faltantes por empleado (batch).
  * ?ids=uuid,uuid — lista explícita; sin ids → plantilla vigente.
- * Con File Stream local: soft-pull de expedientes con faltantes antes de contar.
+ * Con File Stream o Drive API: soft-pull de expedientes con faltantes antes de contar.
  */
 export async function GET(request: Request) {
   const auth = await requireRrhhSession();
@@ -211,7 +211,7 @@ export async function GET(request: Request) {
     let rows = rowsOrErr;
 
     let softPulled = 0;
-    if (!skipPull && localDriveFsEnabled()) {
+    if (!skipPull && expedientePullSourceAvailable()) {
       const byEmp = new Map<string, DocRow[]>();
       for (const r of rows) {
         const list = byEmp.get(r.employee_id);
@@ -266,10 +266,9 @@ export async function GET(request: Request) {
               fullName: emp?.full_name || '',
               driveFolderPath: emp?.drive_folder_path,
             });
-            if (!folder) continue;
             const result = await pullExpedienteDocuments({
               employeeId: id,
-              driveFolderPath: folder,
+              driveFolderPath: folder || emp?.drive_folder_path,
               fullName: emp?.full_name || '',
               who: auth.username,
               force: false,

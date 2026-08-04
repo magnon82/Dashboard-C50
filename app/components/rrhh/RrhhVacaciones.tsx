@@ -18,6 +18,7 @@ import {
   isLeaveExemptEmployee,
   isLeaveTomada,
   leaveInclusiveDays,
+  leaveLaborDays,
   plantillaPositionKey,
   todayIsoCdmx,
   type HrEmployee,
@@ -25,6 +26,7 @@ import {
   type HrLeaveRequest,
   type HrLeaveStatus,
 } from '@/app/lib/hr';
+import type { HrLeaveRenewalAlert } from '@/app/lib/hr-leave-accrual';
 import { formatHrListName } from '@/app/lib/hr-person-match';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
@@ -41,10 +43,12 @@ type BalancesPayload = {
   ready: boolean;
   year: number;
   employees: HrLeaveBalanceRow[];
+  renewals?: HrLeaveRenewalAlert[];
   message?: string | null;
   error?: string;
   periodLabel?: string | null;
   periodStatus?: string | null;
+  accrualNote?: string | null;
 };
 
 function balanceAsEmployee(r: HrLeaveBalanceRow): HrEmployee {
@@ -54,7 +58,7 @@ function balanceAsEmployee(r: HrLeaveBalanceRow): HrEmployee {
     status: 'activo',
     puesto: r.puesto,
     area: r.area,
-    fecha_ingreso: null,
+    fecha_ingreso: r.fecha_ingreso ?? null,
     email: null,
     phone: null,
     drive_folder_path: null,
@@ -301,11 +305,12 @@ export function RrhhVacaciones() {
   );
   const [balancesLoading, setBalancesLoading] = useState(true);
   const [balancesMessage, setBalancesMessage] = useState<string | null>(null);
+  const [renewals, setRenewals] = useState<HrLeaveRenewalAlert[]>([]);
+  const [ackBusyId, setAckBusyId] = useState<string | null>(null);
 
   const [employeeId, setEmployeeId] = useState('');
   const [fechaSolicitud, setFechaSolicitud] = useState(todayIsoCdmx);
   const [nombre, setNombre] = useState('');
-  const [curp, setCurp] = useState('');
   const [puesto, setPuesto] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
@@ -315,6 +320,19 @@ export function RrhhVacaciones() {
   const [observaciones, setObservaciones] = useState('');
 
   const today = todayIsoCdmx();
+
+  /** Saldo por tomar del colaborador seleccionado (`days_remaining`). */
+  const selectedBalance = employeeId
+    ? balances.find((b) => b.employee_id === employeeId)
+    : undefined;
+  const diasDisponiblesDisplay = !employeeId
+    ? ''
+    : balancesLoading
+      ? '…'
+      : selectedBalance?.days_remaining != null &&
+          Number.isFinite(Number(selectedBalance.days_remaining))
+        ? formatDays(Number(selectedBalance.days_remaining))
+        : 'no disponible';
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -362,15 +380,17 @@ export function RrhhVacaciones() {
       const res = await fetch('/api/hr/leave-balances', { cache: 'no-store' });
       const json = (await res.json()) as BalancesPayload;
       setBalances(json.employees || []);
+      setRenewals(json.renewals || []);
       setBalancesYear(json.year ?? null);
       setBalancesPeriodLabel(json.periodLabel ?? null);
       setBalancesMessage(
         json.ready
-          ? json.message || null
+          ? json.message || json.accrualNote || null
           : json.message || json.error || 'Sin saldos'
       );
     } catch {
       setBalances([]);
+      setRenewals([]);
       setBalancesYear(null);
       setBalancesPeriodLabel(null);
       setBalancesMessage('Error de red al cargar saldos');
@@ -379,16 +399,50 @@ export function RrhhVacaciones() {
     }
   }, []);
 
+  async function acknowledgeRenewal(id: string) {
+    setAckBusyId(id);
+    try {
+      const res = await fetch('/api/hr/leave-balances', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acknowledgeAlertId: id }),
+      });
+      if (res.ok) {
+        setRenewals((prev) => prev.filter((a) => a.id !== id));
+      }
+    } finally {
+      setAckBusyId(null);
+    }
+  }
+
   useEffect(() => {
     void Promise.all([refresh(), loadEmployees(), loadBalances()]);
   }, [refresh, loadEmployees, loadBalances]);
 
-  useEffect(() => {
-    if (!desde || !hasta || hasta < desde) return;
-    setDays(String(leaveInclusiveDays(desde, hasta)));
-    setUltimoDia((prev) => prev || addIsoDays(desde, -1));
-    setReingreso((prev) => prev || addIsoDays(hasta, 1));
-  }, [desde, hasta]);
+  /** Solo el rango de vacaciones (Desde/Hasta) alimenta Total de días — no último día / reingreso.
+   * Cuenta días laborables (Lun–Sáb); el domingo de descanso no se toma como vacaciones. */
+  function syncDaysFromVacationRange(from: string, to: string) {
+    if (!from || !to || to < from) return;
+    const n = leaveLaborDays(from, to);
+    if (n > 0) setDays(String(n));
+    else if (n === 0) setDays('');
+  }
+
+  function onVacationDesdeChange(value: string) {
+    setDesde(value);
+    syncDaysFromVacationRange(value, hasta);
+    if (value) {
+      setUltimoDia((prev) => prev || addIsoDays(value, -1));
+    }
+  }
+
+  function onVacationHastaChange(value: string) {
+    setHasta(value);
+    syncDaysFromVacationRange(desde, value);
+    if (value) {
+      setReingreso((prev) => prev || addIsoDays(value, 1));
+    }
+  }
 
   function onSelectEmployee(id: string) {
     setEmployeeId(id);
@@ -405,7 +459,6 @@ export function RrhhVacaciones() {
 
   function resetFormKeepEmployee() {
     setFechaSolicitud(todayIsoCdmx);
-    setCurp('');
     setDesde('');
     setHasta('');
     setUltimoDia('');
@@ -437,7 +490,7 @@ export function RrhhVacaciones() {
           fecha_solicitud: fechaSolicitud,
           solicitada_a: '',
           nombre_empleado: nombrePayload,
-          curp: curp.trim(),
+          curp: '',
           puesto: puestoPayload,
           date_from: desde,
           date_to: hasta,
@@ -546,6 +599,10 @@ export function RrhhVacaciones() {
             <h3 className="mt-1 text-lg font-bold" style={{ color: theme.title }}>
               Saldos de vacaciones
             </h3>
+            <p className="mt-1 text-sm" style={{ color: theme.muted }}>
+              Derecho LFT por antigüedad cumplida; el saldo baja al tomar días y
+              sube en cada aniversario.
+            </p>
             {balancesPeriodLabel ? (
               <p className="mt-1 text-sm" style={{ color: theme.muted }}>
                 Según nómina {balancesPeriodLabel}
@@ -561,6 +618,51 @@ export function RrhhVacaciones() {
             Actualizar
           </button>
         </div>
+
+        {renewals.length > 0 ? (
+          <div
+            className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3"
+            style={{ boxShadow: SUITE.shadow }}
+          >
+            <p className="text-sm font-bold text-amber-950">
+              Renovaciones de derecho ({renewals.length})
+            </p>
+            <ul className="space-y-2">
+              {renewals.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex flex-wrap items-start justify-between gap-2 border-b border-amber-100 pb-2 last:border-0 last:pb-0"
+                >
+                  <div className="min-w-0 text-sm text-amber-950">
+                    <span className="font-semibold">
+                      {formatHrListName(a.employee_name)}
+                    </span>
+                    {' · '}
+                    año {a.completed_years} ({formatHrDate(a.anniversary_date)})
+                    <br />
+                    <span className="text-amber-900/90">
+                      Derecho {formatDays(a.previous_entitlement)} →{' '}
+                      {formatDays(a.new_entitlement)}; +
+                      {formatDays(a.days_added)} días
+                      {a.previous_remaining != null
+                        ? ` · saldo ${formatDays(a.previous_remaining)} → ${formatDays(a.new_remaining)}`
+                        : ''}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={ackBusyId === a.id}
+                    onClick={() => void acknowledgeRenewal(a.id)}
+                    className="shrink-0 text-xs font-semibold underline-offset-2 hover:underline disabled:opacity-50"
+                    style={{ color: SUITE.orangeDeep }}
+                  >
+                    {ackBusyId === a.id ? '…' : 'Entendido'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {balancesMessage && (
           <p className="text-sm" style={{ color: '#b45309' }}>
             {balancesMessage}
@@ -589,6 +691,10 @@ export function RrhhVacaciones() {
                 >
                   <th className="px-4 py-3 font-semibold">Nombre</th>
                   <th className="px-4 py-3 font-semibold">Puesto</th>
+                  <th className="px-4 py-3 font-semibold">Antigüedad</th>
+                  <th className="px-4 py-3 font-semibold text-right">
+                    Derecho
+                  </th>
                   <th className="px-4 py-3 font-semibold text-right">
                     Tomadas
                   </th>
@@ -605,7 +711,7 @@ export function RrhhVacaciones() {
                       style={{ backgroundColor: SUITE.orangeSoft }}
                     >
                       <td
-                        colSpan={4}
+                        colSpan={6}
                         className="px-4 py-2.5 text-xs font-bold uppercase tracking-wide"
                         style={{ color: SUITE.navy }}
                       >
@@ -639,6 +745,29 @@ export function RrhhVacaciones() {
                             {puesto}
                           </td>
                           <td
+                            className="px-4 py-3"
+                            style={{ color: theme.muted }}
+                            title={
+                              bal?.fecha_ingreso
+                                ? `Ingreso ${bal.fecha_ingreso}`
+                                : undefined
+                            }
+                          >
+                            {bal?.antiguedad_label || '—'}
+                          </td>
+                          <td
+                            className="px-4 py-3 text-right tabular-nums"
+                            style={{ color: theme.title }}
+                            title={
+                              bal?.completed_years != null &&
+                              bal.completed_years > 0
+                                ? `LFT año ${bal.completed_years}`
+                                : 'Sin año cumplido aún'
+                            }
+                          >
+                            {formatDays(bal?.policy_entitlement ?? bal?.days_entitled ?? null)}
+                          </td>
+                          <td
                             className="px-4 py-3 text-right tabular-nums"
                             style={{ color: theme.title }}
                           >
@@ -647,11 +776,6 @@ export function RrhhVacaciones() {
                           <td
                             className="px-4 py-3 text-right font-semibold tabular-nums"
                             style={{ color: SUITE.navy }}
-                            title={
-                              bal?.days_entitled != null
-                                ? `Correspondientes: ${formatDays(bal.days_entitled)}`
-                                : undefined
-                            }
                           >
                             {formatDays(bal?.days_remaining ?? null)}
                           </td>
@@ -772,14 +896,23 @@ export function RrhhVacaciones() {
                 }
               />
             </Field>
-            <Field label="CURP">
+            <Field
+              label="Días disponibles de vacaciones"
+              hint={
+                balancesYear
+                  ? `Saldo por tomar · ${balancesPeriodLabel || balancesYear}`
+                  : 'Saldo por tomar del colaborador'
+              }
+            >
               <input
                 type="text"
-                className={`${inputClass} uppercase`}
-                value={curp}
-                onChange={(e) => setCurp(e.target.value.toUpperCase())}
-                maxLength={18}
-                placeholder="18 caracteres"
+                className={`${inputClass} bg-slate-50 text-slate-700 tabular-nums`}
+                value={diasDisponiblesDisplay}
+                readOnly
+                tabIndex={-1}
+                placeholder={
+                  employeeId ? 'no disponible' : 'Elige colaborador'
+                }
               />
             </Field>
           </div>
@@ -787,28 +920,31 @@ export function RrhhVacaciones() {
 
         <SuiteCard>
           <h3 className="text-base font-bold" style={{ color: theme.title }}>
-            Periodo solicitado
+            Periodo de vacaciones
           </h3>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <Field label="Desde" required>
+            <Field label="Desde" required hint="Inicio de vacaciones">
               <input
                 type="date"
                 className={inputClass}
                 value={desde}
-                onChange={(e) => setDesde(e.target.value)}
+                onChange={(e) => onVacationDesdeChange(e.target.value)}
                 required
               />
             </Field>
-            <Field label="Hasta" required>
+            <Field label="Hasta" required hint="Fin de vacaciones">
               <input
                 type="date"
                 className={inputClass}
                 value={hasta}
-                onChange={(e) => setHasta(e.target.value)}
+                onChange={(e) => onVacationHastaChange(e.target.value)}
                 required
               />
             </Field>
-            <Field label="Último día laborado">
+            <Field
+              label="Último día laborado"
+              hint="Asistencia (no cuenta días de vacaciones)"
+            >
               <input
                 type="date"
                 className={inputClass}
@@ -816,7 +952,10 @@ export function RrhhVacaciones() {
                 onChange={(e) => setUltimoDia(e.target.value)}
               />
             </Field>
-            <Field label="Fecha de reingreso">
+            <Field
+              label="Fecha de reingreso"
+              hint="Asistencia (no cuenta días de vacaciones)"
+            >
               <input
                 type="date"
                 className={inputClass}
@@ -824,7 +963,11 @@ export function RrhhVacaciones() {
                 onChange={(e) => setReingreso(e.target.value)}
               />
             </Field>
-            <Field label="Total de días" required>
+            <Field
+              label="Total de días"
+              required
+              hint="Días laborables (Lun–Sáb); el descanso semanal no cuenta. Puedes ajustar."
+            >
               <input
                 type="number"
                 min={1}

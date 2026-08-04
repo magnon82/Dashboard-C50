@@ -7,10 +7,12 @@ import {
   addIsoDays,
   formatHrDate,
   formatHrPuesto,
+  HR_SHIFT_NOTES_VACACIONES,
   isCurrentScheduleWeek,
   isGenericPisoArea,
   isPastScheduleWeek,
   isPlantillaExterno,
+  isVacationScheduleShift,
   meseroWithinFamilyRank,
   plantillaPositionKey,
   scheduleSectionFromPosition,
@@ -64,7 +66,10 @@ type DaySegment = {
 type DayCell = {
   start: string; // HH:mm — turno principal (editable en grilla)
   end: string;
+  /** Sin Ent/Sal: DESCANSO (omit shift) o VACACIONES (marker shift). */
   off: boolean;
+  /** Cuando off: true = VACACIONES, false = DESCANSO. */
+  vacation?: boolean;
   role?: string | null;
   /** Turnos adicionales el mismo día (p. ej. mañana+cena); cuentan en «h». */
   extra?: DaySegment[];
@@ -237,7 +242,22 @@ function toTimeDb(hhmm: string): string | null {
 }
 
 function emptyDay(): DayCell {
-  return { start: '', end: '', off: true };
+  return { start: '', end: '', off: true, vacation: false };
+}
+
+function vacationDay(): DayCell {
+  return { start: '', end: '', off: true, vacation: true };
+}
+
+function isVacationDay(d: DayCell): boolean {
+  return Boolean(d.off && d.vacation);
+}
+
+/** Ciclo D → V → turno: worked→DESCANSO→VACACIONES→worked. */
+function cycleDayAbsence(cur: DayCell): DayCell {
+  if (!cur.off) return emptyDay();
+  if (!cur.vacation) return vacationDay();
+  return { start: '14:00', end: '22:00', off: false, vacation: false };
 }
 
 function weekLabel(w: Pick<HrScheduleWeek, 'week_start' | 'week_number'>): string {
@@ -251,6 +271,7 @@ function serializeGrid(rows: PersonRow[]): string {
     rows.map((r) => ({
       id: r.employee_id,
       days: r.days.map((d) => {
+        if (isVacationDay(d)) return 'VAC';
         if (d.off) return 'OFF';
         const extras = (d.extra || [])
           .map((e) => `${e.start}-${e.end}`)
@@ -308,13 +329,17 @@ function buildRowsFromShifts(
     }
     const di = dates.indexOf(s.shift_date);
     if (di < 0) continue;
+    if (isVacationScheduleShift(s)) {
+      row.days[di] = vacationDay();
+      continue;
+    }
     const start = toHhmm(s.start_time);
     const end = toHhmm(s.end_time);
     if (!start || !end) continue;
     const role = s.role_label || null;
     const cur = row.days[di];
     if (cur.off || !cur.start || !cur.end) {
-      row.days[di] = { start, end, off: false, role };
+      row.days[di] = { start, end, off: false, vacation: false, role };
     } else if (cur.start === start && cur.end === end) {
       // mismo turno duplicado — ignorar
     } else {
@@ -323,7 +348,7 @@ function buildRowsFromShifts(
       if (!extras.some((e) => e.start === start && e.end === end)) {
         extras.push({ start, end, role });
       }
-      row.days[di] = { ...cur, off: false, extra: extras };
+      row.days[di] = { ...cur, off: false, vacation: false, extra: extras };
     }
   }
 
@@ -366,7 +391,22 @@ function rowsToShifts(rows: PersonRow[], dates: string[]): Omit<
   for (const r of rows) {
     for (let i = 0; i < 7; i++) {
       const d = r.days[i];
-      if (!d || d.off) continue;
+      if (!d) continue;
+      if (isVacationDay(d)) {
+        out.push({
+          employee_id: r.employee_id,
+          shift_date: dates[i],
+          start_time: null,
+          end_time: null,
+          area: r.area === 'Otros' ? null : r.area,
+          role_label: null,
+          origin: 'manual',
+          notes: HR_SHIFT_NOTES_VACACIONES,
+          employee_name: r.full_name,
+        });
+        continue;
+      }
+      if (d.off) continue;
       const segments: DaySegment[] = [];
       if (d.start && d.end) {
         segments.push({ start: d.start, end: d.end, role: d.role || r.puesto });
@@ -484,7 +524,7 @@ export function RrhhHorarios() {
   const pastLocked =
     weekDetail != null && isPastScheduleWeek(weekDetail.week_end);
 
-  /** Por columna: fecha civil &lt; hoy CDMX → Ent/Sal/DESCANSO solo lectura. */
+  /** Por columna: fecha civil &lt; hoy CDMX → Ent/Sal/DESCANSO/VACACIONES solo lectura. */
   const dayLocked = useMemo(() => {
     const today = todayIsoCdmx();
     return dates.map((d) => d.slice(0, 10) < today);
@@ -1010,13 +1050,22 @@ export function RrhhHorarios() {
         const days = r.days.map((d, i) => {
           if (i !== dayIndex) return d;
           const next = { ...d, ...patch };
-          if (patch.off === true) {
+          if (patch.vacation === true) {
             next.start = '';
             next.end = '';
             next.off = true;
+            next.vacation = true;
+            next.extra = undefined;
+            next.role = undefined;
+          } else if (patch.off === true) {
+            next.start = '';
+            next.end = '';
+            next.off = true;
+            next.vacation = false;
             next.extra = undefined;
             next.role = undefined;
           } else if (patch.start !== undefined || patch.end !== undefined) {
+            next.vacation = false;
             next.off = !(next.start || next.end);
             if (next.off) {
               next.extra = undefined;
@@ -1044,12 +1093,19 @@ export function RrhhHorarios() {
       prev.map((r) => {
         if (r.employee_id !== employeeId) return r;
         const days = [...r.days];
-        const cur = days[dayIndex];
-        if (cur.off) {
-          days[dayIndex] = { start: '14:00', end: '22:00', off: false };
-        } else {
-          days[dayIndex] = emptyDay();
-        }
+        days[dayIndex] = cycleDayAbsence(days[dayIndex]);
+        return { ...r, days };
+      })
+    );
+  }
+
+  function setVacation(employeeId: string, dayIndex: number) {
+    if (pastLocked || dayLocked[dayIndex]) return;
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.employee_id !== employeeId) return r;
+        const days = [...r.days];
+        days[dayIndex] = vacationDay();
         return { ...r, days };
       })
     );
@@ -1202,7 +1258,7 @@ export function RrhhHorarios() {
           </p>
           <p className="mt-1 text-xs" style={{ color: theme.muted }}>
             Se copian los turnos de la semana anterior (misma gente / Ent–Sal /
-            DESCANSO). Puedes editar después. Futuras quedan en borrador hasta
+            DESCANSO / VACACIONES). Puedes editar después. Futuras quedan en borrador hasta
             Publicar.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-2">
@@ -1526,6 +1582,7 @@ export function RrhhHorarios() {
                           dayLocked={dayLocked}
                           onCell={updateCell}
                           onToggleOff={toggleOff}
+                          onSetVacation={setVacation}
                         />
                       ))
                     )}
@@ -1571,7 +1628,7 @@ export function RrhhHorarios() {
               <p className="text-xs" style={{ color: theme.muted }}>
                 {pastLocked
                   ? 'Semana pasada: solo consulta. No se pueden editar Ent./Sal. La columna h suma las horas de los turnos.'
-                  : 'Hoy y días futuros editables (CDMX). D = descanso; clic en DESCANSO para turno. Columna h = horas (nocturnos cruzan medianoche). Guardar aparece con cambios; en curso publica al guardar.'}
+                  : 'Hoy y días futuros editables (CDMX). D = descanso · V = vacaciones · ciclo en la barra D→V→turno. Columna h = horas (nocturnos cruzan medianoche). Guardar aparece con cambios; en curso publica al guardar.'}
               </p>
             </>
           )}
@@ -1601,6 +1658,7 @@ function AreaFragment({
   dayLocked = [],
   onCell,
   onToggleOff,
+  onSetVacation,
 }: {
   area: string;
   people: PersonRow[];
@@ -1609,6 +1667,7 @@ function AreaFragment({
   dayLocked?: boolean[];
   onCell: (id: string, day: number, patch: Partial<DayCell>) => void;
   onToggleOff: (id: string, day: number) => void;
+  onSetVacation: (id: string, day: number) => void;
 }) {
   return (
     <>
@@ -1647,45 +1706,49 @@ function AreaFragment({
           {p.days.map((d, di) => {
             const cellLocked = readOnly || Boolean(dayLocked[di]);
             const overlapConflict = rowDayHasOverlapConflict(p, di);
-            return d.off ? (
-              <td
-                key={di}
-                colSpan={2}
-                className={`border-l border-slate-100 px-1 py-0.5 text-center${
-                  cellLocked && !readOnly ? ' bg-slate-50/70' : ''
-                }`}
-              >
-                {cellLocked ? (
-                  <span
-                    className="inline-block w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide opacity-80"
-                    style={{
-                      backgroundColor: '#fef3c7',
-                      color: '#92400e',
-                    }}
-                    title={
-                      !readOnly && dayLocked[di]
-                        ? 'Día pasado: solo consulta'
-                        : undefined
-                    }
-                  >
-                    DESCANSO
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onToggleOff(p.employee_id, di)}
-                    className="w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide"
-                    style={{
-                      backgroundColor: '#fef3c7',
-                      color: '#92400e',
-                    }}
-                    title="Clic para asignar turno"
-                  >
-                    DESCANSO
-                  </button>
-                )}
-              </td>
-            ) : (
+            const vac = isVacationDay(d);
+            if (d.off) {
+              const barBg = vac ? '#e0f2fe' : '#fef3c7';
+              const barFg = vac ? '#075985' : '#92400e';
+              const barLabel = vac ? 'VACACIONES' : 'DESCANSO';
+              const barTitle = cellLocked
+                ? !readOnly && dayLocked[di]
+                  ? 'Día pasado: solo consulta'
+                  : undefined
+                : vac
+                  ? 'Clic para asignar turno (ciclo V→turno)'
+                  : 'Clic para Vacaciones (ciclo D→V→turno)';
+              return (
+                <td
+                  key={di}
+                  colSpan={2}
+                  className={`border-l border-slate-100 px-1 py-0.5 text-center${
+                    cellLocked && !readOnly ? ' bg-slate-50/70' : ''
+                  }`}
+                >
+                  {cellLocked ? (
+                    <span
+                      className="inline-block w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide opacity-80"
+                      style={{ backgroundColor: barBg, color: barFg }}
+                      title={barTitle}
+                    >
+                      {barLabel}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onToggleOff(p.employee_id, di)}
+                      className="w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide"
+                      style={{ backgroundColor: barBg, color: barFg }}
+                      title={barTitle}
+                    >
+                      {barLabel}
+                    </button>
+                  )}
+                </td>
+              );
+            }
+            return (
               <Fragment key={`${p.employee_id}-${di}`}>
                 <td
                   className={`border-l border-slate-100 px-0.5 py-0.5${
@@ -1740,19 +1803,34 @@ function AreaFragment({
                       }`}
                     />
                     {!cellLocked && (
-                      <button
-                        type="button"
-                        title="Marcar DESCANSO"
-                        aria-label="Marcar DESCANSO"
-                        onClick={() => onToggleOff(p.employee_id, di)}
-                        className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide"
-                        style={{
-                          backgroundColor: '#fef3c7',
-                          color: '#92400e',
-                        }}
-                      >
-                        D
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          title="Marcar DESCANSO (ciclo D→V→turno)"
+                          aria-label="Marcar DESCANSO"
+                          onClick={() => onToggleOff(p.employee_id, di)}
+                          className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                          style={{
+                            backgroundColor: '#fef3c7',
+                            color: '#92400e',
+                          }}
+                        >
+                          D
+                        </button>
+                        <button
+                          type="button"
+                          title="Marcar VACACIONES"
+                          aria-label="Marcar VACACIONES"
+                          onClick={() => onSetVacation(p.employee_id, di)}
+                          className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                          style={{
+                            backgroundColor: '#e0f2fe',
+                            color: '#075985',
+                          }}
+                        >
+                          V
+                        </button>
+                      </>
                     )}
                   </div>
                 </td>

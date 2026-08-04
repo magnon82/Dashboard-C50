@@ -8,6 +8,7 @@ import {
   type HrSummaryAlert,
   type HrSummaryKpis,
 } from '@/app/lib/hr';
+import { listLeaveRenewalAlerts } from '@/app/lib/hr-leave-accrual';
 import { mondayOfWeek } from '@/app/lib/hr-schedule-propose';
 import { resolvePlantillaVigente } from '@/app/lib/hr-plantilla';
 
@@ -221,6 +222,23 @@ export async function GET() {
         message: `${leaveLowCount} saldo(s) de vacaciones ≤ ${HR_LEAVE_LOW_THRESHOLD} día(s)`,
         go: 'vacaciones',
       });
+    }
+
+    try {
+      const renewals = await listLeaveRenewalAlerts(sb, {
+        includeAcknowledged: false,
+        limit: 20,
+      });
+      if (!renewals.schemaMissing && renewals.alerts.length > 0) {
+        alerts.push({
+          id: 'leave-renewal',
+          severity: 'info',
+          message: `${renewals.alerts.length} renovación(es) de vacaciones por antigüedad`,
+          go: 'vacaciones',
+        });
+      }
+    } catch {
+      // Schema opcional (hr_leave_accrual.sql)
     }
 
     return NextResponse.json({

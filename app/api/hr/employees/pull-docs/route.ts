@@ -10,7 +10,10 @@ import {
   isRequiredDocSatisfied,
 } from '@/app/lib/hr-employee-profile';
 import { resolvePlantillaVigente } from '@/app/lib/hr-plantilla';
-import { localDriveFsEnabled } from '@/app/lib/local-fs';
+import {
+  expedientePullSourceAvailable,
+} from '@/app/lib/hr-expediente-docs-pull';
+import { expedienteDriveUnavailableHint } from '@/app/lib/hr-expediente-drive';
 import { getServiceSupabase } from '@/app/lib/users';
 
 export const runtime = 'nodejs';
@@ -18,7 +21,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/hr/employees/pull-docs
- * Jala documentación de expediente Drive → checklist.
+ * Jala documentación de expediente (File Stream o Drive API) → Storage/checklist.
  * Body: {
  *   employeeId?: string,
  *   force?: boolean,
@@ -26,7 +29,6 @@ export const dynamic = 'force-dynamic';
  *   plantillaOnly?: boolean,  // default true si no hay employeeId
  *   onlyMissing?: boolean,    // default true si plantillaOnly
  * }
- * Requiere File Stream (PC admin).
  */
 export async function POST(request: Request) {
   const auth = await requireRrhhSession();
@@ -34,11 +36,11 @@ export async function POST(request: Request) {
   const denied = requireRrhhEmployeesWrite(auth);
   if (denied) return denied;
 
-  if (!localDriveFsEnabled()) {
+  if (!expedientePullSourceAvailable()) {
     return NextResponse.json(
       {
-        error: 'File Stream no disponible en este entorno',
-        hint: 'Usa el PC admin con I:\\Mi unidad montado.',
+        error: 'Sin fuente de expediente (local ni Drive API)',
+        hint: expedienteDriveUnavailableHint(),
       },
       { status: 400 }
     );

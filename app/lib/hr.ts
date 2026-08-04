@@ -49,7 +49,13 @@ export type HrEmployee = {
   puesto: string | null;
   /** Roles adicionales (catálogo); no duplica fila en plantilla. */
   puestos_secundarios?: string[] | null;
+  /**
+   * Área(s) de equipo. Legado: un valor (`Piso`). Multi: delimitado
+   * `Piso, Cocina` y/o columna `areas text[]` (patch `hr_employee_areas.sql`).
+   */
   area: string | null;
+  /** Áreas canónicas (preferir sobre parsear `area` si viene poblado). */
+  areas?: string[] | null;
   fecha_ingreso: string | null;
   /** Último día laborado / fecha de baja (patch `hr_employee_baja.sql`). */
   fecha_baja?: string | null;
@@ -57,8 +63,15 @@ export type HrEmployee = {
   fecha_nacimiento?: string | null;
   /** Sueldo diario vigente en ficha (también snapshot en líneas de nómina). */
   sueldo_diario?: number | null;
+  /**
+   * Sueldo diario del rol / área secundaria (dual).
+   * Patch `hr_employee_sueldo_secundario.sql`.
+   */
+  sueldo_diario_secundario?: number | null;
   email: string | null;
   phone: string | null;
+  /** Domicilio (ficha Datos; patch en hr_employee_documents.sql). */
+  domicilio?: string | null;
   drive_folder_path: string | null;
   suite_username?: string | null;
   force_include?: boolean;
@@ -182,6 +195,29 @@ export type HrScheduleShift = {
   /** Notas de ficha (flags dual/externo) cuando el join las trae. */
   employee_notes?: string | null;
 };
+
+/**
+ * Marker in `hr_schedule_shifts.notes` for a vacation day (null Ent/Sal).
+ * DESCANSO = omit the shift row entirely. Soft link to leave-requests can come later.
+ */
+export const HR_SHIFT_NOTES_VACACIONES = 'vacaciones';
+
+/** True if this row is a vacaciones marker (no worked Ent/Sal). */
+export function isVacationScheduleShift(
+  s: Pick<HrScheduleShift, 'start_time' | 'end_time' | 'notes' | 'role_label'>
+): boolean {
+  const start = s.start_time ? String(s.start_time).slice(0, 5) : '';
+  const end = s.end_time ? String(s.end_time).slice(0, 5) : '';
+  if (start && end) return false;
+  const n = String(s.notes || '')
+    .trim()
+    .toLowerCase();
+  if (n === HR_SHIFT_NOTES_VACACIONES || n === 'vacation') return true;
+  const r = String(s.role_label || '')
+    .trim()
+    .toLowerCase();
+  return r === HR_SHIFT_NOTES_VACACIONES || r === 'vacation';
+}
 
 export const HR_SCHEDULE_STATUS_LABELS: Record<HrScheduleStatus, string> = {
   propuesta: 'Propuesta',
@@ -332,6 +368,14 @@ export type HrLeaveBalanceRow = {
   days_entitled: number | null;
   source: string | null;
   updated_at: string | null;
+  /** Fecha de ingreso (para antigüedad / LFT). */
+  fecha_ingreso?: string | null;
+  /** Años de servicio cumplidos (aniversarios). */
+  completed_years?: number | null;
+  /** Derecho LFT del año de antigüedad actual (tabla reforma 2023). */
+  policy_entitlement?: number | null;
+  /** Etiqueta legible de antigüedad. */
+  antiguedad_label?: string | null;
 };
 
 /** Carpeta Drive File Stream · Documentación vigente (nombre en disco aún incluye 2023). */
@@ -409,6 +453,52 @@ export function leaveInclusiveDays(from: string, to: string): number {
   const b = new Date(to.slice(0, 10) + 'T12:00:00');
   if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return 0;
   return Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1;
+}
+
+/**
+ * Días laborables de vacaciones (tomados) entre Desde/Hasta.
+ * Por defecto: Lun–Sáb cuentan; domingo = descanso semanal y no cuenta
+ * (jornada restaurante CDMX ≈ 6 labor + 1 descanso).
+ * `excludeDates`: días DESCANSO del horario (ISO) si se conocen — también se omiten.
+ * `restWeekdays`: JS getDay() a excluir además de excludeDates (default `[0]` = domingo).
+ * Ej.: 2026-08-10 → 2026-08-16 (lun–dom) → 6.
+ */
+export function leaveLaborDays(
+  from: string,
+  to: string,
+  opts?: {
+    excludeDates?: Iterable<string>;
+    /** Weekdays JS (0=dom … 6=sáb). Default: domingo. Pass `[]` to only use excludeDates. */
+    restWeekdays?: number[];
+  }
+): number {
+  const a = new Date(from.slice(0, 10) + 'T12:00:00');
+  const b = new Date(to.slice(0, 10) + 'T12:00:00');
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return 0;
+
+  const exclude = new Set<string>();
+  if (opts?.excludeDates) {
+    for (const d of opts.excludeDates) {
+      const iso = String(d || '').slice(0, 10);
+      if (iso) exclude.add(iso);
+    }
+  }
+  const restWeekdays =
+    opts?.restWeekdays !== undefined ? opts.restWeekdays : [0];
+  const restWd = new Set(restWeekdays);
+
+  let n = 0;
+  const cur = new Date(a);
+  while (cur <= b) {
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, '0');
+    const day = String(cur.getDate()).padStart(2, '0');
+    const iso = `${y}-${m}-${day}`;
+    const wd = cur.getDay();
+    if (!exclude.has(iso) && !restWd.has(wd)) n += 1;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return n;
 }
 
 /** Suma/resta días a ISO date (UTC noon). */
@@ -927,26 +1017,145 @@ export function meseroWithinFamilyRank(
 /**
  * Área genérica de piso (no es sección Excel). Preferir `puesto` para agrupar.
  * «Piso» solo indica equipo; no debe crear encabezado huérfano.
+ * Tolera multi-área delimitada: solo es genérico si *todas* las partes lo son.
  */
 export function isGenericPisoArea(raw: string | null | undefined): boolean {
-  const p = foldPuestoKey(raw ?? '');
-  return p === 'piso' || p === 'equipo de piso' || p === 'floor';
+  const parts = parseEmployeeAreas(raw);
+  if (parts.length === 0) {
+    const p = foldPuestoKey(raw ?? '');
+    return p === 'piso' || p === 'equipo de piso' || p === 'floor';
+  }
+  return parts.every((a) => {
+    const p = foldPuestoKey(a);
+    return p === 'piso' || p === 'equipo de piso' || p === 'floor';
+  });
+}
+
+/** Áreas de equipo conocidas (ficha Datos / plantilla). */
+export const HR_AREA_CATALOG = [
+  'Piso',
+  'Cocina',
+  'Barra',
+  'Administrativo',
+] as const;
+
+export type HrAreaLabel = (typeof HR_AREA_CATALOG)[number];
+
+const AREA_LABEL_ALIASES: Record<string, HrAreaLabel> = {
+  piso: 'Piso',
+  'equipo de piso': 'Piso',
+  floor: 'Piso',
+  cocina: 'Cocina',
+  barra: 'Barra',
+  bartender: 'Barra',
+  barman: 'Barra',
+  admin: 'Administrativo',
+  administrativo: 'Administrativo',
+  administracion: 'Administrativo',
+  gerencia: 'Administrativo',
+};
+
+/** Normaliza una etiqueta de área al catálogo (o Title Case si es custom). */
+export function normalizeAreaLabel(
+  raw: string | null | undefined
+): string | null {
+  const t = String(raw || '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (!t) return null;
+  const folded = foldPuestoKey(t);
+  if (AREA_LABEL_ALIASES[folded]) return AREA_LABEL_ALIASES[folded]!;
+  const catalogHit = HR_AREA_CATALOG.find((c) => foldPuestoKey(c) === folded);
+  if (catalogHit) return catalogHit;
+  return t;
+}
+
+function uniqAreaLabels(raw: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const r of raw) {
+    const n = normalizeAreaLabel(r);
+    if (!n) continue;
+    const k = foldPuestoKey(n);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(n);
+  }
+  return out;
+}
+
+/**
+ * Lee áreas desde `areas[]` y/o `area` legado (uno o delimitado `,|;`).
+ */
+export function parseEmployeeAreas(
+  areaOrList?: string | string[] | null,
+  areasCol?: string[] | null
+): string[] {
+  if (Array.isArray(areasCol) && areasCol.length > 0) {
+    return uniqAreaLabels(areasCol.map((x) => String(x ?? '')));
+  }
+  if (Array.isArray(areaOrList)) {
+    return uniqAreaLabels(areaOrList.map((x) => String(x ?? '')));
+  }
+  const raw = String(areaOrList || '').trim();
+  if (!raw) return [];
+  if (/[,|;]/.test(raw)) {
+    return uniqAreaLabels(raw.split(/[,|;]/).map((s) => s.trim()));
+  }
+  return uniqAreaLabels([raw]);
+}
+
+/** Serializa áreas a string legado para columna `area`. */
+export function formatEmployeeAreas(areas: string[]): string | null {
+  const cleaned = uniqAreaLabels(areas);
+  return cleaned.length ? cleaned.join(', ') : null;
+}
+
+/** Áreas efectivas de una ficha (`areas` si hay; si no, parsea `area`). */
+export function employeeAreas(e: {
+  area?: string | null;
+  areas?: string[] | null;
+}): string[] {
+  return parseEmployeeAreas(e.area ?? null, e.areas ?? null);
+}
+
+/** True si la ficha tiene ≥2 roles o ≥2 áreas (pide sueldo diario 2). */
+export function employeeNeedsSecondarySalary(e: {
+  puesto?: string | null;
+  puestos_secundarios?: string[] | null;
+  notes?: string | null;
+  full_name?: string | null;
+  area?: string | null;
+  areas?: string[] | null;
+}): boolean {
+  const sec = Array.isArray(e.puestos_secundarios)
+    ? e.puestos_secundarios.filter((x) => String(x || '').trim())
+    : [];
+  if (sec.length > 0) return true;
+  if (employeeAreas(e).length >= 2) return true;
+  if (employeeNotesHasFlag(e.notes, 'dual_limpieza_mesero')) return true;
+  return false;
 }
 
 /**
  * Clave de posición para plantilla/horarios: puesto, o área si no es «Piso» vacío.
  */
 export function plantillaPositionKey(
-  e: Pick<HrEmployee, 'puesto' | 'area' | 'notes' | 'puestos_secundarios'>
+  e: Pick<HrEmployee, 'puesto' | 'area' | 'notes' | 'puestos_secundarios'> & {
+    areas?: string[] | null;
+  }
 ): string | null {
   const puesto = String(e.puesto || '').trim();
   if (puesto) return puesto;
   if (employeeNotesHasFlag(e.notes, 'dual_limpieza_mesero')) {
     return 'Meserx Encargadx';
   }
-  const area = String(e.area || '').trim();
-  if (!area || isGenericPisoArea(area)) return null;
-  return area;
+  const areas = employeeAreas(e);
+  const nonGeneric = areas.find((a) => {
+    const p = foldPuestoKey(a);
+    return p !== 'piso' && p !== 'equipo de piso' && p !== 'floor';
+  });
+  return nonGeneric ?? null;
 }
 
 /**
@@ -1170,14 +1379,18 @@ export type HrPayCadence = 'quincenal' | 'semanal';
  * resto de plantilla → semanal. Flag `sueldo_quincenal:N` en notes fuerza quincenal.
  */
 export function employeePayCadence(
-  e: Pick<HrEmployee, 'puesto' | 'area' | 'notes' | 'puestos_secundarios'>
+  e: Pick<HrEmployee, 'puesto' | 'area' | 'notes' | 'puestos_secundarios'> & {
+    areas?: string[] | null;
+  }
 ): HrPayCadence {
   if (parseSueldoQuincenalFromNotes(e.notes) != null) return 'quincenal';
   const key = plantillaPositionKey(e);
   if (plantillaTeamGroup(key) === 'admin') return 'quincenal';
-  const areaKey = foldPuestoKey(e.area || '');
-  if (/\badmin/.test(areaKey) || /\badministraci/.test(areaKey)) {
-    return 'quincenal';
+  for (const a of employeeAreas(e)) {
+    const areaKey = foldPuestoKey(a);
+    if (/\badmin/.test(areaKey) || /\badministraci/.test(areaKey)) {
+      return 'quincenal';
+    }
   }
   return 'semanal';
 }
@@ -1193,6 +1406,7 @@ export function resolveSueldoQuincenal(e: {
   notes?: string | null;
   puesto?: string | null;
   area?: string | null;
+  areas?: string[] | null;
   puestos_secundarios?: string[] | null;
 }): number | null {
   const fromNotes = parseSueldoQuincenalFromNotes(e.notes);
@@ -1200,6 +1414,7 @@ export function resolveSueldoQuincenal(e: {
   const roleFields = {
     puesto: e.puesto ?? null,
     area: e.area ?? null,
+    areas: e.areas ?? null,
     notes: e.notes ?? null,
     puestos_secundarios: e.puestos_secundarios ?? null,
   };

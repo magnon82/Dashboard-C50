@@ -1,7 +1,7 @@
 /**
  * Catálogo local de menús Eventos (fallback si Supabase aún no tiene tablas).
  * Fuente: supabase/seed_event_menus.json (= seed de eventos_module.sql),
- * alimentos/barra desde Menús eventos vigentes; bebidas desde Menú C50 Esp.pdf.
+ * alimentos/barra desde Menús eventos vigentes; menú regular + bebidas desde Menú C50 Esp.pdf.
  */
 import { readFile } from 'fs/promises';
 import path from 'path';
@@ -61,7 +61,8 @@ async function readSeedJsonUtf8(file: string): Promise<string> {
 }
 
 export async function loadEventMenusSeed(): Promise<EventMenu[]> {
-  if (cached) return cached;
+  // En dev no cachear: seed JSON (menú regular, etc.) debe verse sin reiniciar.
+  if (cached && process.env.NODE_ENV === 'production') return cached;
   const file = path.join(process.cwd(), 'supabase', 'seed_event_menus.json');
   const raw = await readSeedJsonUtf8(file);
   const parsed = JSON.parse(raw) as SeedFile;

@@ -51,8 +51,12 @@ function money(v: number) {
   return `$${v.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
 }
 
-function openFactura(filePath: string) {
-  return `/api/facturas?open=${encodeURIComponent(filePath)}&download=1`;
+function openFacturaView(id: string) {
+  return `/api/facturas?id=${encodeURIComponent(id)}&format=pdf`;
+}
+
+function openFacturaDownload(id: string, format: 'pdf' | 'xml' = 'pdf') {
+  return `/api/facturas?id=${encodeURIComponent(id)}&format=${format}&download=1`;
 }
 
 function openComprobante(filePath: string) {
@@ -71,6 +75,7 @@ export function FacturasIndex() {
   const [error, setError] = useState<string | null>(null);
   const [rootExists, setRootExists] = useState(false);
   const [comprobantesRootExists, setComprobantesRootExists] = useState(false);
+  const [localFsEnabled, setLocalFsEnabled] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
@@ -96,6 +101,7 @@ export function FacturasIndex() {
       setFaltantes(json.faltantes || []);
       setRootExists(Boolean(json.rootExists));
       setComprobantesRootExists(Boolean(json.comprobantesRootExists));
+      setLocalFsEnabled(Boolean(json.localFsEnabled));
       setLoadedOnce(true);
     } catch {
       setError('No se pudo cargar el índice de facturas');
@@ -265,7 +271,7 @@ export function FacturasIndex() {
                   <th className="px-3 py-2.5 text-center font-semibold">Folio</th>
                   <th className="px-3 py-2.5 text-center font-semibold">Monto</th>
                   <th className="px-3 py-2.5 text-center font-semibold">
-                    Descargas
+                    Archivos
                   </th>
                 </tr>
               </thead>
@@ -301,20 +307,33 @@ export function FacturasIndex() {
                     <td className="px-3 py-2 text-right">
                       <div className="inline-flex flex-wrap items-center justify-end gap-2">
                         {rootExists && it.pdf_path ? (
-                          <a
-                            className="text-xs font-semibold underline-offset-2 hover:underline"
-                            style={{ color: SUITE.orangeDeep }}
-                            href={openFactura(it.pdf_path)}
-                            download
-                          >
-                            PDF
-                          </a>
+                          <>
+                            <a
+                              className="text-xs font-semibold underline-offset-2 hover:underline"
+                              style={{ color: SUITE.orangeDeep }}
+                              href={openFacturaView(it.id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={it.filename || 'Ver PDF en el navegador'}
+                            >
+                              Ver PDF
+                            </a>
+                            <a
+                              className="text-xs font-semibold underline-offset-2 hover:underline"
+                              style={{ color: SUITE.orangeDeep }}
+                              href={openFacturaDownload(it.id, 'pdf')}
+                              download
+                              title="Descargar PDF"
+                            >
+                              PDF
+                            </a>
+                          </>
                         ) : null}
                         {rootExists && it.xml_path ? (
                           <a
                             className="text-xs font-semibold underline-offset-2 hover:underline"
                             style={{ color: SUITE.navy }}
-                            href={openFactura(it.xml_path)}
+                            href={openFacturaDownload(it.id, 'xml')}
                             download
                           >
                             XML
@@ -332,7 +351,30 @@ export function FacturasIndex() {
                             Comprobante
                           </a>
                         ) : null}
-                        {!rootExists && !it.comprobante_path ? (
+                        {rootExists && !it.pdf_path && !it.xml_path ? (
+                          <span
+                            className="text-xs text-slate-400"
+                            title="Sin PDF/XML en el índice"
+                          >
+                            Sin archivo
+                          </span>
+                        ) : null}
+                        {!rootExists && (it.has_pdf || it.has_xml) ? (
+                          <span
+                            className="text-xs text-slate-400"
+                            title={
+                              localFsEnabled
+                                ? 'Configura FACTURAS_PATH o monta FACTURAS CFDI en este PC'
+                                : 'PDF/XML indexados; vista previa en la nube requiere Storage o Drive API'
+                            }
+                          >
+                            Solo índice
+                          </span>
+                        ) : null}
+                        {!rootExists &&
+                        !it.has_pdf &&
+                        !it.has_xml &&
+                        !it.comprobante_path ? (
                           <span className="text-xs text-slate-400">—</span>
                         ) : null}
                       </div>

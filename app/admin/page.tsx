@@ -25,7 +25,20 @@ interface AdminUser {
   createdAt?: string;
   /** Contraseña recuperable (solo API admin). null en cuentas antiguas sin plaintext. */
   password?: string | null;
+  linkedEmployee?: {
+    id: string;
+    full_name: string;
+    puesto: string | null;
+  } | null;
 }
+
+type HrLinkOption = {
+  id: string;
+  full_name: string;
+  puesto: string | null;
+  area: string | null;
+  suite_username: string | null;
+};
 
 const emptyForm = {
   username: '',
@@ -195,6 +208,8 @@ export default function AdminPage() {
   const [editUsername, setEditUsername] = useState('');
   const [editDisplayName, setEditDisplayName] = useState('');
   const [editCapabilities, setEditCapabilities] = useState<string[]>([]);
+  const [editEmployeeId, setEditEmployeeId] = useState<string>('');
+  const [hrEmployees, setHrEmployees] = useState<HrLinkOption[]>([]);
   const [editSaving, setEditSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
@@ -220,14 +235,21 @@ export default function AdminPage() {
   const load = useCallback(async () => {
     setError('');
     try {
-      const res = await fetch('/api/admin/users', { cache: 'no-store' });
-      const json = await res.json();
-      if (!res.ok) {
+      const [usersRes, empRes] = await Promise.all([
+        fetch('/api/admin/users', { cache: 'no-store' }),
+        fetch('/api/admin/hr-employees', { cache: 'no-store' }),
+      ]);
+      const json = await usersRes.json();
+      if (!usersRes.ok) {
         setError(json.error || 'No se pudieron cargar usuarios');
         setUsers([]);
         return;
       }
       setUsers(json.users || []);
+      if (empRes.ok) {
+        const empJson = await empRes.json();
+        setHrEmployees(empJson.employees || []);
+      }
     } catch {
       setError('Error de red al cargar usuarios');
     } finally {
@@ -308,6 +330,7 @@ export default function AdminPage() {
     setEditDisplayName(u.displayName || '');
     setEditModules((u.modules || []).filter((m) => m !== '*'));
     setEditCapabilities(u.capabilities || []);
+    setEditEmployeeId(u.linkedEmployee?.id || '');
     setOkMsg('');
     setError('');
   }
@@ -329,6 +352,7 @@ export default function AdminPage() {
       const body: Record<string, unknown> = {
         username: editUsername.trim().toLowerCase(),
         displayName: editDisplayName,
+        employeeId: editEmployeeId.trim() || null,
       };
       if (editing?.role !== 'admin') {
         body.role = 'viewer';
@@ -623,6 +647,7 @@ export default function AdminPage() {
                   <thead>
                     <tr className="text-center text-xs uppercase tracking-wide text-slate-500">
                       <th className="py-2 pr-3 text-center">Usuario</th>
+                      <th className="py-2 pr-3 text-center">Colaborador</th>
                       <th className="py-2 pr-3 text-center">Rol</th>
                       <th className="py-2 pr-3 text-center">Módulos</th>
                       <th className="py-2 pr-3 text-center">Estado</th>
@@ -636,6 +661,22 @@ export default function AdminPage() {
                           <p className="font-semibold text-slate-800">{u.username}</p>
                           {u.displayName && (
                             <p className="text-xs text-slate-500">{u.displayName}</p>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-3 text-left">
+                          {u.linkedEmployee ? (
+                            <div>
+                              <p className="text-sm text-slate-800">
+                                {u.linkedEmployee.full_name}
+                              </p>
+                              {u.linkedEmployee.puesto ? (
+                                <p className="text-[11px] text-slate-500">
+                                  {u.linkedEmployee.puesto}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">Sin enlace</span>
                           )}
                         </td>
                         <td className="py-2.5 pr-3">
@@ -792,6 +833,34 @@ export default function AdminPage() {
                     onChange={(e) => setEditDisplayName(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
                   />
+                </label>
+
+                <label className="mt-3 block text-sm font-semibold text-slate-700">
+                  Colaborador RH
+                  <select
+                    value={editEmployeeId}
+                    onChange={(e) => setEditEmployeeId(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none focus:border-blue-500"
+                  >
+                    <option value="">— Sin enlace —</option>
+                    {hrEmployees.map((e) => {
+                      const taken =
+                        e.suite_username &&
+                        e.suite_username !==
+                          editUsername.trim().toLowerCase() &&
+                        e.id !== editEmployeeId;
+                      return (
+                        <option key={e.id} value={e.id} disabled={Boolean(taken)}>
+                          {e.full_name}
+                          {e.puesto ? ` · ${e.puesto}` : ''}
+                          {taken ? ` (ya: @${e.suite_username})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <span className="mt-1 block text-xs font-normal text-slate-500">
+                    Vincula este usuario Suite a la ficha (Staff / resguardos).
+                  </span>
                 </label>
 
                 <PasswordField

@@ -12,6 +12,10 @@ import {
 import { SOURCE_ESTADO_PDF_INDEX } from '@/app/lib/estados-cuenta';
 import { getServiceSupabase } from '@/app/lib/users';
 import { weekMondayIso } from '@/app/lib/ventas-semana';
+import {
+  clientSafeRoot,
+  localDriveFsEnabled,
+} from '@/app/lib/local-fs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -511,7 +515,10 @@ export async function GET(request: Request) {
       });
     } catch {
       return NextResponse.json(
-        { error: 'Archivo no legible en este servidor', path: decoded },
+        {
+          error: 'Archivo no legible en este servidor',
+          ...(localDriveFsEnabled() ? { path: decoded } : {}),
+        },
         { status: 404 }
       );
     }
@@ -536,7 +543,8 @@ export async function GET(request: Request) {
       : null;
 
   try {
-    const rootExists = existsSync(root);
+    const localFs = localDriveFsEnabled();
+    const rootExists = localFs && existsSync(root);
     let items: ComprobanteItem[] = [];
     let source: 'index' | 'scan' | 'index+scan' = 'index';
 
@@ -578,12 +586,22 @@ export async function GET(request: Request) {
     const filtered = filterItems(items, { year, month, day, bank, q, kind });
     sortComprobantesByRecency(filtered);
 
+    const itemsOut = localFs
+      ? filtered
+      : filtered.map((it) => ({
+          ...it,
+          path: '',
+          rel_path: '',
+        }));
+
     return NextResponse.json({
-      items: filtered,
-      count: filtered.length,
+      items: itemsOut,
+      count: itemsOut.length,
       source,
-      root,
+      root: clientSafeRoot(root),
       rootExists,
+      localFsEnabled: localFs,
+      canOpenFiles: rootExists,
     });
   } catch (e) {
     return NextResponse.json(

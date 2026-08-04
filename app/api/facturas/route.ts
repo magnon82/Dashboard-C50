@@ -13,11 +13,16 @@ import {
   listFacturas,
   listFacturasFaltantes,
   findComprobanteForFacturaLike,
+  companionPdfPathFromXml,
   SOURCE_FACTURA_CFDI,
 } from '@/app/lib/facturas';
 import { listPdfComprobantes } from '@/app/lib/estados-cuenta';
 import { getServiceSupabase } from '@/app/lib/users';
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
+import {
+  clientSafeRoot,
+  localDriveFsEnabled,
+} from '@/app/lib/local-fs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -148,7 +153,10 @@ async function streamFile(
     });
   } catch {
     return NextResponse.json(
-      { error: 'Archivo no legible en este servidor', path: filePath },
+      {
+        error: 'Archivo no legible en este servidor',
+        ...(localDriveFsEnabled() ? { path: filePath } : {}),
+      },
       { status: 404 }
     );
   }
@@ -202,10 +210,17 @@ export async function GET(request: Request) {
       const d = parseDesc(data.description);
       const pdf = d.pdf_path ? String(d.pdf_path) : '';
       const xml = d.xml_path ? String(d.xml_path) : '';
+      const companion =
+        !pdf && xml ? companionPdfPathFromXml(xml) || '' : '';
       let chosen = '';
       if (format === 'xml') chosen = xml || pdf;
-      else if (format === 'pdf') chosen = pdf || xml;
-      else chosen = pdf || xml;
+      else if (format === 'pdf') {
+        // Prefer real PDF; fall back to companion beside XML; never serve XML as PDF.
+        if (pdf && existsSync(pdf)) chosen = pdf;
+        else if (companion && existsSync(companion)) chosen = companion;
+        else if (pdf) chosen = pdf;
+        else if (companion) chosen = companion;
+      } else chosen = pdf || (companion && existsSync(companion) ? companion : '') || xml;
       if (!chosen) {
         return NextResponse.json(
           {
@@ -296,6 +311,20 @@ export async function GET(request: Request) {
 
     const pdfs = listPdfComprobantes(records);
     const withComprobante = facturas.map((f) => {
+      let pdf_path = f.pdf_path;
+      let has_pdf = f.has_pdf;
+      // If ingest only stored XML, expose companion PDF when it exists on disk.
+      if (!pdf_path && f.xml_path) {
+        const companion = companionPdfPathFromXml(f.xml_path);
+        if (
+          companion &&
+          isUnderAnyRoot(companion, allowedRoots()) &&
+          existsSync(companion)
+        ) {
+          pdf_path = companion;
+          has_pdf = true;
+        }
+      }
       const comp = findComprobanteForFacturaLike(
         {
           amount: f.amount,
@@ -307,6 +336,8 @@ export async function GET(request: Request) {
       );
       return {
         ...f,
+        pdf_path,
+        has_pdf,
         comprobante_path: comp?.rel_path || null,
         comprobante_filename: comp?.filename || null,
       };
@@ -330,17 +361,40 @@ export async function GET(request: Request) {
       };
     });
 
-    const rootExists = existsSync(DEFAULT_ROOT) || existsSync(LOCAL_FALLBACK_ROOT);
-    const comprobantesRootExists = existsSync(COMPROBANTES_ROOT);
+    const localFs = localDriveFsEnabled();
+    const rootExists =
+      localFs &&
+      (existsSync(DEFAULT_ROOT) || existsSync(LOCAL_FALLBACK_ROOT));
+    const comprobantesRootExists = localFs && existsSync(COMPROBANTES_ROOT);
+
+    const stripLocalPaths = <
+      T extends {
+        pdf_path?: string | null;
+        xml_path?: string | null;
+        comprobante_path?: string | null;
+      },
+    >(
+      row: T
+    ): T =>
+      localFs
+        ? row
+        : {
+            ...row,
+            pdf_path: null,
+            xml_path: null,
+            comprobante_path: null,
+          };
 
     return NextResponse.json({
-      items: view === 'faltantes' ? [] : withComprobante,
-      faltantes: faltantesWithComp,
+      items: view === 'faltantes' ? [] : withComprobante.map(stripLocalPaths),
+      faltantes: faltantesWithComp.map(stripLocalPaths),
       count: withComprobante.length,
       faltantesCount: faltantesWithComp.length,
-      root: DEFAULT_ROOT,
+      root: clientSafeRoot(DEFAULT_ROOT),
       rootExists,
       comprobantesRootExists,
+      localFsEnabled: localFs,
+      canOpenFiles: rootExists,
       source: SOURCE_FACTURA_CFDI,
     });
   } catch (e) {

@@ -22,6 +22,7 @@ import {
   checkOptionalMenuChoicesOnLines,
   computeOptionalMenuChoiceDeadline,
   computeQuoteTotals,
+  defaultEventDateIso,
   earliestSelectableEventDateIso,
   formatIsoDateEs,
   formatMxn,
@@ -47,9 +48,17 @@ import {
   type QuoteLineOptions,
 } from '@/app/lib/eventos';
 import {
+  COTIZACION_DRAFT_SAVE_KEY,
+  COTIZACION_DRAFT_SAVED_PING_KEY,
   COTIZACION_DRAFT_STORAGE_KEY,
   type CotizacionDoc,
+  type CotizacionDraftSavePayload,
 } from '@/app/lib/eventos-cotizacion-doc';
+import {
+  QUOTE_PAYMENT_METHOD_LABELS,
+  browserPublicQuoteUrl,
+  type QuotePaymentMethod,
+} from '@/app/lib/eventos-quote-payment';
 import {
   EventosLinePaxControl,
   EventosPaxCounter,
@@ -92,6 +101,10 @@ type SavedQuote = {
   updated_at?: string | null;
   client?: { id: string; company_name: string } | null;
   service_order_id?: string | null;
+  public_token?: string | null;
+  public_path?: string | null;
+  accepted_at?: string | null;
+  payment_method?: string | null;
 };
 
 export function EventosCotizador({
@@ -131,10 +144,8 @@ export function EventosCotizador({
   const [clientPath, setClientPath] = useState<'alta' | 'existente' | null>(
     null
   );
-  /** Nueva cotización: hoy civil CDMX (yyyy-mm-dd) para el input date nativo. */
-  const [eventDate, setEventDate] = useState(() =>
-    earliestSelectableEventDateIso()
-  );
+  /** Nueva cotización: default hoy+10 días CDMX; min = mañana. */
+  const [eventDate, setEventDate] = useState(() => defaultEventDateIso());
   const minEventDate = useMemo(() => earliestSelectableEventDateIso(), []);
   const [celebration, setCelebration] = useState('');
   const [notes, setNotes] = useState('');
@@ -151,6 +162,7 @@ export function EventosCotizador({
   const [quotesReady, setQuotesReady] = useState<boolean | null>(null);
   const [quotesError, setQuotesError] = useState<string | null>(null);
   const [quotesLoading, setQuotesLoading] = useState(true);
+  const [copiedPublicId, setCopiedPublicId] = useState<string | null>(null);
   const [altaBusy, setAltaBusy] = useState(false);
   const [altaForm, setAltaForm] = useState({
     company_name: '',
@@ -163,10 +175,9 @@ export function EventosCotizador({
   const drinksCtaRef = useRef<HTMLDivElement | null>(null);
   const itemPickerRef = useRef<HTMLDivElement | null>(null);
 
-  // Fallback en montaje: si aún no hay fecha (nueva cotización), primera
-  // fecha con >72 h de anticipación. No sobrescribe una fecha ya cargada.
+  // Fallback en montaje: si aún no hay fecha (nueva cotización), hoy+10 CDMX.
   useEffect(() => {
-    setEventDate((prev) => (prev ? prev : earliestSelectableEventDateIso()));
+    setEventDate((prev) => (prev ? prev : defaultEventDateIso()));
   }, []);
 
   /**
@@ -226,6 +237,8 @@ export function EventosCotizador({
   const choiceGroups = selectedItem?.choice_groups || [];
 
   const isDrinkMenu = selectedMenu ? isEventosDrinkMenu(selectedMenu) : false;
+  /** Ítem sobra cuando el catálogo trae un solo ítem (p. ej. Menú 3 tiempos). */
+  const showItemPicker = items.length > 1;
 
   /** Top bebidas pedidas en OS (ya vienen ordenadas por os_count desde la API). */
   const topPedidas = useMemo(() => {
@@ -492,6 +505,10 @@ export function EventosCotizador({
             updated_at?: string | null;
             client?: { id: string; company_name: string } | null;
             service_order_id?: string | null;
+            public_token?: string | null;
+            public_path?: string | null;
+            accepted_at?: string | null;
+            payment_method?: string | null;
           }) => ({
             id: q.id,
             quote_number: q.quote_number || null,
@@ -502,6 +519,10 @@ export function EventosCotizador({
             updated_at: q.updated_at || null,
             client: q.client || null,
             service_order_id: q.service_order_id || null,
+            public_token: q.public_token || null,
+            public_path: q.public_path || null,
+            accepted_at: q.accepted_at || null,
+            payment_method: q.payment_method || null,
           })
         )
       );
@@ -519,6 +540,33 @@ export function EventosCotizador({
   useEffect(() => {
     void loadQuotes();
   }, [loadQuotes]);
+
+  /** Si se guardó desde la pestaña de vista previa, limpia el borrador local. */
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key !== COTIZACION_DRAFT_SAVED_PING_KEY || !e.newValue) return;
+      try {
+        const ping = JSON.parse(e.newValue) as {
+          quote_number?: string | null;
+          total?: number;
+        };
+        setLines([]);
+        setNotes('');
+        setPlaceHold(false);
+        setMsg(
+          `Cotización ${ping.quote_number || ''} guardada desde vista previa${
+            ping.total != null ? ` · ${formatMxn(Number(ping.total))}` : ''
+          }. Puedes armar otra.`
+        );
+        void loadQuotes();
+        void onSaved();
+      } catch {
+        /* ignore malformed ping */
+      }
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [loadQuotes, onSaved]);
 
   function addLine(qtyOverride?: number) {
     if (quoteLocked) {
@@ -818,6 +866,33 @@ export function EventosCotizador({
     };
   }
 
+  function buildDraftSavePayload(): CotizacionDraftSavePayload | null {
+    if (!clientId || !lines.length) return null;
+    return {
+      client_id: clientId,
+      event_date: eventDate || null,
+      pax,
+      celebration: celebration.trim() || null,
+      notes: notes.trim() || null,
+      phone: clientPhone.trim() || null,
+      email: clientEmail.trim() || null,
+      contact_name: clientContactName.trim() || null,
+      apply_servicio: applyServicio,
+      place_hold: placeHold,
+      lines: lines.map((l) => ({
+        menu_item_id: l.menu_item_id,
+        description: l.description,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        unit: l.unit,
+        category: l.category,
+        min_pax: l.min_pax,
+        requires_food: l.requires_food,
+        options: l.options,
+      })),
+    };
+  }
+
   /** Vista previa: basta con líneas válidas (no exige pax completo ni candado). */
   function openPreview() {
     if (!clientId) {
@@ -850,6 +925,15 @@ export function EventosCotizador({
       COTIZACION_DRAFT_STORAGE_KEY,
       JSON.stringify(buildDraftDoc())
     );
+    const savePayload = buildDraftSavePayload();
+    if (savePayload) {
+      localStorage.setItem(
+        COTIZACION_DRAFT_SAVE_KEY,
+        JSON.stringify(savePayload)
+      );
+    } else {
+      localStorage.removeItem(COTIZACION_DRAFT_SAVE_KEY);
+    }
     window.open('/eventos/cotizacion/preview', '_blank', 'noopener,noreferrer');
   }
 
@@ -1014,6 +1098,25 @@ export function EventosCotizador({
       setErr('Error de red al guardar cotización');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyPublicLink(q: SavedQuote) {
+    const path = q.public_path;
+    if (!path) {
+      setErr(
+        'Sin enlace público. Ejecuta supabase/eventos_quote_public_token.sql y Actualizar.'
+      );
+      return;
+    }
+    const url = browserPublicQuoteUrl(path);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedPublicId(q.id);
+      setMsg(`Enlace público copiado: ${url}`);
+      window.setTimeout(() => setCopiedPublicId(null), 2000);
+    } catch {
+      setErr(`Copia manualmente: ${url}`);
     }
   }
 
@@ -1379,9 +1482,11 @@ export function EventosCotizador({
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
               />
               <p className="mt-1 text-xs text-slate-500">
-                No disponibles fechas a {EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT}{' '}
-                h o menos del evento (CDMX). Sin cambios de cotización si faltan{' '}
-                {EVENTOS_QUOTE_LOCK_WITHIN_DAYS} días o menos.
+                Por defecto +10 días (CDMX). Mínimo: mañana. Sin cambios de
+                cotización si faltan {EVENTOS_QUOTE_LOCK_WITHIN_DAYS} días o
+                menos. Entrada/postre: definir a más tardar{' '}
+                {EVENTOS_OPTIONAL_MENU_CHOICE_HOURS_BEFORE_EVENT} h antes del
+                evento.
               </p>
             </label>
             <label className="text-sm">
@@ -1481,9 +1586,11 @@ export function EventosCotizador({
               <p className="mt-1 text-xs text-slate-500">
                 {hasFoodInQuote
                   ? isDrinkMenu
-                    ? 'Elige el ítem abajo y agrega la línea de bebidas a la cotización.'
+                    ? showItemPicker
+                      ? 'Elige el ítem abajo y agrega la línea de bebidas a la cotización.'
+                      : 'Agrega la línea de bebidas a la cotización.'
                     : 'Alimentos listos. Usa los botones Barra libre / Bebidas C50 bajo la tabla, o cambia este menú a Bebidas.'
-                  : 'Primero agrega una línea de alimentos; después se habilitan barra libre y Bebidas (Menú C50).'}
+                  : 'Elige Menú 3 tiempos (eventos) o Menú regular (C50); después se habilitan barra libre y Bebidas.'}
               </p>
             </label>
           </div>
@@ -1552,7 +1659,7 @@ export function EventosCotizador({
                 </p>
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
-                {topPedidas.map((it, idx) => {
+                {topPedidas.map((it) => {
                   const active = it.id === itemId;
                   return (
                     <button
@@ -1568,27 +1675,10 @@ export function EventosCotizador({
                         backgroundColor: active ? '#E8F1F8' : '#fff',
                         color: SUITE.navy,
                       }}
-                      title={`${it.name} · pedida en ${it.os_count} OS`}
+                      title={it.name}
                     >
-                      {idx < 3 ? (
-                        <span
-                          className="shrink-0 text-[10px] font-bold uppercase tracking-wide"
-                          style={{ color: SUITE.orange }}
-                        >
-                          Top
-                        </span>
-                      ) : null}
                       <span className="min-w-0 truncate font-semibold">
                         {it.name}
-                      </span>
-                      <span
-                        className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-bold"
-                        style={{
-                          backgroundColor: SUITE.orangeSoft,
-                          color: SUITE.navySoft,
-                        }}
-                      >
-                        {it.os_count} OS
                       </span>
                     </button>
                   );
@@ -1653,48 +1743,50 @@ export function EventosCotizador({
             </div>
           )}
 
+          {(showItemPicker || choiceGroups.length === 0) && (
           <div
             ref={itemPickerRef}
             id="cotizador-item-picker"
             className={`mt-3 grid grid-cols-1 items-end gap-3 ${
               choiceGroups.length === 0 &&
               (nextLineIsAlloc || selectedItem?.unit === 'persona')
-                ? 'sm:grid-cols-[minmax(0,1fr)_7.5rem_auto]'
+                ? showItemPicker
+                  ? 'sm:grid-cols-[minmax(0,1fr)_7.5rem_auto]'
+                  : 'sm:grid-cols-[7.5rem_auto]'
                 : choiceGroups.length === 0
-                  ? 'sm:grid-cols-[minmax(0,1fr)_auto]'
+                  ? showItemPicker
+                    ? 'sm:grid-cols-[minmax(0,1fr)_auto]'
+                    : 'sm:grid-cols-[auto]'
                   : 'sm:grid-cols-1'
             }`}
           >
-            <label className="min-w-0 text-sm">
-              <span className="font-semibold" style={{ color: SUITE.navy }}>
-                Ítem
-              </span>
-              <select
-                value={itemId}
-                onChange={(e) => setItemId(e.target.value)}
-                disabled={!items.length || quoteLocked}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
-              >
-                {!items.length ? (
-                  <option value="">Sin ítems en este menú</option>
-                ) : (
-                  items.map((it) => (
-                    <option key={it.id} value={it.id}>
-                      {it.os_count && it.os_count > 0
-                        ? `★ ${it.name}`
-                        : it.name}
-                      {it.choice_groups?.some((g) => g.affects_price)
-                        ? ' · precio según fuerte'
-                        : ` · ${formatMxn(Number(it.unit_price))}/${it.unit}`}
-                      {it.os_count && it.os_count > 0
-                        ? ` · ${it.os_count} OS`
-                        : ''}
-                      {!it.price_verified ? ' *' : ''}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
+            {showItemPicker ? (
+              <label className="min-w-0 text-sm">
+                <span className="font-semibold" style={{ color: SUITE.navy }}>
+                  Ítem
+                </span>
+                <select
+                  value={itemId}
+                  onChange={(e) => setItemId(e.target.value)}
+                  disabled={!items.length || quoteLocked}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
+                >
+                  {!items.length ? (
+                    <option value="">Sin ítems en este menú</option>
+                  ) : (
+                    items.map((it) => (
+                      <option key={it.id} value={it.id}>
+                        {it.name}
+                        {it.choice_groups?.some((g) => g.affects_price)
+                          ? ' · precio según fuerte'
+                          : ` · ${formatMxn(Number(it.unit_price))}/${it.unit}`}
+                        {!it.price_verified ? ' *' : ''}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+            ) : null}
             {/* Cantidad / Agregar solo si no hay choice_groups (desayunos, bebidas…). */}
             {choiceGroups.length === 0 &&
               (nextLineIsAlloc || selectedItem?.unit === 'persona') && (
@@ -1748,7 +1840,7 @@ export function EventosCotizador({
             !quoteLocked ? (
               <p
                 id="line-qty-pax-hint"
-                className="text-xs font-medium sm:col-start-2"
+                className={`text-xs font-medium ${showItemPicker ? 'sm:col-start-2' : ''}`}
                 style={{ color: SUITE.muted }}
               >
                 {paxAlloc.remaining > 0
@@ -1757,6 +1849,7 @@ export function EventosCotizador({
               </p>
             ) : null}
           </div>
+          )}
 
           {choiceGroups.length > 0 && selectedItem && (
             <div
@@ -2164,7 +2257,7 @@ export function EventosCotizador({
                         Más pedidas en eventos
                       </p>
                       <div className="mt-1.5 flex flex-wrap gap-2">
-                        {topPedidas.map((it, idx) => {
+                        {topPedidas.map((it) => {
                           const active = it.id === itemId;
                           return (
                             <button
@@ -2180,27 +2273,10 @@ export function EventosCotizador({
                                 backgroundColor: active ? '#E8F1F8' : '#fff',
                                 color: SUITE.navy,
                               }}
-                              title={`${it.name} · pedida en ${it.os_count} OS`}
+                              title={it.name}
                             >
-                              {idx < 3 ? (
-                                <span
-                                  className="shrink-0 text-[10px] font-bold uppercase tracking-wide"
-                                  style={{ color: SUITE.orange }}
-                                >
-                                  Top
-                                </span>
-                              ) : null}
                               <span className="min-w-0 truncate font-semibold">
                                 {it.name}
-                              </span>
-                              <span
-                                className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-                                style={{
-                                  backgroundColor: SUITE.orangeSoft,
-                                  color: SUITE.navySoft,
-                                }}
-                              >
-                                {it.os_count} OS
                               </span>
                             </button>
                           );
@@ -2231,13 +2307,8 @@ export function EventosCotizador({
                         ) : (
                           items.map((it) => (
                             <option key={`paso2-${it.id}`} value={it.id}>
-                              {it.os_count && it.os_count > 0
-                                ? `★ ${it.name}`
-                                : it.name}
+                              {it.name}
                               {` · ${formatMxn(Number(it.unit_price))}/${it.unit}`}
-                              {it.os_count && it.os_count > 0
-                                ? ` · ${it.os_count} OS`
-                                : ''}
                               {!it.price_verified ? ' *' : ''}
                             </option>
                           ))
@@ -2597,6 +2668,13 @@ export function EventosCotizador({
                     </div>
                     <div className="text-[11px] text-slate-500">
                       {STATUS_LABELS[q.status] || q.status}
+                      {q.payment_method
+                        ? ` · ${
+                            QUOTE_PAYMENT_METHOD_LABELS[
+                              q.payment_method as QuotePaymentMethod
+                            ] || q.payment_method
+                          }`
+                        : ''}
                       {q.event_date
                         ? ` · ${new Date(
                             q.event_date + 'T12:00:00'
@@ -2607,6 +2685,18 @@ export function EventosCotizador({
                           })}`
                         : ''}
                       {q.pax ? ` · ${q.pax} pax` : ''}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void copyPublicLink(q)}
+                        className="text-[11px] font-semibold"
+                        style={{ color: SUITE.orangeDeep }}
+                      >
+                        {copiedPublicId === q.id
+                          ? 'Enlace copiado'
+                          : 'Copiar enlace público'}
+                      </button>
                     </div>
                   </li>
                 ))}
@@ -2653,6 +2743,13 @@ export function EventosCotizador({
                   </div>
                   <div className="mt-0.5 text-xs text-slate-500">
                     {STATUS_LABELS[q.status] || q.status}
+                    {q.payment_method
+                      ? ` · ${
+                          QUOTE_PAYMENT_METHOD_LABELS[
+                            q.payment_method as QuotePaymentMethod
+                          ] || q.payment_method
+                        }`
+                      : ''}
                     {q.client?.company_name
                       ? ` · ${q.client.company_name}`
                       : ' · Sin cliente'}
@@ -2674,6 +2771,16 @@ export function EventosCotizador({
                     Ver cotización →
                   </a>
                   <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void copyPublicLink(q)}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                      title="Enlace sin login para el cliente"
+                    >
+                      {copiedPublicId === q.id
+                        ? 'Enlace copiado'
+                        : 'Copiar enlace'}
+                    </button>
                     {q.service_order_id ? (
                       <a
                         href={`/eventos/os/${q.service_order_id}`}

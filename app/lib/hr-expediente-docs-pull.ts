@@ -1,9 +1,7 @@
 /**
- * Jala PDFs/imágenes del expediente Drive (File Stream) → hr_employee_documents,
- * contratos, y médico (exámenes / gastos médicos / justificantes).
- * Clasifica por nombre de archivo; PDFs de identidad se re-tipan por contenido
- * (acta vs CURP vs INE). `Documentos.pdf` / `DOCS.*` = paquete de alta partido
- * en un PDF por tipo.
+ * Jala PDFs/imágenes del expediente (File Stream local o Drive API) →
+ * hr_employee_documents, contratos y médico. Clasifica por nombre; PDFs de
+ * identidad se re-tipan por contenido. `Documentos.pdf` / `DOCS.*` = paquete.
  */
 
 import { existsSync } from 'fs';
@@ -47,8 +45,20 @@ import {
   folderBasenameFromPath,
   matchPerson,
 } from '@/app/lib/hr-person-match';
+import {
+  downloadDriveFileBuffer,
+  expedienteDriveApiAvailable,
+  expedienteDriveUnavailableHint,
+  listDriveFilesRecursive,
+  resolveExpedienteDriveFolder,
+} from '@/app/lib/hr-expediente-drive';
 import { localDriveFsEnabled } from '@/app/lib/local-fs';
 import { getServiceSupabase } from '@/app/lib/users';
+
+/** Local File Stream o Drive API con folder ID + credenciales. */
+export function expedientePullSourceAvailable(): boolean {
+  return localDriveFsEnabled() || expedienteDriveApiAvailable();
+}
 
 const MAX_BYTES = 10 * 1024 * 1024;
 /** Contratos escaneados suelen superar 10 MB (p. ej. Contrato.pdf ~13–15 MB). */
@@ -520,7 +530,8 @@ async function linkSplitPackParts(opts: {
 
 /**
  * Importa documentos del folder `drive_folder_path` del empleado.
- * Requiere File Stream local (PC admin). No pisa `verified` salvo force.
+ * Local (File Stream) si hay I:\; si no, Drive API → Storage.
+ * No pisa `verified` salvo force.
  */
 export async function pullExpedienteDocuments(opts: {
   employeeId: string;
@@ -534,39 +545,129 @@ export async function pullExpedienteDocuments(opts: {
   const force = Boolean(opts.force);
   let folder = (opts.driveFolderPath || '').trim();
 
-  if (!localDriveFsEnabled()) {
-    return {
-      ok: false,
-      imported: 0,
-      skipped: 0,
-      scanned: 0,
-      matched: [],
-      error: 'File Stream no disponible en este entorno',
-      hint: 'Ejecuta en el PC admin con I:\\Mi unidad montado (o HR_ALLOW_LOCAL_FS=1).',
-    };
+  type ListedFile = {
+    name: string;
+    path: string;
+    sizeBytes: number | null;
+    fileId?: string;
+  };
+
+  let files: ListedFile[] = [];
+
+  if (localDriveFsEnabled()) {
+    // Soft-resolve: nombre corto («Elizabeth Torrijos») ↔ carpeta Altas completa.
+    if (
+      opts.fullName &&
+      (!folder || !existsSync(folder) || !isUnderHrRoot(folder))
+    ) {
+      const resolved = await resolveExpedienteFolder({
+        employeeId: opts.employeeId,
+        fullName: opts.fullName,
+        driveFolderPath: folder || null,
+      });
+      if (resolved) folder = resolved;
+    } else if (folder && opts.fullName) {
+      await resolveExpedienteFolder({
+        employeeId: opts.employeeId,
+        fullName: opts.fullName,
+        driveFolderPath: folder,
+      });
+    }
+
+    if (!folder) {
+      return {
+        ok: false,
+        imported: 0,
+        skipped: 0,
+        scanned: 0,
+        matched: [],
+        error: 'Empleado sin carpeta de expediente vinculada',
+        hint: 'Vincula el expediente en Plantilla (Altas) o ejecuta el backfill de paths.',
+      };
+    }
+    if (!isUnderHrRoot(folder) || !existsSync(folder)) {
+      // Disco stale → intentar Drive API si está configurado.
+      if (!expedienteDriveApiAvailable()) {
+        return {
+          ok: false,
+          imported: 0,
+          skipped: 0,
+          scanned: 0,
+          matched: [],
+          error: 'Carpeta de expediente no encontrada en disco',
+          hint: folder,
+        };
+      }
+    } else {
+      try {
+        files = await listFilesRecursive(folder);
+      } catch (e) {
+        return {
+          ok: false,
+          imported: 0,
+          skipped: 0,
+          scanned: 0,
+          matched: [],
+          error:
+            e instanceof Error ? e.message : 'No se pudo listar el expediente',
+        };
+      }
+    }
   }
 
-  // Soft-resolve: nombre corto («Elizabeth Torrijos») ↔ carpeta Altas completa.
-  if (
-    opts.fullName &&
-    (!folder || !existsSync(folder) || !isUnderHrRoot(folder))
-  ) {
-    const resolved = await resolveExpedienteFolder({
-      employeeId: opts.employeeId,
-      fullName: opts.fullName,
-      driveFolderPath: folder || null,
-    });
-    if (resolved) folder = resolved;
-  } else if (folder && opts.fullName) {
-    // Path ya ok: igual corrige full_name a nombres + un apellido.
-    await resolveExpedienteFolder({
-      employeeId: opts.employeeId,
-      fullName: opts.fullName,
-      driveFolderPath: folder,
-    });
+  if (!files.length && expedienteDriveApiAvailable()) {
+    try {
+      const driveFolder = await resolveExpedienteDriveFolder({
+        employeeId: opts.employeeId,
+        fullName: String(opts.fullName || ''),
+        driveFolderPath: folder || opts.driveFolderPath || null,
+      });
+      if (!driveFolder) {
+        return {
+          ok: false,
+          imported: 0,
+          skipped: 0,
+          scanned: 0,
+          matched: [],
+          error: 'Empleado sin carpeta de expediente en Drive',
+          hint:
+            'Verifica el nombre en Altas/Bajas o vincula drive_folder_path. ' +
+            (folder ? `Path índice: ${folder}` : ''),
+        };
+      }
+      folder = driveFolder.logicalPath;
+      const listed = await listDriveFilesRecursive(driveFolder.folderId);
+      files = listed.map((f) => ({
+        name: f.name,
+        path: f.path,
+        sizeBytes: f.sizeBytes,
+        fileId: f.fileId,
+      }));
+    } catch (e) {
+      return {
+        ok: false,
+        imported: 0,
+        skipped: 0,
+        scanned: 0,
+        matched: [],
+        error: e instanceof Error ? e.message : 'No se pudo listar Drive',
+        hint: expedienteDriveUnavailableHint(),
+      };
+    }
   }
 
-  if (!folder) {
+  if (!files.length) {
+    if (!localDriveFsEnabled() && !expedienteDriveApiAvailable()) {
+      return {
+        ok: false,
+        imported: 0,
+        skipped: 0,
+        scanned: 0,
+        matched: [],
+        error: 'Sin fuente de expediente (local ni Drive API)',
+        hint: expedienteDriveUnavailableHint(),
+      };
+    }
     return {
       ok: false,
       imported: 0,
@@ -574,18 +675,7 @@ export async function pullExpedienteDocuments(opts: {
       scanned: 0,
       matched: [],
       error: 'Empleado sin carpeta de expediente vinculada',
-      hint: 'Vincula el expediente en Plantilla (Altas) o ejecuta el backfill de paths.',
-    };
-  }
-  if (!isUnderHrRoot(folder) || !existsSync(folder)) {
-    return {
-      ok: false,
-      imported: 0,
-      skipped: 0,
-      scanned: 0,
-      matched: [],
-      error: 'Carpeta de expediente no encontrada en disco',
-      hint: folder,
+      hint: 'Vincula el expediente en Plantilla (Altas) o configura HR_EXPEDIENTES_DRIVE_FOLDER_ID.',
     };
   }
 
@@ -606,25 +696,12 @@ export async function pullExpedienteDocuments(opts: {
     };
   }
 
-  let files: Array<{ name: string; path: string; sizeBytes: number | null }>;
-  try {
-    files = await listFilesRecursive(folder);
-  } catch (e) {
-    return {
-      ok: false,
-      imported: 0,
-      skipped: 0,
-      scanned: 0,
-      matched: [],
-      error: e instanceof Error ? e.message : 'No se pudo listar el expediente',
-    };
-  }
-
   type Classified = {
     name: string;
     path: string;
     sizeBytes: number | null;
     kind: HrDocTypeId | 'pack';
+    fileId?: string;
   };
   const classified: Classified[] = [];
   for (const f of files) {
@@ -639,26 +716,43 @@ export async function pullExpedienteDocuments(opts: {
   let imported = 0;
   let skipped = 0;
   const bufCache = new Map<string, { buf: Buffer; mime: string }>();
+  const fileIdByPath = new Map(
+    files.filter((f) => f.fileId).map((f) => [f.path, f.fileId!])
+  );
 
   async function loadBuf(filePath: string, fileName: string) {
     const hit = bufCache.get(filePath);
     if (hit) return hit;
-    const buf = await readFile(filePath);
-    if (buf.length > MAX_BYTES) {
-      throw new Error(`${fileName}: supera 10 MB`);
+    let buf: Buffer;
+    let mime: string;
+    const driveId = fileIdByPath.get(filePath);
+    if (driveId) {
+      const dl = await downloadDriveFileBuffer(driveId);
+      buf = dl.buffer;
+      mime = dl.mimeType;
+      if (mime === 'application/octet-stream' && fileName.toLowerCase().endsWith('.pdf')) {
+        mime = 'application/pdf';
+      }
+    } else {
+      buf = await readFile(filePath);
+      const { contentType } = hrBibliotecaContentType(filePath);
+      mime =
+        contentType === 'application/octet-stream'
+          ? fileName.toLowerCase().endsWith('.pdf')
+            ? 'application/pdf'
+            : 'application/octet-stream'
+          : contentType.split(';')[0];
     }
-    const { contentType } = hrBibliotecaContentType(filePath);
-    const mime =
-      contentType === 'application/octet-stream'
-        ? fileName.toLowerCase().endsWith('.pdf')
-          ? 'application/pdf'
-          : 'application/octet-stream'
-        : contentType.split(';')[0];
+    const maxAllowed = /contrato/i.test(filePath) || /contrato/i.test(fileName)
+      ? CONTRACT_MAX_BYTES
+      : MAX_BYTES;
+    if (buf.length > maxAllowed) {
+      throw new Error(`${fileName}: supera ${Math.round(maxAllowed / (1024 * 1024))} MB`);
+    }
     const entry = { buf, mime };
     bufCache.set(filePath, entry);
     return entry;
   }
-
   const byType = new Map<HrDocTypeId, Classified>();
   const packs: Classified[] = [];
   for (const c of classified) {
@@ -1497,11 +1591,14 @@ export async function repairSharedPackFromStorage(opts: {
   };
 }
 
-/** ¿Conviene soft-pull al abrir perfil? (sin docs / obligatorios faltantes). */
+/**
+ * ¿Conviene soft-pull? (sin docs / obligatorios faltantes).
+ * No bloquear GET del perfil: usar `profileSoftPullPending` + sync en background.
+ */
 export async function shouldSoftPullExpediente(
   employeeId: string
 ): Promise<boolean> {
-  if (!localDriveFsEnabled()) return false;
+  if (!expedientePullSourceAvailable()) return false;
   try {
     const sb = getServiceSupabase();
     const { data, error } = await sb
@@ -1530,7 +1627,7 @@ export async function shouldSoftPullExpediente(
 export async function shouldSoftPullContracts(
   employeeId: string
 ): Promise<boolean> {
-  if (!localDriveFsEnabled()) return false;
+  if (!expedientePullSourceAvailable()) return false;
   try {
     const sb = getServiceSupabase();
     const { data, error } = await sb
@@ -1568,11 +1665,12 @@ export async function shouldSoftPullContracts(
 /**
  * Soft-pull médico si aún no hay archivos en exámenes / reembolsos / justificantes.
  * (Aunque el checklist documental ya esté lleno.)
+ * No usar solo para bloquear/abrir perfil: carpeta médica vacía es común.
  */
 export async function shouldSoftPullMedical(
   employeeId: string
 ): Promise<boolean> {
-  if (!localDriveFsEnabled()) return false;
+  if (!expedientePullSourceAvailable()) return false;
   try {
     const sb = getServiceSupabase();
     const checks = await Promise.all([
@@ -1611,6 +1709,33 @@ export async function shouldSoftPullMedical(
         !/does not exist|relation|42P01|schema cache/i.test(r.error.message)
     );
     return usable;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ¿El perfil necesita sync de expediente en background?
+ * Ligero (solo DB): docs faltantes, contratos vacíos o pack a reparar.
+ * Médico vacío solo no dispara (muy común) — el pull completo lo incluye si corre.
+ * Nunca await-ear pull/OCR en el GET del perfil.
+ */
+export async function profileSoftPullPending(
+  employeeId: string,
+  opts?: { docsRequired?: boolean }
+): Promise<boolean> {
+  const docsRequired = opts?.docsRequired !== false;
+  try {
+    const tasks: Promise<boolean>[] = [
+      shouldRepairSharedPack(employeeId),
+      shouldRepairMislabeledPack(employeeId),
+    ];
+    if (expedientePullSourceAvailable()) {
+      if (docsRequired) tasks.push(shouldSoftPullExpediente(employeeId));
+      tasks.push(shouldSoftPullContracts(employeeId));
+    }
+    const flags = await Promise.all(tasks);
+    return flags.some(Boolean);
   } catch {
     return false;
   }

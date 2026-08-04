@@ -66,7 +66,7 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
     persistsIn:
       'hr_employees.drive_folder_path + status/fecha_baja (índice en DB)',
     stillNeedsDrive:
-      'Abrir binarios: HR_EXPEDIENTES_DRIVE_FOLDER_ID; detectar carpetas nuevas = PC admin',
+      'Binarios: Drive API (HR_EXPEDIENTES_DRIVE_FOLDER_ID) → Storage; detectar carpetas nuevas = PC admin opcional',
     cadenceHint: 'Diario 12:00 PM CDMX (Actions soft-sync); alta/baja en Suite',
     refreshHow: 'Índice en Supabase; sync local opcional',
   },
@@ -75,7 +75,7 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
     label: 'Biblioteca RH (políticas, RIT, perfiles, exámenes)',
     persistsIn: 'hr_doc_links (metadatos/rutas); Cultura también en código',
     stillNeedsDrive:
-      'Abrir PDF/docx: drive_url o HR_DOCS_VIGENTE_DRIVE_FOLDER_ID',
+      'Abrir PDF/docx: Drive API (HR_DOCS_VIGENTE_DRIVE_FOLDER_ID) o drive_url',
     cadenceHint: 'Diario 12:00 PM CDMX (Actions soft-sync); docs cambian raro',
     refreshHow: 'Seed SQL + POST /api/hr/sync content_type=biblioteca',
   },

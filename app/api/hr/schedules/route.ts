@@ -33,6 +33,7 @@ type PrevShiftRow = {
   end_time: string | null;
   area: string | null;
   role_label: string | null;
+  notes: string | null;
 };
 
 function mapShiftOut(raw: Record<string, unknown>) {
@@ -315,7 +316,9 @@ export async function POST(request: Request) {
     if (prevWeek) {
       const { data: src } = await sb
         .from('hr_schedule_shifts')
-        .select('employee_id, shift_date, start_time, end_time, area, role_label')
+        .select(
+          'employee_id, shift_date, start_time, end_time, area, role_label, notes'
+        )
         .eq('week_id', prevWeek.id);
       prevShifts = (src || []) as PrevShiftRow[];
     }
@@ -379,7 +382,7 @@ export async function POST(request: Request) {
             area: s.area != null ? String(s.area) : null,
             role_label: s.role_label != null ? String(s.role_label) : null,
             origin: 'manual' as const,
-            notes: null,
+            notes: s.notes != null ? String(s.notes) : null,
           };
         })
         .filter((r): r is NonNullable<typeof r> => r != null);

@@ -6,6 +6,8 @@ import {
   requireRrhhEmployeesWrite,
 } from '@/app/lib/hr-api';
 import {
+  formatEmployeeAreas,
+  parseEmployeeAreas,
   plantillaTeamGroup,
   syncExternoFlagInNotes,
   defaultRequiereDocumentacion,
@@ -811,13 +813,34 @@ export async function PATCH(request: Request) {
     ) {
       patch.puestos_secundarios = rolesParsed.roles.secondary;
     }
-    if (body.area === undefined && patch.puesto) {
+    if (body.area === undefined && body.areas === undefined && patch.puesto) {
       const inferred = areaFromPuesto(String(patch.puesto));
-      if (inferred) patch.area = inferred;
+      if (inferred) {
+        patch.area = inferred;
+        patch.areas = [inferred];
+      }
     }
   }
-  if (body.area !== undefined) {
-    patch.area = body.area == null ? null : String(body.area).trim() || null;
+  if (body.area !== undefined || body.areas !== undefined) {
+    let list: string[] = [];
+    if (Array.isArray(body.areas)) {
+      list = parseEmployeeAreas(
+        null,
+        body.areas.map((x: unknown) => String(x ?? ''))
+      );
+    } else if (Array.isArray(body.area)) {
+      list = parseEmployeeAreas(
+        body.area.map((x: unknown) => String(x ?? '')),
+        null
+      );
+    } else {
+      list = parseEmployeeAreas(
+        body.area == null ? null : String(body.area),
+        null
+      );
+    }
+    patch.area = formatEmployeeAreas(list);
+    patch.areas = list;
   }
   if (body.notes !== undefined || rolesTouched || tipoTouched) {
     const notesIn =
@@ -952,6 +975,23 @@ export async function PATCH(request: Request) {
       const retry = await sb
         .from('hr_employees')
         .update(patch)
+        .eq('id', id)
+        .select(EMP_SELECT_FULL_NO_TIPO)
+        .maybeSingle();
+      data = retry.data as typeof data;
+      error = retry.error;
+    }
+
+    if (
+      error &&
+      /\bareas\b|column .* does not exist|42703/i.test(error.message) &&
+      patch.areas !== undefined
+    ) {
+      const { areas: _ar, ...withoutAreas } = patch;
+      void _ar;
+      const retry = await sb
+        .from('hr_employees')
+        .update(withoutAreas)
         .eq('id', id)
         .select(EMP_SELECT_FULL_NO_TIPO)
         .maybeSingle();

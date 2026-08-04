@@ -142,17 +142,23 @@ function mergeItem(
   folio?: string | null
 ): void {
   const key = dedupeKey(item.event_date, item.title, item.client, folio);
+  const resolvedFolio =
+    resolveFolio(folio, item.folio, item.title, item.client) || null;
+  const withFolio: CalendarEventItem = {
+    ...item,
+    folio: resolvedFolio || item.folio || null,
+  };
   const prev = map.get(key);
   if (!prev) {
-    map.set(key, item);
+    map.set(key, withFolio);
     return;
   }
   const preferNew =
-    SOURCE_PRIORITY[item.source] > SOURCE_PRIORITY[prev.source] ||
-    (SOURCE_PRIORITY[item.source] === SOURCE_PRIORITY[prev.source] &&
-      (item.pax ?? 0) > (prev.pax ?? 0));
-  const base = preferNew ? item : prev;
-  const other = preferNew ? prev : item;
+    SOURCE_PRIORITY[withFolio.source] > SOURCE_PRIORITY[prev.source] ||
+    (SOURCE_PRIORITY[withFolio.source] === SOURCE_PRIORITY[prev.source] &&
+      (withFolio.pax ?? 0) > (prev.pax ?? 0));
+  const base = preferNew ? withFolio : prev;
+  const other = preferNew ? prev : withFolio;
   map.set(key, {
     ...base,
     title: preferTitle(base.title, other.title),
@@ -182,6 +188,11 @@ function mergeItem(
         other.source === 'os'
     ),
     has_anticipo: Boolean(base.has_anticipo || other.has_anticipo),
+    folio:
+      resolveFolio(base.folio, other.folio, folio) ||
+      base.folio ||
+      other.folio ||
+      null,
     quote_id: base.quote_id || other.quote_id,
     lead_id: base.lead_id || other.lead_id,
     client_id: base.client_id || other.client_id,
@@ -198,6 +209,7 @@ function emptyLinks(): Pick<
   | 'digital_os_id'
   | 'has_os'
   | 'has_anticipo'
+  | 'folio'
   | 'quote_id'
   | 'lead_id'
   | 'client_id'
@@ -211,6 +223,7 @@ function emptyLinks(): Pick<
     digital_os_id: null,
     has_os: false,
     has_anticipo: false,
+    folio: null,
     quote_id: null,
     lead_id: null,
     client_id: null,

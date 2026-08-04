@@ -19,6 +19,10 @@ import {
   listDigitalServiceOrders,
 } from '@/app/lib/eventos-service-order';
 import { getServiceSupabase } from '@/app/lib/users';
+import {
+  clientSafeRoot,
+  localDriveFsEnabled,
+} from '@/app/lib/local-fs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,7 +77,10 @@ export async function GET(request: Request) {
       });
     } catch {
       return NextResponse.json(
-        { error: 'Archivo no legible en este servidor', path: decoded },
+        {
+          error: 'Archivo no legible en este servidor',
+          ...(localDriveFsEnabled() ? { path: decoded } : {}),
+        },
         { status: 404 }
       );
     }
@@ -206,17 +213,28 @@ export async function GET(request: Request) {
     return (a.filename || '').localeCompare(b.filename || '', 'es');
   });
 
+  const localFs = localDriveFsEnabled();
+  const itemsOut = localFs
+    ? items
+    : items.map((it) =>
+        it.kind === 'pdf'
+          ? { ...it, path: '', rel_path: '' }
+          : it
+      );
+
   return NextResponse.json({
-    ready: items.length > 0 || rootExists || digitalReady,
-    root,
+    ready: itemsOut.length > 0 || rootExists || digitalReady,
+    root: clientSafeRoot(root),
     rootExists,
+    localFsEnabled: localFs,
+    canOpenFiles: rootExists,
     source: digital.length
       ? pdfSource === 'none'
         ? 'digital'
         : `digital+${pdfSource}`
       : pdfSource,
-    items,
-    count: items.length,
+    items: itemsOut,
+    count: itemsOut.length,
     digital_count: digital.length,
     pdf_count: pdfFiltered.length,
     note: [

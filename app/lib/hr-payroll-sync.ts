@@ -456,6 +456,22 @@ export async function syncLeaveBalancesFromPeriod(
     }
   }
 
+  const lineIds = (lines || [])
+    .map((raw) => String((raw as { employee_id: string }).employee_id))
+    .filter((id) => id && !exemptIds.has(id));
+  const policyProtected = new Set<string>();
+  if (lineIds.length > 0) {
+    const { data: existingBals } = await sb
+      .from('hr_leave_balances')
+      .select('employee_id, source')
+      .eq('year', y)
+      .in('employee_id', lineIds);
+    for (const row of existingBals || []) {
+      const r = row as { employee_id: string; source: string };
+      if (r.source === 'policy') policyProtected.add(String(r.employee_id));
+    }
+  }
+
   let n = 0;
   for (const raw of lines || []) {
     const line = raw as {
@@ -465,6 +481,8 @@ export async function syncLeaveBalancesFromPeriod(
       notes: string | null;
     };
     if (exemptIds.has(String(line.employee_id))) continue;
+    // No pisar saldos ya acumulados por LFT (aniversario).
+    if (policyProtected.has(String(line.employee_id))) continue;
     const taken = line.vacaciones_tomadas;
     const remaining = line.vacaciones_restantes;
     let entitled: number | null = null;

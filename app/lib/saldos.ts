@@ -8,6 +8,16 @@ export const SOURCE_SALDOS_BANCOS_MANUAL = 'saldos_bancos_manual';
 export const CAT_SALDO_MIFEL = 'Saldo Mifel';
 export const CAT_SALDO_BBVA = 'Saldo BBVA';
 
+/** Hoy civil America/Mexico_City (YYYY-MM-DD). Saldos no se conocen a futuro. */
+export function todayCdmxIso(at: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Mexico_City',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(at);
+}
+
 export interface SaldosAlDiaData {
   efectivo: number | null;
   efectivoFecha: string | null;

@@ -4,12 +4,14 @@ import {
   requireEventosSession,
   requireEventosWrite,
 } from '@/app/lib/eventos-api';
-import {
-  EVENTOS_SERVICIO_PCT,
-  type QuoteLineOptions,
-} from '@/app/lib/eventos';
 import type { CotizacionDoc } from '@/app/lib/eventos-cotizacion-doc';
+import { ensureQuoteFolio } from '@/app/lib/eventos-quote-folio';
 import { createServiceOrderFromQuote } from '@/app/lib/eventos-service-order';
+import {
+  buildCotizacionDocFromQuoteRow,
+  ensureQuotePublicToken,
+  publicQuotePath,
+} from '@/app/lib/eventos-quote-public';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,48 +58,16 @@ export async function GET(_request: Request, ctx: RouteCtx) {
       );
     }
 
-    const client = data.client as {
-      company_name?: string;
-      contact_name?: string | null;
-      phone?: string | null;
-      email?: string | null;
-    } | null;
+    const folio = await ensureQuoteFolio(
+      sb,
+      id,
+      (data as { quote_number?: string | null }).quote_number
+    );
+    if (folio && folio !== data.quote_number) {
+      (data as { quote_number?: string | null }).quote_number = folio;
+    }
 
-    const lines = (
-      (data.lines as Array<{
-        description: string;
-        quantity: number;
-        unit_price: number;
-        options?: QuoteLineOptions | null;
-        sort_order?: number;
-      }>) || []
-    )
-      .slice()
-      .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
-      .map((l) => ({
-        description: l.description,
-        quantity: Number(l.quantity),
-        unit_price: Number(l.unit_price),
-        options: (l.options || {}) as QuoteLineOptions,
-      }));
-
-    const doc: CotizacionDoc = {
-      quote_number: data.quote_number || null,
-      status: data.status || null,
-      client_name: client?.company_name || null,
-      contact_name: client?.contact_name || null,
-      phone: client?.phone || null,
-      email: client?.email || null,
-      celebration: data.celebration || null,
-      event_date: data.event_date || null,
-      pax: Number(data.pax || 0),
-      notes: data.notes || null,
-      apply_servicio: data.apply_servicio !== false,
-      servicio_pct: Number(data.servicio_pct ?? EVENTOS_SERVICIO_PCT),
-      hold_until: data.hold_until || null,
-      lines,
-      issued_at: data.created_at || data.updated_at || null,
-    };
+    const doc: CotizacionDoc = buildCotizacionDocFromQuoteRow(data);
 
     let service_order_id: string | null = null;
     try {
@@ -111,7 +81,20 @@ export async function GET(_request: Request, ctx: RouteCtx) {
       service_order_id = null;
     }
 
-    return NextResponse.json({ doc, quote: data, service_order_id });
+    const public_token = await ensureQuotePublicToken(
+      sb,
+      id,
+      (data as { public_token?: string | null }).public_token
+    );
+    const public_path = public_token ? publicQuotePath(public_token) : null;
+
+    return NextResponse.json({
+      doc,
+      quote: data,
+      service_order_id,
+      public_token,
+      public_path,
+    });
   } catch (e) {
     return NextResponse.json(
       {
@@ -142,6 +125,7 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
   let body: {
     status?: string;
     generate_os?: boolean;
+    payment_link_url?: string | null;
   };
   try {
     body = await request.json();
@@ -149,9 +133,13 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
     return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
   }
 
-  if (!body.status && body.generate_os == null) {
+  if (
+    !body.status &&
+    body.generate_os == null &&
+    body.payment_link_url === undefined
+  ) {
     return NextResponse.json(
-      { error: 'Indica status o generate_os' },
+      { error: 'Indica status, generate_os o payment_link_url' },
       { status: 400 }
     );
   }
@@ -168,17 +156,37 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
     const now = new Date().toISOString();
     let quote: Record<string, unknown> | null = null;
 
-    if (body.status) {
+    const patch: Record<string, unknown> = { updated_at: now };
+    if (body.status) patch.status = body.status;
+    if (body.payment_link_url !== undefined) {
+      const url =
+        typeof body.payment_link_url === 'string'
+          ? body.payment_link_url.trim()
+          : '';
+      patch.payment_link_url = url || null;
+    }
+
+    if (body.status || body.payment_link_url !== undefined) {
       const { data, error } = await sb
         .from('event_quotes')
-        .update({ status: body.status, updated_at: now })
+        .update(patch)
         .eq('id', id)
         .select(
           '*, lines:event_quote_lines(*), client:event_clients(id, company_name)'
         )
         .single();
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const missingLink = /payment_link_url|schema cache|column/i.test(
+          error.message
+        );
+        return NextResponse.json(
+          {
+            error: missingLink
+              ? 'Falta migrar payment_link_url. Ejecuta supabase/eventos_quote_accept.sql'
+              : error.message,
+          },
+          { status: missingLink ? 503 : 500 }
+        );
       }
       quote = data;
     }

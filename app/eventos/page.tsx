@@ -56,6 +56,7 @@ type SummaryPayload = {
     os_filename?: string | null;
     has_os?: boolean;
     has_anticipo?: boolean;
+    folio?: string | null;
     quote_id?: string | null;
   }>;
 };

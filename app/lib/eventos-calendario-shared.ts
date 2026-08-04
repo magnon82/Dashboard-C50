@@ -27,6 +27,8 @@ export type CalendarEventItem = {
   has_os: boolean;
   /** True si el evento viene de Anticipos C50 (pago de anticipo registrado). */
   has_anticipo: boolean;
+  /** Folio OS / anticipo (G7, numérico, etc.) si se pudo resolver. */
+  folio: string | null;
   /** id de event_quotes si hay match en Supabase */
   quote_id: string | null;
   lead_id: string | null;

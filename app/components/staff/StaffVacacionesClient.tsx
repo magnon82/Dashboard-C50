@@ -15,7 +15,7 @@ import {
   formatHrDate,
   hrLeaveDisplayLabel,
   isLeaveTomada,
-  leaveInclusiveDays,
+  leaveLaborDays,
   todayIsoCdmx,
   type HrLeaveBalanceRow,
   type HrLeaveRequest,
@@ -183,7 +183,7 @@ export function StaffVacacionesClient() {
   }, [refresh]);
 
   const days =
-    desde && hasta && hasta >= desde ? leaveInclusiveDays(desde, hasta) : 0;
+    desde && hasta && hasta >= desde ? leaveLaborDays(desde, hasta) : 0;
 
   const reserved = useMemo(
     () => reservedLeaveDays(requests, today),

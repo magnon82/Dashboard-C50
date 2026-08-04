@@ -152,7 +152,7 @@ export async function POST(request: Request) {
         linkedCount: count ?? 0,
         message:
           'Índice de expedientes operativo en Supabase. Detectar carpetas nuevas es opcional desde el PC de admin.',
-        hint: 'Opcional: HR_EXPEDIENTES_DRIVE_FOLDER_ID para «Abrir en Drive».',
+        hint: 'Opcional: HR_EXPEDIENTES_DRIVE_FOLDER_ID + credenciales Google para soft-pull Drive→Storage en Vercel.',
       });
     }
 

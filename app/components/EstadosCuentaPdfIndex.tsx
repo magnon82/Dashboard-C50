@@ -52,6 +52,7 @@ export function EstadosCuentaPdfIndex({
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<string>('');
   const [rootExists, setRootExists] = useState(false);
+  const [localFsEnabled, setLocalFsEnabled] = useState(false);
   const [preferScan, setPreferScan] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -81,6 +82,7 @@ export function EstadosCuentaPdfIndex({
       setItems(json.items || []);
       setSource(json.source || '');
       setRootExists(Boolean(json.rootExists));
+      setLocalFsEnabled(Boolean(json.localFsEnabled));
       setLoadedOnce(true);
     } catch {
       setError('No se pudo cargar el índice de estados de cuenta');
@@ -221,9 +223,14 @@ export function EstadosCuentaPdfIndex({
             </label>
             <button
               type="button"
-              className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700"
+              className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!localFsEnabled && !rootExists}
               onClick={() => setPreferScan((v) => !v)}
-              title="Releer carpeta local I:\Administración\Bancos"
+              title={
+                !localFsEnabled && !rootExists
+                  ? 'Escaneo local no disponible en la nube'
+                  : 'Releer carpeta local Administración/Bancos'
+              }
             >
               {preferScan ? 'Usar índice' : 'Escanear disco'}
             </button>
@@ -232,11 +239,14 @@ export function EstadosCuentaPdfIndex({
           <p className="mb-3 text-sm" style={{ color: theme.muted }}>
             Estados de cuenta bancarios (PDF). Fuente:{' '}
             {source === 'scan'
-              ? 'escaneo local de Administración\\Bancos'
+              ? 'escaneo local de Administración/Bancos'
               : source === 'index'
                 ? 'índice Supabase (estado_cuenta_pdf_index)'
                 : source || '—'}
-            {rootExists ? '' : ' · carpeta I: no visible en este servidor'}.
+            {rootExists
+              ? ''
+              : ' · vista previa PDF solo en PC de admin (en línea: solo índice)'}
+            .
           </p>
 
           {error && (
@@ -312,7 +322,7 @@ export function EstadosCuentaPdfIndex({
                               </td>
                               <td
                                 className="max-w-[360px] truncate py-1.5 text-xs text-slate-600"
-                                title={it.path || it.rel_path}
+                                title={it.filename}
                               >
                                 {it.filename}
                               </td>
@@ -328,6 +338,13 @@ export function EstadosCuentaPdfIndex({
                                     >
                                       Abrir PDF
                                     </a>
+                                  ) : !rootExists ? (
+                                    <span
+                                      className="text-xs text-slate-400"
+                                      title="Indexado; abrir PDF requiere PC de admin o Storage/Drive API"
+                                    >
+                                      Solo índice
+                                    </span>
                                   ) : null}
                                 </div>
                               </td>

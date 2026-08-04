@@ -686,13 +686,9 @@ export function EventosOrdenesServicio() {
                         ) : (
                           <span
                             className="text-xs text-slate-500"
-                            title={
-                              it.rel_path
-                                ? `En índice (${it.rel_path}). Monta Drive local para descargar.`
-                                : undefined
-                            }
+                            title="Indexado; descarga PDF requiere PC de admin o Storage/Drive API"
                           >
-                            Sin archivo local
+                            Solo índice
                           </span>
                         )}
                       </td>

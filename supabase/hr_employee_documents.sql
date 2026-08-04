@@ -9,7 +9,7 @@
 --   Verificación Master: status verified/rejected en perfil Documentos.
 --
 -- Crea:
---   · columnas perfil en hr_employees (fecha_baja, phone, foto, nss, curp, emergencia)
+--   · columnas perfil en hr_employees (fecha_baja, phone, foto, nss, curp, emergencia, domicilio)
 --   · public.hr_employee_documents  (checklist INE/acta/CURP/domicilio/CV…)
 --   · public.hr_medical_reimbursements
 --   · public.hr_medical_justifications
@@ -40,6 +40,9 @@ alter table public.hr_employees
 
 alter table public.hr_employees
   add column if not exists emergency_phone text;
+
+alter table public.hr_employees
+  add column if not exists domicilio text;
 
 -- 2) Checklist documental (núcleo del tab Documentos)
 create table if not exists public.hr_employee_documents (
