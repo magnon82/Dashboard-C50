@@ -431,12 +431,13 @@ export async function GET(req: Request, ctx: Ctx) {
       .order('created_at', { ascending: false })
       .limit(100);
     if (resg.error && missingAcceptedCols(resg.error.message)) {
-      resg = await sb
+      // Legacy select omits accepted_* cols; cast keeps TS happy across schema versions.
+      resg = (await sb
         .from('hr_resguardo_requests')
         .select(HR_RESGUARDO_SELECT_LEGACY)
         .eq('employee_id', id)
         .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(100)) as typeof resg;
     }
     if (!resg.error && resg.data) {
       for (const row of resg.data) {
@@ -453,12 +454,12 @@ export async function GET(req: Request, ctx: Ctx) {
       .order('created_at', { ascending: false })
       .limit(200);
     if (unlinked.error && missingAcceptedCols(unlinked.error.message)) {
-      unlinked = await sb
+      unlinked = (await sb
         .from('hr_resguardo_requests')
         .select(HR_RESGUARDO_SELECT_LEGACY)
         .is('employee_id', null)
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(200)) as typeof unlinked;
     }
     if (!unlinked.error && unlinked.data) {
       const candidate = [{ id, full_name: emp.full_name || '' }];
