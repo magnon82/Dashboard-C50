@@ -65,6 +65,39 @@ export async function GET() {
     const health = evaluateInfocajaSyncHealth({ maxInfocajaDate });
     const hubAlert = formatInfocajaSyncHubAlert(health);
 
+    // #region agent log
+    fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '826472',
+      },
+      body: JSON.stringify({
+        sessionId: '826472',
+        runId: 'pre-fix',
+        hypothesisId: 'A',
+        location: 'ventas-sync-status/route.ts:GET',
+        message: 'Infocaja sync health evaluated',
+        data: {
+          maxInfocajaDate,
+          stale: health.stale,
+          ok: health.ok,
+          todayCdmx: health.todayCdmx,
+          hourCdmx: health.hourCdmx,
+          expectedMinDate: health.expectedMinDate,
+          message: health.message,
+          canDispatch:
+            canAccessAdmin(auth) &&
+            Boolean(
+              process.env.GH_WORKFLOW_DISPATCH_TOKEN?.trim() ||
+                process.env.GITHUB_TOKEN?.trim()
+            ),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
     return NextResponse.json({
       ready: true,
       health,

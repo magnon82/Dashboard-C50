@@ -70,9 +70,12 @@ export function evaluateInfocajaSyncHealth(opts: {
   const stale = !max || max < expectedMinDate;
   let message: string;
   if (!max) {
-    message = 'No hay ventas Infocaja en Supabase. Corre Sync Gmail.';
+    message =
+      'No hay ventas Infocaja en Supabase. El sync automático (Actions) debería cargarlas; si persiste, revisa Gmail Fin de Día.';
   } else if (stale) {
-    message = `Ventas desactualizadas: último día ${max} (se espera ≥ ${expectedMinDate}). Sync Gmail no corrió o falló.`;
+    // Actions puede salir en verde sin el día nuevo (correo aún no llega).
+    // No afirmar que el workflow “falló”: el dato en BD es lo que falta.
+    message = `Ventas desactualizadas: último día ${max} (se espera ≥ ${expectedMinDate}). El sync automático reintenta en horario; si el Fin de Día de ${expectedMinDate} ya está en Gmail y sigue faltando, revisa Actions.`;
   } else {
     message = `Infocaja al día (último ${max}).`;
   }

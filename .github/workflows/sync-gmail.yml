@@ -1,17 +1,21 @@
 name: Sync Gmail diario
 
 # CDMX sin DST desde 2022 (UTC-6).
-# Horario pedido:
-#   · Lun–Vie 2:00–6:00 AM CDMX cada hora  → 8:00–12:00 UTC (cron weekdays 1–5)
-#   · Dom 7:00–11:00 PM CDMX cada hora     → lun 1:00–5:00 UTC (cron weekday 1)
-# GitHub cron es best-effort; la Suite alerta si Infocaja queda atrasada.
-# Infocaja + CORTE → Supabase; CFDI → financial_records (best-effort).
+# Objetivo: automático, sin depender de “Run workflow”.
+#   · Lun–Sáb 2:00–6:00 AM CDMX cada hora   → 8:00–12:00 UTC
+#   · Lun–Sáb 8,10,12,14 CDMX (refuerzo)    → 14,16,18,20 UTC
+#       (el Fin de Día suele llegar después de la madrugada)
+#   · Dom 7:00–11:00 PM CDMX cada hora      → lun 1:00–5:00 UTC
+# GitHub cron puede retrasarse; los refuerzos diurnos cubren el hueco.
+# Tras las 10:00 CDMX, si falta el día esperado el job FALLA (no verde falso).
 
 on:
   schedule:
-    # Lun–Vie 2,3,4,5,6 AM CDMX
-    - cron: "0 8-12 * * 1-5"
-    # Dom 7,8,9,10,11 PM CDMX (= lun 1–5 UTC)
+    # Lun–Sáb madrugada 2–6 AM CDMX
+    - cron: "0 8-12 * * 1-6"
+    # Lun–Sáb refuerzo 8,10,12,14 CDMX
+    - cron: "0 14,16,18,20 * * 1-6"
+    # Dom 7–11 PM CDMX (= lun 1–5 UTC)
     - cron: "0 1-5 * * 1"
   workflow_dispatch:
 
@@ -73,6 +77,15 @@ jobs:
           PYTHONUTF8: "1"
         run: python sync_gmail_diario.py --newer-than 7 --skip-facturas
 
+      - name: Verify Infocaja al día (auto)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CI: "true"
+          PYTHONUTF8: "1"
+        run: python verify_infocaja_freshness.py
+
       - name: Sync Facturas CFDI → Supabase
         continue-on-error: true
         env:
@@ -89,5 +102,5 @@ jobs:
       - name: Mark job failed clearly
         if: failure()
         run: |
-          echo "::error::Sync Gmail falló. Revisa el paso en rojo y secrets Actions. Activa notificaciones: GitHub → Settings → Notifications → Actions."
+          echo "::error::Sync Gmail falló o Infocaja sigue atrasada tras el horario automático. Revisa el paso en rojo; el próximo refuerzo del cron volverá a intentar."
           exit 1

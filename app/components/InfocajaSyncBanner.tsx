@@ -27,6 +27,31 @@ export function InfocajaSyncBanner({ className = '' }: { className?: string }) {
       if (res.ok && json.health) {
         setHealth(json.health as Health);
         setCanDispatch(Boolean(json.canDispatch));
+        // #region agent log
+        fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': '826472',
+          },
+          body: JSON.stringify({
+            sessionId: '826472',
+            runId: 'pre-fix',
+            hypothesisId: 'C',
+            location: 'InfocajaSyncBanner.tsx:refresh',
+            message: 'Banner health from API',
+            data: {
+              stale: Boolean(json.health?.stale),
+              showManualLink: Boolean(json.health?.stale),
+              canDispatch: Boolean(json.canDispatch),
+              maxInfocajaDate: json.health?.maxInfocajaDate ?? null,
+              expectedMinDate: json.health?.expectedMinDate ?? null,
+              message: json.health?.message ?? null,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
       }
     } catch {
       /* ignore */
@@ -73,7 +98,7 @@ export function InfocajaSyncBanner({ className = '' }: { className?: string }) {
           className="inline-flex min-h-10 items-center rounded-xl px-3 text-xs font-bold text-white"
           style={{ backgroundColor: SUITE.navy }}
         >
-          Abrir Actions (Run workflow)
+          Ver historial Actions
         </a>
         {canDispatch ? (
           <button
