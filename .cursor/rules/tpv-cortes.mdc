@@ -23,9 +23,19 @@ Schema: `photo_kind` (`venta`|`propina`); unique `(corte_date, terminal_number, 
 ## Fuentes
 
 - Fotos: Supabase Storage `tpv-cortes` + tabla `tpv_corte_uploads` (`supabase/tpv_cortes.sql`)
-- Montos: **OCR automático** al subir (`tesseract.js` + parse Mifel en `app/lib/tpv-ocr.ts`). Si no legible → rechazo «Vuelve a tomar la foto».
+- Montos: **OCR automático** al subir (`tesseract.js` + parse Mifel en `app/lib/tpv-ocr.ts`). Si no legible → rechazo «Vuelve a tomar la foto». Si falla el motor → 503 «lector no disponible» (sin pedir retomar).
 - TOTALIZACIÓN → `ticket_total` (liquidación; a menudo incluye tips). Propina → `amount_propina`. Con ambas: `cobrado = ticket_total − propina`. Neto banco = cobrado + propinas.
-- Override manual opcional en el form / PATCH.
+- **Sin campo de monto en la captura**: la venta en tarjetas se registra desde los tickets. La corrección manual solo existe sobre una foto ya guardada («Corregir monto» → PATCH `/api/tpv-cortes/[id]`).
+
+## OCR en Vercel — no romper el empaquetado
+
+`runTpvOcr` carga tesseract.js con `require()` en runtime para poder envolver `spawnWorker` **antes** de que `createWorker` capture la referencia: tesseract.js registra `worker.onerror` (API de navegador) y en Node el evento `'error'` del worker_thread sin listener se relanza en el hilo principal → **mata la función serverless entera** (el POST se queda colgado en «Leyendo ticket…» y cualquier GET simultáneo devuelve «Failed to fetch»). Por lo mismo se pasa `errorHandler` a `createWorker`: sin él tesseract.js hace `throw` dentro del handler de `'message'`.
+
+El tracer de Next copia el archivo de entrada del worker pero **no sigue sus `require()`**, y con el require dinámico tampoco ve el paquete. Todo lo que necesita el lambda va explícito en `outputFileTracingIncludes['/api/tpv-cortes']` (next.config.ts): `tesseract.js/src/**`, `tesseract.js-core/**` (todas las variantes: `getCore` compara los OEM contra un booleano y siempre pide el core completo), `wasm-feature-detect`, `bmp-js`, `regenerator-runtime`, `is-url` y `tessdata/spa.traineddata`.
+
+`tessdata/spa.traineddata` va **versionado** y se usa como `langPath` + `cachePath`: sin él tesseract.js descarga ~3 MB del CDN en cada cold start e intenta escribir la caché en el cwd de solo lectura. Override: `TPV_TESSDATA_DIR`.
+
+Verificación antes de desplegar cambios de OCR: `npm run build` y comprobar que `.next/server/app/api/tpv-cortes/route.js.nft.json` incluye `tesseract.js-core`, `worker-script/node/getCore.js` y `tessdata/spa.traineddata`. Copiar ese set de archivos a una carpeta limpia y correr `createWorker` ahí reproduce el lambda exacto.
 - Cross-check opcional: Infocaja `Infocaja Bancarias` / `Infocaja Propina`
 - No confundir con `corte_caja` (cancelaciones/descuentos Infocaja)
 

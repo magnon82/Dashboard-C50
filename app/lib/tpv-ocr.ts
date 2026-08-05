@@ -10,12 +10,19 @@
  * - Solo venta: cobrado temporal = ticket_total; solo propina: solo tip.
  * - Neto banco = cobrado + propinas (las tips se suman, no se restan).
  */
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import sharp from 'sharp';
-import { createWorker, type Worker } from 'tesseract.js';
+import type { Worker } from 'tesseract.js';
 import type { TpvPhotoKind } from '@/app/lib/tpv-cortes';
 
 export const TPV_OCR_RETAKE_MSG =
   'No se pudo leer el ticket con claridad. Vuelve a tomar la foto (nitidez, luz y ticket completo).';
+
+/** Fallo de infraestructura (no es culpa de la foto): no pedir retomarla. */
+export const TPV_OCR_UNAVAILABLE_MSG =
+  'El lector de tickets no está disponible en este momento. Vuelve a intentar en unos segundos; si sigue igual avisa a sistemas (no hace falta repetir la foto).';
 
 /** Prefijo en ocr_text para recuperar ticket_total tras reconciliar cobrado. */
 export const TPV_OCR_META_PREFIX = 'TPV_OCR';
@@ -32,6 +39,8 @@ export interface TpvOcrParseResult {
   meanConfidence: number;
   detectedKind: TpvPhotoKind | null;
   error?: string;
+  /** true = falló el motor OCR (infra), no la calidad de la foto. */
+  unavailable?: boolean;
 }
 
 export interface TpvOcrAmounts {
@@ -45,16 +54,136 @@ export interface TpvOcrAmounts {
   ocrStatus: 'done' | 'failed';
 }
 
+/** Arranque del worker (descarga cero: traineddata local) + margen de CPU fría. */
+const TPV_OCR_INIT_TIMEOUT_MS = 25_000;
+/** Una pasada de `recognize` sobre un ticket ya preprocesado. */
+const TPV_OCR_PASS_TIMEOUT_MS = 20_000;
+/** Presupuesto total del multipass: deja margen bajo `maxDuration = 60`. */
+const TPV_OCR_TOTAL_BUDGET_MS = 38_000;
+
+const nodeRequire = createRequire(path.join(process.cwd(), 'noop.js'));
+
+/**
+ * Carpeta con `spa.traineddata` versionado. Usarla como `langPath` y `cachePath`
+ * evita la descarga desde el CDN en cada cold start y la escritura en el FS de
+ * solo lectura de Vercel (tesseract.js cachea el idioma junto al cwd por default).
+ */
+function tessdataDir(): string | null {
+  const candidates = [
+    process.env.TPV_TESSDATA_DIR,
+    path.join(process.cwd(), 'tessdata'),
+  ].filter((p): p is string => Boolean(p));
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'spa.traineddata'))) return dir;
+  }
+  return null;
+}
+
+/**
+ * tesseract.js registra `worker.onerror` (API de Web Worker). En Node los fallos
+ * del worker_thread llegan por el evento `'error'` y, sin listener, Node los
+ * relanza en el hilo principal: en Vercel eso mata la función completa y la
+ * petición en curso se queda sin respuesta. Se envuelve `spawnWorker` antes de
+ * que `createWorker` capture la referencia por destructuring.
+ */
+function loadTesseract(): typeof import('tesseract.js') {
+  const nodeWorker = nodeRequire('tesseract.js/src/worker/node') as {
+    spawnWorker: (opts: unknown) => { on: (ev: string, cb: (e: unknown) => void) => void };
+    __c50ErrorGuard?: boolean;
+  };
+  if (!nodeWorker.__c50ErrorGuard) {
+    const spawn = nodeWorker.spawnWorker;
+    nodeWorker.spawnWorker = (opts: unknown) => {
+      const worker = spawn(opts);
+      worker.on('error', (err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        lastWorkerError = msg;
+        // `createWorker` no se entera del fallo del thread: hay que cortarlo aquí
+        // en vez de esperar el timeout completo.
+        failInit?.(new Error(msg));
+      });
+      return worker;
+    };
+    nodeWorker.__c50ErrorGuard = true;
+  }
+  return nodeRequire('tesseract.js') as typeof import('tesseract.js');
+}
+
 let workerPromise: Promise<Worker> | null = null;
+let lastWorkerError: string | null = null;
+let failInit: ((e: Error) => void) | null = null;
+
+async function resetWorker(): Promise<void> {
+  const pending = workerPromise;
+  workerPromise = null;
+  if (!pending) return;
+  try {
+    const worker = await pending;
+    await worker.terminate();
+  } catch {
+    // Worker roto: basta con soltar la referencia memoizada.
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`OCR ${label} excedió ${Math.round(ms / 1000)}s`)),
+      ms
+    );
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
 
 async function getWorker(): Promise<Worker> {
   if (!workerPromise) {
-    workerPromise = (async () => {
-      const worker = await createWorker('spa', 1, {
-        logger: () => undefined,
-      });
-      return worker;
-    })();
+    const dir = tessdataDir();
+    if (!dir) {
+      throw new Error(
+        'Falta tessdata/spa.traineddata en el despliegue (outputFileTracingIncludes)'
+      );
+    }
+    lastWorkerError = null;
+    const fatal = new Promise<never>((_, reject) => {
+      failInit = reject;
+    });
+    workerPromise = withTimeout(
+      Promise.race([
+        loadTesseract().createWorker('spa', 1, {
+          logger: () => undefined,
+          // Sin errorHandler, tesseract.js hace `throw` dentro del handler de
+          // 'message' del worker y la excepción queda sin capturar.
+          errorHandler: (err: unknown) => {
+            lastWorkerError = typeof err === 'string' ? err : String(err);
+            failInit?.(new Error(lastWorkerError));
+          },
+          langPath: dir,
+          cachePath: dir,
+          gzip: false,
+        }),
+        fatal,
+      ]),
+      TPV_OCR_INIT_TIMEOUT_MS,
+      'init'
+    ).catch((e: unknown) => {
+      workerPromise = null;
+      throw new Error(
+        lastWorkerError
+          ? `${lastWorkerError}`
+          : e instanceof Error
+            ? e.message
+            : 'No se pudo iniciar el OCR'
+      );
+    });
   }
   return workerPromise;
 }
@@ -421,7 +550,7 @@ async function recognizeBuffer(
 ): Promise<{ text: string; confidence: number }> {
   const {
     data: { text, confidence },
-  } = await worker.recognize(img);
+  } = await withTimeout(worker.recognize(img), TPV_OCR_PASS_TIMEOUT_MS, 'recognize');
   return { text: normalizeOcrText(text || ''), confidence: Number(confidence) || 0 };
 }
 
@@ -431,9 +560,27 @@ export async function runTpvOcr(
 ): Promise<TpvOcrParseResult> {
   let rawText = '';
   let meanConfidence = 0;
+  const deadline = Date.now() + TPV_OCR_TOTAL_BUDGET_MS;
+
+  let worker: Worker;
+  try {
+    worker = await getWorker();
+  } catch (e) {
+    // Motor caído / mal desplegado: no tiene sentido pedir otra foto.
+    return {
+      ok: false,
+      ticketTotal: null,
+      amountPropina: null,
+      consumo: null,
+      rawText: '',
+      meanConfidence: 0,
+      detectedKind: null,
+      unavailable: true,
+      error: e instanceof Error ? e.message : 'OCR no disponible',
+    };
+  }
 
   try {
-    const worker = await getWorker();
     const modes: Array<'base' | 'contrast' | 'bottom'> =
       photoKind === 'venta'
         ? ['base', 'contrast', 'bottom']
@@ -442,6 +589,8 @@ export async function runTpvOcr(
     let best: TpvOcrParseResult | null = null;
 
     for (const mode of modes) {
+      // La primera pasada siempre corre; las de refuerzo solo si queda tiempo.
+      if (best && Date.now() > deadline) break;
       const prepared = await preprocessVariant(buffer, mode);
       const { text, confidence } = await recognizeBuffer(worker, prepared);
       rawText = rawText ? `${rawText}\n---\n${text}` : text;
@@ -547,14 +696,18 @@ export async function runTpvOcr(
 
     return { ...best, rawText: best.rawText || rawText, meanConfidence };
   } catch (e) {
+    // Timeout o worker roto a mitad del multipass: soltar el worker memoizado
+    // para que la siguiente petición arranque uno limpio.
+    void resetWorker();
     return {
       ok: false,
       ticketTotal: null,
       amountPropina: null,
       consumo: null,
-      rawText: '',
-      meanConfidence: 0,
+      rawText,
+      meanConfidence,
       detectedKind: null,
+      unavailable: true,
       error: e instanceof Error ? e.message : 'OCR falló',
     };
   }

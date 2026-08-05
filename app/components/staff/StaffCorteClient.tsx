@@ -189,8 +189,6 @@ export function StaffCorteClient() {
   const [activeTerminal, setActiveTerminal] = useState<TpvTerminalNumber>(1);
   const [activeKind, setActiveKind] = useState<TpvPhotoKind>('venta');
   const [pending, setPending] = useState<PendingFile | null>(null);
-  const [cobrado, setCobrado] = useState('');
-  const [propina, setPropina] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [wi, setWi] = useState('');
@@ -335,8 +333,6 @@ export function StaffCorteClient() {
   function clearPending() {
     if (pending?.previewUrl) URL.revokeObjectURL(pending.previewUrl);
     setPending(null);
-    setCobrado('');
-    setPropina('');
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -385,8 +381,6 @@ export function StaffCorteClient() {
         height: prepared.height,
         sharpness: prepared.sharpness,
       });
-      setCobrado('');
-      setPropina('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo validar la foto');
     }
@@ -407,17 +401,6 @@ export function StaffCorteClient() {
       fd.set('width_px', String(pending.width));
       fd.set('height_px', String(pending.height));
       fd.set('sharpness', String(pending.sharpness));
-      if (activeKind === 'venta' && String(cobrado).trim()) {
-        fd.set(
-          'total_cobrado',
-          String(Number(String(cobrado).replace(/,/g, '').trim()))
-        );
-      } else if (activeKind === 'propina' && String(propina).trim() !== '') {
-        fd.set(
-          'propina',
-          String(Number(String(propina).replace(/,/g, '').trim()))
-        );
-      }
 
       const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
       const data = await readTpvApiJson(res);
@@ -636,13 +619,22 @@ export function StaffCorteClient() {
   const bancos = payload?.bancos;
   const status = payload?.status;
   const infocaja = payload?.infocaja;
-  const netoPreview =
-    activeKind === 'venta'
-      ? computeNetoBanco(
-          cobrado.trim() ? Number(cobrado.replace(/,/g, '')) : null,
-          null
-        )
-      : null;
+
+  // «Failed to fetch» es un TypeError de fetch (red / respuesta cortada), no un
+  // error de Supabase: el hint de staff_rpt_diario ahí solo despista.
+  const isNetworkError =
+    Boolean(error) &&
+    /failed to fetch|load failed|networkerror|error de red|network request failed/i.test(
+      error as string
+    );
+  const mentionsRptTable = /staff_rpt_diario|staff_corte_prod_fix/i.test(
+    error || ''
+  );
+  const errorHint = isNetworkError
+    ? 'Se cortó la conexión con el servidor. Revisa la señal y toca Reintentar; los datos ya guardados no se pierden.'
+    : mentionsRptTable
+      ? 'Ejecuta en Supabase → SQL Editor: supabase/staff_corte_prod_fix.sql (o staff_rpt_diario.sql).'
+      : 'Puedes cambiar entre Hoy y Ayer arriba aunque falle la carga de este día.';
 
   const liveCashDelta = (() => {
     if (!efectivoContado.trim() || !infocaja?.hasEfectivo) return null;
@@ -909,11 +901,16 @@ export function StaffCorteClient() {
       {error ? (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <p>{error}</p>
-          <p className="mt-1 text-xs text-amber-900/80">
-            Puedes cambiar entre Hoy y Ayer arriba aunque falte alguna tabla.
-            Si el error menciona staff_rpt_diario, ejecuta en Supabase SQL
-            Editor: supabase/staff_corte_prod_fix.sql (o staff_rpt_diario.sql).
-          </p>
+          <p className="mt-1 text-xs text-amber-900/80">{errorHint}</p>
+          {isNetworkError ? (
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="mt-2 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-950"
+            >
+              Reintentar
+            </button>
+          ) : null}
         </div>
       ) : null}
       {msg ? (
@@ -1163,30 +1160,10 @@ export function StaffCorteClient() {
                     lado ≥{TPV_MIN_LONG_SIDE})
                   </p>
                   <p className="rounded-xl bg-sky-50 px-3 py-2 text-sm text-sky-950">
-                    Al guardar se lee el ticket automáticamente. Si no se
-                    entiende, vuelve a tomar la foto. Monto manual solo para
-                    corregir.
+                    {activeKind === 'venta'
+                      ? 'El monto se lee del ticket (TOTAL GENERAL) al guardar. Si no se entiende, vuelve a tomar la foto.'
+                      : 'La propina se lee del reporte al guardar. Si no se entiende, vuelve a tomar la foto.'}
                   </p>
-                  {activeKind === 'venta' ? (
-                    <MoneyInput
-                      label="Cobrado (opcional / corrección)"
-                      value={cobrado}
-                      onChange={setCobrado}
-                      hint="Auto desde TOTAL GENERAL; déjalo vacío si la foto está clara"
-                    />
-                  ) : (
-                    <MoneyInput
-                      label="Propina (opcional / corrección)"
-                      value={propina}
-                      onChange={setPropina}
-                      hint="Auto desde el reporte; 0 si no hay propinas"
-                    />
-                  )}
-                  {activeKind === 'venta' && netoPreview != null ? (
-                    <p className="text-xs text-slate-500">
-                      Vista previa: {moneyMx(netoPreview)}
-                    </p>
-                  ) : null}
                   <button
                     type="button"
                     disabled={busy === `t${activeTerminal}-${activeKind}`}

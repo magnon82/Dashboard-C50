@@ -85,8 +85,6 @@ export function TpvCorteClient() {
     height: number;
     sharpness: number;
   } | null>(null);
-  const [cobrado, setCobrado] = useState('');
-  const [propina, setPropina] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [verify, setVerify] = useState<TpvWeekVerify | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -168,8 +166,6 @@ export function TpvCorteClient() {
     if (preview) URL.revokeObjectURL(preview);
     setPreview(null);
     setPendingFile(null);
-    setCobrado('');
-    setPropina('');
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -217,12 +213,6 @@ export function TpvCorteClient() {
       fd.set('width_px', String(pendingFile.width));
       fd.set('height_px', String(pendingFile.height));
       fd.set('sharpness', String(pendingFile.sharpness));
-      if (activeKind === 'venta' && cobrado.trim()) {
-        fd.set('total_cobrado', cobrado.trim());
-      }
-      if (activeKind === 'propina' && propina.trim() !== '') {
-        fd.set('propina', propina.trim());
-      }
 
       const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
       const json = await readTpvApiJson(res);
@@ -380,14 +370,6 @@ export function TpvCorteClient() {
       setBusyTerminal(null);
     }
   }
-
-  const netoPreview =
-    activeKind === 'venta'
-      ? computeNetoBanco(
-          cobrado.trim() ? Number(cobrado.replace(/,/g, '')) : null,
-          null
-        )
-      : null;
 
   const dayComplete = Boolean(day?.complete);
   const activeSlot = day?.slots.find((s) => s.terminal === activeTerminal);
@@ -670,45 +652,12 @@ export function TpvCorteClient() {
                   {pendingFile.sharpness.toFixed(0)}
                 </p>
                 <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  Al guardar se lee el ticket automáticamente
+                  El monto se lee del ticket al guardar
                   {activeKind === 'venta'
                     ? ' (TOTAL GENERAL).'
                     : ' (total propina).'}{' '}
-                  Si no se entiende, te pedirá volver a tomar la foto. Monto
-                  manual solo si hace falta corregir:
+                  Si no se entiende, te pedirá volver a tomar la foto.
                 </p>
-                {activeKind === 'venta' ? (
-                  <label className="block">
-                    <span className="text-sm font-medium text-slate-600">
-                      Cobrado (opcional / corrección)
-                    </span>
-                    <input
-                      inputMode="decimal"
-                      className="mt-1 min-h-12 w-full rounded-xl border border-slate-200 px-3 text-lg"
-                      placeholder="Auto desde foto"
-                      value={cobrado}
-                      onChange={(e) => setCobrado(e.target.value)}
-                    />
-                  </label>
-                ) : (
-                  <label className="block">
-                    <span className="text-sm font-medium text-slate-600">
-                      Propina (opcional / corrección)
-                    </span>
-                    <input
-                      inputMode="decimal"
-                      className="mt-1 min-h-12 w-full rounded-xl border border-slate-200 px-3 text-lg"
-                      placeholder="Auto desde foto"
-                      value={propina}
-                      onChange={(e) => setPropina(e.target.value)}
-                    />
-                  </label>
-                )}
-                {activeKind === 'venta' && netoPreview != null ? (
-                  <p className="text-sm text-slate-600">
-                    Vista previa: <strong>{moneyMx(netoPreview)}</strong>
-                  </p>
-                ) : null}
                 <button
                   type="button"
                   disabled={busyTerminal === activeTerminal}

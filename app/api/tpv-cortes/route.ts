@@ -35,6 +35,7 @@ import {
 } from '@/app/lib/staff-rpt';
 import {
   TPV_OCR_RETAKE_MSG,
+  TPV_OCR_UNAVAILABLE_MSG,
   amountsFromOcr,
   decodeTicketTotalFromOcrText,
   reconcilePairAmounts,
@@ -635,6 +636,19 @@ export async function POST(request: Request) {
     // --- OCR: lee montos del ticket; si no legible → retake (no guarda) ---
     const ocr = await runTpvOcr(buffer, photoKind);
     const fromOcr = amountsFromOcr(photoKind, ocr);
+
+    // Motor OCR caído (no es la foto): no guardar y no pedir retomarla.
+    if (ocr.unavailable && !fromOcr?.totalCobrado && !fromOcr?.propina) {
+      return NextResponse.json(
+        {
+          error: TPV_OCR_UNAVAILABLE_MSG,
+          detail: ocr.error || null,
+          retake: false,
+          ocr_status: 'failed',
+        },
+        { status: 503 }
+      );
+    }
 
     let rowCobrado: number | null = null;
     let rowPropina: number | null = null;
