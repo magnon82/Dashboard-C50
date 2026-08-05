@@ -2,20 +2,13 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { SuiteCard } from '@/app/components/SuiteShell';
+import { RrhhHorariosMobile } from '@/app/components/rrhh/RrhhHorariosMobile';
 import {
-  HR_SCHEDULE_STATUS_LABELS,
   addIsoDays,
   formatHrDate,
   formatHrPuesto,
-  HR_SHIFT_NOTES_VACACIONES,
   isCurrentScheduleWeek,
-  isGenericPisoArea,
   isPastScheduleWeek,
-  isPlantillaExterno,
-  isVacationScheduleShift,
-  meseroWithinFamilyRank,
-  plantillaPositionKey,
-  scheduleSectionFromPosition,
   scheduleWeekStatusLabel,
   todayIsoCdmx,
   type HrEmployee,
@@ -25,64 +18,37 @@ import {
 } from '@/app/lib/hr';
 import { formatHrListName } from '@/app/lib/hr-person-match';
 import {
-  daySegmentsOverlap,
   findLimpiezaServicioConflicts,
   hasDualLimpiezaServicio,
 } from '@/app/lib/hr-puestos';
 import { weekNumberForHorariosMonday } from '@/app/lib/hr-schedule-import';
 import {
   mondayOfWeek,
-  sumShiftHours,
   sundayOfWeek,
   weekDateList,
 } from '@/app/lib/hr-schedule-propose';
+import {
+  DAY_HEADERS,
+  areaSortKey,
+  buildRowsFromShifts,
+  comparePersonRows,
+  cycleDayAbsence,
+  emptyDay,
+  formatRowHours,
+  isVacationDay,
+  resolveRowSection,
+  rowDayHasOverlapConflict,
+  rowHasDualShifts,
+  rowHours,
+  rowsToShifts,
+  serializeGrid,
+  vacationDay,
+  type DayCell,
+  type PersonRow,
+} from '@/app/lib/hr-schedule-grid';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
-
-const DAY_HEADERS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] as const;
-
-/** Orden de secciones como en HORARIOS C50.xlsx (+ Externos al final). */
-const AREA_ORDER = [
-  'Gerencia',
-  'Hostess',
-  'Caja',
-  'Bartender',
-  'Meseros',
-  'Runner',
-  'Cocina',
-  'Limpieza',
-  'Mantenimiento',
-  'Administración',
-  'Externos',
-] as const;
-
-type DaySegment = {
-  start: string; // HH:mm
-  end: string;
-  role?: string | null;
-};
-
-type DayCell = {
-  start: string; // HH:mm — turno principal (editable en grilla)
-  end: string;
-  /** Sin Ent/Sal: DESCANSO (omit shift) o VACACIONES (marker shift). */
-  off: boolean;
-  /** Cuando off: true = VACACIONES, false = DESCANSO. */
-  vacation?: boolean;
-  role?: string | null;
-  /** Turnos adicionales el mismo día (p. ej. mañana+cena); cuentan en «h». */
-  extra?: DaySegment[];
-};
-
-type PersonRow = {
-  employee_id: string;
-  full_name: string;
-  area: string;
-  puesto: string | null;
-  dualLimpiezaServicio?: boolean;
-  days: DayCell[]; // 7 lun–dom
-};
 
 function statusStyle(status: HrScheduleStatus): { bg: string; color: string } {
   switch (status) {
@@ -134,351 +100,10 @@ function weekStatusBadge(
   };
 }
 
-function normalizeArea(raw: string | null | undefined): string {
-  if (!raw?.trim() || isGenericPisoArea(raw)) return 'Otros';
-  return scheduleSectionFromPosition(raw);
-}
-
-function areaSortKey(area: string): number {
-  const i = AREA_ORDER.indexOf(area as (typeof AREA_ORDER)[number]);
-  return i >= 0 ? i : AREA_ORDER.length;
-}
-
-/** Sección de grilla: puesto family → área de turnos → plantilla; nunca «Piso» suelto. */
-function resolveRowSection(
-  emp: HrEmployee | undefined,
-  shiftAreas: string[],
-  shiftRoles: string[],
-  fallbackName: string
-): { section: string; puesto: string | null } {
-  const dual = emp ? hasDualLimpiezaServicio(emp) : false;
-  const posKey = emp ? plantillaPositionKey(emp) : null;
-  const fromPuesto = posKey ? scheduleSectionFromPosition(posKey) : null;
-
-  // Contar áreas de turnos (ignorar Piso genérico)
-  const areaCounts = new Map<string, number>();
-  for (const a of shiftAreas) {
-    const sec = normalizeArea(a);
-    if (sec === 'Otros') continue;
-    areaCounts.set(sec, (areaCounts.get(sec) || 0) + 1);
-  }
-  let fromShifts: string | null = null;
-  let best = 0;
-  for (const [sec, n] of areaCounts) {
-    if (n > best) {
-      best = n;
-      fromShifts = sec;
-    }
-  }
-
-  // Rol más frecuente en turnos
-  const roleCounts = new Map<string, number>();
-  for (const r of shiftRoles) {
-    const t = String(r || '').trim();
-    if (!t) continue;
-    roleCounts.set(t, (roleCounts.get(t) || 0) + 1);
-  }
-  let topRole: string | null = null;
-  let roleBest = 0;
-  for (const [r, n] of roleCounts) {
-    if (n > roleBest) {
-      roleBest = n;
-      topRole = r;
-    }
-  }
-  const fromRole = topRole ? scheduleSectionFromPosition(topRole) : null;
-
-  let section =
-    (fromPuesto && fromPuesto !== 'Otros' ? fromPuesto : null) ||
-    (fromRole && fromRole !== 'Otros' ? fromRole : null) ||
-    fromShifts ||
-    (dual ? 'Meseros' : null) ||
-    'Otros';
-
-  // Dual limpieza/mesero → siempre con Meseros (encargado), no Limpieza sola
-  if (dual && (section === 'Limpieza' || section === 'Otros' || section === 'Piso')) {
-    section = 'Meseros';
-  }
-
-  if (
-    isPlantillaExterno({
-      full_name: emp?.full_name || fallbackName,
-      notes: emp?.notes,
-    })
-  ) {
-    section = 'Externos';
-  }
-
-  const puesto =
-    emp?.puesto ||
-    (dual ? 'Meserx Encargadx' : null) ||
-    topRole ||
-    (fromPuesto && fromPuesto !== 'Otros' ? fromPuesto : null) ||
-    null;
-
-  return { section, puesto };
-}
-
-function comparePersonRows(a: PersonRow, b: PersonRow): number {
-  const ka = areaSortKey(a.area);
-  const kb = areaSortKey(b.area);
-  if (ka !== kb) return ka - kb;
-  if (a.area === 'Meseros' && b.area === 'Meseros') {
-    const ra = meseroWithinFamilyRank(a.puesto);
-    const rb = meseroWithinFamilyRank(b.puesto);
-    if (ra !== rb) return ra - rb;
-  }
-  return a.full_name.localeCompare(b.full_name, 'es');
-}
-
-function toHhmm(t: string | null | undefined): string {
-  if (!t) return '';
-  return t.slice(0, 5);
-}
-
-function toTimeDb(hhmm: string): string | null {
-  if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
-  return `${hhmm}:00`;
-}
-
-function emptyDay(): DayCell {
-  return { start: '', end: '', off: true, vacation: false };
-}
-
-function vacationDay(): DayCell {
-  return { start: '', end: '', off: true, vacation: true };
-}
-
-function isVacationDay(d: DayCell): boolean {
-  return Boolean(d.off && d.vacation);
-}
-
-/** Ciclo D → V → turno: worked→DESCANSO→VACACIONES→worked. */
-function cycleDayAbsence(cur: DayCell): DayCell {
-  if (!cur.off) return emptyDay();
-  if (!cur.vacation) return vacationDay();
-  return { start: '14:00', end: '22:00', off: false, vacation: false };
-}
-
 function weekLabel(w: Pick<HrScheduleWeek, 'week_start' | 'week_number'>): string {
   const n =
     w.week_number ?? weekNumberForHorariosMonday(w.week_start) ?? null;
   return n != null ? `SEMANA ${n}` : `Semana ${w.week_start.slice(5)}`;
-}
-
-function serializeGrid(rows: PersonRow[]): string {
-  return JSON.stringify(
-    rows.map((r) => ({
-      id: r.employee_id,
-      days: r.days.map((d) => {
-        if (isVacationDay(d)) return 'VAC';
-        if (d.off) return 'OFF';
-        const extras = (d.extra || [])
-          .map((e) => `${e.start}-${e.end}`)
-          .join('|');
-        return extras ? `${d.start}-${d.end}+${extras}` : `${d.start}-${d.end}`;
-      }),
-    }))
-  );
-}
-
-function buildRowsFromShifts(
-  employees: HrEmployee[],
-  shifts: HrScheduleShift[],
-  dates: string[],
-  opts?: { seedPlantilla?: boolean }
-): PersonRow[] {
-  const empById = new Map(employees.map((e) => [e.id, e]));
-  const byId = new Map<string, PersonRow>();
-  const shiftAreasByEmp = new Map<string, string[]>();
-  const shiftRolesByEmp = new Map<string, string[]>();
-  // Histórico: solo quien tiene turnos esa semana. Plantilla vigente
-  // (force_exclude) solo se siembra en «nueva semana» / borradores futuros.
-  const seedPlantilla = opts?.seedPlantilla === true;
-
-  // Primero: quien tiene turnos esa semana
-  for (const s of shifts) {
-    const areas = shiftAreasByEmp.get(s.employee_id) || [];
-    if (s.area) areas.push(s.area);
-    else if (s.employee_area) areas.push(s.employee_area);
-    shiftAreasByEmp.set(s.employee_id, areas);
-
-    const roles = shiftRolesByEmp.get(s.employee_id) || [];
-    if (s.role_label) roles.push(s.role_label);
-    else if (s.employee_puesto) roles.push(s.employee_puesto);
-    shiftRolesByEmp.set(s.employee_id, roles);
-
-    let row = byId.get(s.employee_id);
-    if (!row) {
-      const emp = empById.get(s.employee_id);
-      const { section, puesto } = resolveRowSection(
-        emp,
-        areas,
-        roles,
-        s.employee_name || s.employee_id
-      );
-      row = {
-        employee_id: s.employee_id,
-        full_name: emp?.full_name || s.employee_name || s.employee_id.slice(0, 8),
-        area: section,
-        puesto,
-        dualLimpiezaServicio: emp ? hasDualLimpiezaServicio(emp) : false,
-        days: dates.map(() => emptyDay()),
-      };
-      byId.set(s.employee_id, row);
-    }
-    const di = dates.indexOf(s.shift_date);
-    if (di < 0) continue;
-    if (isVacationScheduleShift(s)) {
-      row.days[di] = vacationDay();
-      continue;
-    }
-    const start = toHhmm(s.start_time);
-    const end = toHhmm(s.end_time);
-    if (!start || !end) continue;
-    const role = s.role_label || null;
-    const cur = row.days[di];
-    if (cur.off || !cur.start || !cur.end) {
-      row.days[di] = { start, end, off: false, vacation: false, role };
-    } else if (cur.start === start && cur.end === end) {
-      // mismo turno duplicado — ignorar
-    } else {
-      // Segundo+ turno el mismo día → acumular para la fórmula «h»
-      const extras = cur.extra ? [...cur.extra] : [];
-      if (!extras.some((e) => e.start === start && e.end === end)) {
-        extras.push({ start, end, role });
-      }
-      row.days[di] = { ...cur, off: false, vacation: false, extra: extras };
-    }
-  }
-
-  // Re-resolver sección con todos los turnos acumulados (área modal)
-  for (const [id, row] of byId) {
-    const emp = empById.get(id);
-    const { section, puesto } = resolveRowSection(
-      emp,
-      shiftAreasByEmp.get(id) || [],
-      shiftRolesByEmp.get(id) || [],
-      row.full_name
-    );
-    row.area = section;
-    row.puesto = puesto || row.puesto;
-  }
-
-  if (seedPlantilla) {
-    for (const e of employees) {
-      if (byId.has(e.id)) continue;
-      const { section, puesto } = resolveRowSection(e, [], [], e.full_name);
-      byId.set(e.id, {
-        employee_id: e.id,
-        full_name: e.full_name,
-        area: section,
-        puesto,
-        dualLimpiezaServicio: hasDualLimpiezaServicio(e),
-        days: dates.map(() => emptyDay()),
-      });
-    }
-  }
-
-  return [...byId.values()].sort(comparePersonRows);
-}
-
-function rowsToShifts(rows: PersonRow[], dates: string[]): Omit<
-  HrScheduleShift,
-  'id' | 'week_id'
->[] {
-  const out: Omit<HrScheduleShift, 'id' | 'week_id'>[] = [];
-  for (const r of rows) {
-    for (let i = 0; i < 7; i++) {
-      const d = r.days[i];
-      if (!d) continue;
-      if (isVacationDay(d)) {
-        out.push({
-          employee_id: r.employee_id,
-          shift_date: dates[i],
-          start_time: null,
-          end_time: null,
-          area: r.area === 'Otros' ? null : r.area,
-          role_label: null,
-          origin: 'manual',
-          notes: HR_SHIFT_NOTES_VACACIONES,
-          employee_name: r.full_name,
-        });
-        continue;
-      }
-      if (d.off) continue;
-      const segments: DaySegment[] = [];
-      if (d.start && d.end) {
-        segments.push({ start: d.start, end: d.end, role: d.role || r.puesto });
-      }
-      for (const e of d.extra || []) {
-        if (e.start && e.end) segments.push(e);
-      }
-      for (const seg of segments) {
-        const role = seg.role || r.puesto;
-        const areaFromRole = role
-          ? scheduleSectionFromPosition(role)
-          : r.area;
-        out.push({
-          employee_id: r.employee_id,
-          shift_date: dates[i],
-          start_time: toTimeDb(seg.start),
-          end_time: toTimeDb(seg.end),
-          area:
-            areaFromRole && areaFromRole !== 'Otros'
-              ? areaFromRole
-              : r.area === 'Otros'
-                ? null
-                : r.area,
-          role_label: role,
-          origin: 'manual',
-          notes: null,
-          employee_name: r.full_name,
-        });
-      }
-    }
-  }
-  return out;
-}
-
-function rowDayHasOverlapConflict(row: PersonRow, dayIndex: number): boolean {
-  if (!row.dualLimpiezaServicio) return false;
-  const d = row.days[dayIndex];
-  if (!d || d.off) return false;
-  const segs: Array<{ start: string; end: string }> = [];
-  if (d.start && d.end) segs.push({ start: d.start, end: d.end });
-  for (const e of d.extra || []) {
-    if (e.start && e.end) segs.push({ start: e.start, end: e.end });
-  }
-  return daySegmentsOverlap(segs);
-}
-
-/**
- * Fórmula «h»: suma de horas asignadas (Ent/Sal) en la semana.
- * DESCANSO / sin Ent+Sal → 0 · nocturno (Sal ≤ Ent) → cruza medianoche · duales → suman.
- */
-function rowHours(row: PersonRow): number {
-  const pairs: Array<{ start: string | null; end: string | null }> = [];
-  for (const d of row.days) {
-    if (d.off) continue;
-    if (d.start && d.end) {
-      pairs.push({ start: toTimeDb(d.start), end: toTimeDb(d.end) });
-    }
-    for (const e of d.extra || []) {
-      if (e.start && e.end) {
-        pairs.push({ start: toTimeDb(e.start), end: toTimeDb(e.end) });
-      }
-    }
-  }
-  return sumShiftHours(pairs);
-}
-
-function formatRowHours(hours: number): string {
-  return hours > 0 ? hours.toFixed(1) : '—';
-}
-
-function rowHasDualShifts(row: PersonRow): boolean {
-  return row.days.some((d) => !d.off && (d.extra?.length ?? 0) > 0);
 }
 
 export function RrhhHorarios() {
@@ -508,6 +133,7 @@ export function RrhhHorarios() {
   const [newWeekDate, setNewWeekDate] = useState(currentMonday);
   const [menuOpen, setMenuOpen] = useState(false);
   const [addEmpId, setAddEmpId] = useState('');
+  const [weekPickerOpen, setWeekPickerOpen] = useState(false);
 
   const dates = useMemo(
     () =>
@@ -1099,6 +725,22 @@ export function RrhhHorarios() {
     );
   }
 
+  /** Móvil: copia el día editado al resto de la semana (respeta días bloqueados). */
+  function applyCellToWeek(employeeId: string, cell: DayCell) {
+    if (pastLocked) return;
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.employee_id !== employeeId) return r;
+        const days = r.days.map((d, i) =>
+          dayLocked[i]
+            ? d
+            : { ...cell, extra: cell.extra ? [...cell.extra] : undefined }
+        );
+        return { ...r, days };
+      })
+    );
+  }
+
   function setVacation(employeeId: string, dayIndex: number) {
     if (pastLocked || dayLocked[dayIndex]) return;
     setRows((prev) =>
@@ -1311,9 +953,65 @@ export function RrhhHorarios() {
         </SuiteCard>
       )}
 
+      {/* Selector de semana compacto (móvil): el histórico largo estorba al editar */}
+      {weeks.length > 0 && (
+        <div className="lg:hidden">
+          <button
+            type="button"
+            disabled={busy}
+            aria-expanded={weekPickerOpen}
+            onClick={() => setWeekPickerOpen((v) => !v)}
+            className="flex min-h-12 w-full items-center justify-between gap-2 rounded-xl bg-white px-3 text-left disabled:opacity-50"
+            style={{ boxShadow: SUITE.shadow }}
+          >
+            <span className="min-w-0">
+              <span
+                className="block truncate text-sm font-bold"
+                style={{ color: theme.title }}
+              >
+                {weekDetail ? weekLabel(weekDetail) : 'Elige una semana'}
+              </span>
+              {weekDetail && (
+                <span className="block text-xs" style={{ color: theme.muted }}>
+                  {formatHrDate(weekDetail.week_start)} –{' '}
+                  {formatHrDate(weekDetail.week_end)}
+                </span>
+              )}
+            </span>
+            <span
+              className="shrink-0 text-xs font-bold"
+              style={{ color: SUITE.navy }}
+            >
+              {weekPickerOpen ? 'Cerrar' : 'Cambiar'}
+            </span>
+          </button>
+          {weekPickerOpen && (
+            <ul className="mt-2 max-h-72 space-y-1.5 overflow-y-auto pr-1">
+              {weeks.map((w) => (
+                <li key={w.id}>
+                  <WeekButton
+                    week={w}
+                    active={w.id === selectedId}
+                    disabled={busy}
+                    onSelect={() => {
+                      setWeekPickerOpen(false);
+                      void selectWeek(w.id);
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[minmax(220px,280px)_1fr]">
-        {/* Histórico */}
-        <aside className="space-y-2">
+        {/* Histórico (en móvil se sustituye por el selector compacto de arriba) */}
+        <aside
+          className={
+            weeks.length > 0 ? 'hidden space-y-2 lg:block' : 'space-y-2'
+          }
+        >
           <div className="flex items-baseline justify-between gap-2">
             <h4 className="text-sm font-bold" style={{ color: theme.title }}>
               Histórico
@@ -1363,60 +1061,16 @@ export function RrhhHorarios() {
               role="listbox"
               aria-label="Semanas de horario"
             >
-              {weeks.map((w) => {
-                const badge = weekStatusBadge(
-                  w.status,
-                  w.week_start,
-                  w.week_end
-                );
-                const active = w.id === selectedId;
-                return (
-                  <li key={w.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={active}
-                      disabled={busy}
-                      onClick={() => void selectWeek(w.id)}
-                      className="w-full rounded-xl bg-white px-3 py-2.5 text-left transition-shadow disabled:opacity-50"
-                      style={{
-                        boxShadow: SUITE.shadow,
-                        outline: active
-                          ? `2px solid ${SUITE.navy}`
-                          : undefined,
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span
-                          className="text-sm font-semibold"
-                          style={{ color: theme.title }}
-                        >
-                          {weekLabel(w)}
-                        </span>
-                        <span
-                          className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
-                          style={{
-                            backgroundColor: badge.bg,
-                            color: badge.color,
-                          }}
-                        >
-                          {badge.label}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-xs" style={{ color: theme.muted }}>
-                        {formatHrDate(w.week_start)} –{' '}
-                        {formatHrDate(w.week_end)}
-                      </p>
-                      <p className="mt-0.5 text-xs tabular-nums" style={{ color: theme.muted }}>
-                        {w.shift_count ?? 0} turnos
-                        {w.hours_total != null
-                          ? ` · ${w.hours_total} h`
-                          : ''}
-                      </p>
-                    </button>
-                  </li>
-                );
-              })}
+              {weeks.map((w) => (
+                <li key={w.id}>
+                  <WeekButton
+                    week={w}
+                    active={w.id === selectedId}
+                    disabled={busy}
+                    onSelect={() => void selectWeek(w.id)}
+                  />
+                </li>
+              ))}
             </ul>
           )}
         </aside>
@@ -1480,7 +1134,7 @@ export function RrhhHorarios() {
               </div>
 
               {!pastLocked && (
-                <div className="flex flex-wrap gap-2">
+                <div className="hidden flex-wrap gap-2 lg:flex">
                   {dirty && (
                     <button
                       type="button"
@@ -1517,9 +1171,21 @@ export function RrhhHorarios() {
                 </div>
               )}
 
-              {/* Grilla Excel */}
+              {/* Editor táctil (celular): un día o una persona a la vez */}
+              <RrhhHorariosMobile
+                key={weekDetail.id}
+                rows={rows}
+                dates={dates}
+                readOnly={pastLocked}
+                dayLocked={dayLocked}
+                todayIso={todayIsoCdmx()}
+                onCell={updateCell}
+                onApplyWeek={applyCellToWeek}
+              />
+
+              {/* Grilla Excel (escritorio) */}
               <div
-                className="overflow-x-auto rounded-xl bg-white"
+                className="hidden overflow-x-auto rounded-xl bg-white lg:block"
                 style={{ boxShadow: SUITE.shadow }}
               >
                 <table className="w-full min-w-[920px] border-collapse text-sm">
@@ -1630,11 +1296,98 @@ export function RrhhHorarios() {
                   ? 'Semana pasada: solo consulta. No se pueden editar Ent./Sal. La columna h suma las horas de los turnos.'
                   : 'Hoy y días futuros editables (CDMX). D = descanso · V = vacaciones · ciclo en la barra D→V→turno. Columna h = horas (nocturnos cruzan medianoche). Guardar aparece con cambios; en curso publica al guardar.'}
               </p>
+
+              {/* Acciones fijas en celular: siempre al alcance del pulgar */}
+              {!pastLocked && (
+                <div
+                  className="sticky bottom-0 z-30 -mx-1 flex items-center gap-2 border-t border-slate-200 bg-white/95 px-1 py-2 backdrop-blur lg:hidden"
+                  style={{
+                    paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))',
+                  }}
+                >
+                  {dirty ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void saveShifts()}
+                      className="min-h-12 flex-1 rounded-xl text-sm font-bold text-white disabled:opacity-50"
+                      style={{ backgroundColor: SUITE.navy }}
+                    >
+                      Guardar cambios
+                    </button>
+                  ) : (
+                    <span
+                      className="flex-1 text-xs font-semibold"
+                      style={{ color: theme.muted }}
+                    >
+                      Sin cambios pendientes
+                    </span>
+                  )}
+                  {weekDetail.status !== 'publicado' && (
+                    <button
+                      type="button"
+                      disabled={busy || dirty}
+                      onClick={() => void setStatus('publicado')}
+                      className="min-h-12 rounded-xl px-4 text-sm font-bold text-white disabled:opacity-50"
+                      style={{ backgroundColor: '#065f46' }}
+                    >
+                      Publicar
+                    </button>
+                  )}
+                </div>
+              )}
             </>
           )}
         </main>
       </div>
     </div>
+  );
+}
+
+function WeekButton({
+  week,
+  active,
+  disabled,
+  onSelect,
+}: {
+  week: HrScheduleWeek;
+  active: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  const badge = weekStatusBadge(week.status, week.week_start, week.week_end);
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={active}
+      disabled={disabled}
+      onClick={onSelect}
+      className="w-full rounded-xl bg-white px-3 py-2.5 text-left transition-shadow disabled:opacity-50"
+      style={{
+        boxShadow: SUITE.shadow,
+        outline: active ? `2px solid ${SUITE.navy}` : undefined,
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold" style={{ color: theme.title }}>
+          {weekLabel(week)}
+        </span>
+        <span
+          className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
+          style={{ backgroundColor: badge.bg, color: badge.color }}
+        >
+          {badge.label}
+        </span>
+      </div>
+      <p className="mt-0.5 text-xs" style={{ color: theme.muted }}>
+        {formatHrDate(week.week_start)} – {formatHrDate(week.week_end)}
+      </p>
+      <p className="mt-0.5 text-xs tabular-nums" style={{ color: theme.muted }}>
+        {week.shift_count ?? 0} turnos
+        {week.hours_total != null ? ` · ${week.hours_total} h` : ''}
+      </p>
+    </button>
   );
 }
 

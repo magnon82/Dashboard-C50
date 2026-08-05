@@ -75,7 +75,7 @@ export const ALL_SOURCE_FILES: string[] = SOURCE_FILE_GROUPS.flatMap((g) => g.so
  */
 export const SOURCE_FILE_UPDATE: Record<string, string> = {
   infocaja:
-    'Función: venta diaria + efectivo/tarjetas/personas. Lun–sáb 4:00 AM · Dom 8:00 PM CDMX (Actions)',
+    'Función: venta diaria + efectivo/tarjetas/personas. Lun–sáb 2–6 AM + 8/10/12/14 CDMX · Dom 7–11 PM (Actions)',
   corte_caja:
     'Función: cancelaciones/descuentos/cortesías. Lun–sáb 4:00 AM · Dom 8:00 PM CDMX (Actions)',
   eventos: 'Función: WI vs Eventos histórico. Manual (ingest_eventos.py)',

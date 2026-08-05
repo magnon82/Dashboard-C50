@@ -45,6 +45,10 @@ type OsItem = {
   pax?: number | null;
   total?: number | null;
   status?: string | null;
+  /** UUID en event_os_documents (PDF en BMS) */
+  doc_id?: string | null;
+  storage_path?: string | null;
+  openable?: boolean;
 };
 
 type PendingOsRow = {
@@ -70,6 +74,26 @@ function openUrl(filePath: string) {
 
 function downloadUrl(filePath: string) {
   return `/api/eventos/os?open=${encodeURIComponent(filePath)}&download=1`;
+}
+
+/** URL de consulta/descarga para PDF en BMS (Storage) o FS local. */
+function pdfOpenUrls(it: OsItem): { view: string; download: string } | null {
+  if (it.doc_id) {
+    return {
+      view: `/api/eventos/os?id=${encodeURIComponent(it.doc_id)}`,
+      download: `/api/eventos/os?id=${encodeURIComponent(it.doc_id)}&download=1`,
+    };
+  }
+  if (it.rel_path) {
+    return {
+      view: `/api/eventos/os?rel=${encodeURIComponent(it.rel_path)}`,
+      download: `/api/eventos/os?rel=${encodeURIComponent(it.rel_path)}&download=1`,
+    };
+  }
+  if (it.path) {
+    return { view: openUrl(it.path), download: downloadUrl(it.path) };
+  }
+  return null;
 }
 
 function DocChip({
@@ -150,13 +174,43 @@ export function EventosOrdenesServicio() {
   const [pending, setPending] = useState<PendingOsRow[]>([]);
   const [genBusy, setGenBusy] = useState<string | null>(null);
   const [genMsg, setGenMsg] = useState('');
+  const [syncBusy, setSyncBusy] = useState(false);
 
   const today = useMemo(() => mexicoTodayIso(), []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { sync?: boolean }) => {
     setLoading(true);
     setError(null);
     try {
+      if (opts?.sync && canEdit) {
+        setSyncBusy(true);
+        try {
+          const syncBody: Record<string, unknown> = {
+            action: 'sync_pdfs',
+            limit: 50,
+          };
+          if (year !== 'all') syncBody.year = year;
+          if (query.trim()) syncBody.q = query.trim();
+          const syncRes = await fetch('/api/eventos/os', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(syncBody),
+          });
+          const syncJson = await syncRes.json().catch(() => ({}));
+          if (syncRes.ok && syncJson.message) {
+            setGenMsg(String(syncJson.message));
+          } else if (!syncRes.ok && syncJson.hint) {
+            setNote(String(syncJson.hint));
+          } else if (!syncRes.ok && syncJson.error) {
+            setNote(String(syncJson.error));
+          }
+        } catch {
+          /* listado sigue */
+        } finally {
+          setSyncBusy(false);
+        }
+      }
+
       const params = new URLSearchParams();
       if (year !== 'all') params.set('year', String(year));
       if (query.trim()) params.set('q', query.trim());
@@ -229,7 +283,7 @@ export function EventosOrdenesServicio() {
     } finally {
       setLoading(false);
     }
-  }, [year, query]);
+  }, [year, query, canEdit]);
 
   async function generateOs(row: PendingOsRow) {
     if (!canEdit || (!row.quote_id && !row.lead_id)) return;
@@ -373,7 +427,7 @@ export function EventosOrdenesServicio() {
         <h3 className="text-base font-bold" style={{ color: theme.title }}>
           Órdenes de servicio
         </h3>
-        {note && source !== 'activity_seed' ? (
+        {note ? (
           <p className="mt-2 text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
             {note}
           </p>
@@ -446,10 +500,16 @@ export function EventosOrdenesServicio() {
         </label>
         <button
           type="button"
-          onClick={() => void load()}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          disabled={loading || syncBusy}
+          onClick={() => void load({ sync: canEdit })}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          title={
+            canEdit
+              ? 'Recargar y sincronizar PDFs faltantes al BMS (Storage)'
+              : 'Recargar listado'
+          }
         >
-          Actualizar
+          {syncBusy ? 'Sincronizando…' : 'Actualizar'}
         </button>
         <span className="ml-auto text-xs text-slate-500">
           {loading
@@ -668,29 +728,42 @@ export function EventosOrdenesServicio() {
                               primary
                             />
                           </div>
-                        ) : it.path ? (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <DocChip
-                              href={openUrl(it.path)}
-                              label="Consultar"
-                              title={it.filename || 'Ver PDF en el navegador'}
-                            />
-                            <DocChip
-                              href={downloadUrl(it.path)}
-                              label="Descargar"
-                              title={it.filename || 'Descargar PDF'}
-                              primary
-                              download={it.filename || 'orden-de-servicio.pdf'}
-                            />
-                          </div>
-                        ) : (
-                          <span
-                            className="text-xs text-slate-500"
-                            title="Indexado; descarga PDF requiere PC de admin o Storage/Drive API"
-                          >
-                            Solo índice
-                          </span>
-                        )}
+                        ) : (() => {
+                          const urls = pdfOpenUrls(it);
+                          if (urls) {
+                            return (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <DocChip
+                                  href={urls.view}
+                                  label="Consultar"
+                                  title={
+                                    it.storage_path
+                                      ? it.filename || 'Ver PDF (BMS Storage)'
+                                      : it.filename ||
+                                        'Ver PDF (abre desde BMS; sync si falta)'
+                                  }
+                                />
+                                <DocChip
+                                  href={urls.download}
+                                  label="Descargar"
+                                  title={it.filename || 'Descargar PDF'}
+                                  primary
+                                  download={
+                                    it.filename || 'orden-de-servicio.pdf'
+                                  }
+                                />
+                              </div>
+                            );
+                          }
+                          return (
+                            <span
+                              className="text-xs text-slate-500"
+                              title="Sin archivo en BMS: falta rel_path o sync de PDF"
+                            >
+                              Solo índice
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );

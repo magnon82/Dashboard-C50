@@ -80,37 +80,6 @@ def main() -> None:
         f"esperado≥{need} max_bd={max_d or '—'}"
     )
 
-    # #region agent log
-    try:
-        import json
-        from pathlib import Path
-
-        log = Path(__file__).resolve().parents[1] / "debug-826472.log"
-        log.open("a", encoding="utf-8").write(
-            json.dumps(
-                {
-                    "sessionId": "826472",
-                    "runId": "post-fix",
-                    "hypothesisId": "D",
-                    "location": "verify_infocaja_freshness.py",
-                    "message": "freshness check",
-                    "data": {
-                        "today": today,
-                        "hour": hour,
-                        "expected": need,
-                        "max": max_d,
-                        "enforce": hour >= 10,
-                    },
-                    "timestamp": int(datetime.now(tz=timezone.utc).timestamp() * 1000),
-                },
-                ensure_ascii=False,
-            )
-            + "\n"
-        )
-    except Exception:
-        pass
-    # #endregion
-
     if not max_d or max_d < need:
         msg = (
             f"Infocaja atrasada: último día {max_d or 'ninguno'} "

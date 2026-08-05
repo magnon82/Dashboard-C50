@@ -91,10 +91,12 @@ export const HR_DRIVE_SYNC_CONTENT_TYPES: HrDriveSyncContentDef[] = [
     id: 'eventos_os',
     label: 'Eventos · órdenes de servicio (PDF)',
     persistsIn:
-      'event_service_orders (digital) + seed_event_client_activity.json (índice PDF)',
-    stillNeedsDrive: 'Abrir PDF legacy opcional (OS digitales en CRM)',
+      'event_service_orders (digital) + event_os_documents + Storage eventos-os-docs; seed = índice legado',
+    stillNeedsDrive:
+      'Solo ingest (File Stream o EVENTOS_OS_DRIVE_FOLDER_ID); consulta desde BMS',
     cadenceHint: 'Frecuente en temporada de eventos',
-    refreshHow: 'OS digital en Suite; seed de actividad',
+    refreshHow:
+      'Actualizar / POST sync_pdfs; SQL supabase/eventos_os_documents.sql',
   },
   {
     id: 'eventos_biblioteca',

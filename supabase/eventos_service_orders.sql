@@ -55,4 +55,4 @@ create index if not exists event_service_orders_lead_idx
   on public.event_service_orders (lead_id);
 
 comment on table public.event_service_orders is
-  'Órdenes de servicio digitales (desde cotización aceptada). Coexiste con PDFs en Drive. payload = snapshot de líneas.';
+  'Órdenes de servicio digitales (desde cotización aceptada). PDFs legado en event_os_documents + Storage. payload = snapshot de líneas.';
