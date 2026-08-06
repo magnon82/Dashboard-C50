@@ -35,19 +35,48 @@ type EventoDelDia = {
   id: string;
   label: string;
   os_number: string | null;
+  /** Total con servicio (doc OS). */
   total: number | null;
+  /**
+   * Venta Global (sin servicio 15%): OS `subtotal`.
+   * Null for financial-only rows.
+   */
+  venta: number | null;
   source: 'os_digital' | 'financial';
 };
+
+type EventosDelDiaPayload = {
+  hasEvent: boolean;
+  /** True when at least one digital OS exists for the day. */
+  hasDigitalOs: boolean;
+  /**
+   * Sum of OS subtotals (Global VENTA). Null when there is no digital OS —
+   * do not invent amounts from financial/Global alone.
+   */
+  suggestedOsAmount: number | null;
+  /** Short label for UI (client / OS numbers). */
+  suggestedOsLabel: string | null;
+  items: EventoDelDia[];
+};
+
+function roundMoney2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
 
 async function loadEventosDelDia(
   sb: ReturnType<typeof getServiceSupabase>,
   date: string
-): Promise<{ hasEvent: boolean; items: EventoDelDia[] }> {
+): Promise<EventosDelDiaPayload> {
   const items: EventoDelDia[] = [];
+  let suggestedOsSum = 0;
+  let digitalOsCount = 0;
+  const labelParts: string[] = [];
 
   const { data: osRows } = await sb
     .from('event_service_orders')
-    .select('id, os_number, client_name, celebration, total, event_date')
+    .select(
+      'id, os_number, client_name, celebration, subtotal, total, event_date'
+    )
     .eq('event_date', date)
     .limit(20);
 
@@ -56,18 +85,30 @@ async function loadEventosDelDia(
       String((r as { client_name?: string }).client_name || '').trim() ||
       String((r as { celebration?: string }).celebration || '').trim() ||
       'Evento';
+    const subtotalRaw = (r as { subtotal?: number | null }).subtotal;
+    const venta =
+      subtotalRaw == null || !Number.isFinite(Number(subtotalRaw))
+        ? null
+        : roundMoney2(Number(subtotalRaw));
+    const totalRaw = (r as { total?: number | null }).total;
+    const total =
+      totalRaw == null || !Number.isFinite(Number(totalRaw))
+        ? null
+        : roundMoney2(Number(totalRaw));
+    const osNumber = (r as { os_number?: string | null }).os_number
+      ? String((r as { os_number: string }).os_number)
+      : null;
     items.push({
       id: String((r as { id: string }).id),
       label: name,
-      os_number: (r as { os_number?: string | null }).os_number
-        ? String((r as { os_number: string }).os_number)
-        : null,
-      total:
-        (r as { total?: number | null }).total == null
-          ? null
-          : Number((r as { total: number }).total),
+      os_number: osNumber,
+      total,
+      venta,
       source: 'os_digital',
     });
+    digitalOsCount += 1;
+    if (venta != null) suggestedOsSum = roundMoney2(suggestedOsSum + venta);
+    labelParts.push(osNumber ? `${name} (OS ${osNumber})` : name);
   }
 
   const { data: finRows } = await sb
@@ -88,11 +129,21 @@ async function loadEventosDelDia(
         (r as { amount?: number | null }).amount == null
           ? null
           : Number((r as { amount: number }).amount),
+      venta: null,
       source: 'financial',
     });
   }
 
-  return { hasEvent: items.length > 0, items };
+  const hasDigitalOs = digitalOsCount > 0;
+  return {
+    hasEvent: items.length > 0,
+    hasDigitalOs,
+    suggestedOsAmount: hasDigitalOs ? suggestedOsSum : null,
+    suggestedOsLabel: hasDigitalOs
+      ? labelParts.slice(0, 3).join(' · ') || null
+      : null,
+    items,
+  };
 }
 
 async function loadTpvUploads(

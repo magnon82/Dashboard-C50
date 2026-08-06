@@ -108,15 +108,27 @@ type DayPayload = {
   defaultDate?: string;
   eventosDelDia?: {
     hasEvent: boolean;
+    hasDigitalOs?: boolean;
+    /** Sum of OS subtotals (Global VENTA). Null if no digital OS. */
+    suggestedOsAmount?: number | null;
+    suggestedOsLabel?: string | null;
     items: Array<{
       id: string;
       label: string;
       os_number: string | null;
       total: number | null;
+      /** Venta sin servicio (OS subtotal). */
+      venta?: number | null;
       source: 'os_digital' | 'financial';
     }>;
   };
 };
+
+const OS_SUGGEST_TOLERANCE_MXN = 0.01;
+
+function formatOsSuggestInput(amount: number): string {
+  return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+}
 
 function corteStatusLabel(summary: DayWindowSummary | null | undefined): string {
   if (!summary || summary.unknown) return '—';
@@ -144,12 +156,14 @@ function MoneyInput({
   onChange,
   hint,
   required,
+  warn,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   hint?: string;
   required?: boolean;
+  warn?: boolean;
 }) {
   return (
     <label className="flex h-full flex-col gap-1.5">
@@ -159,12 +173,22 @@ function MoneyInput({
           {required ? ' *' : ''}
         </span>
         {hint ? (
-          <p className="mt-0.5 text-xs leading-snug text-slate-500">{hint}</p>
+          <p
+            className={`mt-0.5 text-xs leading-snug ${
+              warn ? 'font-medium text-amber-800' : 'text-slate-500'
+            }`}
+          >
+            {hint}
+          </p>
         ) : null}
       </div>
       <input
         inputMode="decimal"
-        className="mt-auto min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-lg"
+        className={`mt-auto min-h-12 w-full rounded-xl border bg-white px-3 text-lg ${
+          warn
+            ? 'border-amber-400 ring-2 ring-amber-200'
+            : 'border-slate-200'
+        }`}
         placeholder="0.00"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -339,6 +363,12 @@ export function StaffCorteClient() {
       }
       setPayload(data as unknown as DayPayload);
       const rpt = data.rpt as StaffRptRow | null;
+      const eventosHint = (data as DayPayload).eventosDelDia;
+      const suggestedOs =
+        eventosHint?.suggestedOsAmount != null &&
+        Number.isFinite(eventosHint.suggestedOsAmount)
+          ? Number(eventosHint.suggestedOsAmount)
+          : null;
       if (rpt) {
         setWi(String(rpt.wi_amount ?? ''));
         setEventosOs(String(rpt.eventos_os_amount ?? rpt.eventos_amount ?? ''));
@@ -353,8 +383,11 @@ export function StaffCorteClient() {
         setNotes(rpt.notes || '');
       } else {
         setWi('');
-        setEventosOs('');
-        setEventosExtra('');
+        // Prefill OS venta from digital OS subtotal(s); never invent if missing.
+        setEventosOs(
+          suggestedOs != null ? formatOsSuggestInput(suggestedOs) : ''
+        );
+        setEventosExtra(eventosHint?.hasEvent ? '0' : '');
         setEfectivoContado('');
         setNotes('');
       }
@@ -634,11 +667,25 @@ export function StaffCorteClient() {
         return;
       }
       if (hasEventosHoy) {
-        if (
-          !confirm(
-            `¿Confirmas el monto de la orden de servicio?\n\n${moneyMx(osNum)}`
-          )
-        ) {
+        const osConfirmLines = [
+          `¿Confirmas el monto de la orden de servicio (VENTA)?`,
+          '',
+          moneyMx(osNum),
+        ];
+        if (suggestedOsAmount != null) {
+          osConfirmLines.push(
+            '',
+            `Sugerido por OS digital: ${moneyMx(suggestedOsAmount)}`
+          );
+          if (Math.abs(osNum - suggestedOsAmount) > OS_SUGGEST_TOLERANCE_MXN) {
+            osConfirmLines.push(
+              '(No coincide con la venta de la orden de servicio)'
+            );
+          }
+        } else {
+          osConfirmLines.push('', 'Sin OS digital — monto capturado a mano.');
+        }
+        if (!confirm(osConfirmLines.join('\n'))) {
           return;
         }
         if (
@@ -722,10 +769,20 @@ export function StaffCorteClient() {
 
   const eventosDelDia = payload?.eventosDelDia;
   const hasEventosHoy = Boolean(eventosDelDia?.hasEvent);
+  const suggestedOsAmount =
+    eventosDelDia?.suggestedOsAmount != null &&
+    Number.isFinite(eventosDelDia.suggestedOsAmount)
+      ? Number(eventosDelDia.suggestedOsAmount)
+      : null;
+  const hasDigitalOs = Boolean(eventosDelDia?.hasDigitalOs);
   const eventosOsNum = parseMoneyInput(eventosOs === '' ? '0' : eventosOs) ?? 0;
   const eventosExtraNum =
     parseMoneyInput(eventosExtra === '' ? '0' : eventosExtra) ?? 0;
   const eventosTotalNum = Math.round((eventosOsNum + eventosExtraNum) * 100) / 100;
+  const eventosOsMismatch =
+    hasEventosHoy &&
+    suggestedOsAmount != null &&
+    Math.abs(eventosOsNum - suggestedOsAmount) > OS_SUGGEST_TOLERANCE_MXN;
 
   const liveCashDelta = (() => {
     if (!efectivoContado.trim() || esperadoTombola == null) return null;
@@ -1416,14 +1473,47 @@ export function StaffCorteClient() {
                 Evento del día · como Global
               </p>
               <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-slate-500">
-                {(eventosDelDia?.items || []).slice(0, 4).map((it) => (
-                  <li key={it.id}>
-                    {it.label}
-                    {it.os_number ? ` · OS ${it.os_number}` : ''}
-                    {it.total != null ? ` · ${moneyMx(it.total)}` : ''}
-                  </li>
-                ))}
+                {(eventosDelDia?.items || []).slice(0, 4).map((it) => {
+                  const displayVenta =
+                    it.source === 'os_digital'
+                      ? (it.venta ?? null)
+                      : it.total;
+                  return (
+                    <li key={it.id}>
+                      {it.label}
+                      {it.os_number ? ` · OS ${it.os_number}` : ''}
+                      {displayVenta != null
+                        ? ` · VENTA ${moneyMx(displayVenta)}`
+                        : ''}
+                      {it.source === 'os_digital' &&
+                      it.total != null &&
+                      it.venta != null &&
+                      Math.abs(it.total - it.venta) > OS_SUGGEST_TOLERANCE_MXN
+                        ? ` (total c/servicio ${moneyMx(it.total)})`
+                        : ''}
+                    </li>
+                  );
+                })}
               </ul>
+              {!hasDigitalOs ? (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-950">
+                  Sin OS digital para esta fecha. Captura el monto de VENTA a
+                  mano (no hay sugerencia automática). Genera o vincula la OS
+                  en Eventos para prellenar.
+                </p>
+              ) : suggestedOsAmount != null ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  Sugerido OS (VENTA)
+                  {eventosDelDia?.suggestedOsLabel
+                    ? ` · ${eventosDelDia.suggestedOsLabel}`
+                    : ''}
+                  :{' '}
+                  <span className="font-semibold text-slate-700">
+                    {moneyMx(suggestedOsAmount)}
+                  </span>
+                  . Confirma o edita si hace falta.
+                </p>
+              ) : null}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <MoneyInput
@@ -1431,7 +1521,14 @@ export function StaffCorteClient() {
                 value={eventosOs}
                 onChange={setEventosOs}
                 required
-                hint="Confirma el monto de la OS"
+                warn={eventosOsMismatch}
+                hint={
+                  eventosOsMismatch && suggestedOsAmount != null
+                    ? `No coincide con la venta de la orden de servicio (${moneyMx(suggestedOsAmount)})`
+                    : suggestedOsAmount != null
+                      ? `Sugerido: ${moneyMx(suggestedOsAmount)} — confirma el monto`
+                      : 'Confirma el monto de la OS (sin sugerencia digital)'
+                }
               />
               <MoneyInput
                 label="Venta extra del evento"
@@ -1441,6 +1538,13 @@ export function StaffCorteClient() {
                 hint="0 si no hubo venta extra"
               />
             </div>
+            {eventosOsMismatch && suggestedOsAmount != null ? (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+                No coincide con la venta de la orden de servicio (
+                {moneyMx(suggestedOsAmount)}
+                ). Puedes guardar el monto editado; solo es una alerta.
+              </p>
+            ) : null}
             <p className="text-sm text-slate-600">
               Total eventos:{' '}
               <strong style={{ color: SUITE.navy }}>
