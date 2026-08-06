@@ -736,7 +736,7 @@ export function AdminAlmacenamientoRecursos() {
           kind: 'source_file' as const,
           note: `${s.rowCount.toLocaleString('es-MX')} fila${s.rowCount === 1 ? '' : 's'}${
             s.lastIngestedAt
-              ? ` · últ. act. ${formatTimestampCdmxShort(s.lastIngestedAt)}`
+              ? ` · últ. sync ${formatTimestampCdmxShort(s.lastIngestedAt)}`
               : s.lastDate
                 ? ` · dato ${s.lastDate}`
                 : ''

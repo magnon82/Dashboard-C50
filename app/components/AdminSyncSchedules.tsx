@@ -71,11 +71,13 @@ function ScheduleCard({
   onDispatch,
   busyWorkflow,
   dispatchMsg,
+  msgWorkflow,
 }: {
   row: ScheduleRow;
   onDispatch: (workflow: SyncWorkflowKey) => void;
   busyWorkflow: SyncWorkflowKey | null;
   dispatchMsg: string | null;
+  msgWorkflow: SyncWorkflowKey | null;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const modeStyle = modeBadgeStyle(row.mode);
@@ -167,7 +169,7 @@ function ScheduleCard({
         </div>
       </div>
 
-      {dispatchMsg && busyWorkflow === row.workflow ? (
+      {dispatchMsg && msgWorkflow === row.workflow ? (
         <p className="border-t px-4 py-2 text-[11px]" style={{ borderColor: SUITE.border, color: theme.muted }}>
           {dispatchMsg}
         </p>
@@ -229,6 +231,7 @@ export function AdminSyncSchedules() {
   const [canDispatch, setCanDispatch] = useState(false);
   const [busyWorkflow, setBusyWorkflow] = useState<SyncWorkflowKey | null>(null);
   const [dispatchMsg, setDispatchMsg] = useState<string | null>(null);
+  const [msgWorkflow, setMsgWorkflow] = useState<SyncWorkflowKey | null>(null);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const fetchedRef = useRef(false);
 
@@ -260,6 +263,7 @@ export function AdminSyncSchedules() {
 
   async function dispatch(workflow: SyncWorkflowKey) {
     setBusyWorkflow(workflow);
+    setMsgWorkflow(workflow);
     setDispatchMsg(null);
     try {
       const res = await fetch('/api/admin/sync-schedules', {
@@ -367,6 +371,7 @@ export function AdminSyncSchedules() {
                 onDispatch={dispatch}
                 busyWorkflow={busyWorkflow}
                 dispatchMsg={dispatchMsg}
+                msgWorkflow={msgWorkflow}
               />
             ))}
           </div>
