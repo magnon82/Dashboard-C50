@@ -27,7 +27,10 @@ import type {
   StaffRptRow,
   StaffCorteStatus,
 } from '@/app/lib/staff-rpt';
-import { parseMoneyInput } from '@/app/lib/staff-rpt';
+import {
+  expectedTombolaDeposit,
+  parseMoneyInput,
+} from '@/app/lib/staff-rpt';
 import { SUITE } from '@/app/lib/themes';
 import { useSession } from '@/app/lib/useSession';
 
@@ -218,7 +221,7 @@ export function StaffCorteClient() {
   const [eventos, setEventos] = useState('');
   /** Fuente de verdad: contado = tómbola (mismo depósito). */
   const [efectivoContado, setEfectivoContado] = useState('');
-  /** Faltante tómbola < Infocaja: cierre permitido solo con confirmación explícita. */
+  /** Faltante tómbola < (Infocaja − propinas TPV): cierre con confirmación. */
   const [ackShortage, setAckShortage] = useState(false);
   const [notes, setNotes] = useState('');
 
@@ -606,11 +609,15 @@ export function StaffCorteClient() {
         setError('Indica el efectivo en tómbola (obligatorio)');
         return;
       }
+      const esperado = expectedTombolaDeposit(
+        info?.hasEfectivo ? info.efectivo : null,
+        bancos?.propina ?? 0
+      );
       const below =
-        Boolean(info?.hasEfectivo) && contadoNum < (info?.efectivo ?? 0);
+        esperado != null && contadoNum < esperado;
       if (below && !ackShortage) {
         setError(
-          `Efectivo en tómbola (${moneyMx(contadoNum)}) es menor que Infocaja (${moneyMx(info!.efectivo)}). Confirma el faltante para poder cerrar.`
+          `Efectivo en tómbola (${moneyMx(contadoNum)}) es menor que lo esperado (${moneyMx(esperado)} = Infocaja − propinas TPV). Confirma el faltante para poder cerrar.`
         );
         return;
       }
@@ -667,11 +674,16 @@ export function StaffCorteClient() {
       ? 'Ejecuta en Supabase → SQL Editor: supabase/staff_corte_prod_fix.sql (o staff_rpt_diario.sql).'
       : 'Puedes cambiar entre Hoy y Ayer arriba aunque falle la carga de este día.';
 
+  const esperadoTombola = expectedTombolaDeposit(
+    infocaja?.hasEfectivo ? infocaja.efectivo : null,
+    bancos?.propina ?? 0
+  );
+
   const liveCashDelta = (() => {
-    if (!efectivoContado.trim() || !infocaja?.hasEfectivo) return null;
+    if (!efectivoContado.trim() || esperadoTombola == null) return null;
     const c = parseMoneyInput(efectivoContado);
     if (c == null) return null;
-    return Math.round((c - infocaja.efectivo) * 100) / 100;
+    return Math.round((c - esperadoTombola) * 100) / 100;
   })();
 
   const efectivoContadoNum = parseMoneyInput(efectivoContado);
@@ -679,8 +691,8 @@ export function StaffCorteClient() {
     efectivoContadoNum != null && efectivoContadoNum >= 0;
   const efectivoBelowInfocaja =
     efectivoContadoOk &&
-    Boolean(infocaja?.hasEfectivo) &&
-    (efectivoContadoNum as number) < (infocaja?.efectivo ?? 0);
+    esperadoTombola != null &&
+    (efectivoContadoNum as number) < esperadoTombola;
   const canCerrarCorte =
     Boolean(bancos?.canSaveRpt) &&
     efectivoContadoOk &&
@@ -1323,8 +1335,8 @@ export function StaffCorteClient() {
           2 · Cierre del día
         </h3>
         <p className="text-xs text-slate-500">
-          WI y Eventos · efectivo en tómbola vs Infocaja. Sin cortesías (vienen
-          de Gmail). Propinas = suma de tickets TPV.
+          WI y Eventos · tómbola = efectivo Infocaja − propinas TPV. Sin
+          cortesías (vienen de Gmail). Propinas = suma de tickets TPV.
         </p>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -1354,19 +1366,43 @@ export function StaffCorteClient() {
           </p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 px-3 py-3">
+        <div className="rounded-xl border border-slate-200 px-3 py-3 space-y-2">
           <p className="text-sm font-semibold text-slate-700">
-            Efectivo Infocaja (referencia)
+            Efectivo → tómbola
           </p>
           {payload?.infocajaError ? (
-            <p className="mt-1 text-xs text-amber-800">{payload.infocajaError}</p>
+            <p className="text-xs text-amber-800">{payload.infocajaError}</p>
           ) : infocaja?.hasEfectivo ? (
-            <p className="mt-1 text-lg font-bold" style={{ color: SUITE.navy }}>
-              {moneyMx(infocaja.efectivo)}
-            </p>
+            <>
+              <div className="flex justify-between text-sm text-slate-600">
+                <span>Efectivo Infocaja (recibido)</span>
+                <span className="font-semibold" style={{ color: SUITE.navy }}>
+                  {moneyMx(infocaja.efectivo)}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm text-slate-600">
+                <span>− Propinas terminales (TPV)</span>
+                <span className="font-semibold" style={{ color: SUITE.navy }}>
+                  {moneyMx(bancos?.propina)}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-slate-200 pt-2 text-sm">
+                <span className="font-semibold text-slate-800">
+                  = Esperado en tómbola
+                </span>
+                <span className="text-lg font-bold" style={{ color: SUITE.navy }}>
+                  {moneyMx(esperadoTombola)}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Las propinas de tarjeta se cubren con efectivo de caja; lo que
+                queda es el depósito en tómbola.
+              </p>
+            </>
           ) : (
-            <p className="mt-1 text-sm text-slate-500">
-              Aún no hay Infocaja Efectivo para esta fecha
+            <p className="text-sm text-slate-500">
+              Aún no hay Infocaja Efectivo para esta fecha. Puedes capturar la
+              tómbola igual; la comparación se activa cuando llegue Infocaja.
             </p>
           )}
         </div>
@@ -1380,8 +1416,8 @@ export function StaffCorteClient() {
           }}
           required
           hint={
-            infocaja?.hasEfectivo
-              ? 'Obligatorio. Monto que depositas en tómbola. Si es menor que Infocaja, confirma el faltante.'
+            esperadoTombola != null
+              ? `Obligatorio. Debe coincidir con ${moneyMx(esperadoTombola)} (Infocaja − propinas). Si es menor, confirma el faltante.`
               : 'Obligatorio. Monto que depositas en tómbola.'
           }
         />
@@ -1392,8 +1428,8 @@ export function StaffCorteClient() {
           >
             <p className="font-medium">
               Alerta: el efectivo en tómbola ({moneyMx(efectivoContadoNum ?? 0)}){' '}
-              es menor que Infocaja ({moneyMx(infocaja?.efectivo ?? 0)}). Faltan{' '}
-              {moneyMx(Math.abs(liveCashDelta))}.
+              es menor que lo esperado ({moneyMx(esperadoTombola)} = Infocaja −
+              propinas TPV). Faltan {moneyMx(Math.abs(liveCashDelta))}.
             </p>
             <label className="flex cursor-pointer items-start gap-2 text-sm font-semibold">
               <input

@@ -9,8 +9,8 @@ import {
 export const STAFF_RPT_TABLE = 'staff_rpt_diario';
 
 /**
- * Tolerancia histórica ($1). El cierre ya NO hard-bloquea si tómbola < Infocaja:
- * es alerta operativa + cierre permitido con acknowledge_shortage (faltante real).
+ * Tolerancia histórica ($1). El cierre ya NO hard-bloquea si tómbola < esperado
+ * (Infocaja − propinas TPV): es alerta operativa + cierre con acknowledge_shortage.
  */
 export const EFECTIVO_TOLERANCE_MXN = 1;
 
@@ -221,54 +221,88 @@ export function sumInfocajaDay(
 }
 
 /**
- * Alerta cuando efectivo en tómbola es estrictamente menor que Infocaja.
- * Producto (ops): es WARNING, no hard-block — un faltante real debe poder
- * cerrarse con acknowledge_shortage + nota. Si falta monto o Infocaja, sin alerta.
+ * Depósito en tómbola = efectivo recibido − propinas de terminales (TPV).
+ * Las propinas de tarjeta se cubren con efectivo de caja; lo que queda es lo
+ * que se deposita en la tómbola.
+ */
+export function expectedTombolaDeposit(
+  efectivoRecibido: number | null | undefined,
+  propinasTerminales: number | null | undefined
+): number | null {
+  if (efectivoRecibido == null || !Number.isFinite(Number(efectivoRecibido))) {
+    return null;
+  }
+  const tips = Math.max(0, Number(propinasTerminales) || 0);
+  return Math.max(
+    0,
+    Math.round((Number(efectivoRecibido) - tips) * 100) / 100
+  );
+}
+
+/**
+ * Alerta cuando el efectivo en tómbola es menor que lo esperado:
+ * Infocaja Efectivo − propinas TPV. WARNING (no hard-block): un faltante real
+ * puede cerrarse con acknowledge_shortage + nota.
  */
 export function efectivoMismatch(
   contado: number | null | undefined,
-  infocaja: number | null | undefined
+  efectivoRecibido: number | null | undefined,
+  propinasTerminales: number | null | undefined = 0
 ): {
   mismatch: boolean;
   belowInfocaja: boolean;
+  expected: number | null;
   delta: number | null;
   message: string | null;
 } {
-  if (contado == null || infocaja == null) {
+  const expected = expectedTombolaDeposit(
+    efectivoRecibido,
+    propinasTerminales
+  );
+  if (contado == null || expected == null) {
     return {
       mismatch: false,
       belowInfocaja: false,
+      expected,
       delta: null,
       message: null,
     };
   }
-  const delta = Math.round((Number(contado) - Number(infocaja)) * 100) / 100;
+  const delta = Math.round((Number(contado) - expected) * 100) / 100;
   if (delta >= 0) {
     return {
       mismatch: false,
       belowInfocaja: false,
+      expected,
       delta,
       message: null,
     };
   }
   const faltante = Math.abs(delta);
-  const message = `Efectivo en tómbola (${moneyMx(contado)}) es menor que Infocaja (${moneyMx(infocaja)}). Faltan ${moneyMx(faltante)}. Confirma el faltante para poder cerrar.`;
+  const tips = Math.max(0, Number(propinasTerminales) || 0);
+  const message = `Efectivo en tómbola (${moneyMx(contado)}) es menor que lo esperado (${moneyMx(expected)} = Infocaja ${moneyMx(efectivoRecibido)} − propinas TPV ${moneyMx(tips)}). Faltan ${moneyMx(faltante)}. Confirma el faltante para poder cerrar.`;
   return {
     mismatch: true,
     belowInfocaja: true,
+    expected,
     delta,
     message,
   };
 }
 
-/** Nota automática al cerrar con faltante (tómbola < Infocaja). */
+/** Nota automática al cerrar con faltante (tómbola < efectivo − propinas). */
 export function shortageCloseNote(
   contado: number,
-  infocaja: number
+  efectivoRecibido: number,
+  propinasTerminales: number = 0
 ): string {
-  const delta = Math.round((contado - infocaja) * 100) / 100;
+  const expected =
+    expectedTombolaDeposit(efectivoRecibido, propinasTerminales) ??
+    efectivoRecibido;
+  const delta = Math.round((contado - expected) * 100) / 100;
   const faltante = Math.abs(delta);
-  return `[Faltante efectivo] Tómbola ${moneyMx(contado)} < Infocaja ${moneyMx(infocaja)} (faltan ${moneyMx(faltante)}). Confirmado al cerrar.`;
+  const tips = Math.max(0, Number(propinasTerminales) || 0);
+  return `[Faltante efectivo] Tómbola ${moneyMx(contado)} < esperado ${moneyMx(expected)} (Infocaja ${moneyMx(efectivoRecibido)} − propinas TPV ${moneyMx(tips)}; faltan ${moneyMx(faltante)}). Confirmado al cerrar.`;
 }
 
 /**

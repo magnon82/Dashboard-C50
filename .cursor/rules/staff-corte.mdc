@@ -14,8 +14,8 @@ Un solo flujo en `/staff/corte` (hub `/staff`):
 
 1. Fecha de corte (CDMX overnight 00:00–05:59 → día anterior) — read-only
 2. Terminales T1–T3: **2 fotos = prueba de bancos** (venta/Totalización + propinas/Reporte). Tras cada foto, staff confirma el monto de ese ticket. O «No se utilizó» para la terminal entera
-3. Bancos / propinas en el cierre = suma TPV (solo lectura). Neto banco = cobrado + propinas (propinas no se descuentan)
-4. Cierre: WI, Eventos (0 si no hubo), efectivo vs Infocaja, tómbola. **Sin cortesías** (Gmail)
+3. Bancos / propinas en el cierre = suma TPV (solo lectura). Neto banco = cobrado + propinas (propinas no se descuentan del depósito bancario)
+4. Cierre: WI, Eventos (0 si no hubo), **tómbola = efectivo Infocaja − propinas TPV**. **Sin cortesías** (Gmail)
 5. Un «Cerrar corte del día» → upsert `staff_rpt_diario`
 6. Completo = 3/3 terminales con ambas fotos + montos (o unused) + cierre guardado
 

@@ -207,7 +207,8 @@ export async function GET(request: Request) {
 
     const cashCheck = efectivoMismatch(
       rpt?.efectivo_contado ?? null,
-      infocaja.hasEfectivo ? infocaja.efectivo : null
+      infocaja.hasEfectivo ? infocaja.efectivo : null,
+      bancos.propina
     );
 
     const isMaster = canAccessAdmin(auth);
@@ -308,7 +309,8 @@ export async function GET(request: Request) {
  * Body JSON: { date?, wi_amount, eventos_amount, efectivo_tombola?,
  *              efectivo_contado, notes?, acknowledge_shortage? }
  * Bancos y propinas se toman de TPV (obligatorio día completo + montos).
- * efectivo_contado obligatorio (= tómbola). Si tómbola < Infocaja: warning;
+ * efectivo_contado obligatorio (= tómbola). Esperado = Infocaja − propinas TPV;
+ * si tómbola < esperado: warning + acknowledge_shortage.
  * se permite cerrar solo con acknowledge_shortage=true (faltante real).
  */
 export async function PUT(request: Request) {
@@ -411,21 +413,22 @@ export async function PUT(request: Request) {
     const { infocaja } = await loadInfocajaDay(sb, date);
     const cashCheck = efectivoMismatch(
       efectivoContado,
-      infocaja.hasEfectivo ? infocaja.efectivo : null
+      infocaja.hasEfectivo ? infocaja.efectivo : null,
+      bancos.propina
     );
 
-    // Regla ops: tómbola < Infocaja = warning + cierre con confirmación explícita.
-    // No hard-blockear faltantes reales (p. ej. $259 vs $5,817).
+    // Regla ops: tómbola < (Infocaja − propinas TPV) = warning + cierre con ack.
+    // No hard-blockear faltantes reales.
     if (cashCheck.belowInfocaja && !acknowledgeShortage) {
       return NextResponse.json(
         {
           error:
             cashCheck.message ||
-            'Efectivo en tómbola menor que Infocaja. Confirma el faltante para cerrar.',
+            'Efectivo en tómbola menor que lo esperado (Infocaja − propinas TPV). Confirma el faltante para cerrar.',
           cashCheck,
           requiresShortageAck: true,
           blockers: [
-            'Confirma el faltante de efectivo (tómbola < Infocaja) para poder cerrar.',
+            'Confirma el faltante de efectivo (tómbola < Infocaja − propinas TPV) para poder cerrar.',
           ],
         },
         { status: 409 }
@@ -435,7 +438,8 @@ export async function PUT(request: Request) {
     if (cashCheck.belowInfocaja && acknowledgeShortage) {
       const auto = shortageCloseNote(
         efectivoContado,
-        infocaja.efectivo
+        infocaja.efectivo,
+        bancos.propina
       );
       notes = notes ? `${notes}\n${auto}`.slice(0, 2000) : auto;
     } else {
