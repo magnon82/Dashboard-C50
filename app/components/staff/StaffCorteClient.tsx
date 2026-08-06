@@ -430,7 +430,9 @@ export function StaffCorteClient() {
             : ` · propina ${moneyMx(ocr.propina ?? upload?.propina)}`
           : '';
       setMsg(
-        `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}`
+        data.needs_amount === true
+          ? `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada, pero no se pudo leer el monto. Toca «Corregir monto» y escríbelo mirando la foto.`
+          : `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}`
       );
       await refresh();
       const day = data.day as
@@ -949,6 +951,8 @@ export function StaffCorteClient() {
               (slot.state === 'unused' ||
                 (slot.state === 'photo' && slot.hasAmounts));
             const partial = slot?.state === 'partial';
+            // Las 2 fotos están, pero a alguna le falta el monto.
+            const needsAmount = slot?.state === 'photo' && !slot.hasAmounts;
             return (
               <button
                 key={n}
@@ -967,15 +971,17 @@ export function StaffCorteClient() {
                       ? SUITE.navy
                       : done
                         ? '#DCFCE7'
-                        : partial
-                          ? '#FEF3C7'
-                          : '#fff',
+                        : needsAmount
+                          ? '#FDE68A'
+                          : partial
+                            ? '#FEF3C7'
+                            : '#fff',
                   color: activeTerminal === n ? '#fff' : SUITE.navy,
                   boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
                 }}
               >
                 T{n}
-                {done ? ' ✓' : partial ? ' …' : ''}
+                {done ? ' ✓' : needsAmount ? ' $?' : partial ? ' …' : ''}
               </button>
             );
           })}
@@ -1063,25 +1069,42 @@ export function StaffCorteClient() {
                           Sin foto
                         </p>
                       )}
-                      {up && kind === 'venta' ? (
-                        <p className="mt-1 text-center text-xs font-semibold text-slate-700">
-                          {moneyMx(up.total_cobrado)}
-                        </p>
-                      ) : null}
-                      {up && kind === 'propina' ? (
-                        <p className="mt-1 text-center text-xs font-semibold text-slate-700">
-                          {moneyMx(up.propina)}
-                        </p>
-                      ) : null}
+                      {(() => {
+                        if (!up) return null;
+                        const amount =
+                          kind === 'venta' ? up.total_cobrado : up.propina;
+                        return amount == null ? (
+                          <p className="mt-1 text-center text-xs font-bold text-amber-700">
+                            Falta el monto
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-center text-xs font-semibold text-slate-700">
+                            {moneyMx(amount)}
+                          </p>
+                        );
+                      })()}
                       {up && !pending ? (
                         <button
                           type="button"
                           disabled={busy === `a${up.id}`}
                           onClick={() => void savePhotoAmount(up)}
-                          className="mt-1 w-full rounded-lg bg-white py-1.5 text-[11px] font-bold disabled:opacity-60"
-                          style={{ color: SUITE.navy }}
+                          className={`mt-1 w-full rounded-lg py-1.5 text-[11px] font-bold disabled:opacity-60 ${
+                            (kind === 'venta' ? up.total_cobrado : up.propina) ==
+                            null
+                              ? 'bg-amber-400 text-amber-950'
+                              : 'bg-white'
+                          }`}
+                          style={
+                            (kind === 'venta' ? up.total_cobrado : up.propina) ==
+                            null
+                              ? undefined
+                              : { color: SUITE.navy }
+                          }
                         >
-                          Corregir monto
+                          {(kind === 'venta' ? up.total_cobrado : up.propina) ==
+                          null
+                            ? 'Escribir monto'
+                            : 'Corregir monto'}
                         </button>
                       ) : null}
                     </div>

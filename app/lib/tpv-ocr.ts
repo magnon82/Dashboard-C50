@@ -228,8 +228,15 @@ export function parseMoneyToken(raw: string): number | null {
   return Math.round(n * 100) / 100;
 }
 
-/** Extrae importes de una línea (patrones específicos primero). */
-export function extractAmountsFromLine(line: string): number[] {
+/**
+ * Extrae importes de una línea (patrones específicos primero).
+ * `allowZero` es para la línea de propina: «PROPINA $0.00» es un dato válido
+ * (día sin propinas), no ruido.
+ */
+export function extractAmountsFromLine(
+  line: string,
+  opts: { allowZero?: boolean } = {}
+): number[] {
   const out: number[] = [];
   const re =
     /\$?\s*(\d{1,3}(?:,\d{3})+\.\d{2}|\d{1,3}(?:,\d{3})+,\d{2}|\d+\.\d{2}|\d+\.\/\d|\d+[.:]\d{2}|\d+\s+\d{2}|\d{4,7})/g;
@@ -239,7 +246,8 @@ export function extractAmountsFromLine(line: string): number[] {
     let tok = m[1].trim();
     if (/^\d+\s+\d{2}$/.test(tok)) tok = tok.replace(/\s+/, '.');
     const amt = parseMoneyToken(tok);
-    if (amt != null && amt > 0 && !seen.has(amt)) {
+    if (amt == null || seen.has(amt)) continue;
+    if (amt > 0 || opts.allowZero) {
       seen.add(amt);
       out.push(amt);
     }
@@ -442,17 +450,41 @@ export function parsePropinaText(text: string): {
     amountPropina = pick.propina;
   }
 
-  // TOTAL final una sola cifra
+  // Fallback 1: la propina va sola en su renglón («PROPINA $624.75»,
+  // «TOTAL PROPINAS $215.50», «PROPINA $0.00» en día sin propinas).
+  if (amountPropina == null) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!/PROPINAS?/i.test(line)) continue;
+      if (/OPER\.?\s*\d/i.test(line)) continue;
+      if (/CONSUMO/i.test(line)) continue;
+      const amts = extractAmountsFromLine(line, { allowZero: true });
+      if (amts.length !== 1) continue;
+      const tip = amts[0];
+      if (tip >= 0 && tip <= 20_000) {
+        amountPropina = tip;
+        break;
+      }
+    }
+  }
+
+  // TOTAL final una sola cifra. Las líneas de propina no son el total del
+  // ticket, y el parche «+6000» (6 leída como 0) solo aplica si hay un par
+  // consumo+propina con el que contrastar.
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (!/^TOTAL\b/i.test(line)) continue;
-    const amts = extractAmountsFromLine(line)
-      .concat(
-        extractAmountsFromLine(line).map((a) =>
-          a >= 100 && a < 2000 ? Math.round((a + 6000) * 100) / 100 : a
-        )
-      )
-      .filter((a) => a >= 500);
+    if (/PROPINAS?/i.test(line)) continue;
+    const raw = extractAmountsFromLine(line);
+    const amts = (
+      consumo != null && amountPropina != null
+        ? raw.concat(
+            raw.map((a) =>
+              a >= 100 && a < 2000 ? Math.round((a + 6000) * 100) / 100 : a
+            )
+          )
+        : raw
+    ).filter((a) => a >= 500);
     if (amts.length) {
       // Prefer amount closest to consumo+propina if known
       if (consumo != null && amountPropina != null) {
@@ -463,6 +495,25 @@ export function parsePropinaText(text: string): {
         total = Math.max(...amts);
       }
       break;
+    }
+  }
+
+  // Fallback 2: consumo y total en renglones distintos → propina = total − consumo.
+  if (amountPropina == null && total != null) {
+    const consumoLine: number[] = [];
+    for (const line of lines) {
+      if (!/CONSUMO/i.test(line)) continue;
+      if (/OPER\.?\s*\d/i.test(line)) continue;
+      consumoLine.push(...extractAmountsFromLine(line).filter((a) => a >= 50));
+    }
+    if (consumoLine.length) {
+      const c = Math.max(...consumoLine);
+      const diff = Math.round((total - c) * 100) / 100;
+      // Solo si la diferencia es una propina plausible (≤30% del consumo).
+      if (diff >= 0 && diff <= c * 0.3) {
+        amountPropina = diff;
+        consumo = c;
+      }
     }
   }
 
@@ -711,6 +762,25 @@ export async function runTpvOcr(
       error: e instanceof Error ? e.message : 'OCR falló',
     };
   }
+}
+
+/** Confianza media de tesseract por debajo de la cual la foto no sirve. */
+const TPV_OCR_MIN_CONFIDENCE = 30;
+/** Caracteres reconocidos mínimos para considerar que se leyó algo. */
+const TPV_OCR_MIN_TEXT_LEN = 40;
+
+/**
+ * ¿La imagen es ilegible (borrosa / recortada / a contraluz) o simplemente el
+ * parser no reconoció el formato de este ticket? Solo en el primer caso tiene
+ * sentido pedir otra foto; en el segundo conviene guardarla y capturar el monto
+ * a mano, porque la foto es la evidencia del corte.
+ */
+export function isTpvPhotoUnreadable(parsed: TpvOcrParseResult): boolean {
+  const textLen = (parsed.rawText || '').replace(/\s/g, '').length;
+  return (
+    parsed.meanConfidence < TPV_OCR_MIN_CONFIDENCE ||
+    textLen < TPV_OCR_MIN_TEXT_LEN
+  );
 }
 
 /**

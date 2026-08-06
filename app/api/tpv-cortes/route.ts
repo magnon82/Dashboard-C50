@@ -37,6 +37,7 @@ import {
   TPV_OCR_RETAKE_MSG,
   TPV_OCR_UNAVAILABLE_MSG,
   amountsFromOcr,
+  isTpvPhotoUnreadable,
   decodeTicketTotalFromOcrText,
   reconcilePairAmounts,
   runTpvOcr,
@@ -655,6 +656,8 @@ export async function POST(request: Request) {
     let ticketTotal: number | null = null;
     let ocrText: string | null = null;
     let ocrStatus: 'done' | 'failed' | 'skipped' = 'skipped';
+    /** Foto guardada sin monto: falta capturarlo con «Corregir monto». */
+    let needsAmount = false;
 
     if (fromOcr && ocr.ok && fromOcr.ocrStatus === 'done') {
       ocrStatus = 'done';
@@ -685,7 +688,8 @@ export async function POST(request: Request) {
       rowPropina = manualPropina;
       ocrStatus = ocr.rawText ? 'failed' : 'skipped';
       ocrText = fromOcr?.ocrText || ocr.rawText || null;
-    } else {
+    } else if (isTpvPhotoUnreadable(ocr)) {
+      // La foto en sí no se puede leer (borrosa / recortada): retomarla sí ayuda.
       return NextResponse.json(
         {
           error: ocr.error || TPV_OCR_RETAKE_MSG,
@@ -695,6 +699,13 @@ export async function POST(request: Request) {
         },
         { status: 400 }
       );
+    } else {
+      // La foto se lee pero el parser no encontró el patrón de este ticket.
+      // Se guarda igual (la foto es la evidencia) y el monto se captura después
+      // con «Corregir monto»; `slotHasAmounts` bloquea el cierre mientras tanto.
+      needsAmount = true;
+      ocrStatus = 'failed';
+      ocrText = fromOcr?.ocrText || ocr.rawText || null;
     }
 
     let netoBanco =
@@ -814,6 +825,11 @@ export async function POST(request: Request) {
       {
         upload,
         day,
+        needs_amount:
+          needsAmount &&
+          (photoKind === 'venta'
+            ? upload.total_cobrado == null
+            : upload.propina == null),
         ocr: {
           status: ocrStatus,
           confidence: ocr.meanConfidence,

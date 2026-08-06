@@ -23,9 +23,10 @@ Schema: `photo_kind` (`venta`|`propina`); unique `(corte_date, terminal_number, 
 ## Fuentes
 
 - Fotos: Supabase Storage `tpv-cortes` + tabla `tpv_corte_uploads` (`supabase/tpv_cortes.sql`)
-- Montos: **OCR automático** al subir (`tesseract.js` + parse Mifel en `app/lib/tpv-ocr.ts`). Si no legible → rechazo «Vuelve a tomar la foto». Si falla el motor → 503 «lector no disponible» (sin pedir retomar).
+- Montos: **OCR automático** al subir (`tesseract.js` + parse Mifel en `app/lib/tpv-ocr.ts`). Tres desenlaces: (1) monto leído → fila `parsed`; (2) foto legible pero sin patrón reconocible (`isTpvPhotoUnreadable` = false) → **se guarda igual** con `ocr_status: 'failed'` y sin monto (`needs_amount: true` en la respuesta), y el monto se captura con «Corregir monto»; (3) foto ilegible (confianza <30 o casi sin texto) → 400 «Vuelve a tomar la foto». Si falla el motor → 503 «lector no disponible» (sin pedir retomar). **Nunca se pierde la foto por culpa del parser**: es la evidencia del corte. `slotHasAmounts` deja el cierre bloqueado mientras falte un monto, así que guardar sin monto no descuadra nada.
 - TOTALIZACIÓN → `ticket_total` (liquidación; a menudo incluye tips). Propina → `amount_propina`. Con ambas: `cobrado = ticket_total − propina`. Neto banco = cobrado + propinas.
-- **Sin campo de monto en la captura**: la venta en tarjetas se registra desde los tickets. La corrección manual solo existe sobre una foto ya guardada («Corregir monto» → PATCH `/api/tpv-cortes/[id]`).
+- **Sin campo de monto en la captura**: la venta en tarjetas se registra desde los tickets. La corrección manual solo existe sobre una foto ya guardada («Corregir monto» → PATCH `/api/tpv-cortes/[id]`). Al capturar ahí la propina, `reconcilePairNeto` resta las propinas del cobrado **solo si** este sigue siendo el TOTAL GENERAL crudo del OCR; si el usuario tecleó el cobrado, se respeta.
+- `parsePropinaText` acepta cuatro formatos, en orden: par consumo+propina en la línea de TOTAL/SUBTOTAL, propina sola en su renglón (incluye «PROPINA $0.00» en días sin propinas), «TOTAL PROPINAS», y consumo/total en renglones distintos (propina = total − consumo, máx. 30%). Ante la duda **no inventa monto**: mejor guardar sin monto que guardar uno equivocado.
 
 ## OCR en Vercel — no romper el empaquetado
 

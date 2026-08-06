@@ -13,6 +13,7 @@ import {
   type TpvCorteStatus,
   type TpvTerminalNumber,
 } from '@/app/lib/tpv-cortes';
+import { decodeTicketTotalFromOcrText } from '@/app/lib/tpv-ocr';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,11 +34,19 @@ async function attachSignedUrl(
   upload.image_url = signed?.signedUrl || null;
 }
 
-/** Tras editar montos: recalcula neto en venta+propina de la misma terminal. */
+/**
+ * Tras editar montos: recalcula neto en venta+propina de la misma terminal.
+ *
+ * `ventaCobradoEditado` = el usuario tecleó el cobrado, así que se respeta tal
+ * cual. Si solo se capturó la propina y el cobrado sigue siendo el TOTAL
+ * GENERAL crudo del OCR (que ya incluye propinas), primero hay que restarlas o
+ * el neto contaría las propinas dos veces.
+ */
 async function reconcilePairNeto(
   sb: ReturnType<typeof getServiceSupabase>,
   corteDate: string,
-  terminal: TpvTerminalNumber
+  terminal: TpvTerminalNumber,
+  ventaCobradoEditado = false
 ) {
   const { data } = await sb
     .from('tpv_corte_uploads')
@@ -58,10 +67,28 @@ async function reconcilePairNeto(
       : venta.propina != null
         ? Number(venta.propina)
         : null;
-  const neto = computeNetoBanco(venta.total_cobrado, tip);
-  if (neto == null) return;
 
   const now = new Date().toISOString();
+  let cobrado = venta.total_cobrado;
+
+  if (!ventaCobradoEditado && tip != null && tip > 0) {
+    const ticketTotal = decodeTicketTotalFromOcrText(venta.ocr_text);
+    const stillRawTicketTotal =
+      ticketTotal != null &&
+      cobrado != null &&
+      Math.abs(Number(cobrado) - ticketTotal) <= 0.01;
+    if (stillRawTicketTotal) {
+      cobrado = Math.max(0, Math.round((ticketTotal - tip) * 100) / 100);
+      await sb
+        .from('tpv_corte_uploads')
+        .update({ total_cobrado: cobrado, updated_at: now })
+        .eq('id', venta.id);
+    }
+  }
+
+  const neto = computeNetoBanco(cobrado, tip);
+  if (neto == null) return;
+
   await sb
     .from('tpv_corte_uploads')
     .update({ neto_banco: neto, updated_at: now })
@@ -220,7 +247,12 @@ export async function PATCH(request: Request, ctx: Ctx) {
 
     // Recalcular neto con la pareja venta/propina del día
     if ('total_cobrado' in body || 'propina' in body || 'neto_banco' in body) {
-      await reconcilePairNeto(sb, upload.corte_date, upload.terminal_number);
+      await reconcilePairNeto(
+        sb,
+        upload.corte_date,
+        upload.terminal_number,
+        'total_cobrado' in body
+      );
       const { data: refreshed } = await sb
         .from('tpv_corte_uploads')
         .select('*')

@@ -243,9 +243,11 @@ export function TpvCorteClient() {
             : ` · propina ${moneyMx(ocr.propina ?? upload?.propina)}`
           : '';
       setMsg(
-        day?.complete
-          ? 'Proceso concluido correctamente. Las 3 terminales ya estan listas.'
-          : `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}.`
+        json.needs_amount === true
+          ? `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada, pero no se pudo leer el monto. Escríbelo con el botón del monto mirando la foto.`
+          : day?.complete
+            ? 'Proceso concluido correctamente. Las 3 terminales ya estan listas.'
+            : `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}.`
       );
       const slotAfter = (day?.slots || []).find(
         (s) => s.terminal === activeTerminal
@@ -763,11 +765,21 @@ export function TpvCorteClient() {
                         {venta ? (
                           <button
                             type="button"
-                            className="mt-1 w-full rounded-lg bg-slate-100 py-1.5 text-[11px] font-bold"
-                            style={{ color: SUITE.navy }}
+                            className={`mt-1 w-full rounded-lg py-1.5 text-[11px] font-bold ${
+                              venta.total_cobrado == null
+                                ? 'bg-amber-400 text-amber-950'
+                                : 'bg-slate-100'
+                            }`}
+                            style={
+                              venta.total_cobrado == null
+                                ? undefined
+                                : { color: SUITE.navy }
+                            }
                             onClick={() => void saveAmounts(venta)}
                           >
-                            Cobrado: {moneyMx(venta.total_cobrado)}
+                            {venta.total_cobrado == null
+                              ? 'Falta cobrado · escribir'
+                              : `Cobrado: ${moneyMx(venta.total_cobrado)}`}
                           </button>
                         ) : null}
                       </div>
@@ -788,11 +800,21 @@ export function TpvCorteClient() {
                         {propinaUp ? (
                           <button
                             type="button"
-                            className="mt-1 w-full rounded-lg bg-slate-100 py-1.5 text-[11px] font-bold"
-                            style={{ color: SUITE.navy }}
+                            className={`mt-1 w-full rounded-lg py-1.5 text-[11px] font-bold ${
+                              propinaUp.propina == null
+                                ? 'bg-amber-400 text-amber-950'
+                                : 'bg-slate-100'
+                            }`}
+                            style={
+                              propinaUp.propina == null
+                                ? undefined
+                                : { color: SUITE.navy }
+                            }
                             onClick={() => void saveAmounts(propinaUp)}
                           >
-                            Propina: {moneyMx(propinaUp.propina)}
+                            {propinaUp.propina == null
+                              ? 'Falta propina · escribir'
+                              : `Propina: ${moneyMx(propinaUp.propina)}`}
                           </button>
                         ) : null}
                       </div>
