@@ -274,7 +274,11 @@ function TeamScheduleTable({
   );
 }
 
-export function StaffHorarioClient() {
+export function StaffHorarioClient({
+  canEdit = false,
+}: {
+  canEdit?: boolean;
+}) {
   const today = todayIsoCdmx();
   const weekStart = mondayOfWeek(today);
   const weekEnd = sundayOfWeek(weekStart);
@@ -336,7 +340,7 @@ export function StaffHorarioClient() {
 
   return (
     <SuiteShell title="Mi horario" subtitle={subtitle}>
-      <p className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/staff"
           className="text-sm font-semibold"
@@ -344,7 +348,31 @@ export function StaffHorarioClient() {
         >
           ← Volver a Staff
         </Link>
-      </p>
+        {canEdit ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/staff/horario?edit=1"
+              className="rounded-lg px-3 py-1.5 text-sm font-bold"
+              style={{
+                backgroundColor: SUITE.navy,
+                color: '#fff',
+              }}
+            >
+              Crear
+            </Link>
+            <Link
+              href="/staff/horario?edit=1"
+              className="rounded-lg px-3 py-1.5 text-sm font-bold"
+              style={{
+                backgroundColor: SUITE.orange,
+                color: SUITE.navy,
+              }}
+            >
+              Editar
+            </Link>
+          </div>
+        ) : null}
+      </div>
 
       {loading ? (
         <p className="text-sm" style={{ color: theme.muted }}>

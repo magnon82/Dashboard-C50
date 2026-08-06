@@ -10,6 +10,7 @@ import { SemanaEnCursoTable } from '@/app/components/SemanaEnCursoTable';
 import { DetalleSemanalCard } from '@/app/components/DetalleSemanalCard';
 import { BalanceMensualSociosCard } from '@/app/components/BalanceMensualSociosCard';
 import { InfocajaSyncBanner } from '@/app/components/InfocajaSyncBanner';
+import { SociosCorteResumenCard } from '@/app/components/SociosCorteResumenCard';
 import { getTheme } from '@/app/lib/themes';
 import {
   buildWeekToDateSales,
@@ -151,6 +152,7 @@ export default function ReportesSociosPage() {
 
   return (
     <SuiteShell title="Reportes Socios">
+      <SociosCorteResumenCard />
       <InfocajaSyncBanner />
       {dataError && (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">

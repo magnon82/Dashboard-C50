@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { SuiteShell } from '@/app/components/SuiteShell';
 import { RrhhHorarios } from '@/app/components/rrhh/RrhhHorarios';
 import { StaffHorarioClient } from '@/app/components/staff/StaffHorarioClient';
@@ -9,7 +11,9 @@ import { SUITE, getTheme } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
 
-export default function StaffHorarioPage() {
+function StaffHorarioPageInner() {
+  const searchParams = useSearchParams();
+  const editMode = searchParams.get('edit') === '1';
   const { user, loading } = useSession();
   const canEdit = canEditSchedules(user);
 
@@ -23,13 +27,13 @@ export default function StaffHorarioPage() {
     );
   }
 
-  if (canEdit) {
+  if (canEdit && editMode) {
     return (
       <SuiteShell
         title="Horarios"
         subtitle="Edición · mismas herramientas que RR.HH. (datos sincronizados)"
       >
-        <p className="mb-4">
+        <p className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
           <Link
             href="/staff"
             className="text-sm font-semibold"
@@ -37,11 +41,34 @@ export default function StaffHorarioPage() {
           >
             ← Volver a Staff
           </Link>
+          <Link
+            href="/staff/horario"
+            className="text-sm font-semibold"
+            style={{ color: SUITE.navy }}
+          >
+            Ver horario
+          </Link>
         </p>
         <RrhhHorarios />
       </SuiteShell>
     );
   }
 
-  return <StaffHorarioClient />;
+  return <StaffHorarioClient canEdit={canEdit} />;
+}
+
+export default function StaffHorarioPage() {
+  return (
+    <Suspense
+      fallback={
+        <SuiteShell title="Horario" subtitle="Cargando…">
+          <p className="text-sm" style={{ color: theme.muted }}>
+            Cargando…
+          </p>
+        </SuiteShell>
+      }
+    >
+      <StaffHorarioPageInner />
+    </Suspense>
+  );
 }

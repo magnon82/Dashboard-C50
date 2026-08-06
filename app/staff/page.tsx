@@ -125,18 +125,16 @@ export default function StaffPage() {
           >
             <div className="flex items-start justify-between gap-3">
               <h2 className="text-lg font-bold" style={{ color: SUITE.navy }}>
-                {canEditHorarios ? 'Horarios' : 'Mi horario'}
+                Horario
               </h2>
               <span
                 className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                 style={{
-                  backgroundColor: canEditHorarios
-                    ? SUITE.navy
-                    : SUITE.orangeSoft,
-                  color: canEditHorarios ? '#fff' : SUITE.navy,
+                  backgroundColor: SUITE.orangeSoft,
+                  color: SUITE.navy,
                 }}
               >
-                {canEditHorarios ? 'Editar' : 'En curso + próxima'}
+                {canEditHorarios ? 'Consulta + editar' : 'En curso + próxima'}
               </span>
             </div>
             <p
@@ -144,14 +142,14 @@ export default function StaffPage() {
               style={{ color: SUITE.muted }}
             >
               {canEditHorarios
-                ? 'Crear y editar semanas con las mismas herramientas que RR.HH. → Horarios'
+                ? 'Horario publicado del equipo; Crear o Editar abre las mismas herramientas que RR.HH.'
                 : 'Semana de horario en curso y la próxima si RH ya la publicó'}
             </p>
             <p
               className="mt-5 text-sm font-bold"
               style={{ color: SUITE.orangeDeep }}
             >
-              {canEditHorarios ? 'Abrir editor →' : 'Ver horario →'}
+              Ver horario →
             </p>
           </SuiteCard>
         </Link>
