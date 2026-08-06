@@ -62,7 +62,7 @@ export function assertWritableCorteDate(
     const { minDate, maxDate } = adminCorteDateWindow();
     return NextResponse.json(
       {
-        error: `Master solo puede cargar el día operativo (${opDay}) o hasta 7 días atrás (${minDate}–${maxDate}). La fecha del corte es la del día de operación (00:00–05:59 → día anterior).`,
+        error: `Master solo puede cargar el día operativo (${opDay}) o hasta 7 días atrás desde el 1 de agosto (${minDate}–${maxDate}). La fecha del corte es la del día de operación (00:00–05:59 → día anterior).`,
         min_date: minDate,
         max_date: maxDate,
         staff_window_date: opDay,
@@ -101,7 +101,7 @@ export function assertStaffCorteWritableDate(
     const { minDate, maxDate } = adminCorteDateWindow();
     return NextResponse.json(
       {
-        error: `Master solo puede cerrar el día operativo (${opDay}) o pendientes hasta 7 días atrás (${minDate}–${maxDate}).`,
+        error: `Master solo puede cerrar el día operativo (${opDay}) o pendientes desde el 1 de agosto (${minDate}–${maxDate}).`,
         min_date: minDate,
         max_date: maxDate,
         staff_window_date: opDay,

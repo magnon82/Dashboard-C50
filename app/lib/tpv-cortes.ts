@@ -155,6 +155,12 @@ export function defaultCorteDateCdmx(at: Date = new Date()): string {
 /** Días hacia atrás que Master puede cargar/editar respecto al día operativo. */
 export const TPV_ADMIN_LOOKBACK_DAYS = 7;
 
+/**
+ * Primer día operativo del flujo de cortes TPV en producción.
+ * Fechas anteriores (p. ej. julio 2026) no aparecen como pendientes ni son editables.
+ */
+export const TPV_CORTE_EPOCH = '2026-08-01';
+
 /** Resta N días a una fecha ISO `YYYY-MM-DD` (calendario UTC noon-safe). */
 export function shiftIsoDate(iso: string, deltaDays: number): string {
   const [y, m, d] = iso.split('-').map(Number);
@@ -165,7 +171,8 @@ export function shiftIsoDate(iso: string, deltaDays: number): string {
 }
 
 /**
- * Ventana Master: día operativo ± lookback (sin fechas futuras ni >7 días atrás).
+ * Ventana Master: día operativo ± lookback, no antes de `TPV_CORTE_EPOCH`
+ * (sin fechas futuras).
  * `opDay` = defaultCorteDateCdmx (madrugada → día anterior).
  */
 export function adminCorteDateWindow(at: Date = new Date()): {
@@ -174,10 +181,14 @@ export function adminCorteDateWindow(at: Date = new Date()): {
   maxDate: string;
 } {
   const opDay = defaultCorteDateCdmx(at);
+  const lookbackMin = shiftIsoDate(opDay, -TPV_ADMIN_LOOKBACK_DAYS);
+  const minDate =
+    lookbackMin < TPV_CORTE_EPOCH ? TPV_CORTE_EPOCH : lookbackMin;
+  const maxDate = opDay < TPV_CORTE_EPOCH ? TPV_CORTE_EPOCH : opDay;
   return {
     opDay,
-    minDate: shiftIsoDate(opDay, -TPV_ADMIN_LOOKBACK_DAYS),
-    maxDate: opDay,
+    minDate: minDate > maxDate ? maxDate : minDate,
+    maxDate,
   };
 }
 
@@ -198,6 +209,7 @@ export function isAdminWritableCorteDate(
   at: Date = new Date()
 ): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) return false;
+  if (corteDate < TPV_CORTE_EPOCH) return false;
   const { minDate, maxDate } = adminCorteDateWindow(at);
   return corteDate >= minDate && corteDate <= maxDate;
 }
@@ -219,6 +231,7 @@ export function isStaffWritableCorteDate(
   at: Date = new Date()
 ): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(corteDate)) return false;
+  if (corteDate < TPV_CORTE_EPOCH) return false;
   const { opDay, prevDay } = staffCorteDateWindow(at);
   return corteDate === opDay || corteDate === prevDay;
 }
