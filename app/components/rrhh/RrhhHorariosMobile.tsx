@@ -56,8 +56,8 @@ type Props = {
   /** Por índice Lun–Dom: la fecha civil ya pasó (CDMX). */
   dayLocked: boolean[];
   todayIso: string;
-  onCell: (employeeId: string, dayIndex: number, patch: Partial<DayCell>) => void;
-  onApplyWeek: (employeeId: string, cell: DayCell) => void;
+  onCell: (rowKey: string, dayIndex: number, patch: Partial<DayCell>) => void;
+  onApplyWeek: (rowKey: string, cell: DayCell) => void;
 };
 
 /**
@@ -82,7 +82,7 @@ export function RrhhHorariosMobile({
   );
   const [personId, setPersonId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<{
-    employeeId: string;
+    rowKey: string;
     dayIndex: number;
   } | null>(null);
 
@@ -114,18 +114,18 @@ export function RrhhHorariosMobile({
   );
 
   const selectedPerson = useMemo(
-    () => rows.find((r) => r.employee_id === personId) || null,
+    () => rows.find((r) => r.rowKey === personId) || null,
     [rows, personId]
   );
 
   const sheetPerson = useMemo(
-    () => (sheet ? rows.find((r) => r.employee_id === sheet.employeeId) : null),
+    () => (sheet ? rows.find((r) => r.rowKey === sheet.rowKey) : null),
     [rows, sheet]
   );
 
-  function openSheet(employeeId: string, di: number) {
+  function openSheet(rowKey: string, di: number) {
     if (readOnly || dayLocked[di]) return;
-    setSheet({ employeeId, dayIndex: di });
+    setSheet({ rowKey, dayIndex: di });
   }
 
   return (
@@ -226,17 +226,17 @@ export function RrhhHorariosMobile({
                     if (!d) return null;
                     const st = cellStyle(d);
                     const locked = readOnly || dayLocked[dayIndex];
-                    const conflict = rowDayHasOverlapConflict(p, dayIndex);
+                    const conflict = rowDayHasOverlapConflict(p, dayIndex, rows);
                     const extras = extraLabel(d);
                     return (
                       <li
-                        key={p.employee_id}
+                        key={p.rowKey}
                         className="border-t border-slate-100 first:border-t-0"
                       >
                         <button
                           type="button"
                           disabled={locked}
-                          onClick={() => openSheet(p.employee_id, dayIndex)}
+                          onClick={() => openSheet(p.rowKey, dayIndex)}
                           className="flex min-h-14 w-full items-center justify-between gap-2 px-3 py-2 text-left disabled:opacity-70"
                         >
                           <span className="min-w-0">
@@ -310,7 +310,7 @@ export function RrhhHorariosMobile({
                   <button
                     type="button"
                     disabled={locked}
-                    onClick={() => openSheet(selectedPerson.employee_id, i)}
+                    onClick={() => openSheet(selectedPerson.rowKey, i)}
                     className="flex min-h-14 w-full items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-left disabled:opacity-70"
                     style={{ boxShadow: SUITE.shadow }}
                   >
@@ -363,12 +363,12 @@ export function RrhhHorariosMobile({
                   ).length;
                   return (
                     <li
-                      key={p.employee_id}
+                      key={p.rowKey}
                       className="border-t border-slate-100 first:border-t-0"
                     >
                       <button
                         type="button"
-                        onClick={() => setPersonId(p.employee_id)}
+                        onClick={() => setPersonId(p.rowKey)}
                         className="flex min-h-14 w-full items-center justify-between gap-2 px-3 py-2 text-left"
                       >
                         <span
@@ -422,8 +422,8 @@ function ShiftSheet({
   dateIso: string;
   presets: Array<{ start: string; end: string }>;
   onClose: () => void;
-  onCell: (employeeId: string, dayIndex: number, patch: Partial<DayCell>) => void;
-  onApplyWeek: (employeeId: string, cell: DayCell) => void;
+  onCell: (rowKey: string, dayIndex: number, patch: Partial<DayCell>) => void;
+  onApplyWeek: (rowKey: string, cell: DayCell) => void;
 }) {
   const day = person.days[dayIndex];
   const extras = (day?.extra || []).filter((e) => e.start && e.end);
@@ -439,7 +439,7 @@ function ShiftSheet({
   if (!day) return null;
 
   function setShift(start: string, end: string) {
-    onCell(person.employee_id, dayIndex, {
+    onCell(person.rowKey, dayIndex, {
       start,
       end,
       off: false,
@@ -448,7 +448,7 @@ function ShiftSheet({
   }
 
   function setExtras(next: DaySegment[]) {
-    onCell(person.employee_id, dayIndex, {
+    onCell(person.rowKey, dayIndex, {
       extra: next.length ? next : undefined,
     });
   }
@@ -532,7 +532,7 @@ function ShiftSheet({
               type="time"
               value={day.start}
               onChange={(e) =>
-                onCell(person.employee_id, dayIndex, {
+                onCell(person.rowKey, dayIndex, {
                   start: e.target.value,
                   off: false,
                   vacation: false,
@@ -547,7 +547,7 @@ function ShiftSheet({
               type="time"
               value={day.end}
               onChange={(e) =>
-                onCell(person.employee_id, dayIndex, {
+                onCell(person.rowKey, dayIndex, {
                   end: e.target.value,
                   off: false,
                   vacation: false,
@@ -608,7 +608,7 @@ function ShiftSheet({
           <button
             type="button"
             onClick={() =>
-              onCell(person.employee_id, dayIndex, { off: true })
+              onCell(person.rowKey, dayIndex, { off: true })
             }
             className="min-h-12 rounded-xl text-sm font-bold uppercase tracking-wide"
             style={
@@ -622,7 +622,7 @@ function ShiftSheet({
           <button
             type="button"
             onClick={() =>
-              onCell(person.employee_id, dayIndex, { vacation: true })
+              onCell(person.rowKey, dayIndex, { vacation: true })
             }
             className="min-h-12 rounded-xl text-sm font-bold uppercase tracking-wide"
             style={
@@ -638,7 +638,7 @@ function ShiftSheet({
         <button
           type="button"
           onClick={() => {
-            onApplyWeek(person.employee_id, day);
+            onApplyWeek(person.rowKey, day);
             onClose();
           }}
           className="mt-3 min-h-12 w-full rounded-xl border border-slate-200 text-sm font-semibold"

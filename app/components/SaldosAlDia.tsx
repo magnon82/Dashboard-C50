@@ -128,7 +128,9 @@ export function SaldosAlDia({ data, loading }: Props) {
               {data.cxpTotal != null ? (
                 <>
                   Programados{' '}
-                  {data.cxpProgramado != null ? money(data.cxpProgramado) : '—'}
+                  <span className="font-semibold" style={{ color: SUITE.orange }}>
+                    {data.cxpProgramado != null ? money(data.cxpProgramado) : '—'}
+                  </span>
                   <span className="mx-1.5 text-slate-300">·</span>
                   Saldo x pagar{' '}
                   <span className="font-semibold" style={{ color: SUITE.orangeDeep }}>

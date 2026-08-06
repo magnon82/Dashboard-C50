@@ -17,6 +17,9 @@ import {
 import {
   daySegmentsOverlap,
   hasDualLimpiezaServicio,
+  isLimpiezaPuesto,
+  isServicioPuesto,
+  timeRangesOverlap,
 } from '@/app/lib/hr-puestos';
 import { sumShiftHours } from '@/app/lib/hr-schedule-propose';
 
@@ -45,6 +48,9 @@ export const AREA_ORDER = [
   'Externos',
 ] as const;
 
+/** Pista de rol para empleados dual Limpieza + servicio (una fila por pista). */
+export type DualRoleTrack = 'limpieza' | 'servicio';
+
 export type DaySegment = {
   start: string; // HH:mm
   end: string;
@@ -64,13 +70,24 @@ export type DayCell = {
 };
 
 export type PersonRow = {
+  /** Clave única en grilla (`employee_id` o `id:limpieza` / `id:servicio`). */
+  rowKey: string;
   employee_id: string;
   full_name: string;
   area: string;
   puesto: string | null;
   dualLimpiezaServicio?: boolean;
+  /** Solo duales: fila Limpieza vs fila servicio (Meseros). */
+  dualTrack?: DualRoleTrack | null;
   days: DayCell[]; // 7 lun–dom
 };
+
+export function personRowKey(
+  employeeId: string,
+  dualTrack?: DualRoleTrack | null
+): string {
+  return dualTrack ? `${employeeId}:${dualTrack}` : employeeId;
+}
 
 export function normalizeArea(raw: string | null | undefined): string {
   if (!raw?.trim() || isGenericPisoArea(raw)) return 'Otros';
@@ -82,14 +99,60 @@ export function areaSortKey(area: string): number {
   return i >= 0 ? i : AREA_ORDER.length;
 }
 
+/**
+ * Clasifica un turno de empleado dual en pista Limpieza vs servicio.
+ * Prioridad: notes propose → role_label → area → heurística matutina.
+ */
+export function dualShiftTrack(s: {
+  role_label?: string | null;
+  area?: string | null;
+  employee_area?: string | null;
+  notes?: string | null;
+  start_time?: string | null;
+}): DualRoleTrack {
+  const notes = String(s.notes || '').toLowerCase();
+  if (/dual_limpieza_mesero\s*:\s*limpieza/.test(notes)) return 'limpieza';
+  if (/dual_limpieza_mesero\s*:\s*mesero/.test(notes)) return 'servicio';
+
+  if (isLimpiezaPuesto(s.role_label)) return 'limpieza';
+  if (s.role_label && isServicioPuesto(s.role_label)) return 'servicio';
+
+  const areaSec = normalizeArea(s.area || s.employee_area);
+  if (areaSec === 'Limpieza' || isLimpiezaPuesto(s.area)) return 'limpieza';
+
+  // Sin etiqueta: turnos que empiezan antes de mediodía → limpieza matutina.
+  const start = String(s.start_time || '').slice(0, 5);
+  if (/^\d{2}:\d{2}$/.test(start) && start < '12:00') return 'limpieza';
+
+  return 'servicio';
+}
+
 /** Sección de grilla: puesto family → área de turnos → plantilla; nunca «Piso» suelto. */
 export function resolveRowSection(
   emp: HrEmployee | undefined,
   shiftAreas: string[],
   shiftRoles: string[],
-  fallbackName: string
+  fallbackName: string,
+  dualTrack?: DualRoleTrack | null
 ): { section: string; puesto: string | null } {
   const dual = emp ? hasDualLimpiezaServicio(emp) : false;
+
+  if (dual && dualTrack === 'limpieza') {
+    return { section: 'Limpieza', puesto: 'Limpieza' };
+  }
+  if (dual && dualTrack === 'servicio') {
+    const posKey = emp ? plantillaPositionKey(emp) : null;
+    const fromPuesto = posKey ? scheduleSectionFromPosition(posKey) : null;
+    const section =
+      (fromPuesto && fromPuesto !== 'Otros' && fromPuesto !== 'Limpieza'
+        ? fromPuesto
+        : null) || 'Meseros';
+    return {
+      section,
+      puesto: emp?.puesto || 'Meserx Encargadx',
+    };
+  }
+
   const posKey = emp ? plantillaPositionKey(emp) : null;
   const fromPuesto = posKey ? scheduleSectionFromPosition(posKey) : null;
 
@@ -133,8 +196,8 @@ export function resolveRowSection(
     (dual ? 'Meseros' : null) ||
     'Otros';
 
-  // Dual limpieza/mesero → siempre con Meseros (encargado), no Limpieza sola
-  if (dual && (section === 'Limpieza' || section === 'Otros' || section === 'Piso')) {
+  // Dual sin pista explícita (legado): no dejar solo en Limpieza
+  if (dual && !dualTrack && (section === 'Limpieza' || section === 'Otros' || section === 'Piso')) {
     section = 'Meseros';
   }
 
@@ -166,7 +229,13 @@ export function comparePersonRows(a: PersonRow, b: PersonRow): number {
     const rb = meseroWithinFamilyRank(b.puesto);
     if (ra !== rb) return ra - rb;
   }
-  return a.full_name.localeCompare(b.full_name, 'es');
+  const nameCmp = a.full_name.localeCompare(b.full_name, 'es');
+  if (nameCmp !== 0) return nameCmp;
+  // Misma persona dual: servicio (Meseros) antes que Limpieza en sort global
+  // (el orden de sección ya suele separarlas).
+  const ta = a.dualTrack || '';
+  const tb = b.dualTrack || '';
+  return ta.localeCompare(tb);
 }
 
 export function toHhmm(t: string | null | undefined): string {
@@ -201,7 +270,7 @@ export function cycleDayAbsence(cur: DayCell): DayCell {
 export function serializeGrid(rows: PersonRow[]): string {
   return JSON.stringify(
     rows.map((r) => ({
-      id: r.employee_id,
+      id: r.rowKey || r.employee_id,
       days: r.days.map((d) => {
         if (isVacationDay(d)) return 'VAC';
         if (d.off) return 'OFF';
@@ -214,6 +283,49 @@ export function serializeGrid(rows: PersonRow[]): string {
   );
 }
 
+function applyShiftToDay(row: PersonRow, di: number, s: HrScheduleShift): void {
+  if (isVacationScheduleShift(s)) {
+    row.days[di] = vacationDay();
+    return;
+  }
+  const start = toHhmm(s.start_time);
+  const end = toHhmm(s.end_time);
+  if (!start || !end) return;
+  const role = s.role_label || null;
+  const cur = row.days[di];
+  if (cur.off || !cur.start || !cur.end) {
+    row.days[di] = { start, end, off: false, vacation: false, role };
+  } else if (cur.start === start && cur.end === end) {
+    // mismo turno duplicado — ignorar
+  } else {
+    const extras = cur.extra ? [...cur.extra] : [];
+    if (!extras.some((e) => e.start === start && e.end === end)) {
+      extras.push({ start, end, role });
+    }
+    row.days[di] = { ...cur, off: false, vacation: false, extra: extras };
+  }
+}
+
+function makeDualRow(
+  emp: HrEmployee | undefined,
+  employeeId: string,
+  fullName: string,
+  track: DualRoleTrack,
+  dates: string[]
+): PersonRow {
+  const { section, puesto } = resolveRowSection(emp, [], [], fullName, track);
+  return {
+    rowKey: personRowKey(employeeId, track),
+    employee_id: employeeId,
+    full_name: fullName,
+    area: section,
+    puesto,
+    dualLimpiezaServicio: true,
+    dualTrack: track,
+    days: dates.map(() => emptyDay()),
+  };
+}
+
 export function buildRowsFromShifts(
   employees: HrEmployee[],
   shifts: HrScheduleShift[],
@@ -221,15 +333,24 @@ export function buildRowsFromShifts(
   opts?: { seedPlantilla?: boolean }
 ): PersonRow[] {
   const empById = new Map(employees.map((e) => [e.id, e]));
-  const byId = new Map<string, PersonRow>();
+  const byKey = new Map<string, PersonRow>();
   const shiftAreasByEmp = new Map<string, string[]>();
   const shiftRolesByEmp = new Map<string, string[]>();
+  const dualSeen = new Set<string>();
   // Histórico: solo quien tiene turnos esa semana. Plantilla vigente
   // (force_exclude) solo se siembra en «nueva semana» / borradores futuros.
   const seedPlantilla = opts?.seedPlantilla === true;
 
-  // Primero: quien tiene turnos esa semana
   for (const s of shifts) {
+    const emp = empById.get(s.employee_id);
+    const dual = emp
+      ? hasDualLimpiezaServicio(emp)
+      : hasDualLimpiezaServicio({
+          full_name: s.employee_name,
+          puesto: s.employee_puesto,
+          notes: s.employee_notes,
+        });
+
     const areas = shiftAreasByEmp.get(s.employee_id) || [];
     if (s.area) areas.push(s.area);
     else if (s.employee_area) areas.push(s.employee_area);
@@ -240,57 +361,91 @@ export function buildRowsFromShifts(
     else if (s.employee_puesto) roles.push(s.employee_puesto);
     shiftRolesByEmp.set(s.employee_id, roles);
 
-    let row = byId.get(s.employee_id);
-    if (!row) {
-      const emp = empById.get(s.employee_id);
-      const { section, puesto } = resolveRowSection(
-        emp,
-        areas,
-        roles,
-        s.employee_name || s.employee_id
-      );
-      row = {
-        employee_id: s.employee_id,
-        full_name: emp?.full_name || s.employee_name || s.employee_id.slice(0, 8),
-        area: section,
-        puesto,
-        dualLimpiezaServicio: emp ? hasDualLimpiezaServicio(emp) : false,
-        days: dates.map(() => emptyDay()),
-      };
-      byId.set(s.employee_id, row);
-    }
-    const di = dates.indexOf(s.shift_date);
-    if (di < 0) continue;
-    if (isVacationScheduleShift(s)) {
-      row.days[di] = vacationDay();
+    const track: DualRoleTrack | null = dual
+      ? isVacationScheduleShift(s)
+        ? null // se aplica a ambas pistas abajo
+        : dualShiftTrack(s)
+      : null;
+    if (dual) dualSeen.add(s.employee_id);
+
+    if (dual && isVacationScheduleShift(s)) {
+      const di = dates.indexOf(s.shift_date);
+      if (di < 0) continue;
+      const name =
+        emp?.full_name || s.employee_name || s.employee_id.slice(0, 8);
+      for (const t of ['servicio', 'limpieza'] as DualRoleTrack[]) {
+        const key = personRowKey(s.employee_id, t);
+        let row = byKey.get(key);
+        if (!row) {
+          row = makeDualRow(emp, s.employee_id, name, t, dates);
+          byKey.set(key, row);
+        }
+        row.days[di] = vacationDay();
+      }
       continue;
     }
-    const start = toHhmm(s.start_time);
-    const end = toHhmm(s.end_time);
-    if (!start || !end) continue;
-    const role = s.role_label || null;
-    const cur = row.days[di];
-    if (cur.off || !cur.start || !cur.end) {
-      row.days[di] = { start, end, off: false, vacation: false, role };
-    } else if (cur.start === start && cur.end === end) {
-      // mismo turno duplicado — ignorar
-    } else {
-      // Segundo+ turno el mismo día → acumular para la fórmula «h»
-      const extras = cur.extra ? [...cur.extra] : [];
-      if (!extras.some((e) => e.start === start && e.end === end)) {
-        extras.push({ start, end, role });
+
+    const key = personRowKey(s.employee_id, track);
+    let row = byKey.get(key);
+    if (!row) {
+      if (dual && track) {
+        row = makeDualRow(
+          emp,
+          s.employee_id,
+          emp?.full_name || s.employee_name || s.employee_id.slice(0, 8),
+          track,
+          dates
+        );
+      } else {
+        const { section, puesto } = resolveRowSection(
+          emp,
+          areas,
+          roles,
+          s.employee_name || s.employee_id
+        );
+        row = {
+          rowKey: key,
+          employee_id: s.employee_id,
+          full_name:
+            emp?.full_name || s.employee_name || s.employee_id.slice(0, 8),
+          area: section,
+          puesto,
+          dualLimpiezaServicio: false,
+          dualTrack: null,
+          days: dates.map(() => emptyDay()),
+        };
       }
-      row.days[di] = { ...cur, off: false, vacation: false, extra: extras };
+      byKey.set(key, row);
+    }
+
+    const di = dates.indexOf(s.shift_date);
+    if (di < 0) continue;
+    applyShiftToDay(row, di, s);
+  }
+
+  // Duales: asegurar ambas pistas (Limpieza + servicio) si ya hay turnos
+  for (const empId of dualSeen) {
+    const emp = empById.get(empId);
+    const name =
+      emp?.full_name ||
+      [...byKey.values()].find((r) => r.employee_id === empId)?.full_name ||
+      empId.slice(0, 8);
+    for (const track of ['servicio', 'limpieza'] as DualRoleTrack[]) {
+      const key = personRowKey(empId, track);
+      if (!byKey.has(key)) {
+        byKey.set(key, makeDualRow(emp, empId, name, track, dates));
+      }
     }
   }
 
-  // Re-resolver sección con todos los turnos acumulados (área modal)
-  for (const [id, row] of byId) {
-    const emp = empById.get(id);
+  // Re-resolver sección no-dual con todos los turnos acumulados
+  for (const row of byKey.values()) {
+    if (row.dualTrack) continue;
+    const emp = empById.get(row.employee_id);
     const { section, puesto } = resolveRowSection(
       emp,
-      shiftAreasByEmp.get(id) || [],
-      shiftRolesByEmp.get(id) || [],
+      shiftAreasByEmp.get(row.employee_id) || [],
+      shiftRolesByEmp.get(row.employee_id) || [],
       row.full_name
     );
     row.area = section;
@@ -299,20 +454,30 @@ export function buildRowsFromShifts(
 
   if (seedPlantilla) {
     for (const e of employees) {
-      if (byId.has(e.id)) continue;
+      if (hasDualLimpiezaServicio(e)) {
+        for (const track of ['servicio', 'limpieza'] as DualRoleTrack[]) {
+          const key = personRowKey(e.id, track);
+          if (byKey.has(key)) continue;
+          byKey.set(key, makeDualRow(e, e.id, e.full_name, track, dates));
+        }
+        continue;
+      }
+      if ([...byKey.values()].some((r) => r.employee_id === e.id)) continue;
       const { section, puesto } = resolveRowSection(e, [], [], e.full_name);
-      byId.set(e.id, {
+      byKey.set(e.id, {
+        rowKey: e.id,
         employee_id: e.id,
         full_name: e.full_name,
         area: section,
         puesto,
-        dualLimpiezaServicio: hasDualLimpiezaServicio(e),
+        dualLimpiezaServicio: false,
+        dualTrack: null,
         days: dates.map(() => emptyDay()),
       });
     }
   }
 
-  return [...byId.values()].sort(comparePersonRows);
+  return [...byKey.values()].sort(comparePersonRows);
 }
 
 export function rowsToShifts(
@@ -320,11 +485,17 @@ export function rowsToShifts(
   dates: string[]
 ): Omit<HrScheduleShift, 'id' | 'week_id'>[] {
   const out: Omit<HrScheduleShift, 'id' | 'week_id'>[] = [];
+  const vacSeen = new Set<string>();
+
   for (const r of rows) {
+    const track = r.dualTrack || null;
     for (let i = 0; i < 7; i++) {
       const d = r.days[i];
       if (!d) continue;
       if (isVacationDay(d)) {
+        const vacKey = `${r.employee_id}|${dates[i]}`;
+        if (vacSeen.has(vacKey)) continue;
+        vacSeen.add(vacKey);
         out.push({
           employee_id: r.employee_id,
           shift_date: dates[i],
@@ -347,24 +518,36 @@ export function rowsToShifts(
         if (e.start && e.end) segments.push(e);
       }
       for (const seg of segments) {
-        const role = seg.role || r.puesto;
+        let role = seg.role || r.puesto;
+        if (track === 'limpieza') role = 'Limpieza';
+        else if (track === 'servicio' && (!role || isLimpiezaPuesto(role))) {
+          role = r.puesto || 'Meserx Encargadx';
+        }
         const areaFromRole = role
           ? scheduleSectionFromPosition(role)
           : r.area;
+        const area =
+          track === 'limpieza'
+            ? 'Limpieza'
+            : areaFromRole && areaFromRole !== 'Otros'
+              ? areaFromRole
+              : r.area === 'Otros'
+                ? null
+                : r.area;
         out.push({
           employee_id: r.employee_id,
           shift_date: dates[i],
           start_time: toTimeDb(seg.start),
           end_time: toTimeDb(seg.end),
-          area:
-            areaFromRole && areaFromRole !== 'Otros'
-              ? areaFromRole
-              : r.area === 'Otros'
-                ? null
-                : r.area,
+          area,
           role_label: role,
           origin: 'manual',
-          notes: null,
+          notes:
+            track === 'limpieza'
+              ? 'dual_limpieza_mesero:limpieza'
+              : track === 'servicio'
+                ? 'dual_limpieza_mesero:mesero'
+                : null,
           employee_name: r.full_name,
         });
       }
@@ -373,19 +556,50 @@ export function rowsToShifts(
   return out;
 }
 
-export function rowDayHasOverlapConflict(
-  row: PersonRow,
-  dayIndex: number
-): boolean {
-  if (!row.dualLimpiezaServicio) return false;
-  const d = row.days[dayIndex];
-  if (!d || d.off) return false;
+function dayWorkSegments(
+  d: DayCell | undefined
+): Array<{ start: string; end: string }> {
+  if (!d || d.off) return [];
   const segs: Array<{ start: string; end: string }> = [];
   if (d.start && d.end) segs.push({ start: d.start, end: d.end });
   for (const e of d.extra || []) {
     if (e.start && e.end) segs.push({ start: e.start, end: e.end });
   }
-  return daySegmentsOverlap(segs);
+  return segs;
+}
+
+/**
+ * Candado UI: solape dentro de la fila o entre pistas Limpieza/servicio
+ * del mismo empleado el mismo día.
+ */
+export function rowDayHasOverlapConflict(
+  row: PersonRow,
+  dayIndex: number,
+  allRows?: PersonRow[]
+): boolean {
+  if (!row.dualLimpiezaServicio) return false;
+  const segs = dayWorkSegments(row.days[dayIndex]);
+  if (segs.length === 0) return false;
+
+  if (daySegmentsOverlap(segs)) return true;
+
+  if (allRows && row.dualTrack) {
+    const sibling = allRows.find(
+      (r) =>
+        r.employee_id === row.employee_id &&
+        r.dualTrack &&
+        r.dualTrack !== row.dualTrack
+    );
+    if (sibling) {
+      const other = dayWorkSegments(sibling.days[dayIndex]);
+      for (const a of segs) {
+        for (const b of other) {
+          if (timeRangesOverlap(a.start, a.end, b.start, b.end)) return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 /**

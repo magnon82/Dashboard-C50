@@ -7,6 +7,7 @@ import { AdminCajaTpv } from '@/app/components/AdminCajaTpv';
 import { AdminDataMap } from '@/app/components/AdminDataMap';
 import { AdminPresupuestoAjustes } from '@/app/components/AdminPresupuestoAjustes';
 import { AdminSaldosBancos } from '@/app/components/AdminSaldosBancos';
+import { AdminSyncSchedules } from '@/app/components/AdminSyncSchedules';
 import { APP_CAPABILITIES } from '@/app/lib/capabilities';
 import { APP_MODULES } from '@/app/lib/modules';
 import { getTheme, SUITE } from '@/app/lib/themes';
@@ -1046,6 +1047,7 @@ export default function AdminPage() {
         description="Mapa de orígenes y catálogo de lo que vive en almacenamiento, APIs y bases del suite."
       >
         <AdminDataMap />
+        <AdminSyncSchedules />
         <AdminAlmacenamientoRecursos />
       </AdminSection>
     </SuiteShell>

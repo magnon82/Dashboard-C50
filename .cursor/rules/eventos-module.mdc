@@ -6,8 +6,10 @@ alwaysApply: false
 
 # Eventos operativos — Dashboard C50
 
-Este módulo es **operación comercial** (`/eventos`: CRM, cotizador, OS…).  
+Este módulo es **operación comercial** (`/eventos`: CRM, cotizador, OS, **Global**…).  
 **No** es el analytics WI/Eventos de Ventas (`ingest_eventos.py`, `financial_records.source_file='eventos'`, pie en `/ventas`). No modificar ese contrato.
+
+**Global (comisiones):** sección `/eventos` → Global lee la pestaña Global del Sheet `EVENTOS C50 {año}` (columnas VENTA + VENTA EXTRA), misma fuente que `ingest_eventos.py`. Se mantiene para el control de pago de comisiones a vendedores. El Corte del día confirma OS + venta extra del día, pero no sustituye Global.
 
 ## Reglas comerciales (locked)
 

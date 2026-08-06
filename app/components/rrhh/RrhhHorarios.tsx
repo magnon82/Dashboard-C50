@@ -36,6 +36,7 @@ import {
   emptyDay,
   formatRowHours,
   isVacationDay,
+  personRowKey,
   resolveRowSection,
   rowDayHasOverlapConflict,
   rowHasDualShifts,
@@ -44,6 +45,7 @@ import {
   serializeGrid,
   vacationDay,
   type DayCell,
+  type DualRoleTrack,
   type PersonRow,
 } from '@/app/lib/hr-schedule-grid';
 import { getTheme, SUITE } from '@/app/lib/themes';
@@ -665,14 +667,14 @@ export function RrhhHorarios() {
   }
 
   function updateCell(
-    employeeId: string,
+    rowKey: string,
     dayIndex: number,
     patch: Partial<DayCell>
   ) {
     if (pastLocked || dayLocked[dayIndex]) return;
     setRows((prev) => {
       const nextRows = prev.map((r) => {
-        if (r.employee_id !== employeeId) return r;
+        if (r.rowKey !== rowKey) return r;
         const days = r.days.map((d, i) => {
           if (i !== dayIndex) return d;
           const next = { ...d, ...patch };
@@ -702,8 +704,8 @@ export function RrhhHorarios() {
         });
         return { ...r, days };
       });
-      const row = nextRows.find((r) => r.employee_id === employeeId);
-      if (row && rowDayHasOverlapConflict(row, dayIndex)) {
+      const row = nextRows.find((r) => r.rowKey === rowKey);
+      if (row && rowDayHasOverlapConflict(row, dayIndex, nextRows)) {
         setToast(
           'Candado: Limpieza y servicio no pueden solaparse el mismo día.'
         );
@@ -713,11 +715,11 @@ export function RrhhHorarios() {
     });
   }
 
-  function toggleOff(employeeId: string, dayIndex: number) {
+  function toggleOff(rowKey: string, dayIndex: number) {
     if (pastLocked || dayLocked[dayIndex]) return;
     setRows((prev) =>
       prev.map((r) => {
-        if (r.employee_id !== employeeId) return r;
+        if (r.rowKey !== rowKey) return r;
         const days = [...r.days];
         days[dayIndex] = cycleDayAbsence(days[dayIndex]);
         return { ...r, days };
@@ -726,26 +728,39 @@ export function RrhhHorarios() {
   }
 
   /** Móvil: copia el día editado al resto de la semana (respeta días bloqueados). */
-  function applyCellToWeek(employeeId: string, cell: DayCell) {
+  function applyCellToWeek(rowKey: string, cell: DayCell) {
     if (pastLocked) return;
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.employee_id !== employeeId) return r;
+    setRows((prev) => {
+      const nextRows = prev.map((r) => {
+        if (r.rowKey !== rowKey) return r;
         const days = r.days.map((d, i) =>
           dayLocked[i]
             ? d
             : { ...cell, extra: cell.extra ? [...cell.extra] : undefined }
         );
         return { ...r, days };
-      })
-    );
+      });
+      const row = nextRows.find((r) => r.rowKey === rowKey);
+      if (row) {
+        for (let i = 0; i < 7; i++) {
+          if (dayLocked[i]) continue;
+          if (rowDayHasOverlapConflict(row, i, nextRows)) {
+            setToast(
+              'Candado: Limpieza y servicio no pueden solaparse el mismo día.'
+            );
+            return prev;
+          }
+        }
+      }
+      return nextRows;
+    });
   }
 
-  function setVacation(employeeId: string, dayIndex: number) {
+  function setVacation(rowKey: string, dayIndex: number) {
     if (pastLocked || dayLocked[dayIndex]) return;
     setRows((prev) =>
       prev.map((r) => {
-        if (r.employee_id !== employeeId) return r;
+        if (r.rowKey !== rowKey) return r;
         const days = [...r.days];
         days[dayIndex] = vacationDay();
         return { ...r, days };
@@ -761,20 +776,30 @@ export function RrhhHorarios() {
       setToast('Ya está en la grilla');
       return;
     }
-    const resolved = resolveRowSection(emp, [], [], emp.full_name);
-    setRows((prev) =>
-      [
-        ...prev,
-        {
-          employee_id: emp.id,
-          full_name: emp.full_name,
-          area: resolved.section,
-          puesto: resolved.puesto || emp.puesto,
-          dualLimpiezaServicio: hasDualLimpiezaServicio(emp),
-          days: dates.map(() => emptyDay()),
-        },
-      ].sort(comparePersonRows)
-    );
+    const dual = hasDualLimpiezaServicio(emp);
+    const tracks: Array<DualRoleTrack | null> = dual
+      ? ['servicio', 'limpieza']
+      : [null];
+    const added: PersonRow[] = tracks.map((track) => {
+      const resolved = resolveRowSection(
+        emp,
+        [],
+        [],
+        emp.full_name,
+        track
+      );
+      return {
+        rowKey: personRowKey(emp.id, track),
+        employee_id: emp.id,
+        full_name: emp.full_name,
+        area: resolved.section,
+        puesto: resolved.puesto || emp.puesto,
+        dualLimpiezaServicio: dual,
+        dualTrack: track,
+        days: dates.map(() => emptyDay()),
+      };
+    });
+    setRows((prev) => [...prev, ...added].sort(comparePersonRows));
     setAddEmpId('');
   }
 
@@ -1244,6 +1269,7 @@ export function RrhhHorarios() {
                           key={area}
                           area={area}
                           people={people}
+                          allRows={rows}
                           readOnly={pastLocked}
                           dayLocked={dayLocked}
                           onCell={updateCell}
@@ -1407,6 +1433,7 @@ function FragmentDaySubHeaders() {
 function AreaFragment({
   area,
   people,
+  allRows,
   readOnly = false,
   dayLocked = [],
   onCell,
@@ -1415,12 +1442,13 @@ function AreaFragment({
 }: {
   area: string;
   people: PersonRow[];
+  allRows: PersonRow[];
   readOnly?: boolean;
   /** true por índice Lun–Dom si la fecha civil ya pasó (CDMX). */
   dayLocked?: boolean[];
-  onCell: (id: string, day: number, patch: Partial<DayCell>) => void;
-  onToggleOff: (id: string, day: number) => void;
-  onSetVacation: (id: string, day: number) => void;
+  onCell: (rowKey: string, day: number, patch: Partial<DayCell>) => void;
+  onToggleOff: (rowKey: string, day: number) => void;
+  onSetVacation: (rowKey: string, day: number) => void;
 }) {
   return (
     <>
@@ -1439,7 +1467,7 @@ function AreaFragment({
       </tr>
       {people.map((p) => (
         <tr
-          key={p.employee_id}
+          key={p.rowKey}
           className="border-t border-slate-100 hover:bg-slate-50/80"
         >
           <td
@@ -1458,7 +1486,7 @@ function AreaFragment({
           </td>
           {p.days.map((d, di) => {
             const cellLocked = readOnly || Boolean(dayLocked[di]);
-            const overlapConflict = rowDayHasOverlapConflict(p, di);
+            const overlapConflict = rowDayHasOverlapConflict(p, di, allRows);
             const vac = isVacationDay(d);
             if (d.off) {
               const barBg = vac ? '#e0f2fe' : '#fef3c7';
@@ -1490,7 +1518,7 @@ function AreaFragment({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => onToggleOff(p.employee_id, di)}
+                      onClick={() => onToggleOff(p.rowKey, di)}
                       className="w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide"
                       style={{ backgroundColor: barBg, color: barFg }}
                       title={barTitle}
@@ -1502,7 +1530,7 @@ function AreaFragment({
               );
             }
             return (
-              <Fragment key={`${p.employee_id}-${di}`}>
+              <Fragment key={`${p.rowKey}-${di}`}>
                 <td
                   className={`border-l border-slate-100 px-0.5 py-0.5${
                     cellLocked && !readOnly ? ' bg-slate-50/70' : ''
@@ -1513,7 +1541,7 @@ function AreaFragment({
                     value={d.start}
                     disabled={cellLocked}
                     onChange={(e) =>
-                      onCell(p.employee_id, di, { start: e.target.value })
+                      onCell(p.rowKey, di, { start: e.target.value })
                     }
                     title={
                       overlapConflict
@@ -1540,7 +1568,7 @@ function AreaFragment({
                       value={d.end}
                       disabled={cellLocked}
                       onChange={(e) =>
-                        onCell(p.employee_id, di, { end: e.target.value })
+                        onCell(p.rowKey, di, { end: e.target.value })
                       }
                       title={
                         overlapConflict
@@ -1561,7 +1589,7 @@ function AreaFragment({
                           type="button"
                           title="Marcar DESCANSO (ciclo D→V→turno)"
                           aria-label="Marcar DESCANSO"
-                          onClick={() => onToggleOff(p.employee_id, di)}
+                          onClick={() => onToggleOff(p.rowKey, di)}
                           className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide"
                           style={{
                             backgroundColor: '#fef3c7',
@@ -1574,7 +1602,7 @@ function AreaFragment({
                           type="button"
                           title="Marcar VACACIONES"
                           aria-label="Marcar VACACIONES"
-                          onClick={() => onSetVacation(p.employee_id, di)}
+                          onClick={() => onSetVacation(p.rowKey, di)}
                           className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide"
                           style={{
                             backgroundColor: '#e0f2fe',

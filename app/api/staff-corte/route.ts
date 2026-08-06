@@ -25,10 +25,75 @@ import {
   parseMoneyInput,
   shortageCloseNote,
   sumInfocajaDay,
+  totalEventosAmount,
 } from '@/app/lib/staff-rpt';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+type EventoDelDia = {
+  id: string;
+  label: string;
+  os_number: string | null;
+  total: number | null;
+  source: 'os_digital' | 'financial';
+};
+
+async function loadEventosDelDia(
+  sb: ReturnType<typeof getServiceSupabase>,
+  date: string
+): Promise<{ hasEvent: boolean; items: EventoDelDia[] }> {
+  const items: EventoDelDia[] = [];
+
+  const { data: osRows } = await sb
+    .from('event_service_orders')
+    .select('id, os_number, client_name, celebration, total, event_date')
+    .eq('event_date', date)
+    .limit(20);
+
+  for (const r of osRows || []) {
+    const name =
+      String((r as { client_name?: string }).client_name || '').trim() ||
+      String((r as { celebration?: string }).celebration || '').trim() ||
+      'Evento';
+    items.push({
+      id: String((r as { id: string }).id),
+      label: name,
+      os_number: (r as { os_number?: string | null }).os_number
+        ? String((r as { os_number: string }).os_number)
+        : null,
+      total:
+        (r as { total?: number | null }).total == null
+          ? null
+          : Number((r as { total: number }).total),
+      source: 'os_digital',
+    });
+  }
+
+  const { data: finRows } = await sb
+    .from('financial_records')
+    .select('id, amount, description')
+    .eq('source_file', 'eventos')
+    .eq('date', date)
+    .limit(20);
+
+  for (const r of finRows || []) {
+    const desc = String((r as { description?: string }).description || '').trim();
+    const label = desc.split('·')[0]?.trim() || 'Evento (Global)';
+    items.push({
+      id: String((r as { id: string }).id),
+      label,
+      os_number: null,
+      total:
+        (r as { amount?: number | null }).amount == null
+          ? null
+          : Number((r as { amount: number }).amount),
+      source: 'financial',
+    });
+  }
+
+  return { hasEvent: items.length > 0, items };
+}
 
 async function loadTpvUploads(
   sb: ReturnType<typeof getServiceSupabase>,
@@ -240,6 +305,8 @@ export async function GET(request: Request) {
       };
     }
 
+    const eventosDelDia = await loadEventosDelDia(sb, date);
+
     return NextResponse.json({
       date,
       defaultDate: opDay,
@@ -262,6 +329,7 @@ export async function GET(request: Request) {
       status,
       cashCheck,
       recent,
+      eventosDelDia,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error al cargar corte';
@@ -306,12 +374,11 @@ export async function GET(request: Request) {
 
 /**
  * PUT /api/staff-corte — Cerrar / actualizar cierre del día (upsert 1 fila).
- * Body JSON: { date?, wi_amount, eventos_amount, efectivo_tombola?,
- *              efectivo_contado, notes?, acknowledge_shortage? }
- * Bancos y propinas se toman de TPV (obligatorio día completo + montos).
- * efectivo_contado obligatorio (= tómbola). Esperado = Infocaja − propinas TPV;
- * si tómbola < esperado: warning + acknowledge_shortage.
- * se permite cerrar solo con acknowledge_shortage=true (faltante real).
+ * Body JSON: { date?, wi_amount, eventos_os_amount?, eventos_extra_amount?,
+ *              eventos_amount? (legacy), efectivo_tombola?, efectivo_contado,
+ *              notes?, acknowledge_shortage? }
+ * Con evento: OS + venta extra (como Global). Total = OS + extra → eventos_amount.
+ * Bancos/propinas = TPV. Tómbola esperada = Infocaja − propinas TPV.
  */
 export async function PUT(request: Request) {
   const auth = await requireVentasSession();
@@ -329,18 +396,51 @@ export async function PUT(request: Request) {
     if (dateGate) return dateGate;
 
     const wi = parseMoneyInput(body.wi_amount);
-    const eventos = parseMoneyInput(body.eventos_amount);
     if (wi == null || wi < 0) {
       return NextResponse.json(
         { error: 'Indica el monto WI (puede ser 0)' },
         { status: 400 }
       );
     }
-    if (eventos == null || eventos < 0) {
-      return NextResponse.json(
-        { error: 'Indica Eventos (0 si no hubo)' },
-        { status: 400 }
-      );
+
+    const hasOsField =
+      body.eventos_os_amount != null && String(body.eventos_os_amount) !== '';
+    const hasExtraField =
+      body.eventos_extra_amount != null &&
+      String(body.eventos_extra_amount) !== '';
+    let eventosOs = 0;
+    let eventosExtra = 0;
+    let eventos = 0;
+
+    if (hasOsField || hasExtraField) {
+      const osRaw = parseMoneyInput(body.eventos_os_amount ?? 0);
+      const extraRaw = parseMoneyInput(body.eventos_extra_amount ?? 0);
+      if (osRaw == null || osRaw < 0) {
+        return NextResponse.json(
+          { error: 'Indica el monto de la orden de servicio (puede ser 0)' },
+          { status: 400 }
+        );
+      }
+      if (extraRaw == null || extraRaw < 0) {
+        return NextResponse.json(
+          { error: 'Indica la venta extra del evento (0 si no hubo)' },
+          { status: 400 }
+        );
+      }
+      eventosOs = osRaw;
+      eventosExtra = extraRaw;
+      eventos = totalEventosAmount(eventosOs, eventosExtra);
+    } else {
+      const legacy = parseMoneyInput(body.eventos_amount);
+      if (legacy == null || legacy < 0) {
+        return NextResponse.json(
+          { error: 'Indica Eventos (0 si no hubo)' },
+          { status: 400 }
+        );
+      }
+      eventos = legacy;
+      eventosOs = legacy;
+      eventosExtra = 0;
     }
 
     const efectivoContado = parseMoneyInput(body.efectivo_contado);
@@ -450,6 +550,8 @@ export async function PUT(request: Request) {
       rpt_date: date,
       wi_amount: wi,
       eventos_amount: eventos,
+      eventos_os_amount: eventosOs,
+      eventos_extra_amount: eventosExtra,
       propinas: bancos.propina,
       efectivo_tombola: tombola,
       efectivo_contado: efectivoContado,

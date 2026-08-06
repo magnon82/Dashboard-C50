@@ -106,6 +106,16 @@ type DayPayload = {
   isMasterAdmin?: boolean;
   staffPrevDate?: string;
   defaultDate?: string;
+  eventosDelDia?: {
+    hasEvent: boolean;
+    items: Array<{
+      id: string;
+      label: string;
+      os_number: string | null;
+      total: number | null;
+      source: 'os_digital' | 'financial';
+    }>;
+  };
 };
 
 function corteStatusLabel(summary: DayWindowSummary | null | undefined): string {
@@ -218,7 +228,8 @@ export function StaffCorteClient() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [wi, setWi] = useState('');
-  const [eventos, setEventos] = useState('');
+  const [eventosOs, setEventosOs] = useState('');
+  const [eventosExtra, setEventosExtra] = useState('');
   /** Fuente de verdad: contado = tómbola (mismo depósito). */
   const [efectivoContado, setEfectivoContado] = useState('');
   /** Faltante tómbola < (Infocaja − propinas TPV): cierre con confirmación. */
@@ -330,7 +341,8 @@ export function StaffCorteClient() {
       const rpt = data.rpt as StaffRptRow | null;
       if (rpt) {
         setWi(String(rpt.wi_amount ?? ''));
-        setEventos(String(rpt.eventos_amount ?? ''));
+        setEventosOs(String(rpt.eventos_os_amount ?? rpt.eventos_amount ?? ''));
+        setEventosExtra(String(rpt.eventos_extra_amount ?? '0'));
         setEfectivoContado(
           rpt.efectivo_contado != null
             ? String(rpt.efectivo_contado)
@@ -341,7 +353,8 @@ export function StaffCorteClient() {
         setNotes(rpt.notes || '');
       } else {
         setWi('');
-        setEventos('');
+        setEventosOs('');
+        setEventosExtra('');
         setEfectivoContado('');
         setNotes('');
       }
@@ -375,7 +388,8 @@ export function StaffCorteClient() {
     setError(null);
     setPayload(null);
     setWi('');
-    setEventos('');
+    setEventosOs('');
+    setEventosExtra('');
     setEfectivoContado('');
     setNotes('');
     setAckShortage(false);
@@ -609,6 +623,32 @@ export function StaffCorteClient() {
         setError('Indica el efectivo en tómbola (obligatorio)');
         return;
       }
+      const osNum = parseMoneyInput(eventosOs === '' ? '0' : eventosOs);
+      const extraNum = parseMoneyInput(eventosExtra === '' ? '0' : eventosExtra);
+      if (osNum == null || osNum < 0) {
+        setError('Indica el monto de la orden de servicio (puede ser 0)');
+        return;
+      }
+      if (extraNum == null || extraNum < 0) {
+        setError('Indica la venta extra del evento (0 si no hubo)');
+        return;
+      }
+      if (hasEventosHoy) {
+        if (
+          !confirm(
+            `¿Confirmas el monto de la orden de servicio?\n\n${moneyMx(osNum)}`
+          )
+        ) {
+          return;
+        }
+        if (
+          !confirm(
+            `¿Confirmas la venta extra del evento?\n\n${moneyMx(extraNum)}`
+          )
+        ) {
+          return;
+        }
+      }
       const esperado = expectedTombolaDeposit(
         info?.hasEfectivo ? info.efectivo : null,
         bancos?.propina ?? 0
@@ -627,7 +667,8 @@ export function StaffCorteClient() {
         body: JSON.stringify({
           date: corteDate,
           wi_amount: wi,
-          eventos_amount: eventos === '' ? '0' : eventos,
+          eventos_os_amount: String(osNum),
+          eventos_extra_amount: String(extraNum),
           // Contado = tómbola (mismo monto depositado)
           efectivo_tombola: String(contadoNum),
           efectivo_contado: String(contadoNum),
@@ -678,6 +719,13 @@ export function StaffCorteClient() {
     infocaja?.hasEfectivo ? infocaja.efectivo : null,
     bancos?.propina ?? 0
   );
+
+  const eventosDelDia = payload?.eventosDelDia;
+  const hasEventosHoy = Boolean(eventosDelDia?.hasEvent);
+  const eventosOsNum = parseMoneyInput(eventosOs === '' ? '0' : eventosOs) ?? 0;
+  const eventosExtraNum =
+    parseMoneyInput(eventosExtra === '' ? '0' : eventosExtra) ?? 0;
+  const eventosTotalNum = Math.round((eventosOsNum + eventosExtraNum) * 100) / 100;
 
   const liveCashDelta = (() => {
     if (!efectivoContado.trim() || esperadoTombola == null) return null;
@@ -1347,14 +1395,61 @@ export function StaffCorteClient() {
             required
             hint="Venta WI del día"
           />
-          <MoneyInput
-            label="Eventos"
-            value={eventos}
-            onChange={setEventos}
-            required
-            hint="0 si no hubo eventos ese día"
-          />
+          {!hasEventosHoy ? (
+            <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm">
+              <p className="font-semibold text-slate-700">Eventos</p>
+              <p className="mt-1 text-lg font-bold" style={{ color: SUITE.navy }}>
+                {moneyMx(0)}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Sin evento registrado para esta fecha (OS / Global). Se cierra en
+                $0.
+              </p>
+            </div>
+          ) : null}
         </div>
+
+        {hasEventosHoy ? (
+          <div className="space-y-3 rounded-xl border border-slate-200 px-3 py-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">
+                Evento del día · como Global
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-slate-500">
+                {(eventosDelDia?.items || []).slice(0, 4).map((it) => (
+                  <li key={it.id}>
+                    {it.label}
+                    {it.os_number ? ` · OS ${it.os_number}` : ''}
+                    {it.total != null ? ` · ${moneyMx(it.total)}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <MoneyInput
+                label="Orden de servicio (VENTA)"
+                value={eventosOs}
+                onChange={setEventosOs}
+                required
+                hint="Confirma el monto de la OS"
+              />
+              <MoneyInput
+                label="Venta extra del evento"
+                value={eventosExtra}
+                onChange={setEventosExtra}
+                required
+                hint="0 si no hubo venta extra"
+              />
+            </div>
+            <p className="text-sm text-slate-600">
+              Total eventos:{' '}
+              <strong style={{ color: SUITE.navy }}>
+                {moneyMx(eventosTotalNum)}
+              </strong>{' '}
+              <span className="text-xs text-slate-400">(OS + extra)</span>
+            </p>
+          </div>
+        ) : null}
 
         <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm">
           <p className="font-semibold text-slate-700">Propinas (tickets TPV)</p>

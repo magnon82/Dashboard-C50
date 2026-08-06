@@ -278,7 +278,7 @@ function DetectionMeta({
         <span className="text-[10px] tabular-nums" style={{ color: theme.muted }}>
           {hit.rowCount.toLocaleString('es-MX')} fila{hit.rowCount === 1 ? '' : 's'}
           {ingestLabel
-            ? ` · últ. act. ${ingestLabel}`
+            ? ` · últ. sync ${ingestLabel}`
             : hit.lastDate
               ? ` · dato ${hit.lastDate}`
               : ''}
@@ -329,8 +329,9 @@ function ChipSection({
                 <span
                   className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
                   style={{ background: '#E8EEF7', color: SUITE.navySoft }}
+                  title="Horario programado"
                 >
-                  {freq}
+                  Programado: {freq}
                 </span>
               ) : null}
             </span>
@@ -383,9 +384,9 @@ function LeafRow({
         <span
           className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
           style={{ background: '#E8EEF7', color: SUITE.navySoft }}
-          title="Actualización"
+          title="Horario programado"
         >
-          {leaf.updateFrequency}
+          Programado: {leaf.updateFrequency}
         </span>
       ) : null}
       {leaf.note ? (
@@ -503,14 +504,16 @@ function ResourceAccordion({
           {branch.updateFrequency ? (
             <span className="mt-1 block text-[11px] leading-snug">
               <span className="font-semibold" style={{ color: SUITE.navy }}>
-                Actualización:{' '}
+                Programado:{' '}
               </span>
               <span style={{ color: SUITE.orangeDeep }}>{branch.updateFrequency}</span>
             </span>
           ) : null}
           {areaLast ? (
             <span className="mt-0.5 block text-[11px] leading-snug font-semibold" style={{ color: SUITE.orangeDeep }}>
-              {areaLast.display}
+              {areaLast.lastAt
+                ? `Última sync: ${formatTimestampCdmxShort(areaLast.lastAt)}`
+                : areaLast.display}
             </span>
           ) : null}
         </span>
@@ -524,7 +527,7 @@ function ResourceAccordion({
           {branch.updateFrequency ? (
             <p className="text-xs" style={{ color: theme.muted }}>
               <span className="font-semibold" style={{ color: SUITE.navy }}>
-                Actualización:{' '}
+                Programado:{' '}
               </span>
               <span className="font-semibold" style={{ color: SUITE.orangeDeep }}>
                 {branch.updateFrequency}
@@ -533,7 +536,9 @@ function ResourceAccordion({
           ) : null}
           {areaLast ? (
             <p className="text-xs font-semibold" style={{ color: SUITE.orangeDeep }}>
-              {areaLast.display}
+              {areaLast.lastAt
+                ? `Última sync: ${formatTimestampCdmxShort(areaLast.lastAt)}`
+                : areaLast.display}
             </p>
           ) : null}
 

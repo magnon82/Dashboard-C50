@@ -12,6 +12,7 @@ import { EventosCotizador } from '@/app/components/eventos/EventosCotizador';
 import { EventosOrdenesServicio } from '@/app/components/eventos/EventosOrdenesServicio';
 import { EventosCalendario } from '@/app/components/eventos/EventosCalendario';
 import { EventosBiblioteca } from '@/app/components/eventos/EventosBiblioteca';
+import { EventosGlobal } from '@/app/components/eventos/EventosGlobal';
 import { EventosStubPanel } from '@/app/components/eventos/EventosStubPanel';
 import {
   sanitizeEventMenuTextFields,
@@ -192,6 +193,8 @@ export default function EventosPage() {
       {section === 'calendario' && <EventosCalendario />}
 
       {section === 'os' && <EventosOrdenesServicio />}
+
+      {section === 'global' && <EventosGlobal />}
 
       {section === 'biblioteca' && <EventosBiblioteca />}
     </SuiteShell>

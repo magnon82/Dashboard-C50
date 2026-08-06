@@ -347,6 +347,8 @@ export type LimpiezaServicioConflict = {
 /**
  * Candado: quien tiene Limpieza + servicio no puede tener turnos solapados
  * el mismo día (mañana Limpieza + tarde Meserx OK si no se cruzan).
+ * Preferencia: solo alerta cuando un turno de Limpieza cruza con uno de servicio;
+ * si no se puede clasificar, cualquier solape del mismo día se bloquea.
  */
 export function findLimpiezaServicioConflicts(
   shifts: ScheduleShiftLike[],
@@ -361,6 +363,23 @@ export function findLimpiezaServicioConflicts(
     list.push(s);
     byKey.set(key, list);
   }
+
+  const classify = (s: ScheduleShiftLike): 'limpieza' | 'servicio' | 'unknown' => {
+    const notes = String(s.notes || '').toLowerCase();
+    if (/dual_limpieza_mesero\s*:\s*limpieza/.test(notes)) return 'limpieza';
+    if (/dual_limpieza_mesero\s*:\s*mesero/.test(notes)) return 'servicio';
+    if (isLimpiezaPuesto(s.role_label) || isLimpiezaPuesto(s.area)) return 'limpieza';
+    if (s.role_label && isServicioPuesto(s.role_label)) return 'servicio';
+    const area = String(s.area || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    if (area.includes('limpieza')) return 'limpieza';
+    const start = String(s.start_time || '').slice(0, 5);
+    if (/^\d{2}:\d{2}$/.test(start) && start < '12:00') return 'limpieza';
+    if (/^\d{2}:\d{2}$/.test(start)) return 'servicio';
+    return 'unknown';
+  };
 
   const out: LimpiezaServicioConflict[] = [];
   const seen = new Set<string>();
@@ -379,6 +398,12 @@ export function findLimpiezaServicioConflicts(
             b.end_time!.slice(0, 5)
           )
         ) {
+          continue;
+        }
+        const ca = classify(a);
+        const cb = classify(b);
+        // Mismo rol clasificado → no es el candado Limpieza↔servicio
+        if (ca !== 'unknown' && cb !== 'unknown' && ca === cb) {
           continue;
         }
         const conflictKey = `${empId}|${date}`;

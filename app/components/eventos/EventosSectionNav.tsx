@@ -8,6 +8,7 @@ export type EventosSection =
   | 'cotizador'
   | 'calendario'
   | 'os'
+  | 'global'
   | 'biblioteca';
 
 const SECTIONS: { id: EventosSection; label: string }[] = [
@@ -16,6 +17,7 @@ const SECTIONS: { id: EventosSection; label: string }[] = [
   { id: 'cotizador', label: 'Cotizador' },
   { id: 'calendario', label: 'Calendario' },
   { id: 'os', label: 'Órdenes de servicio' },
+  { id: 'global', label: 'Global' },
   { id: 'biblioteca', label: 'Biblioteca' },
 ];
 

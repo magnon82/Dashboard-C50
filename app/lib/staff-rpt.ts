@@ -19,6 +19,10 @@ export interface StaffRptRow {
   rpt_date: string;
   wi_amount: number;
   eventos_amount: number;
+  /** Orden de servicio (Global · VENTA). */
+  eventos_os_amount: number;
+  /** Venta extra del evento (Global · VENTA EXTRA). */
+  eventos_extra_amount: number;
   propinas: number;
   efectivo_tombola: number;
   efectivo_contado: number | null;
@@ -71,11 +75,22 @@ export interface StaffRptInfocajaDay {
 }
 
 export function asStaffRptRow(r: Record<string, unknown>): StaffRptRow {
+  const os =
+    r.eventos_os_amount == null ? null : Number(r.eventos_os_amount);
+  const extra =
+    r.eventos_extra_amount == null ? null : Number(r.eventos_extra_amount);
+  const totalLegacy = Number(r.eventos_amount) || 0;
+  const osAmount = os != null && Number.isFinite(os) ? os : 0;
+  const extraAmount = extra != null && Number.isFinite(extra) ? extra : 0;
+  // Filas antiguas sin desglose: todo el total cuenta como OS.
+  const hasSplit = r.eventos_os_amount != null || r.eventos_extra_amount != null;
   return {
     id: String(r.id),
     rpt_date: String(r.rpt_date).slice(0, 10),
     wi_amount: Number(r.wi_amount) || 0,
-    eventos_amount: Number(r.eventos_amount) || 0,
+    eventos_amount: totalLegacy,
+    eventos_os_amount: hasSplit ? osAmount : totalLegacy,
+    eventos_extra_amount: hasSplit ? extraAmount : 0,
     propinas: Number(r.propinas) || 0,
     efectivo_tombola: Number(r.efectivo_tombola) || 0,
     efectivo_contado:
@@ -96,6 +111,11 @@ export function asStaffRptRow(r: Record<string, unknown>): StaffRptRow {
     created_at: String(r.created_at || ''),
     updated_at: String(r.updated_at || ''),
   };
+}
+
+/** Total eventos = OS (VENTA) + venta extra. */
+export function totalEventosAmount(os: number, extra: number): number {
+  return Math.round((Math.max(0, os) + Math.max(0, extra)) * 100) / 100;
 }
 
 function slotHasAmounts(

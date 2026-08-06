@@ -5,21 +5,18 @@ import Link from 'next/link';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
 import {
   addIsoDays,
-  employeeNotesHasFlag,
   formatHrDate,
   formatHrPuesto,
-  isGenericPisoArea,
-  isPlantillaExterno,
-  isVacationScheduleShift,
-  meseroWithinFamilyRank,
-  plantillaPositionKey,
-  scheduleSectionFromPosition,
   todayIsoCdmx,
-  type HrEmployee,
   type HrScheduleShift,
 } from '@/app/lib/hr';
 import { formatHrListName } from '@/app/lib/hr-person-match';
-import { hasDualLimpiezaServicio } from '@/app/lib/hr-puestos';
+import {
+  DAY_HEADERS,
+  areaSortKey,
+  buildRowsFromShifts,
+  type PersonRow,
+} from '@/app/lib/hr-schedule-grid';
 import {
   mondayOfWeek,
   sundayOfWeek,
@@ -29,45 +26,12 @@ import {
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
-const DAY_HEADERS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] as const;
 
 /** Vie–Dom CDMX: mostrar también la próxima semana publicada. */
 function isWeekendPreviewDay(iso: string): boolean {
   const wd = weekdayOfIso(iso);
   return wd === 5 || wd === 6 || wd === 0;
 }
-
-const AREA_ORDER = [
-  'Gerencia',
-  'Hostess',
-  'Caja',
-  'Bartender',
-  'Meseros',
-  'Runner',
-  'Cocina',
-  'Limpieza',
-  'Mantenimiento',
-  'Administración',
-  'Externos',
-] as const;
-
-type DaySegment = { start: string; end: string };
-
-type DayCell = {
-  start: string;
-  end: string;
-  off: boolean;
-  vacation?: boolean;
-  extra?: DaySegment[];
-};
-
-type PersonRow = {
-  employee_id: string;
-  full_name: string;
-  area: string;
-  puesto: string | null;
-  days: DayCell[];
-};
 
 type WeekInfo = {
   id: string;
@@ -92,219 +56,6 @@ type Payload = {
   nextWeekEnd?: string | null;
 };
 
-function normalizeArea(raw: string | null | undefined): string {
-  if (!raw?.trim() || isGenericPisoArea(raw)) return 'Otros';
-  return scheduleSectionFromPosition(raw);
-}
-
-function areaSortKey(area: string): number {
-  const i = AREA_ORDER.indexOf(area as (typeof AREA_ORDER)[number]);
-  return i >= 0 ? i : AREA_ORDER.length;
-}
-
-function resolveRowSection(
-  emp: HrEmployee | undefined,
-  shiftAreas: string[],
-  shiftRoles: string[],
-  fallbackName: string,
-  notesFallback?: string | null
-): { section: string; puesto: string | null } {
-  const notes = emp?.notes ?? notesFallback ?? null;
-  const dual =
-    (emp ? hasDualLimpiezaServicio({ ...emp, notes }) : false) ||
-    employeeNotesHasFlag(notes, 'dual_limpieza_mesero');
-  const posKey = emp ? plantillaPositionKey(emp) : null;
-  const fromPuesto = posKey ? scheduleSectionFromPosition(posKey) : null;
-
-  const areaCounts = new Map<string, number>();
-  for (const a of shiftAreas) {
-    const sec = normalizeArea(a);
-    if (sec === 'Otros') continue;
-    areaCounts.set(sec, (areaCounts.get(sec) || 0) + 1);
-  }
-  let fromShifts: string | null = null;
-  let best = 0;
-  for (const [sec, n] of areaCounts) {
-    if (n > best) {
-      best = n;
-      fromShifts = sec;
-    }
-  }
-
-  const roleCounts = new Map<string, number>();
-  for (const r of shiftRoles) {
-    const t = String(r || '').trim();
-    if (!t) continue;
-    roleCounts.set(t, (roleCounts.get(t) || 0) + 1);
-  }
-  let topRole: string | null = null;
-  let roleBest = 0;
-  for (const [r, n] of roleCounts) {
-    if (n > roleBest) {
-      roleBest = n;
-      topRole = r;
-    }
-  }
-  const fromRole = topRole ? scheduleSectionFromPosition(topRole) : null;
-
-  let section =
-    (fromPuesto && fromPuesto !== 'Otros' ? fromPuesto : null) ||
-    (fromRole && fromRole !== 'Otros' ? fromRole : null) ||
-    fromShifts ||
-    (dual ? 'Meseros' : null) ||
-    'Otros';
-
-  if (
-    dual &&
-    (section === 'Limpieza' || section === 'Otros' || section === 'Piso')
-  ) {
-    section = 'Meseros';
-  }
-
-  if (isPlantillaExterno({ full_name: emp?.full_name || fallbackName, notes })) {
-    section = 'Externos';
-  }
-
-  const puesto =
-    emp?.puesto ||
-    (dual ? 'Meserx Encargadx' : null) ||
-    topRole ||
-    (fromPuesto && fromPuesto !== 'Otros' ? fromPuesto : null) ||
-    null;
-
-  return { section, puesto };
-}
-
-function comparePersonRows(a: PersonRow, b: PersonRow): number {
-  const ka = areaSortKey(a.area);
-  const kb = areaSortKey(b.area);
-  if (ka !== kb) return ka - kb;
-  if (a.area === 'Meseros' && b.area === 'Meseros') {
-    const ra = meseroWithinFamilyRank(a.puesto);
-    const rb = meseroWithinFamilyRank(b.puesto);
-    if (ra !== rb) return ra - rb;
-  }
-  return a.full_name.localeCompare(b.full_name, 'es');
-}
-
-function toHhmm(t: string | null | undefined): string {
-  if (!t) return '';
-  return t.slice(0, 5);
-}
-
-function emptyDay(): DayCell {
-  return { start: '', end: '', off: true, vacation: false };
-}
-
-function vacationDay(): DayCell {
-  return { start: '', end: '', off: true, vacation: true };
-}
-
-function buildRowsFromShifts(
-  shifts: HrScheduleShift[],
-  dates: string[]
-): PersonRow[] {
-  const byId = new Map<string, PersonRow>();
-  const shiftAreasByEmp = new Map<string, string[]>();
-  const shiftRolesByEmp = new Map<string, string[]>();
-  const notesByEmp = new Map<string, string | null>();
-
-  for (const s of shifts) {
-    if (s.employee_notes != null && !notesByEmp.has(s.employee_id)) {
-      notesByEmp.set(s.employee_id, s.employee_notes);
-    }
-    const areas = shiftAreasByEmp.get(s.employee_id) || [];
-    if (s.area) areas.push(s.area);
-    else if (s.employee_area) areas.push(s.employee_area);
-    shiftAreasByEmp.set(s.employee_id, areas);
-
-    const roles = shiftRolesByEmp.get(s.employee_id) || [];
-    if (s.role_label) roles.push(s.role_label);
-    else if (s.employee_puesto) roles.push(s.employee_puesto);
-    shiftRolesByEmp.set(s.employee_id, roles);
-
-    let row = byId.get(s.employee_id);
-    if (!row) {
-      const stub: HrEmployee | undefined = s.employee_puesto
-        ? ({
-            id: s.employee_id,
-            full_name: s.employee_name || s.employee_id,
-            status: 'activo',
-            puesto: s.employee_puesto,
-            area: s.employee_area ?? null,
-            fecha_ingreso: null,
-            email: null,
-            phone: null,
-            drive_folder_path: null,
-            notes: s.employee_notes ?? null,
-          } as HrEmployee)
-        : undefined;
-      const { section, puesto } = resolveRowSection(
-        stub,
-        areas,
-        roles,
-        s.employee_name || s.employee_id,
-        s.employee_notes
-      );
-      row = {
-        employee_id: s.employee_id,
-        full_name: s.employee_name || s.employee_id.slice(0, 8),
-        area: section,
-        puesto,
-        days: dates.map(() => emptyDay()),
-      };
-      byId.set(s.employee_id, row);
-    }
-    const di = dates.indexOf(s.shift_date);
-    if (di < 0) continue;
-    if (isVacationScheduleShift(s)) {
-      row.days[di] = vacationDay();
-      continue;
-    }
-    const start = toHhmm(s.start_time);
-    const end = toHhmm(s.end_time);
-    if (!start || !end) continue;
-    const cur = row.days[di];
-    if (cur.off || !cur.start || !cur.end) {
-      row.days[di] = { start, end, off: false, vacation: false };
-    } else if (cur.start === start && cur.end === end) {
-      // duplicate
-    } else {
-      const extras = cur.extra ? [...cur.extra] : [];
-      if (!extras.some((e) => e.start === start && e.end === end)) {
-        extras.push({ start, end });
-      }
-      row.days[di] = { ...cur, off: false, vacation: false, extra: extras };
-    }
-  }
-
-  for (const [id, row] of byId) {
-    const stub: HrEmployee = {
-      id,
-      full_name: row.full_name,
-      status: 'activo',
-      puesto: row.puesto,
-      area: row.area,
-      fecha_ingreso: null,
-      email: null,
-      phone: null,
-      drive_folder_path: null,
-      notes: notesByEmp.get(id) ?? null,
-    };
-    const { section, puesto } = resolveRowSection(
-      stub,
-      shiftAreasByEmp.get(id) || [],
-      shiftRolesByEmp.get(id) || [],
-      row.full_name,
-      notesByEmp.get(id)
-    );
-    row.area = section;
-    row.puesto = puesto || row.puesto;
-  }
-
-  return [...byId.values()].sort(comparePersonRows);
-}
-
 function TeamScheduleTable({
   weekStart,
   shifts,
@@ -319,7 +70,7 @@ function TeamScheduleTable({
     return dates.findIndex((d) => d.slice(0, 10) === today);
   }, [dates]);
   const rows = useMemo(
-    () => buildRowsFromShifts(shifts, dates),
+    () => buildRowsFromShifts([], shifts, dates),
     [shifts, dates]
   );
   const grouped = useMemo(() => {
@@ -440,7 +191,7 @@ function TeamScheduleTable({
                 </tr>
                 {people.map((p) => (
                   <tr
-                    key={p.employee_id}
+                    key={p.rowKey}
                     className="border-t border-slate-100"
                   >
                     <td
@@ -485,7 +236,7 @@ function TeamScheduleTable({
                           </span>
                         </td>
                       ) : (
-                        <Fragment key={`${p.employee_id}-${di}`}>
+                        <Fragment key={`${p.rowKey}-${di}`}>
                           <td
                             className={`${colEdge} px-0.5 py-0.5`}
                             style={colWash}
