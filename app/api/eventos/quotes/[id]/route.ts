@@ -11,6 +11,8 @@ import {
   buildCotizacionDocFromQuoteRow,
   ensureQuotePublicToken,
   publicQuotePath,
+  regenerateQuotePublicToken,
+  revokeQuotePublicToken,
 } from '@/app/lib/eventos-quote-public';
 
 export const runtime = 'nodejs';
@@ -108,7 +110,7 @@ export async function GET(_request: Request, ctx: RouteCtx) {
 
 /**
  * PATCH /api/eventos/quotes/[id]
- * Body: { status, generate_os? }
+ * Body: { status, generate_os?, payment_link_url?, regenerate_public_token?, revoke_public_token? }
  * Si status=aceptada (o generate_os=true), crea/actualiza OS digital.
  */
 export async function PATCH(request: Request, ctx: RouteCtx) {
@@ -126,11 +128,71 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
     status?: string;
     generate_os?: boolean;
     payment_link_url?: string | null;
+    regenerate_public_token?: boolean;
+    revoke_public_token?: boolean;
   };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
+  }
+
+  if (body.regenerate_public_token === true) {
+    try {
+      const sb = getServiceSupabase();
+      const token = await regenerateQuotePublicToken(sb, id);
+      if (!token) {
+        return NextResponse.json(
+          {
+            error:
+              'No se pudo regenerar el enlace. Ejecuta supabase/eventos_quote_public_token.sql',
+          },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json({
+        public_token: token,
+        public_path: publicQuotePath(token),
+      });
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error:
+            e instanceof Error ? e.message : 'Error al regenerar enlace público',
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (body.revoke_public_token === true) {
+    try {
+      const sb = getServiceSupabase();
+      const result = await revokeQuotePublicToken(sb, id);
+      if (!result.ok) {
+        return NextResponse.json(
+          {
+            error: result.missingColumn
+              ? 'Falta migrar public_token. Ejecuta supabase/eventos_quote_public_token.sql'
+              : 'No se pudo desactivar el enlace',
+          },
+          { status: result.missingColumn ? 503 : 500 }
+        );
+      }
+      return NextResponse.json({
+        public_token: null,
+        public_path: null,
+        revoked: true,
+      });
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error:
+            e instanceof Error ? e.message : 'Error al desactivar enlace público',
+        },
+        { status: 500 }
+      );
+    }
   }
 
   if (
@@ -139,7 +201,10 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
     body.payment_link_url === undefined
   ) {
     return NextResponse.json(
-      { error: 'Indica status, generate_os o payment_link_url' },
+      {
+        error:
+          'Indica status, generate_os, payment_link_url, regenerate_public_token o revoke_public_token',
+      },
       { status: 400 }
     );
   }

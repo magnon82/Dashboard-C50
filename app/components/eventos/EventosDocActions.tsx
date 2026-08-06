@@ -3,13 +3,15 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { EVENTOS_CONTACT } from '@/app/lib/eventos';
+import type { CotizacionDoc } from '@/app/lib/eventos-cotizacion-doc';
+import { downloadCotizacionPdf } from '@/app/lib/eventos-cotizacion-pdf';
 import { SUITE } from '@/app/lib/themes';
 
 function digitsOnly(phone: string): string {
   return phone.replace(/\D/g, '');
 }
 
-/** Acciones de impresión / enlace / envío para cotización u OS (HTML → PDF). */
+/** Acciones de descarga PDF / enlace / envío para cotización u OS. */
 export function EventosDocActions({
   kind,
   folio,
@@ -21,6 +23,8 @@ export function EventosDocActions({
   /** URL pública (/c/…) — si falta, usa la URL actual (vista interna). */
   shareUrl,
   publicShare = false,
+  /** Documento de cotización: genera PDF real (sin diálogo de impresión). */
+  cotizacionDoc,
   extra,
 }: {
   kind: 'cotizacion' | 'os';
@@ -33,12 +37,14 @@ export function EventosDocActions({
   shareUrl?: string | null;
   /** Vista pública: sin «Volver» a la Suite ni texto de sesión. */
   publicShare?: boolean;
+  cotizacionDoc?: CotizacionDoc | null;
   extra?: ReactNode;
 }) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [shareNote, setShareNote] = useState('');
   const [resolvedShare, setResolvedShare] = useState(shareUrl || '');
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   /** Tabs abiertos con window.open(+noopener) no tienen historial útil; back() queda en blanco. */
   function goBack() {
@@ -72,14 +78,42 @@ export function EventosDocActions({
     }
   }, [shareUrl]);
 
+  async function handleDownloadPdf() {
+    if (kind === 'cotizacion' && cotizacionDoc) {
+      setPdfBusy(true);
+      setShareNote('');
+      try {
+        await downloadCotizacionPdf(cotizacionDoc);
+        setShareNote('PDF descargado');
+        window.setTimeout(() => setShareNote(''), 2000);
+      } catch {
+        setShareNote('No se pudo generar el PDF');
+      } finally {
+        setPdfBusy(false);
+      }
+      return;
+    }
+    // OS digital: sigue el flujo de impresión del navegador
+    window.print();
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('print') === '1') {
-      const t = window.setTimeout(() => window.print(), 400);
+    if (params.get('print') !== '1' && params.get('download') !== '1') return;
+
+    if (kind === 'cotizacion' && cotizacionDoc) {
+      const t = window.setTimeout(() => {
+        void downloadCotizacionPdf(cotizacionDoc).catch(() => {
+          setShareNote('No se pudo generar el PDF');
+        });
+      }, 400);
       return () => window.clearTimeout(t);
     }
-  }, []);
+
+    const t = window.setTimeout(() => window.print(), 400);
+    return () => window.clearTimeout(t);
+  }, [kind, cotizacionDoc]);
 
   const label = kind === 'cotizacion' ? 'cotización' : 'orden de servicio';
   const who = clientName || 'cliente';
@@ -92,20 +126,36 @@ export function EventosDocActions({
 
   const pageUrl = resolvedShare;
 
-  const bodyLines = [
-    `Hola${who !== 'cliente' ? ` ${who}` : ''},`,
-    '',
-    `Adjunto / enlace a su ${label}${folio ? ` (${folio})` : ''} para ${celebration || 'su evento'} en Carranza 50.`,
-    eventDate ? `Fecha del evento: ${eventDate}` : null,
-    '',
-    pageUrl ? `Ver / imprimir PDF: ${pageUrl}` : null,
-    '',
-    'En el navegador use «Imprimir → Guardar como PDF» si necesita el archivo.',
-    '',
-    'Saludos,',
-    'Eventos · Carranza 50',
-    EVENTOS_CONTACT.email,
-  ].filter((x): x is string => x != null);
+  const bodyLines =
+    kind === 'cotizacion'
+      ? [
+          `Hola${who !== 'cliente' ? ` ${who}` : ''},`,
+          '',
+          `Adjunto / enlace a su ${label}${folio ? ` (${folio})` : ''} para ${celebration || 'su evento'} en Carranza 50.`,
+          eventDate ? `Fecha del evento: ${eventDate}` : null,
+          '',
+          pageUrl ? `Ver cotización: ${pageUrl}` : null,
+          '',
+          'En la página puede usar «Descargar PDF» para obtener el archivo.',
+          '',
+          'Saludos,',
+          'Eventos · Carranza 50',
+          EVENTOS_CONTACT.email,
+        ].filter((x): x is string => x != null)
+      : [
+          `Hola${who !== 'cliente' ? ` ${who}` : ''},`,
+          '',
+          `Adjunto / enlace a su ${label}${folio ? ` (${folio})` : ''} para ${celebration || 'su evento'} en Carranza 50.`,
+          eventDate ? `Fecha del evento: ${eventDate}` : null,
+          '',
+          pageUrl ? `Ver / imprimir PDF: ${pageUrl}` : null,
+          '',
+          'En el navegador use «Imprimir → Guardar como PDF» si necesita el archivo.',
+          '',
+          'Saludos,',
+          'Eventos · Carranza 50',
+          EVENTOS_CONTACT.email,
+        ].filter((x): x is string => x != null);
 
   const mailtoHref = recipientEmail
     ? `mailto:${encodeURIComponent(recipientEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyLines.join('\n'))}`
@@ -147,22 +197,34 @@ export function EventosDocActions({
     }
   }
 
+  const canDirectPdf = kind === 'cotizacion' && !!cotizacionDoc;
   const hint = publicShare
-    ? 'En el diálogo de impresión elige «Guardar como PDF».'
+    ? canDirectPdf
+      ? '«Descargar PDF» guarda el archivo en tu dispositivo.'
+      : 'En el diálogo de impresión elige «Guardar como PDF».'
     : kind === 'cotizacion'
-      ? '«Imprimir / guardar PDF» genera el archivo; no guarda la cotización en la Suite.'
+      ? canDirectPdf
+        ? '«Descargar PDF» genera el archivo; no guarda la cotización en la Suite.'
+        : 'Falta el documento para generar PDF.'
       : 'En el diálogo de impresión elige «Guardar como PDF». El enlace abre este documento en la Suite (sesión requerida).';
   const statusText = shareNote || hint;
+
+  const pdfButtonLabel = canDirectPdf
+    ? pdfBusy
+      ? 'Generando PDF…'
+      : 'Descargar PDF'
+    : 'Imprimir / guardar PDF';
 
   return (
     <div className="mb-5 flex flex-wrap items-center gap-2 print:hidden">
       <button
         type="button"
-        onClick={() => window.print()}
-        className="rounded-lg px-4 py-2 text-sm font-bold text-white"
+        disabled={pdfBusy || (kind === 'cotizacion' && !cotizacionDoc)}
+        onClick={() => void handleDownloadPdf()}
+        className="rounded-lg px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
         style={{ backgroundColor: SUITE.navy }}
       >
-        Imprimir / guardar PDF
+        {pdfButtonLabel}
       </button>
       <button
         type="button"

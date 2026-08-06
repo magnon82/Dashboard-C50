@@ -21,6 +21,7 @@ import {
   resolveAnticipoDateFromActivity,
   validatePaxAllocation,
   validateQuotePax,
+  syncBarraLibreLinesToPax,
   type QuoteLineInput,
 } from '@/app/lib/eventos';
 import { isPersistedMenuItemId } from '@/app/lib/eventos-menus-seed';
@@ -181,19 +182,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const lines = (body.lines || []).filter(
-    (l) => l.description && Number(l.quantity) > 0
+  const pax = Number(body.pax || 10);
+  if (!Number.isFinite(pax)) {
+    return NextResponse.json({ error: 'pax inválido' }, { status: 400 });
+  }
+
+  // Barra libre (persona) siempre al grupo completo.
+  const lines = syncBarraLibreLinesToPax(
+    pax,
+    (body.lines || []).filter(
+      (l) => l.description && Number(l.quantity) > 0
+    )
   );
   if (!lines.length) {
     return NextResponse.json(
       { error: 'Agrega al menos una línea a la cotización' },
       { status: 400 }
     );
-  }
-
-  const pax = Number(body.pax || 10);
-  if (!Number.isFinite(pax)) {
-    return NextResponse.json({ error: 'pax inválido' }, { status: 400 });
   }
 
   const paxErr = validateQuotePax(

@@ -62,6 +62,48 @@ export async function ensureQuotePublicToken(
   return null;
 }
 
+/** Invalida el enlace anterior y crea uno nuevo (opaco). */
+export async function regenerateQuotePublicToken(
+  sb: EventosSb,
+  quoteId: string
+): Promise<string | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const token = generateQuotePublicToken();
+    const { data, error } = await sb
+      .from('event_quotes')
+      .update({ public_token: token, updated_at: new Date().toISOString() })
+      .eq('id', quoteId)
+      .select('public_token')
+      .maybeSingle();
+
+    if (error) {
+      if (MISSING_TOKEN_COL.test(error.message)) return null;
+      continue;
+    }
+    if (data?.public_token) return String(data.public_token);
+  }
+  return null;
+}
+
+/** Desactiva el enlace público (el token deja de resolver). */
+export async function revokeQuotePublicToken(
+  sb: EventosSb,
+  quoteId: string
+): Promise<{ ok: boolean; missingColumn?: boolean }> {
+  const { error } = await sb
+    .from('event_quotes')
+    .update({ public_token: null, updated_at: new Date().toISOString() })
+    .eq('id', quoteId);
+
+  if (error) {
+    if (MISSING_TOKEN_COL.test(error.message)) {
+      return { ok: false, missingColumn: true };
+    }
+    return { ok: false };
+  }
+  return { ok: true };
+}
+
 type QuoteRowForDoc = {
   quote_number?: string | null;
   status?: string | null;

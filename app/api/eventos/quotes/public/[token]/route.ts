@@ -7,6 +7,7 @@ import {
   getBbvaTransferDetails,
   type QuotePaymentMethod,
 } from '@/app/lib/eventos-quote-payment';
+import { allowPublicQuoteRequest } from '@/app/lib/public-quote-rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,7 +27,14 @@ function normalizeClientJoin(row: Record<string, unknown>) {
  * GET /api/eventos/quotes/public/[token]
  * Lectura pública (sin sesión) de una cotización por token opaco.
  */
-export async function GET(_request: Request, ctx: RouteCtx) {
+export async function GET(request: Request, ctx: RouteCtx) {
+  if (!allowPublicQuoteRequest(request)) {
+    return NextResponse.json(
+      { error: 'Demasiadas solicitudes. Intenta en un minuto.' },
+      { status: 429 }
+    );
+  }
+
   const { token: raw } = await ctx.params;
   const token = decodeURIComponent(raw || '').trim();
   if (!token || token.length < 16) {

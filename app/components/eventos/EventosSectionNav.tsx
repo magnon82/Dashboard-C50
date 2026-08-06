@@ -14,7 +14,7 @@ export type EventosSection =
 const SECTIONS: { id: EventosSection; label: string }[] = [
   { id: 'tablero', label: 'Tablero' },
   { id: 'crm', label: 'CRM' },
-  { id: 'cotizador', label: 'Cotizador' },
+  { id: 'cotizador', label: 'Cotizaciones' },
   { id: 'calendario', label: 'Calendario' },
   { id: 'os', label: 'Órdenes de servicio' },
   { id: 'global', label: 'Global' },

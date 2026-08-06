@@ -74,6 +74,10 @@ export default function EventosPage() {
   );
   const [persistQuotes, setPersistQuotes] = useState(true);
   const [loading, setLoading] = useState(true);
+  /** Tablero «Nueva cotización» abre el flujo Cotizar (no solo el listado). */
+  const [openCompose, setOpenCompose] = useState(false);
+  /** Al elegir la pestaña Cotizaciones, forzar listado (no quedar en Cotizar). */
+  const [cotizacionesListKey, setCotizacionesListKey] = useState(0);
   const hoy = new Date().toLocaleDateString('es-MX', {
     day: 'numeric',
     month: 'long',
@@ -137,14 +141,26 @@ export default function EventosPage() {
 
   return (
     <SuiteShell title="Eventos" subtitle={`Operación comercial · ${hoy}`}>
-      <EventosSectionNav active={section} onChange={setSection} />
+      <EventosSectionNav
+        active={section}
+        onChange={(id) => {
+          setSection(id);
+          if (id === 'cotizador') {
+            setOpenCompose(false);
+            setCotizacionesListKey((k) => k + 1);
+          }
+        }}
+      />
 
       {section === 'tablero' && (
         <EventosTablero
           summary={summary}
           loading={loading}
           onGoCrm={() => setSection('crm')}
-          onGoCotizador={() => setSection('cotizador')}
+          onGoCotizador={() => {
+            setOpenCompose(true);
+            setSection('cotizador');
+          }}
           onGoOs={() => setSection('os')}
         />
       )}
@@ -174,7 +190,7 @@ export default function EventosPage() {
             bullets={[
               'Abre Supabase → SQL Editor',
               'Pega y ejecuta supabase/eventos_module.sql + supabase/eventos_menus_bebidas_c50.sql (3 tiempos, desayunos, parejas, barra libre, bebidas C50)',
-              'Recarga /eventos → Cotizador',
+              'Recarga /eventos → Cotizaciones',
               'Opcional: CRM → agregar clientes o leads manualmente',
               'Precios con * aún requieren verificación operativa',
             ]}
@@ -187,6 +203,9 @@ export default function EventosPage() {
             dbReady={summary?.ready !== false}
             menusFromSeed={menusSource === 'seed_json'}
             persistQuotes={persistQuotes}
+            startCompose={openCompose}
+            onStartComposeConsumed={() => setOpenCompose(false)}
+            listResetKey={cotizacionesListKey}
           />
         ))}
 

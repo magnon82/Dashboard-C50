@@ -102,6 +102,39 @@ export function quoteLineIsDrink(line: {
   return Boolean(line.requiresFood ?? line.requires_food);
 }
 
+/**
+ * Barra libre por persona (nacional / internacional / refrescos).
+ * Bajo este formato aplica al grupo completo — no a un subconjunto de pax.
+ * Excluye horas extra (`unit=hora`).
+ */
+export function isBarraLibrePersonaLine(line: {
+  unit?: string | null;
+  category?: string | null;
+}): boolean {
+  const unit = String(line.unit || 'persona');
+  if (unit !== 'persona') return false;
+  return String(line.category || '') === 'barra_libre';
+}
+
+/** Ajusta cantidades de barra libre (persona) al pax total del evento. */
+export function syncBarraLibreLinesToPax<
+  T extends {
+    quantity: number;
+    unit?: string | null;
+    category?: string | null;
+  },
+>(pax: number, lines: T[]): T[] {
+  const target = Math.max(1, Math.floor(Number(pax) || 0));
+  let changed = false;
+  const next = lines.map((l) => {
+    if (!isBarraLibrePersonaLine(l)) return l;
+    if (Number(l.quantity) === target) return l;
+    changed = true;
+    return { ...l, quantity: target };
+  });
+  return changed ? next : lines;
+}
+
 export const LEAD_STAGES = [
   'nuevo',
   'contactado',

@@ -27,6 +27,7 @@ import {
   formatMxn,
   formatQuoteLineDescription,
   missingOptionalMenuChoiceLabels,
+  isBarraLibrePersonaLine,
   isEventosCotizadorFoodMenu,
   isEventosDrinkMenu,
   isPaxAllocationLine,
@@ -37,6 +38,7 @@ import {
   resolveAnticipoDateFromActivity,
   resolveItemUnitPrice,
   summarizePaxAllocation,
+  syncBarraLibreLinesToPax,
   validateChoiceSelections,
   validatePaxAllocation,
   validateQuotePax,
@@ -112,6 +114,9 @@ export function EventosCotizador({
   dbReady = true,
   menusFromSeed = false,
   persistQuotes = true,
+  startCompose = false,
+  onStartComposeConsumed,
+  listResetKey = 0,
 }: {
   menus: EventMenu[];
   clients: EventClient[];
@@ -122,9 +127,16 @@ export function EventosCotizador({
   menusFromSeed?: boolean;
   /** false si event_quotes no está listo para guardar */
   persistQuotes?: boolean;
+  /** Abrir flujo Cotizar (p. ej. desde Tablero «Nueva cotización»). */
+  startCompose?: boolean;
+  onStartComposeConsumed?: () => void;
+  /** Incrementar al elegir la pestaña Cotizaciones → mostrar listado. */
+  listResetKey?: number;
 }) {
   const { user } = useSession();
   const canEdit = !!user?.canEdit;
+  /** list = listado Cotizaciones; compose = armar cotización nueva. */
+  const [view, setView] = useState<'list' | 'compose'>('list');
   const [menuId, setMenuId] = useState(() => {
     const firstFood = menus.find(isEventosCotizadorFoodMenu);
     return firstFood?.id || menus[0]?.id || '';
@@ -177,6 +189,26 @@ export function EventosCotizador({
   useEffect(() => {
     setEventDate((prev) => (prev ? prev : defaultEventDateIso()));
   }, []);
+
+  // Pestaña Cotizaciones → siempre listado.
+  useEffect(() => {
+    if (listResetKey > 0) setView('list');
+  }, [listResetKey]);
+
+  // Tablero / deep-link: abrir flujo Cotizar.
+  useEffect(() => {
+    if (!startCompose) return;
+    setView('compose');
+    setLines([]);
+    setChoices({});
+    setNotes('');
+    setPlaceHold(false);
+    setErr('');
+    setMsg(
+      'Nueva cotización: cada guardado crea una versión distinta; no sobrescribe las anteriores.'
+    );
+    onStartComposeConsumed?.();
+  }, [startCompose, onStartComposeConsumed]);
 
   /**
    * Catálogos del cotizador: sin parejas (solo Biblioteca), filtrados por min_pax.
@@ -370,6 +402,21 @@ export function EventosCotizador({
       category: selectedMenu.category,
     });
 
+  /** Barra libre nacional/internacional/refrescos: siempre pax completo. */
+  const nextLineIsBarraLibrePersona =
+    !!selectedItem &&
+    !!selectedMenu &&
+    isBarraLibrePersonaLine({
+      unit: selectedItem.unit || 'persona',
+      category: selectedMenu.category,
+    });
+
+  // Si cambia el pax del evento, alinear líneas de barra libre al grupo completo.
+  useEffect(() => {
+    if (quoteLocked) return;
+    setLines((prev) => syncBarraLibreLinesToPax(pax, prev));
+  }, [pax, quoteLocked]);
+
   // Al cambiar pax / líneas / ítem: sugerir cantidad = pax restantes (menús alimentos).
   // Deps por id (no objetos): si selectedItem/selectedMenu cambian de identidad en cada
   // render del padre, el efecto pisaba lineQty y el círculo quedaba “congelado” en remaining.
@@ -385,7 +432,13 @@ export function EventosCotizador({
       setLineQty(rem > 0 ? clampLinePax(rem, rem) : 0);
       return;
     }
-    if (selectedItem.unit === 'persona') {
+    if (
+      isBarraLibrePersonaLine({
+        unit: selectedItem.unit || 'persona',
+        category: selectedMenu.category,
+      }) ||
+      selectedItem.unit === 'persona'
+    ) {
       setLineQty(Math.max(1, pax));
       return;
     }
@@ -591,8 +644,15 @@ export function EventosCotizador({
       unit: item.unit || 'persona',
       category: selectedMenu.category,
     });
+    const isBarraLibre = isBarraLibrePersonaLine({
+      unit: item.unit || 'persona',
+      category: selectedMenu.category,
+    });
     let qty: number;
-    if (isAlloc) {
+    if (isBarraLibre) {
+      // Formato barra libre: todos los pax del evento deben tenerla.
+      qty = Math.max(1, Math.floor(Number(pax) || 0));
+    } else if (isAlloc) {
       const raw =
         qtyOverride != null && Number.isFinite(qtyOverride)
           ? qtyOverride
@@ -671,6 +731,12 @@ export function EventosCotizador({
       },
     ]);
 
+    if (isBarraLibre) {
+      setMsg(
+        `Barra libre aplica a todos los pax del evento (${qty}). Se asignó al grupo completo.`
+      );
+    }
+
     // Tras alimentos, avisar + llevar el CTA de bebidas a la vista (junto a la tabla).
     if (isEventosCotizadorFoodMenu(selectedMenu)) {
       const alreadyHadDrinks = lines.some((l) =>
@@ -731,7 +797,7 @@ export function EventosCotizador({
     setMsg(
       next.category === 'barra_libre'
         ? nItems
-          ? `Catálogo: barra libre (${nItems} ítems). Elige nacional / internacional / refrescos abajo y agrega la línea.`
+          ? `Catálogo: barra libre (${nItems} ítems). Elige nacional / internacional / refrescos — al agregar se aplica al grupo completo (${Math.max(1, pax)} pax).`
           : 'Catálogo: barra libre sin ítems — revisa el seed de menús.'
         : nItems
           ? `Catálogo: Bebidas C50 (${nItems} ítems). Elige la bebida abajo (más pedidas primero) y agrega la línea.`
@@ -753,6 +819,7 @@ export function EventosCotizador({
 
   /** Limpia líneas para armar otra cotización (mismo cliente / fecha / pax). */
   function startNuevaCotizacion() {
+    setView('compose');
     setLines([]);
     setChoices({});
     setNotes('');
@@ -1080,6 +1147,7 @@ export function EventosCotizador({
       setNotes('');
       setPlaceHold(false);
       await Promise.all([onSaved(), loadQuotes()]);
+      setView('list');
       if (savedId) {
         window.open(
           `/eventos/cotizacion/${savedId}`,
@@ -1110,6 +1178,45 @@ export function EventosCotizador({
       window.setTimeout(() => setCopiedPublicId(null), 2000);
     } catch {
       setErr(`Copia manualmente: ${url}`);
+    }
+  }
+
+  async function regeneratePublicLink(q: SavedQuote) {
+    if (!canEdit) return;
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await fetch(`/api/eventos/quotes/${q.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ regenerate_public_token: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(json.error || 'No se pudo regenerar el enlace');
+        return;
+      }
+      await loadQuotes();
+      const path =
+        typeof json.public_path === 'string' ? json.public_path : null;
+      if (path) {
+        const url = browserPublicQuoteUrl(path);
+        try {
+          await navigator.clipboard.writeText(url);
+          setCopiedPublicId(q.id);
+          setMsg(`Nuevo enlace público (el anterior ya no funciona): ${url}`);
+          window.setTimeout(() => setCopiedPublicId(null), 2500);
+        } catch {
+          setMsg(`Nuevo enlace: ${url}`);
+        }
+      } else {
+        setMsg('Enlace regenerado');
+      }
+    } catch {
+      setErr('Error de red al regenerar enlace');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1151,7 +1258,202 @@ export function EventosCotizador({
     }
   }
 
+  if (view === 'list') {
+    return (
+      <div className="space-y-5">
+        <SuiteCard>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold" style={{ color: theme.title }}>
+                Cotizaciones
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Listado de cotizaciones guardadas. Usa «Cotizar» para armar una
+                nueva. Cada enlace público es único y no requiere login.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void loadQuotes()}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              >
+                Actualizar
+              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={startNuevaCotizacion}
+                  className="rounded-xl px-4 py-2 text-sm font-bold text-white"
+                  style={{ backgroundColor: SUITE.orange }}
+                >
+                  Cotizar
+                </button>
+              )}
+            </div>
+          </div>
+
+          {(err || msg) && (
+            <p
+              className="mt-3 text-sm font-medium"
+              style={{ color: err ? '#b91c1c' : SUITE.navy }}
+            >
+              {err || msg}
+            </p>
+          )}
+
+          {quotesLoading ? (
+            <p className="mt-4 text-sm text-slate-500">Cargando…</p>
+          ) : quotesReady === false ? (
+            <div className="mt-4 space-y-2 text-sm" style={{ color: theme.muted }}>
+              <p>
+                No hay tabla de cotizaciones (o falló la lectura). Ejecuta{' '}
+                <code className="text-xs">supabase/eventos_module.sql</code> en el
+                SQL Editor de Supabase y recarga.
+              </p>
+              {quotesError && (
+                <p className="text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
+                  {quotesError}
+                </p>
+              )}
+            </div>
+          ) : quotes.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+              <p className="text-sm text-slate-600">
+                Aún no hay cotizaciones.
+              </p>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={startNuevaCotizacion}
+                  className="mt-3 rounded-xl px-4 py-2 text-sm font-bold text-white"
+                  style={{ backgroundColor: SUITE.orange }}
+                >
+                  Cotizar
+                </button>
+              )}
+            </div>
+          ) : (
+            <ul className="mt-4 space-y-2">
+              {quotes.map((q) => (
+                <li
+                  key={q.id}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-slate-800">
+                        {q.quote_number || q.id.slice(0, 8)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {STATUS_LABELS[q.status] || q.status}
+                        {q.payment_method
+                          ? ` · ${
+                              QUOTE_PAYMENT_METHOD_LABELS[
+                                q.payment_method as QuotePaymentMethod
+                              ] || q.payment_method
+                            }`
+                          : ''}
+                        {q.client?.company_name
+                          ? ` · ${q.client.company_name}`
+                          : ' · Sin cliente'}
+                        {q.event_date
+                          ? ` · ${new Date(
+                              q.event_date + 'T12:00:00'
+                            ).toLocaleDateString('es-MX', {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                            })}`
+                          : ''}
+                        {q.pax ? ` · ${q.pax} pax` : ''}
+                      </p>
+                    </div>
+                    <span className="font-bold" style={{ color: SUITE.navy }}>
+                      {formatMxn(q.total)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <a
+                      href={`/eventos/cotizacion/${q.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                    >
+                      Ver
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => void copyPublicLink(q)}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                      title="Enlace sin login para el cliente"
+                    >
+                      {copiedPublicId === q.id
+                        ? 'Enlace copiado'
+                        : 'Copiar enlace'}
+                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void regeneratePublicLink(q)}
+                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-50"
+                        title="Invalida el enlace anterior y crea uno nuevo"
+                      >
+                        Nuevo enlace
+                      </button>
+                    )}
+                    {q.service_order_id ? (
+                      <a
+                        href={`/eventos/os/${q.service_order_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-white"
+                        style={{ backgroundColor: SUITE.navy }}
+                      >
+                        Ver OS
+                      </a>
+                    ) : canEdit ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void generateOsFromQuote(q.id)}
+                        className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                        style={{ backgroundColor: SUITE.navy }}
+                        title="Marca cotización aceptada, lead ganado y crea OS digital"
+                      >
+                        Generar OS
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SuiteCard>
+      </div>
+    );
+  }
+
   return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setView('list');
+            setErr('');
+          }}
+          className="text-sm font-semibold underline-offset-2 hover:underline"
+          style={{ color: SUITE.navy }}
+        >
+          ← Cotizaciones
+        </button>
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+          Cotizar · nueva cotización
+        </span>
+      </div>
+
     <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
       <div className="space-y-5">
         {!dbReady && !menusFromSeed && (
@@ -1194,7 +1496,7 @@ export function EventosCotizador({
                   className="text-xs underline-offset-2 hover:underline disabled:opacity-40 disabled:no-underline"
                   style={{ color: theme.muted }}
                 >
-                  Empezar otra
+                  Limpiar y empezar otra
                 </button>
               )}
             </div>
@@ -1785,7 +2087,11 @@ export function EventosCotizador({
               (nextLineIsAlloc || selectedItem?.unit === 'persona') && (
                 <label className="text-sm">
                   <span className="font-semibold" style={{ color: SUITE.navy }}>
-                    {nextLineIsAlloc ? 'Personas (línea)' : 'Cantidad'}
+                    {nextLineIsAlloc
+                      ? 'Personas (línea)'
+                      : nextLineIsBarraLibrePersona
+                        ? 'Cantidad (grupo)'
+                        : 'Cantidad'}
                   </span>
                   {nextLineIsAlloc ? (
                     <EventosLinePaxControl
@@ -1803,7 +2109,7 @@ export function EventosCotizador({
                       step={1}
                       max={EVENTOS_MAX_PAX}
                       value={lineQty}
-                      disabled={quoteLocked}
+                      disabled={quoteLocked || nextLineIsBarraLibrePersona}
                       onChange={(e) => {
                         const raw = Math.max(
                           0,
@@ -1813,8 +2119,21 @@ export function EventosCotizador({
                       }}
                       onKeyDown={tryAddLineOnEnter}
                       className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm disabled:bg-slate-50"
+                      title={
+                        nextLineIsBarraLibrePersona
+                          ? 'Barra libre aplica a todos los pax del evento'
+                          : undefined
+                      }
                     />
                   )}
+                  {nextLineIsBarraLibrePersona ? (
+                    <p
+                      className="mt-1 text-xs font-medium"
+                      style={{ color: SUITE.muted }}
+                    >
+                      Barra libre = grupo completo ({pax} pax)
+                    </p>
+                  ) : null}
                 </label>
               )}
             {choiceGroups.length === 0 && (
@@ -2032,34 +2351,46 @@ export function EventosCotizador({
                           max={isPaxAllocationLine(l) ? EVENTOS_MAX_PAX : undefined}
                           step={isPaxAllocationLine(l) ? 1 : 0.01}
                           value={l.quantity}
-                          disabled={quoteLocked}
+                          disabled={
+                            quoteLocked || isBarraLibrePersonaLine(l)
+                          }
                           onChange={(e) =>
                             setLines((prev) =>
-                              prev.map((x) =>
-                                x.key === l.key
-                                  ? {
-                                      ...x,
-                                      quantity: isPaxAllocationLine(x)
-                                        ? Math.min(
-                                            EVENTOS_MAX_PAX,
-                                            Math.max(
-                                              0,
-                                              Math.floor(
-                                                Number(e.target.value) || 0
-                                              )
-                                            )
+                              prev.map((x) => {
+                                if (x.key !== l.key) return x;
+                                if (isBarraLibrePersonaLine(x)) {
+                                  return {
+                                    ...x,
+                                    quantity: Math.max(
+                                      1,
+                                      Math.floor(Number(pax) || 0)
+                                    ),
+                                  };
+                                }
+                                return {
+                                  ...x,
+                                  quantity: isPaxAllocationLine(x)
+                                    ? Math.min(
+                                        EVENTOS_MAX_PAX,
+                                        Math.max(
+                                          0,
+                                          Math.floor(
+                                            Number(e.target.value) || 0
                                           )
-                                        : Number(e.target.value) || 0,
-                                    }
-                                  : x
-                              )
+                                        )
+                                      )
+                                    : Number(e.target.value) || 0,
+                                };
+                              })
                             )
                           }
                           className="w-20 rounded border border-slate-200 px-2 py-1 disabled:bg-slate-50"
                           title={
-                            isPaxAllocationLine(l)
-                              ? 'Personas con este menú'
-                              : undefined
+                            isBarraLibrePersonaLine(l)
+                              ? 'Barra libre aplica a todos los pax del evento'
+                              : isPaxAllocationLine(l)
+                                ? 'Personas con este menú'
+                                : undefined
                           }
                         />
                       </td>
@@ -2290,7 +2621,9 @@ export function EventosCotizador({
                         className="font-semibold"
                         style={{ color: SUITE.navy }}
                       >
-                        Cantidad
+                        {nextLineIsBarraLibrePersona
+                          ? 'Cantidad (grupo)'
+                          : 'Cantidad'}
                       </span>
                       <input
                         type="number"
@@ -2298,6 +2631,7 @@ export function EventosCotizador({
                         step={1}
                         max={EVENTOS_MAX_PAX}
                         value={lineQty}
+                        disabled={nextLineIsBarraLibrePersona}
                         onChange={(e) => {
                           const raw = Math.max(
                             1,
@@ -2305,8 +2639,21 @@ export function EventosCotizador({
                           );
                           setLineQty(Math.min(EVENTOS_MAX_PAX, raw));
                         }}
-                        className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
+                        title={
+                          nextLineIsBarraLibrePersona
+                            ? 'Barra libre aplica a todos los pax del evento'
+                            : undefined
+                        }
                       />
+                      {nextLineIsBarraLibrePersona ? (
+                        <p
+                          className="mt-1 text-[11px] font-medium leading-snug"
+                          style={{ color: SUITE.muted }}
+                        >
+                          Grupo completo
+                        </p>
+                      ) : null}
                     </label>
                     <button
                       type="button"
@@ -2599,7 +2946,7 @@ export function EventosCotizador({
         <SuiteCard>
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-sm font-bold" style={{ color: theme.title }}>
-              Cotizaciones guardadas
+              De este cliente
             </h4>
             <button
               type="button"
@@ -2610,169 +2957,59 @@ export function EventosCotizador({
             </button>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Varias cotizaciones por cliente están permitidas; cada una es una
-            versión distinta.
+            Cotizaciones previas del cliente seleccionado (no se sobrescriben).
           </p>
 
-          {clientId && clientQuotes.length > 0 && (
-            <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                De este cliente ({clientQuotes.length})
-              </p>
-              <ul className="mt-2 max-h-[160px] space-y-1.5 overflow-y-auto">
-                {clientQuotes.map((q) => (
-                  <li key={`client-${q.id}`} className="text-sm">
-                    <div className="flex justify-between gap-2">
-                      <a
-                        href={`/eventos/cotizacion/${q.id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold hover:underline"
-                        style={{ color: SUITE.navy }}
-                      >
-                        {q.quote_number || q.id.slice(0, 8)}
-                      </a>
-                      <span className="font-semibold text-slate-700">
-                        {formatMxn(q.total)}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      {STATUS_LABELS[q.status] || q.status}
-                      {q.payment_method
-                        ? ` · ${
-                            QUOTE_PAYMENT_METHOD_LABELS[
-                              q.payment_method as QuotePaymentMethod
-                            ] || q.payment_method
-                          }`
-                        : ''}
-                      {q.event_date
-                        ? ` · ${new Date(
-                            q.event_date + 'T12:00:00'
-                          ).toLocaleDateString('es-MX', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                          })}`
-                        : ''}
-                      {q.pax ? ` · ${q.pax} pax` : ''}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void copyPublicLink(q)}
-                        className="text-[11px] font-semibold"
-                        style={{ color: SUITE.orangeDeep }}
-                      >
-                        {copiedPublicId === q.id
-                          ? 'Enlace copiado'
-                          : 'Copiar enlace público'}
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {quotesLoading ? (
-            <p className="mt-2 text-sm text-slate-500">Cargando…</p>
-          ) : quotesReady === false ? (
-            <div className="mt-2 space-y-2 text-sm" style={{ color: theme.muted }}>
-              <p>
-                No hay tabla de cotizaciones (o falló la lectura). Ejecuta{' '}
-                <code className="text-xs">supabase/eventos_module.sql</code> en el
-                SQL Editor de Supabase y recarga.
-              </p>
-              {quotesError && (
-                <p className="text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
-                  {quotesError}
-                </p>
-              )}
-            </div>
-          ) : quotes.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">
-              Aún no hay cotizaciones. Arma líneas y guarda una nueva.
+          {!clientId ? (
+            <p className="mt-3 text-sm text-slate-500">
+              Selecciona un cliente para ver sus cotizaciones.
+            </p>
+          ) : clientQuotes.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-500">
+              Este cliente aún no tiene cotizaciones guardadas.
             </p>
           ) : (
-            <ul className="mt-3 max-h-[420px] space-y-2 overflow-y-auto">
-              <li className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Recientes
-              </li>
-              {quotes.map((q) => (
-                <li
-                  key={q.id}
-                  className="rounded-lg bg-slate-50 px-3 py-2 text-sm"
-                >
+            <ul className="mt-3 max-h-[320px] space-y-1.5 overflow-y-auto">
+              {clientQuotes.map((q) => (
+                <li key={`client-${q.id}`} className="text-sm">
                   <div className="flex justify-between gap-2">
-                    <span className="font-semibold text-slate-800">
+                    <a
+                      href={`/eventos/cotizacion/${q.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold hover:underline"
+                      style={{ color: SUITE.navy }}
+                    >
                       {q.quote_number || q.id.slice(0, 8)}
-                    </span>
-                    <span className="font-bold" style={{ color: SUITE.navy }}>
+                    </a>
+                    <span className="font-semibold text-slate-700">
                       {formatMxn(q.total)}
                     </span>
                   </div>
-                  <div className="mt-0.5 text-xs text-slate-500">
+                  <div className="text-[11px] text-slate-500">
                     {STATUS_LABELS[q.status] || q.status}
-                    {q.payment_method
-                      ? ` · ${
-                          QUOTE_PAYMENT_METHOD_LABELS[
-                            q.payment_method as QuotePaymentMethod
-                          ] || q.payment_method
-                        }`
-                      : ''}
-                    {q.client?.company_name
-                      ? ` · ${q.client.company_name}`
-                      : ' · Sin cliente'}
                     {q.event_date
-                      ? ` · ${new Date(q.event_date + 'T12:00:00').toLocaleDateString(
-                          'es-MX',
-                          { day: 'numeric', month: 'short', year: 'numeric' }
-                        )}`
+                      ? ` · ${new Date(
+                          q.event_date + 'T12:00:00'
+                        ).toLocaleDateString('es-MX', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}`
                       : ''}
                     {q.pax ? ` · ${q.pax} pax` : ''}
                   </div>
-                  <a
-                    href={`/eventos/cotizacion/${q.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1.5 inline-block text-xs font-semibold"
-                    style={{ color: SUITE.orangeDeep }}
-                  >
-                    Ver cotización →
-                  </a>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="mt-1 flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={() => void copyPublicLink(q)}
-                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
-                      title="Enlace sin login para el cliente"
+                      className="text-[11px] font-semibold"
+                      style={{ color: SUITE.orangeDeep }}
                     >
                       {copiedPublicId === q.id
                         ? 'Enlace copiado'
                         : 'Copiar enlace'}
                     </button>
-                    {q.service_order_id ? (
-                      <a
-                        href={`/eventos/os/${q.service_order_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-white"
-                        style={{ backgroundColor: SUITE.navy }}
-                      >
-                        Ver OS
-                      </a>
-                    ) : canEdit ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void generateOsFromQuote(q.id)}
-                        className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
-                        style={{ backgroundColor: SUITE.navy }}
-                        title="Marca cotización aceptada, lead ganado y crea OS digital"
-                      >
-                        Generar OS
-                      </button>
-                    ) : null}
                   </div>
                 </li>
               ))}
@@ -2780,6 +3017,7 @@ export function EventosCotizador({
           )}
         </SuiteCard>
       </div>
+    </div>
     </div>
   );
 }

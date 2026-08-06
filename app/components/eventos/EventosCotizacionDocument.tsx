@@ -66,6 +66,7 @@ export function EventosCotizacionDocument({
           recipientPhone={doc.phone}
           shareUrl={shareUrl}
           publicShare={publicShare}
+          cotizacionDoc={doc}
           extra={actionsExtra}
         />
       )}

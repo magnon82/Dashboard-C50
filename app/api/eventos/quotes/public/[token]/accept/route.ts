@@ -6,6 +6,7 @@ import {
   isQuotePaymentMethod,
   type QuotePaymentMethod,
 } from '@/app/lib/eventos-quote-payment';
+import { allowPublicQuoteRequest } from '@/app/lib/public-quote-rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,13 @@ const MISSING_ACCEPT_COLS =
  * Aceptación pública (sin sesión): status → aceptada + método de pago.
  */
 export async function POST(request: Request, ctx: RouteCtx) {
+  if (!allowPublicQuoteRequest(request)) {
+    return NextResponse.json(
+      { error: 'Demasiadas solicitudes. Intenta en un minuto.' },
+      { status: 429 }
+    );
+  }
+
   const { token: raw } = await ctx.params;
   const token = decodeURIComponent(raw || '').trim();
   if (!token || token.length < 16) {

@@ -1,5 +1,5 @@
 /**
- * Modelo de documento de cotización presentable (HTML / impresión PDF).
+ * Modelo de documento de cotización presentable (HTML / PDF descargable).
  */
 
 import {
