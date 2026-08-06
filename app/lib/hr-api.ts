@@ -5,6 +5,7 @@ import {
   canAccessAdmin,
   canAccessModule,
   canEditHrEmployees,
+  canEditHrSchedules,
   verifySessionToken,
   type SessionUser,
 } from '@/app/lib/auth';
@@ -88,6 +89,36 @@ export function requireRrhhEmployeesWrite(
   if (!canEditHrEmployees(session)) {
     return NextResponse.json(
       { error: 'Sin permiso de edición de empleados' },
+      { status: 403 }
+    );
+  }
+  return null;
+}
+
+/**
+ * Lectura/edición de horarios: módulo `rrhh` o palomita `rrhh.schedules_edit`.
+ * Misma fuente de verdad que /rrhh → Horarios (APIs /api/hr/schedules*).
+ */
+export async function requireSchedulesSession(): Promise<
+  SessionUser | NextResponse
+> {
+  const session = await readSession();
+  if (session instanceof NextResponse) return session;
+  if (!canEditHrSchedules(session)) {
+    return NextResponse.json(
+      { error: 'Sin permiso para editar horarios' },
+      { status: 403 }
+    );
+  }
+  return session;
+}
+
+export function requireSchedulesWrite(
+  session: SessionUser
+): NextResponse | null {
+  if (!canEditHrSchedules(session)) {
+    return NextResponse.json(
+      { error: 'Sin permiso de edición de horarios' },
       { status: 403 }
     );
   }

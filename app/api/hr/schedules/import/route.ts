@@ -11,8 +11,8 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
   hrSchemaMissing,
-  requireRrhhSession,
-  requireRrhhWrite,
+  requireSchedulesSession,
+  requireSchedulesWrite,
 } from '@/app/lib/hr-api';
 import {
   summarizeHorariosWorkbook,
@@ -57,7 +57,7 @@ async function dirOk(): Promise<boolean> {
  * GET — lista archivos locales de horarios (sin rutas).
  */
 export async function GET() {
-  const auth = await requireRrhhSession();
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
 
   try {
@@ -118,9 +118,9 @@ export async function GET() {
  *   replace?: true, refreshExisting?: true, createMissing?: true }
  */
 export async function POST(request: Request) {
-  const auth = await requireRrhhSession();
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
-  const denied = requireRrhhWrite(auth);
+  const denied = requireSchedulesWrite(auth);
   if (denied) return denied;
 
   let body: Record<string, unknown>;

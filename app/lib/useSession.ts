@@ -11,6 +11,7 @@ export interface ClientSession {
   canAccessAdmin: boolean;
   canAccessStaffCorte?: boolean;
   canEditHrEmployees?: boolean;
+  canEditHrSchedules?: boolean;
 }
 
 export function useSession() {
@@ -53,4 +54,13 @@ export function canEditEmployees(user: ClientSession | null): boolean {
   if (user.role === 'admin' || user.modules.includes('*')) return true;
   if (user.canEditHrEmployees) return true;
   return (user.capabilities || []).includes('rrhh.employees_edit');
+}
+
+/** Edición de horarios desde Staff o RR.HH. (módulo rrhh o palomita). */
+export function canEditSchedules(user: ClientSession | null): boolean {
+  if (!user) return false;
+  if (user.role === 'admin' || user.modules.includes('*')) return true;
+  if (user.canEditHrSchedules) return true;
+  if (user.modules.includes('rrhh')) return true;
+  return (user.capabilities || []).includes('rrhh.schedules_edit');
 }

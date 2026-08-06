@@ -6,6 +6,7 @@ import {
   canAccessAdmin,
   canAccessStaffCorte,
   canEditHrEmployees,
+  canEditHrSchedules,
 } from '@/app/lib/auth';
 
 export async function GET() {
@@ -28,6 +29,7 @@ export async function GET() {
       canAccessAdmin: canAccessAdmin(session),
       canAccessStaffCorte: canAccessStaffCorte(session),
       canEditHrEmployees: canEditHrEmployees(session),
+      canEditHrSchedules: canEditHrSchedules(session),
     },
   });
 }

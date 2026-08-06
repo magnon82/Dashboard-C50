@@ -4,6 +4,7 @@ import {
   hrSchemaMissing,
   requireRrhhSession,
   requireRrhhEmployeesWrite,
+  requireSchedulesSession,
 } from '@/app/lib/hr-api';
 import {
   formatEmployeeAreas,
@@ -185,7 +186,8 @@ function withTimeout<T>(
  *   (TTL 5 min; timeout 6s; sin OCR de expedientes).
  */
 export async function GET(request: Request) {
-  const auth = await requireRrhhSession();
+  // Lectura para RR.HH. y editores de horarios (Staff con palomita).
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
 
   const url = new URL(request.url);

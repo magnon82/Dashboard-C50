@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
   hrSchemaMissing,
-  requireRrhhSession,
-  requireRrhhWrite,
+  requireSchedulesSession,
+  requireSchedulesWrite,
 } from '@/app/lib/hr-api';
 import {
   isCurrentScheduleWeek,
@@ -66,7 +66,7 @@ type Ctx = { params: Promise<{ weekId: string }> };
  * GET /api/hr/schedules/[weekId]
  */
 export async function GET(_request: Request, ctx: Ctx) {
-  const auth = await requireRrhhSession();
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
 
   const { weekId } = await ctx.params;
@@ -158,9 +158,9 @@ export async function GET(_request: Request, ctx: Ctx) {
  * Si `shifts` viene, reemplaza todos los turnos de la semana.
  */
 export async function PATCH(request: Request, ctx: Ctx) {
-  const auth = await requireRrhhSession();
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
-  const denied = requireRrhhWrite(auth);
+  const denied = requireSchedulesWrite(auth);
   if (denied) return denied;
 
   const { weekId } = await ctx.params;
@@ -455,9 +455,9 @@ export async function PATCH(request: Request, ctx: Ctx) {
  * DELETE /api/hr/schedules/[weekId] — solo propuesta/borrador.
  */
 export async function DELETE(_request: Request, ctx: Ctx) {
-  const auth = await requireRrhhSession();
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
-  const denied = requireRrhhWrite(auth);
+  const denied = requireSchedulesWrite(auth);
   if (denied) return denied;
 
   const { weekId } = await ctx.params;

@@ -214,3 +214,13 @@ export function canEditHrEmployees(session: SessionUser): boolean {
   if (session.role === 'admin' || session.modules.includes('*')) return true;
   return sessionHasCapability(session, 'rrhh.employees_edit');
 }
+
+/**
+ * Crear / editar horarios (RR.HH. → Horarios o Staff → Horarios editar).
+ * Admin implícito; módulo `rrhh`; o palomita `rrhh.schedules_edit` en Master.
+ */
+export function canEditHrSchedules(session: SessionUser): boolean {
+  if (session.role === 'admin' || session.modules.includes('*')) return true;
+  if (canAccessModule(session, 'rrhh')) return true;
+  return sessionHasCapability(session, 'rrhh.schedules_edit');
+}

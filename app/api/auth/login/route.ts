@@ -5,6 +5,7 @@ import {
   canAccessAdmin,
   canAccessStaffCorte,
   canEditHrEmployees,
+  canEditHrSchedules,
   createSessionToken,
   getDashboardPassword,
   getDashboardUser,
@@ -107,6 +108,7 @@ export async function POST(request: Request) {
       canAccessAdmin: canAccessAdmin(session),
       canAccessStaffCorte: canAccessStaffCorte(session),
       canEditHrEmployees: canEditHrEmployees(session),
+      canEditHrSchedules: canEditHrSchedules(session),
     },
   });
   response.cookies.set(SESSION_COOKIE, token, {

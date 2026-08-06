@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
   hrSchemaMissing,
-  requireRrhhSession,
-  requireRrhhWrite,
+  requireSchedulesSession,
+  requireSchedulesWrite,
 } from '@/app/lib/hr-api';
 import { addIsoDays, type HrScheduleStatus, type HrScheduleWeek } from '@/app/lib/hr';
 import {
@@ -66,7 +66,7 @@ function mapShiftOut(raw: Record<string, unknown>) {
  * ?limit=&offset= — paginación (default limit 500)
  */
 export async function GET(request: Request) {
-  const auth = await requireRrhhSession();
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
 
   const url = new URL(request.url);
@@ -232,9 +232,9 @@ export async function GET(request: Request) {
  * (copy_previous default true; false = semana vacía)
  */
 export async function POST(request: Request) {
-  const auth = await requireRrhhSession();
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
-  const denied = requireRrhhWrite(auth);
+  const denied = requireSchedulesWrite(auth);
   if (denied) return denied;
 
   let body: Record<string, unknown>;

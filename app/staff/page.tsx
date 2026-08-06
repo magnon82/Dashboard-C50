@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
-import { useSession } from '@/app/lib/useSession';
+import { canEditSchedules, useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -11,6 +11,7 @@ const theme = getTheme('suite');
 export default function StaffPage() {
   const { user, loading } = useSession();
   const showCorte = Boolean(user?.canAccessStaffCorte);
+  const canEditHorarios = canEditSchedules(user);
   const [pendingResguardos, setPendingResguardos] = useState<number | null>(
     null
   );
@@ -124,29 +125,33 @@ export default function StaffPage() {
           >
             <div className="flex items-start justify-between gap-3">
               <h2 className="text-lg font-bold" style={{ color: SUITE.navy }}>
-                Mi horario
+                {canEditHorarios ? 'Horarios' : 'Mi horario'}
               </h2>
               <span
                 className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                 style={{
-                  backgroundColor: SUITE.orangeSoft,
-                  color: SUITE.navy,
+                  backgroundColor: canEditHorarios
+                    ? SUITE.navy
+                    : SUITE.orangeSoft,
+                  color: canEditHorarios ? '#fff' : SUITE.navy,
                 }}
               >
-                En curso + próxima
+                {canEditHorarios ? 'Editar' : 'En curso + próxima'}
               </span>
             </div>
             <p
               className="mt-3 text-sm leading-relaxed"
               style={{ color: SUITE.muted }}
             >
-              Semana de horario en curso y la próxima si RH ya la publicó
+              {canEditHorarios
+                ? 'Crear y editar semanas con las mismas herramientas que RR.HH. → Horarios'
+                : 'Semana de horario en curso y la próxima si RH ya la publicó'}
             </p>
             <p
               className="mt-5 text-sm font-bold"
               style={{ color: SUITE.orangeDeep }}
             >
-              Ver horario →
+              {canEditHorarios ? 'Abrir editor →' : 'Ver horario →'}
             </p>
           </SuiteCard>
         </Link>

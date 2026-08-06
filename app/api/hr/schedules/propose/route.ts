@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
   hrSchemaMissing,
-  requireRrhhSession,
-  requireRrhhWrite,
+  requireSchedulesSession,
+  requireSchedulesWrite,
 } from '@/app/lib/hr-api';
 import type { ProposeEmployee } from '@/app/lib/hr-schedule-propose';
 import {
@@ -26,9 +26,9 @@ export const dynamic = 'force-dynamic';
  * Genera semana status=propuesta a partir de plantilla + histórico − disponibilidad/leave.
  */
 export async function POST(request: Request) {
-  const auth = await requireRrhhSession();
+  const auth = await requireSchedulesSession();
   if (auth instanceof NextResponse) return auth;
-  const denied = requireRrhhWrite(auth);
+  const denied = requireSchedulesWrite(auth);
   if (denied) return denied;
 
   let body: Record<string, unknown>;

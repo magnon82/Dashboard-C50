@@ -4,7 +4,10 @@
  * Ampliar aquí cuando Master agregue más «palomitas».
  */
 
-export type CapabilityId = 'staff.corte' | 'rrhh.employees_edit';
+export type CapabilityId =
+  | 'staff.corte'
+  | 'rrhh.employees_edit'
+  | 'rrhh.schedules_edit';
 
 export type AppCapability = {
   id: CapabilityId;
@@ -24,6 +27,12 @@ export const APP_CAPABILITIES: AppCapability[] = [
     id: 'rrhh.employees_edit',
     label: 'Edición de empleados',
     hint: 'RR.HH. · Alta, baja y editar ficha / perfil de colaboradores',
+  },
+  {
+    id: 'rrhh.schedules_edit',
+    label: 'Edición de horarios',
+    hint:
+      'Staff · Crear y editar semanas de horario (misma herramienta que RR.HH. → Horarios). También aplica con módulo Recursos Humanos.',
   },
 ];
 
