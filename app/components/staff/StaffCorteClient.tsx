@@ -109,7 +109,7 @@ type DayPayload = {
   eventosDelDia?: {
     hasEvent: boolean;
     hasDigitalOs?: boolean;
-    /** Sum of OS subtotals (Global VENTA). Null if no digital OS. */
+    /** OS subtotals sum, or 0 when there is no digital OS / no event. */
     suggestedOsAmount?: number | null;
     suggestedOsLabel?: string | null;
     items: Array<{
@@ -366,9 +366,9 @@ export function StaffCorteClient() {
       const eventosHint = (data as DayPayload).eventosDelDia;
       const suggestedOs =
         eventosHint?.suggestedOsAmount != null &&
-        Number.isFinite(eventosHint.suggestedOsAmount)
+        Number.isFinite(Number(eventosHint.suggestedOsAmount))
           ? Number(eventosHint.suggestedOsAmount)
-          : null;
+          : 0;
       if (rpt) {
         setWi(String(rpt.wi_amount ?? ''));
         setEventosOs(String(rpt.eventos_os_amount ?? rpt.eventos_amount ?? ''));
@@ -383,11 +383,9 @@ export function StaffCorteClient() {
         setNotes(rpt.notes || '');
       } else {
         setWi('');
-        // Prefill OS venta from digital OS subtotal(s); never invent if missing.
-        setEventosOs(
-          suggestedOs != null ? formatOsSuggestInput(suggestedOs) : ''
-        );
-        setEventosExtra(eventosHint?.hasEvent ? '0' : '');
+        // Prefill: OS digital → subtotal(s); sin evento / sin OS → $0.
+        setEventosOs(formatOsSuggestInput(suggestedOs));
+        setEventosExtra('0');
         setEfectivoContado('');
         setNotes('');
       }
@@ -666,24 +664,26 @@ export function StaffCorteClient() {
         setError('Indica la venta extra del evento (0 si no hubo)');
         return;
       }
-      if (hasEventosHoy) {
+      const osDiffers =
+        Math.abs(osNum - suggestedOsAmount) > OS_SUGGEST_TOLERANCE_MXN;
+      if (hasEventosHoy || osNum !== 0 || extraNum !== 0 || osDiffers) {
         const osConfirmLines = [
           `¿Confirmas el monto de la orden de servicio (VENTA)?`,
           '',
           moneyMx(osNum),
+          '',
+          `Sugerido: ${moneyMx(suggestedOsAmount)}`,
         ];
-        if (suggestedOsAmount != null) {
+        if (hasDigitalOs && osDiffers) {
           osConfirmLines.push(
-            '',
-            `Sugerido por OS digital: ${moneyMx(suggestedOsAmount)}`
+            '(No coincide con la venta de la orden de servicio)'
           );
-          if (Math.abs(osNum - suggestedOsAmount) > OS_SUGGEST_TOLERANCE_MXN) {
-            osConfirmLines.push(
-              '(No coincide con la venta de la orden de servicio)'
-            );
-          }
-        } else {
-          osConfirmLines.push('', 'Sin OS digital — monto capturado a mano.');
+        } else if (!hasDigitalOs && osDiffers) {
+          osConfirmLines.push(
+            hasEventosHoy
+              ? '(No hay orden de servicio digital para esta fecha)'
+              : '(Sin evento / OS registrada — el sugerido es $0)'
+          );
         }
         if (!confirm(osConfirmLines.join('\n'))) {
           return;
@@ -769,20 +769,32 @@ export function StaffCorteClient() {
 
   const eventosDelDia = payload?.eventosDelDia;
   const hasEventosHoy = Boolean(eventosDelDia?.hasEvent);
+  const hasDigitalOs = Boolean(eventosDelDia?.hasDigitalOs);
   const suggestedOsAmount =
     eventosDelDia?.suggestedOsAmount != null &&
-    Number.isFinite(eventosDelDia.suggestedOsAmount)
+    Number.isFinite(Number(eventosDelDia.suggestedOsAmount))
       ? Number(eventosDelDia.suggestedOsAmount)
-      : null;
-  const hasDigitalOs = Boolean(eventosDelDia?.hasDigitalOs);
+      : 0;
   const eventosOsNum = parseMoneyInput(eventosOs === '' ? '0' : eventosOs) ?? 0;
   const eventosExtraNum =
     parseMoneyInput(eventosExtra === '' ? '0' : eventosExtra) ?? 0;
   const eventosTotalNum = Math.round((eventosOsNum + eventosExtraNum) * 100) / 100;
   const eventosOsMismatch =
-    hasEventosHoy &&
-    suggestedOsAmount != null &&
     Math.abs(eventosOsNum - suggestedOsAmount) > OS_SUGGEST_TOLERANCE_MXN;
+  const eventosExtraMismatch =
+    Math.abs(eventosExtraNum - 0) > OS_SUGGEST_TOLERANCE_MXN && !hasEventosHoy;
+  const eventosOsWarnMessage = !eventosOsMismatch
+    ? null
+    : hasDigitalOs
+      ? `No coincide con la venta de la orden de servicio (${moneyMx(suggestedOsAmount)}).`
+      : hasEventosHoy
+        ? 'No hay orden de servicio digital para esta fecha (sugerido $0). Genera o vincula la OS en Eventos para prellenar.'
+        : 'Sin evento / OS registrada — el sugerido es $0.';
+  const eventosOsHint = eventosOsWarnMessage
+    ? eventosOsWarnMessage
+    : hasDigitalOs
+      ? `Sugerido: ${moneyMx(suggestedOsAmount)} — confirma el monto`
+      : 'Sugerido: $0 — confirma o edita si hace falta';
 
   const liveCashDelta = (() => {
     if (!efectivoContado.trim() || esperadoTombola == null) return null;
@@ -1452,26 +1464,26 @@ export function StaffCorteClient() {
             required
             hint="Venta WI del día"
           />
-          {!hasEventosHoy ? (
-            <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm">
-              <p className="font-semibold text-slate-700">Eventos</p>
-              <p className="mt-1 text-lg font-bold" style={{ color: SUITE.navy }}>
-                {moneyMx(0)}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Sin evento registrado para esta fecha (OS / Global). Se cierra en
-                $0.
-              </p>
-            </div>
-          ) : null}
+          <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm sm:bg-transparent sm:px-0 sm:py-0">
+            <p className="font-semibold text-slate-700 sm:hidden">Eventos</p>
+            <p className="mt-1 text-xs text-slate-500 sm:mt-0">
+              {hasEventosHoy
+                ? hasDigitalOs
+                  ? `Evento con OS digital · sugerido ${moneyMx(suggestedOsAmount)}`
+                  : 'Evento sin OS digital · sugerido $0'
+                : 'Sin evento registrado · sugerido $0 (editable)'}
+            </p>
+          </div>
         </div>
 
-        {hasEventosHoy ? (
-          <div className="space-y-3 rounded-xl border border-slate-200 px-3 py-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-800">
-                Evento del día · como Global
-              </p>
+        <div className="space-y-3 rounded-xl border border-slate-200 px-3 py-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">
+              {hasEventosHoy
+                ? 'Evento del día · como Global'
+                : 'Eventos (VENTA)'}
+            </p>
+            {hasEventosHoy ? (
               <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-slate-500">
                 {(eventosDelDia?.items || []).slice(0, 4).map((it) => {
                   const displayVenta =
@@ -1495,65 +1507,68 @@ export function StaffCorteClient() {
                   );
                 })}
               </ul>
-              {!hasDigitalOs ? (
-                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-950">
-                  Sin OS digital para esta fecha. Captura el monto de VENTA a
-                  mano (no hay sugerencia automática). Genera o vincula la OS
-                  en Eventos para prellenar.
-                </p>
-              ) : suggestedOsAmount != null ? (
-                <p className="mt-2 text-xs text-slate-500">
-                  Sugerido OS (VENTA)
-                  {eventosDelDia?.suggestedOsLabel
-                    ? ` · ${eventosDelDia.suggestedOsLabel}`
-                    : ''}
-                  :{' '}
-                  <span className="font-semibold text-slate-700">
-                    {moneyMx(suggestedOsAmount)}
-                  </span>
-                  . Confirma o edita si hace falta.
-                </p>
-              ) : null}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <MoneyInput
-                label="Orden de servicio (VENTA)"
-                value={eventosOs}
-                onChange={setEventosOs}
-                required
-                warn={eventosOsMismatch}
-                hint={
-                  eventosOsMismatch && suggestedOsAmount != null
-                    ? `No coincide con la venta de la orden de servicio (${moneyMx(suggestedOsAmount)})`
-                    : suggestedOsAmount != null
-                      ? `Sugerido: ${moneyMx(suggestedOsAmount)} — confirma el monto`
-                      : 'Confirma el monto de la OS (sin sugerencia digital)'
-                }
-              />
-              <MoneyInput
-                label="Venta extra del evento"
-                value={eventosExtra}
-                onChange={setEventosExtra}
-                required
-                hint="0 si no hubo venta extra"
-              />
-            </div>
-            {eventosOsMismatch && suggestedOsAmount != null ? (
-              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
-                No coincide con la venta de la orden de servicio (
-                {moneyMx(suggestedOsAmount)}
-                ). Puedes guardar el monto editado; solo es una alerta.
+            ) : (
+              <p className="mt-1 text-xs text-slate-500">
+                No hay OS / Global para esta fecha. Se sugiere $0; puedes
+                capturar un monto si aplica.
+              </p>
+            )}
+            {hasDigitalOs ? (
+              <p className="mt-2 text-xs text-slate-500">
+                Sugerido OS (VENTA)
+                {eventosDelDia?.suggestedOsLabel
+                  ? ` · ${eventosDelDia.suggestedOsLabel}`
+                  : ''}
+                :{' '}
+                <span className="font-semibold text-slate-700">
+                  {moneyMx(suggestedOsAmount)}
+                </span>
+                . Confirma o edita si hace falta.
               </p>
             ) : null}
-            <p className="text-sm text-slate-600">
-              Total eventos:{' '}
-              <strong style={{ color: SUITE.navy }}>
-                {moneyMx(eventosTotalNum)}
-              </strong>{' '}
-              <span className="text-xs text-slate-400">(OS + extra)</span>
-            </p>
           </div>
-        ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MoneyInput
+              label="Orden de servicio (VENTA)"
+              value={eventosOs}
+              onChange={setEventosOs}
+              required
+              warn={eventosOsMismatch}
+              hint={eventosOsHint}
+            />
+            <MoneyInput
+              label="Venta extra del evento"
+              value={eventosExtra}
+              onChange={setEventosExtra}
+              required
+              warn={eventosExtraMismatch}
+              hint={
+                eventosExtraMismatch
+                  ? 'Sin evento registrado — el sugerido es $0'
+                  : '0 si no hubo venta extra'
+              }
+            />
+          </div>
+          {eventosOsWarnMessage ? (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+              {eventosOsWarnMessage} Puedes guardar el monto editado; solo es
+              una alerta.
+            </p>
+          ) : null}
+          {eventosExtraMismatch ? (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+              Venta extra distinta de $0 sin evento registrado. Puedes guardar;
+              solo es una alerta.
+            </p>
+          ) : null}
+          <p className="text-sm text-slate-600">
+            Total eventos:{' '}
+            <strong style={{ color: SUITE.navy }}>
+              {moneyMx(eventosTotalNum)}
+            </strong>{' '}
+            <span className="text-xs text-slate-400">(OS + extra)</span>
+          </p>
+        </div>
 
         <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm">
           <p className="font-semibold text-slate-700">Propinas (tickets TPV)</p>

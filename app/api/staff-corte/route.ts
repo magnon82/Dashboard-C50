@@ -50,10 +50,11 @@ type EventosDelDiaPayload = {
   /** True when at least one digital OS exists for the day. */
   hasDigitalOs: boolean;
   /**
-   * Sum of OS subtotals (Global VENTA). Null when there is no digital OS —
-   * do not invent amounts from financial/Global alone.
+   * Suggested Global VENTA for corte:
+   * - digital OS present → sum of OS subtotals
+   * - otherwise → 0 (no inventar importes; staff puede editar)
    */
-  suggestedOsAmount: number | null;
+  suggestedOsAmount: number;
   /** Short label for UI (client / OS numbers). */
   suggestedOsLabel: string | null;
   items: EventoDelDia[];
@@ -138,7 +139,8 @@ async function loadEventosDelDia(
   return {
     hasEvent: items.length > 0,
     hasDigitalOs,
-    suggestedOsAmount: hasDigitalOs ? suggestedOsSum : null,
+    // Sin OS digital: sugerir $0 (editable; alerta en UI si capturan otro monto).
+    suggestedOsAmount: hasDigitalOs ? suggestedOsSum : 0,
     suggestedOsLabel: hasDigitalOs
       ? labelParts.slice(0, 3).join(' · ') || null
       : null,
