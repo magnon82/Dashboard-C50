@@ -28,6 +28,28 @@ import { SUITE } from '@/app/lib/themes';
 
 type Tab = 'captura' | 'revisar';
 
+function parseManualAmount(raw: string): number | null {
+  const n = Number(String(raw).trim().replace(/,/g, ''));
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function confirmTerminalAmount(
+  kind: TpvPhotoKind,
+  terminal: TpvTerminalNumber,
+  amount: number
+): boolean {
+  const formatted = moneyMx(amount);
+  if (kind === 'venta') {
+    return confirm(
+      `¿Este es el monto cobrado en la terminal ${terminal}?\n\n${formatted}`
+    );
+  }
+  return confirm(
+    `¿Este es el monto de propinas cobrado con la terminal ${terminal}?\n\n${formatted}`
+  );
+}
+
 function statusLabel(
   slot: {
     state: string;
@@ -85,6 +107,7 @@ export function TpvCorteClient() {
     height: number;
     sharpness: number;
   } | null>(null);
+  const [pendingAmount, setPendingAmount] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [verify, setVerify] = useState<TpvWeekVerify | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -166,6 +189,7 @@ export function TpvCorteClient() {
     if (preview) URL.revokeObjectURL(preview);
     setPreview(null);
     setPendingFile(null);
+    setPendingAmount('');
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -183,6 +207,7 @@ export function TpvCorteClient() {
         height: prepared.height,
         sharpness: prepared.sharpness,
       });
+      setPendingAmount('');
     } catch (e) {
       setError(
         e instanceof Error
@@ -198,7 +223,17 @@ export function TpvCorteClient() {
       setError('Primero toma o elige la foto del corte.');
       return;
     }
-    // Montos opcionales: el servidor lee el ticket (OCR). Manual solo como respaldo.
+    const amount = parseManualAmount(pendingAmount);
+    if (amount == null) {
+      setError(
+        activeKind === 'venta'
+          ? 'Indica el monto cobrado (número ≥ 0).'
+          : 'Indica el monto de propinas (número ≥ 0; 0 si no hubo).'
+      );
+      return;
+    }
+    if (!confirmTerminalAmount(activeKind, activeTerminal, amount)) return;
+
     setBusyTerminal(activeTerminal);
     setError(null);
     setMsg(null);
@@ -213,14 +248,15 @@ export function TpvCorteClient() {
       fd.set('width_px', String(pendingFile.width));
       fd.set('height_px', String(pendingFile.height));
       fd.set('sharpness', String(pendingFile.sharpness));
+      if (activeKind === 'venta') fd.set('total_cobrado', String(amount));
+      else fd.set('propina', String(amount));
 
       const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
       const json = await readTpvApiJson(res);
       if (!res.ok) {
         setError(
           String(
-            json.error ||
-              'No se pudo leer el ticket. Vuelve a tomar la foto.'
+            json.error || 'No se pudo guardar. Revisa la foto y el monto.'
           )
         );
         return;
@@ -228,26 +264,15 @@ export function TpvCorteClient() {
       clearPending();
       const day = json.day as TpvDayCompleteness | undefined;
       if (day) setDay(day);
-      const ocr = json.ocr as
-        | {
-            status?: string;
-            total_cobrado?: number | null;
-            propina?: number | null;
-          }
-        | undefined;
       const upload = json.upload as TpvCorteUpload | undefined;
-      const ocrBit =
-        ocr?.status === 'done'
-          ? activeKind === 'venta'
-            ? ` · cobrado ${moneyMx(ocr.total_cobrado ?? upload?.total_cobrado)}`
-            : ` · propina ${moneyMx(ocr.propina ?? upload?.propina)}`
-          : '';
+      const amountBit =
+        activeKind === 'venta'
+          ? ` · cobrado ${moneyMx(upload?.total_cobrado ?? amount)}`
+          : ` · propina ${moneyMx(upload?.propina ?? amount)}`;
       setMsg(
-        json.needs_amount === true
-          ? `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada, pero no se pudo leer el monto. Escríbelo con el botón del monto mirando la foto.`
-          : day?.complete
-            ? 'Proceso concluido correctamente. Las 3 terminales ya estan listas.'
-            : `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}.`
+        day?.complete
+          ? 'Proceso concluido correctamente. Las 3 terminales ya estan listas.'
+          : `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${amountBit}.`
       );
       const slotAfter = (day?.slots || []).find(
         (s) => s.terminal === activeTerminal
@@ -307,21 +332,27 @@ export function TpvCorteClient() {
   }
 
   async function saveAmounts(u: TpvCorteUpload) {
-    setBusyTerminal(u.terminal_number);
     setError(null);
     try {
       const kind = u.photo_kind === 'propina' ? 'propina' : 'venta';
       if (kind === 'venta') {
-        const cob = prompt(
-          'Total cobrado (TOTALIZACIÓN)',
+        const cobRaw = prompt(
+          `Monto cobrado en la terminal ${u.terminal_number} — léelo de la foto`,
           String(u.total_cobrado ?? '')
         );
-        if (cob === null) return;
+        if (cobRaw === null) return;
+        const cob = parseManualAmount(cobRaw);
+        if (cob == null) {
+          setError('Total inválido');
+          return;
+        }
+        if (!confirmTerminalAmount('venta', u.terminal_number, cob)) return;
+        setBusyTerminal(u.terminal_number);
         const res = await fetch(`/api/tpv-cortes/${u.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            total_cobrado: cob === '' ? null : Number(cob),
+            total_cobrado: cob,
             status: 'parsed',
           }),
         });
@@ -331,13 +362,23 @@ export function TpvCorteClient() {
           return;
         }
       } else {
-        const tip = prompt('Propina (REPORTE)', String(u.propina ?? '0'));
-        if (tip === null) return;
+        const tipRaw = prompt(
+          `Monto de propinas cobrado con la terminal ${u.terminal_number} — léelo de la foto; 0 si no hubo`,
+          String(u.propina ?? '0')
+        );
+        if (tipRaw === null) return;
+        const tip = parseManualAmount(tipRaw);
+        if (tip == null) {
+          setError('Propina inválida');
+          return;
+        }
+        if (!confirmTerminalAmount('propina', u.terminal_number, tip)) return;
+        setBusyTerminal(u.terminal_number);
         const res = await fetch(`/api/tpv-cortes/${u.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            propina: tip === '' ? 0 : Number(tip),
+            propina: tip,
             status: 'parsed',
           }),
         });
@@ -653,12 +694,30 @@ export function TpvCorteClient() {
                   {pendingFile.width}×{pendingFile.height}px · nitidez{' '}
                   {pendingFile.sharpness.toFixed(0)}
                 </p>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">
+                    {activeKind === 'venta'
+                      ? `Monto cobrado · Terminal ${activeTerminal}`
+                      : `Monto de propinas · Terminal ${activeTerminal}`}
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.01"
+                    value={pendingAmount}
+                    onChange={(e) => setPendingAmount(e.target.value)}
+                    placeholder={
+                      activeKind === 'venta'
+                        ? 'Ej. 6215.00'
+                        : 'Ej. 624.75 (0 si no hubo)'
+                    }
+                    className="min-h-12 w-full rounded-xl border border-slate-300 px-3 text-base font-semibold text-slate-900"
+                  />
+                </label>
                 <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  El monto se lee del ticket al guardar
-                  {activeKind === 'venta'
-                    ? ' (TOTAL GENERAL).'
-                    : ' (total propina).'}{' '}
-                  Si no se entiende, te pedirá volver a tomar la foto.
+                  La foto debe verse nítida. Escribe el monto mirando el ticket;
+                  al guardar te pediremos confirmarlo.
                 </p>
                 <button
                   type="button"
@@ -668,7 +727,7 @@ export function TpvCorteClient() {
                   style={{ backgroundColor: SUITE.navy }}
                 >
                   {busyTerminal === activeTerminal
-                    ? 'Leyendo ticket…'
+                    ? 'Guardando…'
                     : `Guardar ${activeKind === 'venta' ? 'venta' : 'propinas'} · T${activeTerminal}`}
                 </button>
                 <button

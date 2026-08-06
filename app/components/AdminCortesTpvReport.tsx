@@ -427,6 +427,28 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
     setError('');
     setMsg('');
     try {
+      const amountPrompt =
+        kind === 'venta'
+          ? `Monto cobrado en la terminal ${terminal} — léelo de la foto`
+          : `Monto de propinas cobrado con la terminal ${terminal} — léelo de la foto; 0 si no hubo`;
+      const amountRaw = window.prompt(amountPrompt, kind === 'propina' ? '0' : '');
+      if (amountRaw === null) return;
+      const amount = Number(String(amountRaw).trim().replace(/,/g, ''));
+      if (!Number.isFinite(amount) || amount < 0) {
+        setError('Monto inválido');
+        return;
+      }
+      const formatted = moneyMx(amount);
+      const ok =
+        kind === 'venta'
+          ? confirm(
+              `¿Este es el monto cobrado en la terminal ${terminal}?\n\n${formatted}`
+            )
+          : confirm(
+              `¿Este es el monto de propinas cobrado con la terminal ${terminal}?\n\n${formatted}`
+            );
+      if (!ok) return;
+
       const prepared = await prepareTpvPhotoForUpload(file);
       try {
         const fd = new FormData();
@@ -437,6 +459,8 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
         fd.set('width_px', String(prepared.width));
         fd.set('height_px', String(prepared.height));
         fd.set('sharpness', String(prepared.sharpness));
+        if (kind === 'venta') fd.set('total_cobrado', String(amount));
+        else fd.set('propina', String(amount));
         const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
         const json = await readTpvApiJson(res);
         if (!res.ok) {
@@ -444,7 +468,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
           return;
         }
         setMsg(
-          `T${terminal} · ${photoKindLabel(kind)} guardada con OCR (${date}).`
+          `T${terminal} · ${photoKindLabel(kind)} guardada (${formatted}) · ${date}.`
         );
         await refreshExpanded();
       } finally {
@@ -460,21 +484,38 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
   async function editAmount(upload: TpvCorteUpload) {
     const kind = upload.photo_kind === 'propina' ? 'propina' : 'venta';
     const label =
-      kind === 'propina' ? 'Propina (REPORTE)' : 'Total cobrado (TOTALIZACIÓN)';
+      kind === 'propina'
+        ? `Monto de propinas cobrado con la terminal ${upload.terminal_number}`
+        : `Monto cobrado en la terminal ${upload.terminal_number}`;
     const current =
       kind === 'propina'
         ? String(upload.propina ?? '')
         : String(upload.total_cobrado ?? '');
     const raw = window.prompt(label, current);
     if (raw === null) return;
+    const amount = Number(String(raw).trim().replace(/,/g, ''));
+    if (!Number.isFinite(amount) || amount < 0) {
+      setError('Monto inválido');
+      return;
+    }
+    const formatted = moneyMx(amount);
+    const ok =
+      kind === 'venta'
+        ? confirm(
+            `¿Este es el monto cobrado en la terminal ${upload.terminal_number}?\n\n${formatted}`
+          )
+        : confirm(
+            `¿Este es el monto de propinas cobrado con la terminal ${upload.terminal_number}?\n\n${formatted}`
+          );
+    if (!ok) return;
     setBusyKey(upload.id);
     setError('');
     try {
       const body =
         kind === 'propina'
-          ? { propina: raw.trim() === '' ? null : Number(raw), status: 'parsed' }
+          ? { propina: amount, status: 'parsed' }
           : {
-              total_cobrado: raw.trim() === '' ? null : Number(raw),
+              total_cobrado: amount,
               status: 'parsed',
             };
       const res = await fetch(`/api/tpv-cortes/${upload.id}`, {

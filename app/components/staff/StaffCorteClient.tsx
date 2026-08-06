@@ -39,6 +39,28 @@ type PendingFile = {
   sharpness: number;
 };
 
+function parseManualAmount(raw: string): number | null {
+  const n = Number(String(raw).trim().replace(/,/g, ''));
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function confirmTerminalAmount(
+  kind: TpvPhotoKind,
+  terminal: TpvTerminalNumber,
+  amount: number
+): boolean {
+  const formatted = moneyMx(amount);
+  if (kind === 'venta') {
+    return confirm(
+      `¿Este es el monto cobrado en la terminal ${terminal}?\n\n${formatted}`
+    );
+  }
+  return confirm(
+    `¿Este es el monto de propinas cobrado con la terminal ${terminal}?\n\n${formatted}`
+  );
+}
+
 type DayWindowSummary = {
   date: string;
   closeSaved: boolean;
@@ -189,6 +211,7 @@ export function StaffCorteClient() {
   const [activeTerminal, setActiveTerminal] = useState<TpvTerminalNumber>(1);
   const [activeKind, setActiveKind] = useState<TpvPhotoKind>('venta');
   const [pending, setPending] = useState<PendingFile | null>(null);
+  const [pendingAmount, setPendingAmount] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [wi, setWi] = useState('');
@@ -333,6 +356,7 @@ export function StaffCorteClient() {
   function clearPending() {
     if (pending?.previewUrl) URL.revokeObjectURL(pending.previewUrl);
     setPending(null);
+    setPendingAmount('');
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -381,6 +405,7 @@ export function StaffCorteClient() {
         height: prepared.height,
         sharpness: prepared.sharpness,
       });
+      setPendingAmount('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo validar la foto');
     }
@@ -388,6 +413,17 @@ export function StaffCorteClient() {
 
   async function submitPhoto() {
     if (!pending) return;
+
+    const amount = parseManualAmount(pendingAmount);
+    if (amount == null) {
+      setError(
+        activeKind === 'venta'
+          ? 'Indica el monto cobrado (número ≥ 0).'
+          : 'Indica el monto de propinas (número ≥ 0; 0 si no hubo).'
+      );
+      return;
+    }
+    if (!confirmTerminalAmount(activeKind, activeTerminal, amount)) return;
 
     setBusy(`t${activeTerminal}-${activeKind}`);
     setError(null);
@@ -401,6 +437,8 @@ export function StaffCorteClient() {
       fd.set('width_px', String(pending.width));
       fd.set('height_px', String(pending.height));
       fd.set('sharpness', String(pending.sharpness));
+      if (activeKind === 'venta') fd.set('total_cobrado', String(amount));
+      else fd.set('propina', String(amount));
 
       const res = await fetch('/api/tpv-cortes', { method: 'POST', body: fd });
       const data = await readTpvApiJson(res);
@@ -409,30 +447,19 @@ export function StaffCorteClient() {
           String(
             data.error ||
               data.hint ||
-              'No se pudo leer el ticket. Vuelve a tomar la foto.'
+              'No se pudo guardar. Revisa la foto y el monto.'
           )
         );
         return;
       }
       clearPending();
-      const ocr = data.ocr as
-        | {
-            status?: string;
-            total_cobrado?: number | null;
-            propina?: number | null;
-          }
-        | undefined;
       const upload = data.upload as TpvCorteUpload | undefined;
-      const ocrBit =
-        ocr?.status === 'done'
-          ? activeKind === 'venta'
-            ? ` · ${moneyMx(ocr.total_cobrado ?? upload?.total_cobrado)}`
-            : ` · propina ${moneyMx(ocr.propina ?? upload?.propina)}`
-          : '';
+      const amountBit =
+        activeKind === 'venta'
+          ? ` · ${moneyMx(upload?.total_cobrado ?? amount)}`
+          : ` · propina ${moneyMx(upload?.propina ?? amount)}`;
       setMsg(
-        data.needs_amount === true
-          ? `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada, pero no se pudo leer el monto. Toca «Corregir monto» y escríbelo mirando la foto.`
-          : `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${ocrBit}`
+        `T${activeTerminal} · ${photoKindLabel(activeKind)} guardada${amountBit}`
       );
       await refresh();
       const day = data.day as
@@ -498,15 +525,16 @@ export function StaffCorteClient() {
     const kind = u.photo_kind === 'propina' ? 'propina' : 'venta';
     if (kind === 'venta') {
       const cobStr = prompt(
-        'Total ventas (TOTALIZACIÓN) — léelo de la foto',
+        `Monto cobrado en la terminal ${u.terminal_number} — léelo de la foto`,
         String(u.total_cobrado ?? '')
       );
       if (cobStr == null) return;
-      const cob = cobStr.trim() === '' ? null : Number(cobStr.replace(/,/g, ''));
-      if (cob == null || !Number.isFinite(cob) || cob < 0) {
+      const cob = parseManualAmount(cobStr);
+      if (cob == null) {
         setError('Total inválido');
         return;
       }
+      if (!confirmTerminalAmount('venta', u.terminal_number, cob)) return;
       setBusy(`a${u.id}`);
       try {
         const res = await fetch(`/api/tpv-cortes/${u.id}`, {
@@ -533,15 +561,16 @@ export function StaffCorteClient() {
     }
 
     const tipStr = prompt(
-      'Propinas (REPORTE DE PROPINAS) — léelas de la foto; 0 si no hay',
+      `Monto de propinas cobrado con la terminal ${u.terminal_number} — léelo de la foto; 0 si no hubo`,
       String(u.propina ?? '0')
     );
     if (tipStr == null) return;
-    const tip = tipStr.trim() === '' ? 0 : Number(tipStr.replace(/,/g, ''));
-    if (!Number.isFinite(tip) || tip < 0) {
+    const tip = parseManualAmount(tipStr);
+    if (tip == null) {
       setError('Propina inválida');
       return;
     }
+    if (!confirmTerminalAmount('propina', u.terminal_number, tip)) return;
     setBusy(`a${u.id}`);
     try {
       const res = await fetch(`/api/tpv-cortes/${u.id}`, {
@@ -894,8 +923,8 @@ export function StaffCorteClient() {
           </p>
         ) : (
           <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            1) Por terminal: foto venta (Totalización) + foto propinas, o «no se
-            usó» → 2) Cierre
+            1) Por terminal: foto nítida + monto manual (venta y propinas), o «no
+            se usó» → 2) Cierre
           </p>
         )}
       </section>
@@ -1026,7 +1055,8 @@ export function StaffCorteClient() {
               </p>
               <p className="mt-1 text-sm text-slate-500">
                 Dos fotos por terminal: <strong>Totalización</strong> (cobrado) y{' '}
-                <strong>Reporte de propinas</strong>. O marca «No se utilizó».
+                <strong>Reporte de propinas</strong>, con el monto escrito a mano.
+                O marca «No se utilizó».
               </p>
 
               <Link
@@ -1182,10 +1212,31 @@ export function StaffCorteClient() {
                     {pending.sharpness.toFixed(0)} (mín. {TPV_MIN_SHARPNESS} ·
                     lado ≥{TPV_MIN_LONG_SIDE})
                   </p>
+                  <label className="block space-y-1">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {activeKind === 'venta'
+                        ? `Monto cobrado · Terminal ${activeTerminal}`
+                        : `Monto de propinas · Terminal ${activeTerminal}`}
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.01"
+                      value={pendingAmount}
+                      onChange={(e) => setPendingAmount(e.target.value)}
+                      placeholder={
+                        activeKind === 'venta'
+                          ? 'Ej. 6215.00'
+                          : 'Ej. 624.75 (0 si no hubo)'
+                      }
+                      className="min-h-12 w-full rounded-xl border border-slate-300 px-3 text-base font-semibold text-slate-900"
+                    />
+                  </label>
                   <p className="rounded-xl bg-sky-50 px-3 py-2 text-sm text-sky-950">
-                    {activeKind === 'venta'
-                      ? 'El monto se lee del ticket (TOTAL GENERAL) al guardar. Si no se entiende, vuelve a tomar la foto.'
-                      : 'La propina se lee del reporte al guardar. Si no se entiende, vuelve a tomar la foto.'}
+                    La foto debe verse nítida (candado de nitidez). El monto se
+                    escribe a mano mirando el ticket; al guardar te pediremos
+                    confirmarlo.
                   </p>
                   <button
                     type="button"
@@ -1195,7 +1246,7 @@ export function StaffCorteClient() {
                     style={{ backgroundColor: SUITE.navy }}
                   >
                     {busy === `t${activeTerminal}-${activeKind}`
-                      ? 'Leyendo ticket…'
+                      ? 'Guardando…'
                       : `Guardar ${activeKind === 'venta' ? 'venta' : 'propinas'} · T${activeTerminal}`}
                   </button>
                   <button

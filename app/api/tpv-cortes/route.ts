@@ -33,20 +33,10 @@ import {
   STAFF_RPT_TABLE,
   asStaffRptRow,
 } from '@/app/lib/staff-rpt';
-import {
-  TPV_OCR_RETAKE_MSG,
-  TPV_OCR_UNAVAILABLE_MSG,
-  amountsFromOcr,
-  isTpvPhotoUnreadable,
-  decodeTicketTotalFromOcrText,
-  reconcilePairAmounts,
-  runTpvOcr,
-} from '@/app/lib/tpv-ocr';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-/** OCR multipass puede tardar en CPU local */
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 const ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -119,8 +109,8 @@ async function deleteExistingForPhotoKind(
 }
 
 /**
- * Tras tener venta + propina: cobrado = ticket_total − propina;
- * neto banco = cobrado + propinas (depósito).
+ * Tras tener venta + propina con montos manuales:
+ * neto banco = cobrado + propinas (depósito). No reescribe el cobrado tecleado.
  */
 async function reconcileTerminalAfterUpload(
   sb: ReturnType<typeof getServiceSupabase>,
@@ -140,42 +130,20 @@ async function reconcileTerminalAfterUpload(
   const propinaRow = rows.find((r) => r.photo_kind === 'propina') || null;
   if (!venta || !propinaRow) return;
 
+  const cobrado = venta.total_cobrado;
   const tip = propinaRow.propina;
-  if (tip == null) return;
-
-  const ticketFromMeta = decodeTicketTotalFromOcrText(venta.ocr_text);
-  const consumoFromMeta = (() => {
-    const m = propinaRow.ocr_text?.match(/consumo=([\d.]+)/);
-    return m ? Number(m[1]) : null;
-  })();
-
-  const reconciled = reconcilePairAmounts({
-    ventaTicketTotal: ticketFromMeta ?? venta.neto_banco,
-    ventaCobrado: venta.total_cobrado,
-    propinaAmount: tip,
-    propinaConsumo: Number.isFinite(consumoFromMeta) ? consumoFromMeta : null,
-  });
-  if (!reconciled) return;
+  const neto = computeNetoBanco(cobrado, tip);
+  if (neto == null) return;
 
   const now = new Date().toISOString();
   await sb
     .from('tpv_corte_uploads')
-    .update({
-      total_cobrado: reconciled.cobrado,
-      neto_banco: reconciled.neto,
-      status: 'parsed',
-      updated_at: now,
-    })
+    .update({ neto_banco: neto, status: 'parsed', updated_at: now })
     .eq('id', venta.id);
 
   await sb
     .from('tpv_corte_uploads')
-    .update({
-      propina: reconciled.propina,
-      neto_banco: reconciled.neto,
-      status: 'parsed',
-      updated_at: now,
-    })
+    .update({ neto_banco: neto, status: 'parsed', updated_at: now })
     .eq('id', propinaRow.id);
 }
 
@@ -609,16 +577,17 @@ export async function POST(request: Request) {
     const dateGate = assertWritableCorteDate(auth, corteDate);
     if (dateGate) return dateGate;
 
-    // Montos manuales opcionales (override / fallback si OCR no corre)
+    // Montos manuales obligatorios (sin OCR por ahora: los tickets no son lo
+    // bastante legibles). La foto sigue siendo evidencia y debe pasar nitidez.
     const totalCobradoRaw = form.get('total_cobrado');
     const propinaRaw = form.get('propina');
     const manualCobrado =
-      totalCobradoRaw != null && String(totalCobradoRaw) !== ''
-        ? Number(totalCobradoRaw)
+      totalCobradoRaw != null && String(totalCobradoRaw).trim() !== ''
+        ? Number(String(totalCobradoRaw).replace(/,/g, ''))
         : null;
     const manualPropina =
-      propinaRaw != null && String(propinaRaw) !== ''
-        ? Number(propinaRaw)
+      propinaRaw != null && String(propinaRaw).trim() !== ''
+        ? Number(String(propinaRaw).replace(/,/g, ''))
         : null;
 
     const notes = String(form.get('notes') || '').trim() || null;
@@ -634,91 +603,43 @@ export async function POST(request: Request) {
     const storagePath = `${corteDate}/t${terminal}-${photoKind}-${id}.${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // --- OCR: lee montos del ticket; si no legible → retake (no guarda) ---
-    const ocr = await runTpvOcr(buffer, photoKind);
-    const fromOcr = amountsFromOcr(photoKind, ocr);
-
-    // Motor OCR caído (no es la foto): no guardar y no pedir retomarla.
-    if (ocr.unavailable && !fromOcr?.totalCobrado && !fromOcr?.propina) {
-      return NextResponse.json(
-        {
-          error: TPV_OCR_UNAVAILABLE_MSG,
-          detail: ocr.error || null,
-          retake: false,
-          ocr_status: 'failed',
-        },
-        { status: 503 }
-      );
-    }
-
     let rowCobrado: number | null = null;
     let rowPropina: number | null = null;
-    let ticketTotal: number | null = null;
-    let ocrText: string | null = null;
-    let ocrStatus: 'done' | 'failed' | 'skipped' = 'skipped';
-    /** Foto guardada sin monto: falta capturarlo con «Corregir monto». */
-    let needsAmount = false;
 
-    if (fromOcr && ocr.ok && fromOcr.ocrStatus === 'done') {
-      ocrStatus = 'done';
-      ocrText = fromOcr.ocrText;
-      ticketTotal = fromOcr.ticketTotal;
-      if (photoKind === 'venta') {
-        rowCobrado = fromOcr.totalCobrado;
-      } else {
-        rowPropina = fromOcr.propina;
+    if (photoKind === 'venta') {
+      if (
+        manualCobrado == null ||
+        Number.isNaN(manualCobrado) ||
+        manualCobrado < 0
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Indica el monto cobrado de esta terminal (léelo del ticket de Totalización).',
+          },
+          { status: 400 }
+        );
       }
-    } else if (
-      photoKind === 'venta' &&
-      manualCobrado != null &&
-      !Number.isNaN(manualCobrado) &&
-      manualCobrado >= 0
-    ) {
-      // Fallback manual solo si el cliente envió monto (edición / sin OCR)
-      rowCobrado = manualCobrado;
-      ticketTotal = manualCobrado;
-      ocrStatus = ocr.rawText ? 'failed' : 'skipped';
-      ocrText = fromOcr?.ocrText || ocr.rawText || null;
-    } else if (
-      photoKind === 'propina' &&
-      manualPropina != null &&
-      !Number.isNaN(manualPropina) &&
-      manualPropina >= 0
-    ) {
-      rowPropina = manualPropina;
-      ocrStatus = ocr.rawText ? 'failed' : 'skipped';
-      ocrText = fromOcr?.ocrText || ocr.rawText || null;
-    } else if (isTpvPhotoUnreadable(ocr)) {
-      // La foto en sí no se puede leer (borrosa / recortada): retomarla sí ayuda.
-      return NextResponse.json(
-        {
-          error: ocr.error || TPV_OCR_RETAKE_MSG,
-          retake: true,
-          ocr_status: 'failed',
-          ocr_confidence: ocr.meanConfidence,
-        },
-        { status: 400 }
-      );
+      rowCobrado = Math.round(manualCobrado * 100) / 100;
     } else {
-      // La foto se lee pero el parser no encontró el patrón de este ticket.
-      // Se guarda igual (la foto es la evidencia) y el monto se captura después
-      // con «Corregir monto»; `slotHasAmounts` bloquea el cierre mientras tanto.
-      needsAmount = true;
-      ocrStatus = 'failed';
-      ocrText = fromOcr?.ocrText || ocr.rawText || null;
+      if (
+        manualPropina == null ||
+        Number.isNaN(manualPropina) ||
+        manualPropina < 0
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Indica el monto de propinas de esta terminal (léelo del Reporte de propinas; 0 si no hubo).',
+          },
+          { status: 400 }
+        );
+      }
+      rowPropina = Math.round(manualPropina * 100) / 100;
     }
 
-    let netoBanco =
-      photoKind === 'venta' && ticketTotal != null
-        ? ticketTotal
-        : photoKind === 'propina' && ticketTotal != null
-          ? ticketTotal
-          : null;
-    if (
-      netoBanco == null &&
-      rowCobrado != null &&
-      rowPropina != null
-    ) {
+    let netoBanco: number | null = null;
+    if (rowCobrado != null && rowPropina != null) {
       netoBanco = computeNetoBanco(rowCobrado, rowPropina);
     }
 
@@ -760,8 +681,8 @@ export async function POST(request: Request) {
       total_cobrado: rowCobrado,
       propina: rowPropina,
       neto_banco: netoBanco,
-      ocr_text: ocrText,
-      ocr_status: ocrStatus,
+      ocr_text: null,
+      ocr_status: 'skipped',
       status: hasAmount ? 'parsed' : 'pending',
       notes,
       verified_by: null,
@@ -786,7 +707,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Reconciliar cobrado = ticket_total − propina cuando ya hay ambas fotos
+    // Neto banco = cobrado + propinas cuando ya hay ambas fotos
     await reconcileTerminalAfterUpload(sb, corteDate, terminal);
 
     const { data: refreshed } = await sb
@@ -825,15 +746,10 @@ export async function POST(request: Request) {
       {
         upload,
         day,
-        needs_amount:
-          needsAmount &&
-          (photoKind === 'venta'
-            ? upload.total_cobrado == null
-            : upload.propina == null),
         ocr: {
-          status: ocrStatus,
-          confidence: ocr.meanConfidence,
-          ticket_total: ticketTotal,
+          status: 'skipped',
+          confidence: null,
+          ticket_total: null,
           total_cobrado: upload.total_cobrado,
           propina: upload.propina,
           sibling: sibling[0]

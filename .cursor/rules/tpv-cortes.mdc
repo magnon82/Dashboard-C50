@@ -13,7 +13,7 @@ alwaysApply: false
 Cobrado en terminales + propinas (solo display) → **neto banco = cobrado + propinas** (depósito diario) → vs presupuesto semanal bancario (`presupuesto_ingreso` tipo ventas MIFEL/BBVA).
 
 Hay **3 terminales**. Cada día, cada una queda:
-1. **2 fotos** que pasan calidad: **venta** (TOTALIZACIÓN) + **propinas** (REPORTE DE PROPINAS), con montos leídos de cada ticket, o
+1. **2 fotos** que pasan calidad (nitidez): **venta** (TOTALIZACIÓN) + **propinas** (REPORTE DE PROPINAS), con montos **manuales confirmados**, o
 2. Marcado explícito **«No se utilizó la terminal N»** (ambas fotos no aplican)
 
 Día incompleto hasta que las 3 estén contabilizadas (3 × 2 fotos, o unused).
@@ -23,20 +23,14 @@ Schema: `photo_kind` (`venta`|`propina`); unique `(corte_date, terminal_number, 
 ## Fuentes
 
 - Fotos: Supabase Storage `tpv-cortes` + tabla `tpv_corte_uploads` (`supabase/tpv_cortes.sql`)
-- Montos: **OCR automático** al subir (`tesseract.js` + parse Mifel en `app/lib/tpv-ocr.ts`). Tres desenlaces: (1) monto leído → fila `parsed`; (2) foto legible pero sin patrón reconocible (`isTpvPhotoUnreadable` = false) → **se guarda igual** con `ocr_status: 'failed'` y sin monto (`needs_amount: true` en la respuesta), y el monto se captura con «Corregir monto»; (3) foto ilegible (confianza <30 o casi sin texto) → 400 «Vuelve a tomar la foto». Si falla el motor → 503 «lector no disponible» (sin pedir retomar). **Nunca se pierde la foto por culpa del parser**: es la evidencia del corte. `slotHasAmounts` deja el cierre bloqueado mientras falte un monto, así que guardar sin monto no descuadra nada.
-- TOTALIZACIÓN → `ticket_total` (liquidación; a menudo incluye tips). Propina → `amount_propina`. Con ambas: `cobrado = ticket_total − propina`. Neto banco = cobrado + propinas.
-- **Sin campo de monto en la captura**: la venta en tarjetas se registra desde los tickets. La corrección manual solo existe sobre una foto ya guardada («Corregir monto» → PATCH `/api/tpv-cortes/[id]`). Al capturar ahí la propina, `reconcilePairNeto` resta las propinas del cobrado **solo si** este sigue siendo el TOTAL GENERAL crudo del OCR; si el usuario tecleó el cobrado, se respeta.
-- `parsePropinaText` acepta cuatro formatos, en orden: par consumo+propina en la línea de TOTAL/SUBTOTAL, propina sola en su renglón (incluye «PROPINA $0.00» en días sin propinas), «TOTAL PROPINAS», y consumo/total en renglones distintos (propina = total − consumo, máx. 30%). Ante la duda **no inventa monto**: mejor guardar sin monto que guardar uno equivocado.
+- Montos: **manuales**, con confirmación (`¿Este es el monto cobrado en la terminal N?` / `¿Este es el monto de propinas cobrado con la terminal N?`). Sin OCR / tesseract por ahora (tickets poco legibles; la lectura automática fallaba).
+- Candado de legibilidad: la foto debe pasar `validateTpvImageQuality` + nitidez ≥ `TPV_MIN_SHARPNESS` (cliente `prepareTpvPhotoForUpload` y servidor). Si está borrosa → retake; el monto no se inventa.
+- Flujo captura: foto nítida → teclear monto mirando el ticket → confirmar → guardar. Neto banco = cobrado + propinas.
+- Corrección posterior: «Corregir monto» / PATCH `/api/tpv-cortes/[id]` con la misma confirmación.
 
-## OCR en Vercel — no romper el empaquetado
+## OCR (desactivado)
 
-`runTpvOcr` carga tesseract.js con `require()` en runtime para poder envolver `spawnWorker` **antes** de que `createWorker` capture la referencia: tesseract.js registra `worker.onerror` (API de navegador) y en Node el evento `'error'` del worker_thread sin listener se relanza en el hilo principal → **mata la función serverless entera** (el POST se queda colgado en «Leyendo ticket…» y cualquier GET simultáneo devuelve «Failed to fetch»). Por lo mismo se pasa `errorHandler` a `createWorker`: sin él tesseract.js hace `throw` dentro del handler de `'message'`.
-
-El tracer de Next copia el archivo de entrada del worker pero **no sigue sus `require()`**, y con el require dinámico tampoco ve el paquete. Todo lo que necesita el lambda va explícito en `outputFileTracingIncludes['/api/tpv-cortes']` (next.config.ts): `tesseract.js/src/**`, `tesseract.js-core/**` (todas las variantes: `getCore` compara los OEM contra un booleano y siempre pide el core completo), `wasm-feature-detect`, `bmp-js`, `regenerator-runtime`, `is-url` y `tessdata/spa.traineddata`.
-
-`tessdata/spa.traineddata` va **versionado** y se usa como `langPath` + `cachePath`: sin él tesseract.js descarga ~3 MB del CDN en cada cold start e intenta escribir la caché en el cwd de solo lectura. Override: `TPV_TESSDATA_DIR`.
-
-Verificación antes de desplegar cambios de OCR: `npm run build` y comprobar que `.next/server/app/api/tpv-cortes/route.js.nft.json` incluye `tesseract.js-core`, `worker-script/node/getCore.js` y `tessdata/spa.traineddata`. Copiar ese set de archivos a una carpeta limpia y correr `createWorker` ahí reproduce el lambda exacto.
+`app/lib/tpv-ocr.ts`, `tessdata/` y `outputFileTracingIncludes` de tesseract en `next.config.ts` se conservan por si se reactiva más adelante. **No** llamar `runTpvOcr` desde `/api/tpv-cortes` mientras el flujo sea manual.
 - Cross-check opcional: Infocaja `Infocaja Bancarias` / `Infocaja Propina`
 - No confundir con `corte_caja` (cancelaciones/descuentos Infocaja)
 
