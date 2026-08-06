@@ -247,9 +247,12 @@ export function StaffCorteClient() {
 
   const [activeTerminal, setActiveTerminal] = useState<TpvTerminalNumber>(1);
   const [activeKind, setActiveKind] = useState<TpvPhotoKind>('venta');
+  /** Tras «Foto venta/propinas»: elegir cámara o galería. */
+  const [sourcePicker, setSourcePicker] = useState<TpvPhotoKind | null>(null);
   const [pending, setPending] = useState<PendingFile | null>(null);
   const [pendingAmount, setPendingAmount] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
 
   const [wi, setWi] = useState('');
   const [eventosOs, setEventosOs] = useState('');
@@ -404,7 +407,24 @@ export function StaffCorteClient() {
     if (pending?.previewUrl) URL.revokeObjectURL(pending.previewUrl);
     setPending(null);
     setPendingAmount('');
-    if (fileRef.current) fileRef.current.value = '';
+    setSourcePicker(null);
+    if (cameraRef.current) cameraRef.current.value = '';
+    if (galleryRef.current) galleryRef.current.value = '';
+  }
+
+  function openPhotoSource(kind: TpvPhotoKind) {
+    setActiveKind(kind);
+    setSourcePicker(kind);
+    setError(null);
+    setMsg(null);
+  }
+
+  function pickFromCamera() {
+    cameraRef.current?.click();
+  }
+
+  function pickFromGallery() {
+    galleryRef.current?.click();
   }
 
   function selectCorteDate(nextRaw: string) {
@@ -426,6 +446,7 @@ export function StaffCorteClient() {
     setAckShortage(false);
     setActiveTerminal(1);
     setActiveKind('venta');
+    setSourcePicker(null);
     setCorteDate(next);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -443,6 +464,7 @@ export function StaffCorteClient() {
     if (!file) return;
     setError(null);
     setMsg(null);
+    setSourcePicker(null);
     try {
       const prepared = await prepareTpvPhotoForUpload(file);
       if (pending?.previewUrl) URL.revokeObjectURL(pending.previewUrl);
@@ -456,6 +478,9 @@ export function StaffCorteClient() {
       setPendingAmount('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo validar la foto');
+    } finally {
+      if (cameraRef.current) cameraRef.current.value = '';
+      if (galleryRef.current) galleryRef.current.value = '';
     }
   }
 
@@ -1284,39 +1309,88 @@ export function StaffCorteClient() {
               ) : null}
 
               <input
-                ref={fileRef}
+                ref={cameraRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
                 className="hidden"
                 onChange={(e) => void onPickFile(e.target.files?.[0] || null)}
               />
+              <input
+                ref={galleryRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => void onPickFile(e.target.files?.[0] || null)}
+              />
 
               {!unusedUpload && !pending ? (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveKind('venta');
-                      fileRef.current?.click();
-                    }}
-                    className="flex min-h-14 items-center justify-center rounded-2xl px-2 text-sm font-bold text-white"
-                    style={{ backgroundColor: SUITE.orange }}
-                  >
-                    {ventaUpload ? 'Retomar venta' : 'Foto venta'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveKind('propina');
-                      fileRef.current?.click();
-                    }}
-                    className="flex min-h-14 items-center justify-center rounded-2xl px-2 text-sm font-bold text-white"
-                    style={{ backgroundColor: '#0F9F9C' }}
-                  >
-                    {propinaUpload ? 'Retomar propinas' : 'Foto propinas'}
-                  </button>
-                </div>
+                sourcePicker ? (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-center text-sm font-semibold text-slate-700">
+                      {sourcePicker === 'venta'
+                        ? ventaUpload
+                          ? 'Retomar venta'
+                          : 'Foto venta'
+                        : propinaUpload
+                          ? 'Retomar propinas'
+                          : 'Foto propinas'}{' '}
+                      · T{activeTerminal}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={pickFromCamera}
+                        className="flex min-h-14 items-center justify-center rounded-2xl px-2 text-sm font-bold text-white"
+                        style={{
+                          backgroundColor:
+                            sourcePicker === 'venta' ? SUITE.orange : '#0F9F9C',
+                        }}
+                      >
+                        Tomar foto
+                      </button>
+                      <button
+                        type="button"
+                        onClick={pickFromGallery}
+                        className="flex min-h-14 items-center justify-center rounded-2xl border-2 px-2 text-sm font-bold"
+                        style={{
+                          borderColor:
+                            sourcePicker === 'venta' ? SUITE.orange : '#0F9F9C',
+                          color:
+                            sourcePicker === 'venta' ? SUITE.orange : '#0F9F9C',
+                        }}
+                      >
+                        Elegir de galería
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSourcePicker(null)}
+                      className="min-h-10 w-full rounded-2xl text-sm font-medium text-slate-500"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openPhotoSource('venta')}
+                      className="flex min-h-14 items-center justify-center rounded-2xl px-2 text-sm font-bold text-white"
+                      style={{ backgroundColor: SUITE.orange }}
+                    >
+                      {ventaUpload ? 'Retomar venta' : 'Foto venta'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openPhotoSource('propina')}
+                      className="flex min-h-14 items-center justify-center rounded-2xl px-2 text-sm font-bold text-white"
+                      style={{ backgroundColor: '#0F9F9C' }}
+                    >
+                      {propinaUpload ? 'Retomar propinas' : 'Foto propinas'}
+                    </button>
+                  </div>
+                )
               ) : null}
 
               {pending ? (
@@ -1328,7 +1402,7 @@ export function StaffCorteClient() {
                         activeKind === 'venta' ? SUITE.orange : '#0F9F9C',
                     }}
                   >
-                    Capturando: {photoKindLabel(activeKind)} · T{activeTerminal}
+                    Foto: {photoKindLabel(activeKind)} · T{activeTerminal}
                   </p>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
