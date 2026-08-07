@@ -86,14 +86,9 @@ export function StaffCumpleanosClient() {
       ) : null}
 
       <SuiteCard>
-        <div>
-          <h2 className="text-base font-bold" style={{ color: theme.title }}>
-            Próximos cumpleaños
-          </h2>
-          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
-            Del más cercano al más lejano
-          </p>
-        </div>
+        <h2 className="text-base font-bold" style={{ color: theme.title }}>
+          Próximos cumpleaños
+        </h2>
 
         <UpcomingBirthdaysList
           upcoming={upcoming}

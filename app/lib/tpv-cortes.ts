@@ -238,10 +238,13 @@ export function isStaffWritableCorteDate(
 
 export function moneyMx(v: number | null | undefined): string {
   if (v == null || Number.isNaN(Number(v))) return '—';
-  return `$${Number(v).toLocaleString('es-MX', {
+  const n = Number(v);
+  const abs = Math.abs(n).toLocaleString('es-MX', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  });
+  // Negativos: −$1,234.56 (déficit tómbola / tips > efectivo)
+  return n < 0 ? `−$${abs}` : `$${abs}`;
 }
 
 export function terminalLabel(n: TpvTerminalNumber): string {

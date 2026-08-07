@@ -788,7 +788,7 @@ export function StaffCorteClient() {
       : 'Puedes cambiar entre Hoy y Ayer arriba aunque falle la carga de este día.';
 
   const esperadoTombola = expectedTombolaDeposit(
-    infocaja?.hasEfectivo ? infocaja.efectivo : null,
+    infocaja != null && infocaja.hasAny ? infocaja.efectivo : null,
     bancos?.propina ?? 0
   );
 
@@ -1658,7 +1658,7 @@ export function StaffCorteClient() {
           </p>
           {payload?.infocajaError ? (
             <p className="text-xs text-amber-800">{payload.infocajaError}</p>
-          ) : infocaja?.hasEfectivo ? (
+          ) : infocaja?.hasAny ? (
             <>
               <div className="flex justify-between text-sm text-slate-600">
                 <span>Efectivo Infocaja (recibido)</span>
@@ -1676,14 +1676,32 @@ export function StaffCorteClient() {
                 <span className="font-semibold text-slate-800">
                   = Esperado en tómbola
                 </span>
-                <span className="text-lg font-bold" style={{ color: SUITE.navy }}>
+                <span
+                  className={`text-lg font-bold ${
+                    esperadoTombola != null && esperadoTombola < 0
+                      ? 'text-rose-700'
+                      : ''
+                  }`}
+                  style={
+                    esperadoTombola != null && esperadoTombola < 0
+                      ? undefined
+                      : { color: SUITE.navy }
+                  }
+                >
                   {moneyMx(esperadoTombola)}
                 </span>
               </div>
-              <p className="text-xs text-slate-500">
-                Las propinas de tarjeta se cubren con efectivo de caja; lo que
-                queda es el depósito en tómbola.
-              </p>
+              {esperadoTombola != null && esperadoTombola < 0 ? (
+                <p className="text-xs text-rose-700">
+                  Negativo: el efectivo no alcanzó para pagar las propinas de
+                  tarjeta (TPV).
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Las propinas de tarjeta se cubren con efectivo de caja; lo que
+                  queda es el depósito en tómbola.
+                </p>
+              )}
             </>
           ) : (
             <p className="text-sm text-slate-500">

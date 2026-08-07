@@ -27,6 +27,8 @@ export type VentasPorMesCardProps = {
   years: number[];
   /** Years passed to buildWeeklySalesByYear; defaults to `years`. */
   weeklyDataYears?: number[];
+  /** staff_rpt OS+extra por día — fallback Eventos si Sheets vacío. */
+  eventosFallbackByDate?: Record<string, number> | null;
   loading?: boolean;
   className?: string;
 };
@@ -36,6 +38,7 @@ export function VentasPorMesCard({
   records,
   years,
   weeklyDataYears,
+  eventosFallbackByDate,
   loading = false,
   className = 'mb-8',
 }: VentasPorMesCardProps) {
@@ -62,13 +65,17 @@ export function VentasPorMesCard({
   }, [years]);
 
   const weeklyByYear = useMemo(
-    () => buildWeeklySalesByYear(records, dataYears),
-    [records, dataYears]
+    () =>
+      buildWeeklySalesByYear(records, dataYears, { eventosFallbackByDate }),
+    [records, dataYears, eventosFallbackByDate]
   );
 
   const monthlyByYear = useMemo(
-    () => buildMonthlySalesByYear(records, weeklyByYear, years),
-    [records, weeklyByYear, years]
+    () =>
+      buildMonthlySalesByYear(records, weeklyByYear, years, {
+        eventosFallbackByDate,
+      }),
+    [records, weeklyByYear, years, eventosFallbackByDate]
   );
 
   const monthlyTotalChartRows = useMemo(

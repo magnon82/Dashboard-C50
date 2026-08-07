@@ -6,6 +6,7 @@ import { WeeklyComparisonChart, colorForYear } from '@/app/components/WeeklyComp
 import { MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
 import { SuiteShell } from '@/app/components/SuiteShell';
 import { VentasResumenCard } from '@/app/components/VentasResumenCard';
+import { VentasCortesReportCard } from '@/app/components/VentasCortesReportCard';
 import { SemanaEnCursoTable } from '@/app/components/SemanaEnCursoTable';
 import { VentasTombolaSemanalCard } from '@/app/components/VentasTombolaSemanalCard';
 import { DetalleSemanalCard } from '@/app/components/DetalleSemanalCard';
@@ -38,6 +39,7 @@ import {
   weekOptionsYearInCourse,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
+import { useStaffRptEventos } from '@/app/lib/use-staff-rpt-eventos';
 
 function money(v: number) {
   return `$${v.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -72,6 +74,9 @@ export default function Dashboard() {
   const [weekTo, setWeekTo] = useState<number | null>(null);
   /** Semana a consultar en card «semana en curso» (null = semana actual WTD). */
   const [consultaSemana, setConsultaSemana] = useState<number | null>(null);
+
+  /** Eventos ERP (staff_rpt) — mismo fallback que la tabla diaria, para acumulado semanal. */
+  const staffRptEventos = useStaffRptEventos();
 
   useEffect(() => {
     async function fetchRecords() {
@@ -136,13 +141,19 @@ export default function Dashboard() {
   }, [year]);
 
   const weeklyByYear = useMemo(
-    () => buildWeeklySalesByYear(records, weeklyDataYears),
-    [records, weeklyDataYears]
+    () =>
+      buildWeeklySalesByYear(records, weeklyDataYears, {
+        eventosFallbackByDate: staffRptEventos,
+      }),
+    [records, weeklyDataYears, staffRptEventos]
   );
 
   const monthlyByYear = useMemo(
-    () => buildMonthlySalesByYear(records, weeklyByYear, COMPARE_YEARS),
-    [records, weeklyByYear]
+    () =>
+      buildMonthlySalesByYear(records, weeklyByYear, COMPARE_YEARS, {
+        eventosFallbackByDate: staffRptEventos,
+      }),
+    [records, weeklyByYear, staffRptEventos]
   );
 
   const weeklyComparison = useMemo(
@@ -282,12 +293,14 @@ export default function Dashboard() {
           onMonthChange={setMonth}
           availableYears={availableYears}
           weeklyDataYears={weeklyDataYears}
+          eventosFallbackByDate={staffRptEventos}
           showPaymentMix
         />
 
         <SemanaEnCursoTable
           weekToDate={weekToDate}
           showDescCanc
+          eventosFallbackByDate={staffRptEventos}
           weekOptions={semanaEnCursoOptions}
           selectedWeek={consultaSemana ?? weekToDate.weekNumber}
           onWeekChange={(w) => {
@@ -296,232 +309,248 @@ export default function Dashboard() {
           }}
         />
 
-        <VentasTombolaSemanalCard
-          mondayKey={weekToDate.mondayKey}
-          sundayKey={weekToDate.sundayKey}
-          weekNumber={weekToDate.weekNumber}
-        />
+        {/* Cortes diarios + canc/desc mensuales + tómbola semanal */}
+        <section className="mb-8">
+          <p
+            className="mb-3 text-xs font-bold uppercase tracking-[0.16em]"
+            style={{ color: theme.muted }}
+          >
+            Cortes y operación
+          </p>
+          <div className="space-y-6 [&>*]:!mb-0">
+            <VentasCortesReportCard className="mb-0" />
 
-        <ChequePromedioMensualCard records={records} years={COMPARE_YEARS} />
-
-        {/* Cancelaciones y descuentos — mes del año en curso */}
-        <Card className={`mb-8 ${cardClass}`} style={cardStyle}>
-          <SectionHeader title={`Cancelaciones y descuentos · ${corteMesLabel}`}>
-            <label className={`${filterControlClass} bg-white shadow-sm`}>
-              <span className="shrink-0 text-slate-500">Mes</span>
-              <select
-                className={`${filterSelectClass} min-w-[9.5rem] cursor-pointer bg-white`}
-                value={corteMonth}
-                onChange={(e) => {
-                  setCorteMonth(Number(e.target.value));
-                  setCorteOpenId(null);
-                }}
-                aria-label="Mes de cancelaciones y descuentos"
-              >
-                {MESES.map((m, i) => {
-                  const mesNum = i + 1;
-                  const tiene = corteMesesConDatos.has(mesNum);
-                  return (
-                    <option key={m} value={mesNum}>
-                      {m}
-                      {tiene ? '' : ' (sin datos)'}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <button
-              type="button"
-              aria-label="Mes anterior"
-              disabled={corteMonth <= 1}
-              onClick={() => {
-                setCorteMonth((m) => Math.max(1, m - 1));
-                setCorteOpenId(null);
-              }}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              aria-label="Mes siguiente"
-              disabled={corteMonth >= 12}
-              onClick={() => {
-                setCorteMonth((m) => Math.min(12, m + 1));
-                setCorteOpenId(null);
-              }}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              ›
-            </button>
-            <label className={filterControlClass}>
-              <span className="text-slate-500">Ver</span>
-              <select
-                className={`${filterSelectClass} min-w-[10rem] cursor-pointer`}
-                value={corteFilter}
-                onChange={(e) => {
-                  setCorteFilter(e.target.value as 'todos' | 'descuentos' | 'cancelaciones');
-                  setCorteOpenId(null);
-                }}
-              >
-                <option value="todos">Todos</option>
-                <option value="descuentos">Solo descuentos</option>
-                <option value="cancelaciones">Solo cancelaciones</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              onClick={() => {
-                setCorteCollapsed((v) => !v);
-                setCorteOpenId(null);
-              }}
-              className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              {corteCollapsed ? 'Mostrar desglose' : 'Ocultar desglose'}
-            </button>
-          </SectionHeader>
-          <Text className="-mt-2 mb-4 text-sm text-slate-500">
-            Clic en un renglón para ver el motivo
-          </Text>
-          <div className="mb-3 text-sm text-slate-600">
-            <span className="font-semibold text-rose-700">
-              Canc. {money(corteMesActual.totalCancelaciones)}
-            </span>
-            <span className="mx-2 text-slate-300">|</span>
-            <span className="font-semibold text-amber-700">
-              Desc. {money(corteMesActual.totalDescuentos)}
-            </span>
-            <span className="mx-2 text-slate-300">|</span>
-            <span className="font-bold text-slate-800">
-              Total {money(corteMesActual.total)}
-            </span>
-          </div>
-          {!corteCollapsed && (
-            <>
-              {corteItemsFiltrados.length === 0 ? (
-                <p className="py-8 text-center text-slate-400">
-                  Sin registros para el filtro seleccionado.
-                </p>
-              ) : (
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr
-                        className="text-center text-xs uppercase tracking-wide text-white"
-                        style={{ backgroundColor: theme.tableHead }}
-                      >
-                        <th className="px-4 py-3">Fecha</th>
-                        <th className="px-4 py-3">Tipo</th>
-                        <th className="px-4 py-3">Detalle</th>
-                        <th className="px-4 py-3">Monto</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {corteItemsFiltrados.map((item, i) => {
-                        const isOpen = corteOpenId === item.id;
-                        const detalle =
-                          item.producto ||
-                          item.persona ||
-                          item.motivo ||
-                          item.grupo ||
-                          (item.kind === 'descuento' ? 'Descuento' : 'Cancelación');
-                        const motivoLines = [
-                          item.motivo && `Motivo: ${item.motivo}`,
-                          item.grupo && `Grupo: ${item.grupo}`,
-                          item.persona && `Persona: ${item.persona}`,
-                          item.producto && `Producto: ${item.producto}`,
-                          item.mesero && `Mesero: ${item.mesero}`,
-                          item.autorizo && `Autorizó: ${item.autorizo}`,
-                          item.mesa && `Mesa: ${item.mesa}`,
-                          item.hora && `Hora: ${item.hora}`,
-                        ].filter(Boolean) as string[];
-                        return (
-                          <Fragment key={item.id}>
-                            <tr
-                              onClick={() =>
-                                setCorteOpenId((cur) => (cur === item.id ? null : item.id))
-                              }
-                              className={`cursor-pointer ${
-                                i % 2 === 0 ? 'bg-white' : 'bg-slate-50'
-                              } ${isOpen ? 'bg-amber-50' : 'hover:bg-amber-50/70'}`}
-                            >
-                              <td className="px-4 py-2.5 text-slate-600">
-                                {formatShort(item.date)}
-                              </td>
-                              <td className="px-4 py-2.5">
-                                <span
-                                  className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                                    item.kind === 'cancelacion'
-                                      ? 'bg-rose-100 text-rose-700'
-                                      : 'bg-amber-100 text-amber-800'
-                                  }`}
+            {/* Listado mensual (además del desglose diario expandible en Cortes) */}
+            <Card className={cardClass} style={cardStyle}>
+              <SectionHeader title={`Cancelaciones y descuentos · ${corteMesLabel}`}>
+                <label className={`${filterControlClass} bg-white shadow-sm`}>
+                  <span className="shrink-0 text-slate-500">Mes</span>
+                  <select
+                    className={`${filterSelectClass} min-w-[9.5rem] cursor-pointer bg-white`}
+                    value={corteMonth}
+                    onChange={(e) => {
+                      setCorteMonth(Number(e.target.value));
+                      setCorteOpenId(null);
+                    }}
+                    aria-label="Mes de cancelaciones y descuentos"
+                  >
+                    {MESES.map((m, i) => {
+                      const mesNum = i + 1;
+                      const tiene = corteMesesConDatos.has(mesNum);
+                      return (
+                        <option key={m} value={mesNum}>
+                          {m}
+                          {tiene ? '' : ' (sin datos)'}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  aria-label="Mes anterior"
+                  disabled={corteMonth <= 1}
+                  onClick={() => {
+                    setCorteMonth((m) => Math.max(1, m - 1));
+                    setCorteOpenId(null);
+                  }}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  aria-label="Mes siguiente"
+                  disabled={corteMonth >= 12}
+                  onClick={() => {
+                    setCorteMonth((m) => Math.min(12, m + 1));
+                    setCorteOpenId(null);
+                  }}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  ›
+                </button>
+                <label className={filterControlClass}>
+                  <span className="text-slate-500">Ver</span>
+                  <select
+                    className={`${filterSelectClass} min-w-[10rem] cursor-pointer`}
+                    value={corteFilter}
+                    onChange={(e) => {
+                      setCorteFilter(e.target.value as 'todos' | 'descuentos' | 'cancelaciones');
+                      setCorteOpenId(null);
+                    }}
+                  >
+                    <option value="todos">Todos</option>
+                    <option value="descuentos">Solo descuentos</option>
+                    <option value="cancelaciones">Solo cancelaciones</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCorteCollapsed((v) => !v);
+                    setCorteOpenId(null);
+                  }}
+                  className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  {corteCollapsed ? 'Mostrar desglose' : 'Ocultar desglose'}
+                </button>
+              </SectionHeader>
+              <Text className="-mt-2 mb-4 text-sm text-slate-500">
+                Clic en un renglón para ver el motivo
+              </Text>
+              <div className="mb-3 text-sm text-slate-600">
+                <span className="font-semibold text-rose-700">
+                  Canc. {money(corteMesActual.totalCancelaciones)}
+                </span>
+                <span className="mx-2 text-slate-300">|</span>
+                <span className="font-semibold text-amber-700">
+                  Desc. {money(corteMesActual.totalDescuentos)}
+                </span>
+                <span className="mx-2 text-slate-300">|</span>
+                <span className="font-bold text-slate-800">
+                  Total {money(corteMesActual.total)}
+                </span>
+              </div>
+              {!corteCollapsed && (
+                <>
+                  {corteItemsFiltrados.length === 0 ? (
+                    <p className="py-8 text-center text-slate-400">
+                      Sin registros para el filtro seleccionado.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr
+                            className="text-center text-xs uppercase tracking-wide text-white"
+                            style={{ backgroundColor: theme.tableHead }}
+                          >
+                            <th className="px-4 py-3">Fecha</th>
+                            <th className="px-4 py-3">Tipo</th>
+                            <th className="px-4 py-3">Detalle</th>
+                            <th className="px-4 py-3">Monto</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {corteItemsFiltrados.map((item, i) => {
+                            const isOpen = corteOpenId === item.id;
+                            const detalle =
+                              item.producto ||
+                              item.persona ||
+                              item.motivo ||
+                              item.grupo ||
+                              (item.kind === 'descuento' ? 'Descuento' : 'Cancelación');
+                            const motivoLines = [
+                              item.motivo && `Motivo: ${item.motivo}`,
+                              item.grupo && `Grupo: ${item.grupo}`,
+                              item.persona && `Persona: ${item.persona}`,
+                              item.producto && `Producto: ${item.producto}`,
+                              item.mesero && `Mesero: ${item.mesero}`,
+                              item.autorizo && `Autorizó: ${item.autorizo}`,
+                              item.mesa && `Mesa: ${item.mesa}`,
+                              item.hora && `Hora: ${item.hora}`,
+                            ].filter(Boolean) as string[];
+                            return (
+                              <Fragment key={item.id}>
+                                <tr
+                                  onClick={() =>
+                                    setCorteOpenId((cur) => (cur === item.id ? null : item.id))
+                                  }
+                                  className={`cursor-pointer ${
+                                    i % 2 === 0 ? 'bg-white' : 'bg-slate-50'
+                                  } ${isOpen ? 'bg-amber-50' : 'hover:bg-amber-50/70'}`}
                                 >
-                                  {item.kind === 'cancelacion' ? 'Cancelación' : 'Descuento'}
-                                </span>
-                              </td>
-                              <td className="max-w-xs truncate px-4 py-2.5 text-slate-700">
-                                {detalle}
-                              </td>
-                              <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
-                                {money(item.amount)}
-                              </td>
-                            </tr>
-                            {isOpen && (
-                              <tr
-                                className="bg-amber-50"
-                                onClick={() => setCorteOpenId(null)}
-                              >
-                                <td colSpan={4} className="px-4 py-3">
-                                  <div className="cursor-pointer rounded-lg border border-amber-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
-                                    <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-                                      Motivo · clic para cerrar
-                                    </p>
-                                    {motivoLines.length > 0 ? (
-                                      <ul className="space-y-0.5">
-                                        {motivoLines.map((line) => (
-                                          <li key={line}>{line}</li>
-                                        ))}
-                                      </ul>
-                                    ) : (
-                                      <p>Sin detalle de motivo</p>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </Fragment>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr
-                        className="font-bold text-white"
-                        style={{ backgroundColor: theme.tableFoot }}
-                      >
-                        <td className="px-4 py-3" colSpan={3}>
-                          Total filtrado · {corteMesLabel}
-                        </td>
-                        <td className="px-4 py-3 text-right">{money(corteTotalFiltrado)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                                  <td className="px-4 py-2.5 text-slate-600">
+                                    {formatShort(item.date)}
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <span
+                                      className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                        item.kind === 'cancelacion'
+                                          ? 'bg-rose-100 text-rose-700'
+                                          : 'bg-amber-100 text-amber-800'
+                                      }`}
+                                    >
+                                      {item.kind === 'cancelacion' ? 'Cancelación' : 'Descuento'}
+                                    </span>
+                                  </td>
+                                  <td className="max-w-xs truncate px-4 py-2.5 text-slate-700">
+                                    {detalle}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
+                                    {money(item.amount)}
+                                  </td>
+                                </tr>
+                                {isOpen && (
+                                  <tr
+                                    className="bg-amber-50"
+                                    onClick={() => setCorteOpenId(null)}
+                                  >
+                                    <td colSpan={4} className="px-4 py-3">
+                                      <div className="cursor-pointer rounded-lg border border-amber-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
+                                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                                          Motivo · clic para cerrar
+                                        </p>
+                                        {motivoLines.length > 0 ? (
+                                          <ul className="space-y-0.5">
+                                            {motivoLines.map((line) => (
+                                              <li key={line}>{line}</li>
+                                            ))}
+                                          </ul>
+                                        ) : (
+                                          <p>Sin detalle de motivo</p>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr
+                            className="font-bold text-white"
+                            style={{ backgroundColor: theme.tableFoot }}
+                          >
+                            <td className="px-4 py-3" colSpan={3}>
+                              Total filtrado · {corteMesLabel}
+                            </td>
+                            <td className="px-4 py-3 text-right">{money(corteTotalFiltrado)}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
-            </>
-          )}
-        </Card>
+            </Card>
+
+            <VentasTombolaSemanalCard
+              className="mb-0"
+              mondayKey={weekToDate.mondayKey}
+              sundayKey={weekToDate.sundayKey}
+              weekNumber={weekToDate.weekNumber}
+            />
+          </div>
+        </section>
 
         <PromedioVentaSemanalPorMesCard
           records={records}
           years={COMPARE_YEARS}
           weeklyDataYears={weeklyDataYears}
+          eventosFallbackByDate={staffRptEventos}
           loading={loading}
         />
+
+        <ChequePromedioMensualCard records={records} years={COMPARE_YEARS} />
 
         <DetalleSemanalCard
           records={records}
           years={COMPARE_YEARS}
           weeklyDataYears={weeklyDataYears}
+          eventosFallbackByDate={staffRptEventos}
         />
 
         <Card className={`mb-8 ${cardClass}`} style={cardStyle}>

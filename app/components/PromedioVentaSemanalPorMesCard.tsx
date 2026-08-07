@@ -27,6 +27,8 @@ export type PromedioVentaSemanalPorMesCardProps = {
   years: number[];
   /** Years passed to buildWeeklySalesByYear; defaults to `years`. */
   weeklyDataYears?: number[];
+  /** staff_rpt OS+extra por día — fallback Eventos si Sheets vacío. */
+  eventosFallbackByDate?: Record<string, number> | null;
   loading?: boolean;
   className?: string;
 };
@@ -36,6 +38,7 @@ export function PromedioVentaSemanalPorMesCard({
   records,
   years,
   weeklyDataYears,
+  eventosFallbackByDate,
   loading = false,
   className = 'mb-8',
 }: PromedioVentaSemanalPorMesCardProps) {
@@ -62,8 +65,9 @@ export function PromedioVentaSemanalPorMesCard({
   }, [years]);
 
   const weeklyByYear = useMemo(
-    () => buildWeeklySalesByYear(records, dataYears),
-    [records, dataYears]
+    () =>
+      buildWeeklySalesByYear(records, dataYears, { eventosFallbackByDate }),
+    [records, dataYears, eventosFallbackByDate]
   );
 
   const monthlyAvgByYear = useMemo(

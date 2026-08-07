@@ -1249,7 +1249,7 @@ export function latestMonthWithSemanasBancos(
 /**
  * Semanas SEM esperadas del mes: lunes desde el 1.er lunes del mes
  * hasta (sin incluir) el 1.er lunes del mes siguiente.
- * (Referencia / Finanzas; el Balance Socios usa la regla del día 10.)
+ * (Referencia / Finanzas; Balance Socios: fila al cerrar el mes, acumulado día 10.)
  */
 export function expectedPresupuestoWeekCount(year: number, month: number): number {
   const monday1 = firstMondayOnOrAfter(year, month, 1);
@@ -1262,8 +1262,20 @@ export function expectedPresupuestoWeekCount(year: number, month: number): numbe
   return Math.max(0, Math.round(diffDays / 7));
 }
 
-/** Día del mes siguiente en que el mes M entra al Balance Socios. */
+/** Día del mes siguiente en que el mes M entra al acumulado del Balance Socios. */
 export const BALANCE_MES_INCORPORA_DIA = 10;
+
+/**
+ * Fecha ISO (YYYY-MM-DD) del primer día del mes siguiente:
+ * a partir de ahí el mes M ya cerró el calendario y puede listarse
+ * en la tabla de Balance (aunque aún no sume al acumulado).
+ * Ej.: julio 2026 → 2026-08-01.
+ */
+export function balanceMesCerradoDesdeIso(year: number, month: number): string {
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  return `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+}
 
 /**
  * Fecha ISO (YYYY-MM-DD) a partir de la cual el mes M ya puede entrar
@@ -1277,7 +1289,21 @@ export function balanceMesIncorporaDesdeIso(year: number, month: number): string
 }
 
 /**
- * Regla de negocio Balance Socios: el mes M se incorpora a más tardar
+ * Mes M ya terminó en calendario (hoy CDMX >= día 1 del mes siguiente).
+ * Usado para mostrar la fila en Balance; el acumulado sigue la regla del día 10.
+ */
+export function isBalanceMesCerradoPorCalendario(
+  year: number,
+  month: number,
+  todayIso?: string
+): boolean {
+  const today = todayIso || todayMexicoIso();
+  if (!parseIsoDate(today)) return false;
+  return today >= balanceMesCerradoDesdeIso(year, month);
+}
+
+/**
+ * Regla de negocio Balance Socios: el mes M se incorpora al acumulado
  * el día 10 del mes siguiente (hoy CDMX >= esa fecha).
  */
 export function isBalanceMesIncorporablePorCalendario(
@@ -1307,7 +1333,7 @@ function hasPresupuestoSemanaMonth(
 }
 
 /**
- * Mes listo para Balance Socios:
+ * Mes listo para sumar al acumulado de Balance Socios:
  * 1) hoy (CDMX) es el día 10 del mes siguiente o después, y
  * 2) existe al menos un `presupuesto_semana` del mes.
  * No usa conteo frágil de SEM (Mar/Jun 2026 pedían 5 semanas y el Excel
@@ -1324,6 +1350,22 @@ export function isPresupuestoMesActualizado(
   return hasPresupuestoSemanaMonth(records, year, month);
 }
 
+/**
+ * Mes visible en la tabla de Balance (fila):
+ * mes ya cerrado en calendario + al menos un `presupuesto_semana`.
+ * Puede aparecer antes del día 10; en ese caso no suma al acumulado.
+ */
+export function isPresupuestoMesVisibleEnBalance(
+  records: FinancialRecord[],
+  year: number,
+  month: number,
+  todayIso?: string
+): boolean {
+  const today = todayIso || todayMexicoIso();
+  if (!isBalanceMesCerradoPorCalendario(year, month, today)) return false;
+  return hasPresupuestoSemanaMonth(records, year, month);
+}
+
 /** Totales mensuales de ingresos / gastos (misma base que ResumenBancosSemanal). */
 export interface BalanceMensual {
   year: number;
@@ -1334,12 +1376,18 @@ export interface BalanceMensual {
   gastos: number;
   /** ingresos − gastos */
   balance: number;
+  /**
+   * true si el mes ya entra al acumulado (día 10 del mes siguiente).
+   * false = mes cerrado visible, pendiente de incorporar.
+   */
+  incorporado: boolean;
 }
 
 export type BuildBalanceMensualOptions = {
   /**
-   * Si true (default en Socios), omite meses aún no incorporables
-   * (antes del día 10 del mes siguiente). Esos meses aportan 0 al acumulado.
+   * Si true (default en Socios), solo meses ya cerrados en calendario
+   * (hoy >= día 1 del mes siguiente) con datos. Antes del día 10
+   * aparecen con `incorporado: false` y no suman al acumulado.
    */
   onlyMesesActualizados?: boolean;
 };
@@ -1347,7 +1395,7 @@ export type BuildBalanceMensualOptions = {
 /**
  * Balance por mes a partir del resumen semanal de Finanzas
  * (`presupuesto_semana` + `flujo_efectivo_semana`).
- * Por defecto solo meses incorporables (regla día 10 del mes siguiente).
+ * Por defecto lista meses cerrados; el acumulado usa solo `incorporado`.
  */
 export function buildBalanceMensualPorAno(
   records: FinancialRecord[],
@@ -1355,14 +1403,17 @@ export function buildBalanceMensualPorAno(
   todayIso?: string,
   options: BuildBalanceMensualOptions = { onlyMesesActualizados: true }
 ): BalanceMensual[] {
-  const onlyActualizados = options.onlyMesesActualizados !== false;
+  const onlyCerrados = options.onlyMesesActualizados !== false;
   const today = todayIso || todayMexicoIso();
   const out: BalanceMensual[] = [];
   for (let month = 1; month <= 12; month++) {
     if (
-      onlyActualizados &&
-      !isPresupuestoMesActualizado(records, year, month, today)
+      onlyCerrados &&
+      !isPresupuestoMesVisibleEnBalance(records, year, month, today)
     ) {
+      continue;
+    }
+    if (!onlyCerrados && !hasPresupuestoSemanaMonth(records, year, month)) {
       continue;
     }
     const weeks = buildResumenBancosSemanal(records, year, month, today);
@@ -1380,12 +1431,16 @@ export function buildBalanceMensualPorAno(
       ingresos,
       gastos,
       balance: ingresos - gastos,
+      incorporado: isBalanceMesIncorporablePorCalendario(year, month, today),
     });
   }
   return out;
 }
 
-/** Acumulado de un arreglo de balance mensual (meses ya filtrados). */
+/**
+ * Acumulado solo de meses ya incorporados (día 10+).
+ * Filas con `incorporado: false` no aportan.
+ */
 export function sumBalanceMensual(rows: BalanceMensual[]): {
   ingresos: number;
   gastos: number;
@@ -1394,6 +1449,7 @@ export function sumBalanceMensual(rows: BalanceMensual[]): {
   let ingresos = 0;
   let gastos = 0;
   for (const r of rows) {
+    if (r.incorporado === false) continue;
     ingresos += r.ingresos;
     gastos += r.gastos;
   }

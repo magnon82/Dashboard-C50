@@ -80,7 +80,8 @@ export function BalanceMensualSociosCard({
 
       <p className="mb-4 text-xs" style={{ color: theme.muted }}>
         Totales mensuales · sin detalle de movimientos · {BALANCE_YEAR}. El mes
-        se incorpora al acumulado a partir del día 10 del mes siguiente.
+        aparece al cerrar el calendario; se incorpora al acumulado a partir del
+        día 10 del mes siguiente.
       </p>
 
       {loading ? (
@@ -89,15 +90,15 @@ export function BalanceMensualSociosCard({
         </p>
       ) : rows.length === 0 ? (
         <p className="text-sm" style={{ color: theme.muted }}>
-          Sin meses incorporados aún en {BALANCE_YEAR}.
+          Sin meses cerrados aún en {BALANCE_YEAR}.
         </p>
       ) : (
         <>
           <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Kpi label="Ingresos" value={ytd.ingresos} />
-            <Kpi label="Gastos" value={ytd.gastos} />
+            <Kpi label="Ingresos (acum.)" value={ytd.ingresos} />
+            <Kpi label="Gastos (acum.)" value={ytd.gastos} />
             <Kpi
-              label="Balance"
+              label="Balance (acum.)"
               value={ytd.balance}
               valueColor={balanceColor(ytd.balance)}
             />
@@ -117,37 +118,60 @@ export function BalanceMensualSociosCard({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
-                  <tr
-                    key={`${r.year}-${r.month}`}
-                    className="border-t border-slate-100"
-                  >
-                    <td
-                      className="px-4 py-2.5 font-medium"
-                      style={{ color: theme.title }}
+                {rows.map((r) => {
+                  const pending = !r.incorporado;
+                  const muted = pending ? theme.muted : theme.title;
+                  return (
+                    <tr
+                      key={`${r.year}-${r.month}`}
+                      className="border-t border-slate-100"
+                      style={
+                        pending
+                          ? { backgroundColor: 'rgba(148, 163, 184, 0.08)' }
+                          : undefined
+                      }
                     >
-                      {MESES[r.month - 1]}
-                    </td>
-                    <td
-                      className="px-4 py-2.5 text-right tabular-nums"
-                      style={{ color: theme.title }}
-                    >
-                      {money(r.ingresos)}
-                    </td>
-                    <td
-                      className="px-4 py-2.5 text-right tabular-nums"
-                      style={{ color: theme.title }}
-                    >
-                      {money(r.gastos)}
-                    </td>
-                    <td
-                      className="px-4 py-2.5 text-right font-semibold tabular-nums"
-                      style={{ color: balanceColor(r.balance) }}
-                    >
-                      {money(r.balance)}
-                    </td>
-                  </tr>
-                ))}
+                      <td
+                        className="px-4 py-2.5 font-medium"
+                        style={{ color: muted }}
+                      >
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          {MESES[r.month - 1]}
+                          {pending ? (
+                            <span
+                              className="text-[10px] font-semibold uppercase tracking-wide"
+                              style={{ color: theme.muted }}
+                            >
+                              Pendiente de incorporar
+                            </span>
+                          ) : null}
+                        </span>
+                      </td>
+                      <td
+                        className="px-4 py-2.5 text-right tabular-nums"
+                        style={{ color: muted }}
+                      >
+                        {money(r.ingresos)}
+                      </td>
+                      <td
+                        className="px-4 py-2.5 text-right tabular-nums"
+                        style={{ color: muted }}
+                      >
+                        {money(r.gastos)}
+                      </td>
+                      <td
+                        className="px-4 py-2.5 text-right font-semibold tabular-nums"
+                        style={{
+                          color: pending
+                            ? theme.muted
+                            : balanceColor(r.balance),
+                        }}
+                      >
+                        {money(r.balance)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr

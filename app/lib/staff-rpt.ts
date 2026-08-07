@@ -241,9 +241,11 @@ export function sumInfocajaDay(
 }
 
 /**
- * Depósito en tómbola = efectivo recibido − propinas de terminales (TPV).
- * Las propinas de tarjeta se cubren con efectivo de caja; lo que queda es lo
- * que se deposita en la tómbola.
+ * Saldo efe = efectivo recibido − propinas de terminales (TPV).
+ * Las propinas de tarjeta se cubren con efectivo de caja; el saldo puede ser
+ * **negativo** si el efectivo no alcanzó (no se recorta a 0).
+ * En corte diario se usa como esperado a depositar; en Ventas semanal el
+ * entregable físico «Tómbola» se calcula aparte con recuperación de déficit.
  */
 export function expectedTombolaDeposit(
   efectivoRecibido: number | null | undefined,
@@ -253,22 +255,70 @@ export function expectedTombolaDeposit(
     return null;
   }
   const tips = Math.max(0, Number(propinasTerminales) || 0);
-  return Math.max(
-    0,
-    Math.round((Number(efectivoRecibido) - tips) * 100) / 100
-  );
+  return Math.round((Number(efectivoRecibido) - tips) * 100) / 100;
+}
+
+export type TombolaDaySource = 'formula' | 'depositado' | 'infocaja';
+
+export type DayTombolaResult = {
+  /** Saldo efe del día (efectivo − propinas TPV); puede ser negativo. */
+  amount: number;
+  source: TombolaDaySource;
+  efectivo: number | null;
+  propinas_tpv: number;
+};
+
+/** Día tras aplicar recuperación de déficit → efectivo a entregar en tómbola. */
+export type TombolaRecoveryDay = {
+  saldo_efe: number;
+  /** Efectivo a entregar ese día (≥ 0). */
+  tombola: number;
+  /** Parte del saldo positivo usada para recuperar déficit previo. */
+  recovery: number;
+  /** Déficit pendiente al cierre del día (≥ 0). */
+  deficit_after: number;
+};
+
+/**
+ * Recupera déficits de Saldo efe antes de entregar a tómbola.
+ *
+ * - saldoEfe &lt; 0 → tómbola 0; se acumula deuda (propinas de tarjeta pagadas
+ *   con efectivo que hay que recuperar).
+ * - saldoEfe &gt; 0 → primero paga deuda; el remanente es tómbola del día.
+ *
+ * Ej.: D1 = −500 → tómbola 0, déficit 500; D2 = +1000 → recovery 500,
+ * tómbola 500, déficit 0.
+ */
+export function applyTombolaDeficitRecovery(
+  saldoEfeByDay: readonly number[]
+): TombolaRecoveryDay[] {
+  let deficit = 0;
+  return saldoEfeByDay.map((raw) => {
+    const saldo_efe = Math.round(Number(raw) * 100) / 100;
+    if (!Number.isFinite(saldo_efe)) {
+      return { saldo_efe: 0, tombola: 0, recovery: 0, deficit_after: deficit };
+    }
+    if (saldo_efe < 0) {
+      deficit = Math.round((deficit - saldo_efe) * 100) / 100;
+      return {
+        saldo_efe,
+        tombola: 0,
+        recovery: 0,
+        deficit_after: deficit,
+      };
+    }
+    const recovery = Math.min(saldo_efe, deficit);
+    const tombola = Math.round((saldo_efe - recovery) * 100) / 100;
+    deficit = Math.round((deficit - recovery) * 100) / 100;
+    return { saldo_efe, tombola, recovery, deficit_after: deficit };
+  });
 }
 
 /**
  * Tómbola del día desde un corte cerrado: Infocaja efectivo − propinas TPV.
  * Si falta Infocaja, usa el monto depositado (contado / tómbola).
  */
-export function dayTombolaFromRpt(rpt: StaffRptRow): {
-  amount: number;
-  source: 'formula' | 'depositado';
-  efectivo: number | null;
-  propinas_tpv: number;
-} {
+export function dayTombolaFromRpt(rpt: StaffRptRow): DayTombolaResult {
   const tips = Math.max(
     0,
     Number(rpt.bancos_propina_tpv ?? rpt.propinas) || 0
@@ -282,6 +332,7 @@ export function dayTombolaFromRpt(rpt: StaffRptRow): {
       propinas_tpv: tips,
     };
   }
+  // Monto depositado capturado (siempre ≥ 0); la fórmula puede ser negativa.
   const depositado =
     rpt.efectivo_contado != null && Number.isFinite(rpt.efectivo_contado)
       ? Math.max(0, Math.round(Number(rpt.efectivo_contado) * 100) / 100)
@@ -292,6 +343,55 @@ export function dayTombolaFromRpt(rpt: StaffRptRow): {
     efectivo: null,
     propinas_tpv: tips,
   };
+}
+
+/**
+ * Tómbola del día con o sin corte cerrado.
+ * Preferencia: efectivo Infocaja (live o snapshot) − propinas de tarjeta
+ * (TPV del corte si existe; si no, Infocaja Propina).
+ * Sin Infocaja: monto depositado del corte.
+ */
+export function resolveDayTombola(input: {
+  rpt?: StaffRptRow | null;
+  infocaja?: StaffRptInfocajaDay | null;
+}): DayTombolaResult | null {
+  const rpt = input.rpt ?? null;
+  const info = input.infocaja ?? null;
+
+  const tipsFromTpv =
+    rpt?.bancos_propina_tpv != null
+      ? Math.max(0, Number(rpt.bancos_propina_tpv) || 0)
+      : null;
+  const tipsFromInfocaja =
+    info != null ? Math.max(0, Number(info.propina) || 0) : null;
+  const tips =
+    tipsFromTpv != null
+      ? tipsFromTpv
+      : tipsFromInfocaja != null
+        ? tipsFromInfocaja
+        : Math.max(0, Number(rpt?.propinas) || 0);
+
+  const efectivoLive =
+    info != null && info.hasAny ? info.efectivo : null;
+  const efectivoSnap =
+    rpt?.efectivo_infocaja != null &&
+    Number.isFinite(Number(rpt.efectivo_infocaja))
+      ? Number(rpt.efectivo_infocaja)
+      : null;
+  const efectivo = efectivoLive ?? efectivoSnap;
+
+  const expected = expectedTombolaDeposit(efectivo, tips);
+  if (expected != null) {
+    return {
+      amount: expected,
+      source: efectivoLive != null && rpt == null ? 'infocaja' : 'formula',
+      efectivo,
+      propinas_tpv: tips,
+    };
+  }
+
+  if (rpt) return dayTombolaFromRpt(rpt);
+  return null;
 }
 
 /**

@@ -10,9 +10,15 @@ import {
 import {
   STAFF_RPT_TABLE,
   asStaffRptRow,
-  dayTombolaFromRpt,
+  applyTombolaDeficitRecovery,
+  resolveDayTombola,
+  sumInfocajaDay,
+  type StaffRptInfocajaDay,
+  type StaffRptRow,
+  type TombolaDaySource,
 } from '@/app/lib/staff-rpt';
 import { isTpvSchemaError, tpvSchemaHint } from '@/app/lib/tpv-api';
+import { eachIsoDateInclusive } from '@/app/lib/staff-propinas';
 import {
   acumuladoWeekForDate,
   sundayOfWeek,
@@ -49,8 +55,9 @@ function parseIso(s: string | null): string | null {
 
 /**
  * GET /api/ventas/tombola-semana
- * Suma semanal (lun–dom CDMX / Acumulado) de tómbola:
- * efectivo Infocaja − propinas TPV, por días con corte cerrado.
+ * Semana lun–dom (CDMX / Acumulado):
+ * - Saldo efe = efectivo Infocaja − propinas tarjeta (puede ser negativo)
+ * - Tómbola = efectivo a entregar tras recuperar déficits de días previos
  *
  * Query: week? year? | from&to (YYYY-MM-DD)
  */
@@ -91,64 +98,164 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Semana en curso: no sumar días futuros (aún sin corte).
+  // Semana en curso: no sumar días futuros.
   const asOf = to > today ? today : to;
 
   try {
     const sb = getServiceSupabase();
-    const { data, error } = await sb
-      .from(STAFF_RPT_TABLE)
-      .select('*')
-      .gte('rpt_date', from)
-      .lte('rpt_date', asOf)
-      .order('rpt_date', { ascending: true });
+    const rptByDate = new Map<string, StaffRptRow>();
+    let schemaMissing = false;
+    let rptErrMsg: string | null = null;
 
-    if (error) {
-      if (isTpvSchemaError(error.message)) {
-        return NextResponse.json(
-          {
-            ready: false,
-            week: weekNumber,
-            year,
-            from,
-            to,
-            asOf,
-            total: 0,
-            days: [],
-            daysWithCorte: 0,
-            schemaMissing: true,
-            error:
-              'Falta la tabla staff_rpt_diario. Ejecuta supabase/staff_corte_prod_fix.sql',
-            hint: tpvSchemaHint(error.message),
-          },
-          { status: 503 }
-        );
+    try {
+      const { data, error } = await sb
+        .from(STAFF_RPT_TABLE)
+        .select('*')
+        .gte('rpt_date', from)
+        .lte('rpt_date', asOf)
+        .order('rpt_date', { ascending: true });
+
+      if (error) {
+        if (isTpvSchemaError(error.message)) {
+          schemaMissing = true;
+          rptErrMsg =
+            'Falta la tabla staff_rpt_diario (opcional si hay Infocaja)';
+        } else {
+          rptErrMsg = error.message;
+        }
+      } else {
+        for (const raw of data || []) {
+          const rpt = asStaffRptRow(raw as Record<string, unknown>);
+          rptByDate.set(rpt.rpt_date, rpt);
+        }
       }
-      throw new Error(error.message);
+    } catch (e) {
+      rptErrMsg =
+        e instanceof Error
+          ? e.message
+          : 'No se pudo leer staff_rpt_diario (se intenta Infocaja)';
     }
 
-    const days: Array<{
+    const infocajaByDate = new Map<string, StaffRptInfocajaDay>();
+    let finErrMsg: string | null = null;
+
+    try {
+      const { data: finRows, error: finError } = await sb
+        .from('financial_records')
+        .select('date, category, amount, source_file')
+        .eq('source_file', 'infocaja')
+        .gte('date', from)
+        .lte('date', asOf);
+
+      if (finError) {
+        finErrMsg = finError.message;
+      } else {
+        const rowsByDate = new Map<
+          string,
+          Array<{ category?: string | null; amount?: number | null }>
+        >();
+        for (const r of finRows || []) {
+          const date = String((r as { date?: string }).date || '').slice(0, 10);
+          if (!date) continue;
+          const list = rowsByDate.get(date) || [];
+          list.push({
+            category: (r as { category?: string | null }).category,
+            amount: (r as { amount?: number | null }).amount,
+          });
+          rowsByDate.set(date, list);
+        }
+        for (const [date, rows] of rowsByDate) {
+          infocajaByDate.set(date, sumInfocajaDay(rows));
+        }
+      }
+    } catch (e) {
+      finErrMsg =
+        e instanceof Error
+          ? e.message
+          : 'No se pudieron leer ventas Infocaja';
+    }
+
+    if (schemaMissing && infocajaByDate.size === 0 && finErrMsg) {
+      return NextResponse.json(
+        {
+          ready: false,
+          week: weekNumber,
+          year,
+          from,
+          to,
+          asOf,
+          total: 0,
+          total_saldo_efe: 0,
+          deficit_remaining: 0,
+          days: [],
+          daysWithCorte: 0,
+          daysWithData: 0,
+          schemaMissing: true,
+          error:
+            'Falta la tabla staff_rpt_diario y no hay Infocaja. Ejecuta supabase/staff_corte_prod_fix.sql',
+          hint: tpvSchemaHint(rptErrMsg || ''),
+        },
+        { status: 503 }
+      );
+    }
+
+    if (rptErrMsg && !schemaMissing && infocajaByDate.size === 0) {
+      throw new Error(rptErrMsg);
+    }
+    if (finErrMsg && rptByDate.size === 0) {
+      throw new Error(finErrMsg);
+    }
+
+    const rawDays: Array<{
       date: string;
-      tombola: number;
+      saldo_efe: number;
       efectivo: number | null;
       propinas_tpv: number;
-      source: 'formula' | 'depositado';
+      source: TombolaDaySource;
+      has_corte: boolean;
     }> = [];
 
-    for (const raw of data || []) {
-      const rpt = asStaffRptRow(raw as Record<string, unknown>);
-      const day = dayTombolaFromRpt(rpt);
-      days.push({
-        date: rpt.rpt_date,
-        tombola: day.amount,
+    for (const date of eachIsoDateInclusive(from, asOf)) {
+      const rpt = rptByDate.get(date) ?? null;
+      const info = infocajaByDate.get(date) ?? null;
+      const day = resolveDayTombola({ rpt, infocaja: info });
+      if (!day) continue;
+      rawDays.push({
+        date,
+        saldo_efe: day.amount,
         efectivo: day.efectivo,
         propinas_tpv: day.propinas_tpv,
         source: day.source,
+        has_corte: rpt != null,
       });
     }
 
+    const recovery = applyTombolaDeficitRecovery(
+      rawDays.map((d) => d.saldo_efe)
+    );
+
+    const days = rawDays.map((d, i) => {
+      const r = recovery[i]!;
+      return {
+        date: d.date,
+        saldo_efe: r.saldo_efe,
+        tombola: r.tombola,
+        recovery: r.recovery,
+        deficit_after: r.deficit_after,
+        efectivo: d.efectivo,
+        propinas_tpv: d.propinas_tpv,
+        source: d.source,
+        has_corte: d.has_corte,
+      };
+    });
+
     const total =
       Math.round(days.reduce((a, d) => a + d.tombola, 0) * 100) / 100;
+    const total_saldo_efe =
+      Math.round(days.reduce((a, d) => a + d.saldo_efe, 0) * 100) / 100;
+    const deficit_remaining =
+      days.length > 0 ? days[days.length - 1]!.deficit_after : 0;
+    const daysWithCorte = days.filter((d) => d.has_corte).length;
 
     return NextResponse.json({
       ready: true,
@@ -157,10 +264,17 @@ export async function GET(req: NextRequest) {
       from,
       to,
       asOf,
+      /** Suma de efectivo a entregar en tómbola (tras recuperar déficits). */
       total,
+      total_saldo_efe,
+      deficit_remaining,
       days,
-      daysWithCorte: days.length,
-      formula: 'efectivo Infocaja − propinas TPV (por día cerrado)',
+      daysWithCorte,
+      daysWithData: days.length,
+      formula:
+        'Saldo efe = Infocaja − propinas TPV; Tómbola = remanente tras recuperar déficits previos',
+      rptError: rptErrMsg,
+      financialError: finErrMsg,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error al cargar tómbola';
@@ -173,8 +287,11 @@ export async function GET(req: NextRequest) {
         to,
         asOf,
         total: 0,
+        total_saldo_efe: 0,
+        deficit_remaining: 0,
         days: [],
         daysWithCorte: 0,
+        daysWithData: 0,
         error: msg,
         hint: isTpvSchemaError(msg) ? tpvSchemaHint(msg) : undefined,
       },

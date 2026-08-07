@@ -26,6 +26,8 @@ export type DetalleSemanalCardProps = {
   years: number[];
   /** Year set passed to buildWeeklySalesByYear. */
   weeklyDataYears: number[];
+  /** staff_rpt OS+extra por día — fallback Eventos si Sheets vacío. */
+  eventosFallbackByDate?: Record<string, number> | null;
   /** Collapsed by default (matches Ventas). */
   defaultCollapsed?: boolean;
   className?: string;
@@ -36,6 +38,7 @@ export function DetalleSemanalCard({
   records,
   years,
   weeklyDataYears,
+  eventosFallbackByDate,
   defaultCollapsed = true,
   className = 'mb-8',
 }: DetalleSemanalCardProps) {
@@ -46,8 +49,11 @@ export function DetalleSemanalCard({
   const [detalleCollapsed, setDetalleCollapsed] = useState(defaultCollapsed);
 
   const weeklyByYear = useMemo(
-    () => buildWeeklySalesByYear(records, weeklyDataYears),
-    [records, weeklyDataYears]
+    () =>
+      buildWeeklySalesByYear(records, weeklyDataYears, {
+        eventosFallbackByDate,
+      }),
+    [records, weeklyDataYears, eventosFallbackByDate]
   );
 
   const weekRowsDisplay = useMemo(() => {

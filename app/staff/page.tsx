@@ -247,7 +247,7 @@ export default function StaffPage() {
               className="mt-3 text-sm leading-relaxed"
               style={{ color: SUITE.muted }}
             >
-              Próximos cumpleaños del staff, del más cercano al más lejano
+              Próximos cumpleaños del staff
             </p>
             <p
               className="mt-5 text-sm font-bold"

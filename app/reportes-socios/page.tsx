@@ -19,6 +19,7 @@ import {
   weekOptionsYearInCourse,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
+import { useStaffRptEventos } from '@/app/lib/use-staff-rpt-eventos';
 
 const theme = getTheme('suite');
 
@@ -44,6 +45,8 @@ export default function ReportesSociosPage() {
   const [month, setMonth] = useState<number | null>(null);
   /** Semana a consultar en card «semana en curso» (solo año en curso). */
   const [consultaSemana, setConsultaSemana] = useState<number | null>(null);
+
+  const staffRptEventos = useStaffRptEventos();
 
   useEffect(() => {
     setConsultaSemana(null);
@@ -177,6 +180,7 @@ export default function ReportesSociosPage() {
         onMonthChange={setMonth}
         availableYears={availableYears}
         weeklyDataYears={weeklyDataYears}
+        eventosFallbackByDate={staffRptEventos}
         showPaymentMix={false}
         filtersBelowBreakdown
       />
@@ -184,6 +188,7 @@ export default function ReportesSociosPage() {
       <SemanaEnCursoTable
         weekToDate={weekToDate}
         showDescCanc={false}
+        eventosFallbackByDate={staffRptEventos}
         weekOptions={showSemanaSelect ? semanaEnCursoOptions : undefined}
         selectedWeek={
           showSemanaSelect
@@ -206,6 +211,7 @@ export default function ReportesSociosPage() {
         records={records}
         years={COMPARE_YEARS}
         weeklyDataYears={weeklyDataYears}
+        eventosFallbackByDate={staffRptEventos}
         loading={loading}
       />
 
@@ -213,6 +219,7 @@ export default function ReportesSociosPage() {
         records={records}
         years={COMPARE_YEARS}
         weeklyDataYears={weeklyDataYears}
+        eventosFallbackByDate={staffRptEventos}
         loading={loading}
       />
 
@@ -232,6 +239,7 @@ export default function ReportesSociosPage() {
         records={records}
         years={COMPARE_YEARS}
         weeklyDataYears={weeklyDataYears}
+        eventosFallbackByDate={staffRptEventos}
       />
     </SuiteShell>
   );

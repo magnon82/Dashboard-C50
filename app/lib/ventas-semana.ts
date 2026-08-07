@@ -179,18 +179,71 @@ export function weeklyFromVentasSemana(records: FinancialRecord[]): Map<string, 
   return map;
 }
 
-/** Eventos diarios → semana acumulado */
-export function weeklyEventosFromRecords(records: FinancialRecord[], year: number): Map<number, number> {
-  const map = new Map<number, number>();
+/** Eventos por día: Sheets `eventos` o staff_rpt (OS+extra) si Sheets falta. */
+export type EventosByDate =
+  | ReadonlyMap<string, number>
+  | Record<string, number>;
+
+function iterEventosByDateKeys(
+  fallback: EventosByDate | null | undefined
+): string[] {
+  if (!fallback) return [];
+  if (fallback instanceof Map) return Array.from(fallback.keys());
+  return Object.keys(fallback);
+}
+
+/**
+ * Montos de Eventos por día (YYYY-MM-DD) para un año.
+ * Prefer Sheets; si el día no tiene monto >0, usa staff_rpt fallback.
+ */
+export function dailyEventosAmounts(
+  records: FinancialRecord[],
+  year: number,
+  eventosFallbackByDate?: EventosByDate | null
+): Map<string, number> {
+  const sheetsByDate = new Map<string, number>();
   for (const r of records) {
     if (r.source_file !== 'eventos' || r.category !== 'Eventos') continue;
     const p = parseIsoDate(r.date);
     if (!p || p.y !== year) continue;
-    // Domingos <2026: cerrado — no sumar en agregados semanales de comparación
-    if (shouldExcludeSunday(p.key)) continue;
-    const week = acumuladoWeekForDate(r.date);
+    sheetsByDate.set(p.key, (sheetsByDate.get(p.key) || 0) + Number(r.amount));
+  }
+
+  const dates = new Set<string>(sheetsByDate.keys());
+  for (const key of iterEventosByDateKeys(eventosFallbackByDate)) {
+    const p = parseIsoDate(key);
+    if (!p || p.y !== year) continue;
+    dates.add(p.key);
+  }
+
+  const out = new Map<string, number>();
+  for (const key of dates) {
+    // Domingos <2026: cerrado — no sumar en agregados
+    if (shouldExcludeSunday(key)) continue;
+    const amt = resolveDayEventosAmount(
+      sheetsByDate.get(key),
+      eventosFallbackLookup(eventosFallbackByDate ?? undefined, key)
+    );
+    if (amt > 0) out.set(key, amt);
+  }
+  return out;
+}
+
+/** Eventos diarios → semana acumulado (Sheets + staff_rpt fallback) */
+export function weeklyEventosFromRecords(
+  records: FinancialRecord[],
+  year: number,
+  eventosFallbackByDate?: EventosByDate | null
+): Map<number, number> {
+  const map = new Map<number, number>();
+  for (const [key, amt] of dailyEventosAmounts(
+    records,
+    year,
+    eventosFallbackByDate
+  )) {
+    const week = acumuladoWeekForDate(key);
     if (week <= 0) continue;
-    map.set(week, (map.get(week) || 0) + Number(r.amount));
+    map.set(week, (map.get(week) || 0) + amt);
   }
   return map;
 }
@@ -239,14 +292,16 @@ export const INFOCAJA_YEAR_FROM = 2026;
 
 export function buildWeeklySalesByYear(
   records: FinancialRecord[],
-  years: number[]
+  years: number[],
+  opts?: { eventosFallbackByDate?: EventosByDate | null }
 ): Map<number, Map<number, WeekSale>> {
   const ventasSemana = weeklyFromVentasSemana(records);
   const byYear = new Map<number, Map<number, WeekSale>>();
+  const fallback = opts?.eventosFallbackByDate;
 
   for (const y of years) {
     const yearMap = new Map<number, WeekSale>();
-    const eventosByWeek = weeklyEventosFromRecords(records, y);
+    const eventosByWeek = weeklyEventosFromRecords(records, y, fallback);
 
     if (y < INFOCAJA_YEAR_FROM) {
       // 2021–2025: solo Acumulado ventas x semana
@@ -437,9 +492,11 @@ export function yearWeeklyAverageFromMonthly(
 export function buildMonthlySalesByYear(
   records: FinancialRecord[],
   weeklyByYear: Map<number, Map<number, WeekSale>>,
-  years: number[]
+  years: number[],
+  opts?: { eventosFallbackByDate?: EventosByDate | null }
 ): Map<number, Map<number, MonthSale>> {
   const result = new Map<number, Map<number, MonthSale>>();
+  const fallback = opts?.eventosFallbackByDate;
 
   for (const y of years) {
     const monthMap = new Map<number, MonthSale>();
@@ -467,13 +524,11 @@ export function buildMonthlySalesByYear(
       });
     } else {
       const eventosMes = new Map<number, number>();
-      records.forEach((r) => {
-        if (r.source_file !== 'eventos' || r.category !== 'Eventos') return;
-        const p = parseIsoDate(r.date);
-        if (!p || p.y !== y) return;
-        if (shouldExcludeSunday(p.key)) return;
-        eventosMes.set(p.m, (eventosMes.get(p.m) || 0) + Number(r.amount));
-      });
+      for (const [key, amt] of dailyEventosAmounts(records, y, fallback)) {
+        const p = parseIsoDate(key);
+        if (!p) continue;
+        eventosMes.set(p.m, (eventosMes.get(p.m) || 0) + amt);
+      }
 
       const infocajaMes = new Map<number, number>();
       records.forEach((r) => {
@@ -1394,6 +1449,35 @@ function parseCorteDescription(desc: string | null | undefined): Record<string, 
   }
 }
 
+/** Mapea una fila corte_caja (Cancelacion/Descuento) a detalle usable en UI. */
+export function toCorteDetailItem(
+  r: Pick<FinancialRecord, 'id' | 'date' | 'category' | 'amount' | 'description'>
+): CorteDetailItem | null {
+  if (r.category !== 'Corte Cancelacion' && r.category !== 'Corte Descuento') {
+    return null;
+  }
+  const p = parseIsoDate(r.date);
+  if (!p) return null;
+  const raw = parseCorteDescription(r.description);
+  const kind: 'cancelacion' | 'descuento' =
+    r.category === 'Corte Cancelacion' ? 'cancelacion' : 'descuento';
+  return {
+    id: r.id,
+    date: p.key,
+    kind,
+    amount: Number(r.amount) || 0,
+    motivo: String(raw.motivo || (kind === 'descuento' ? 'Descuento' : 'Cancelación')),
+    grupo: raw.grupo ? String(raw.grupo) : undefined,
+    persona: raw.persona ? String(raw.persona) : undefined,
+    producto: raw.producto ? String(raw.producto) : undefined,
+    mesero: raw.mesero ? String(raw.mesero) : undefined,
+    autorizo: raw.autorizo ? String(raw.autorizo) : undefined,
+    mesa: raw.mesa ? String(raw.mesa) : undefined,
+    hora: raw.hora ? String(raw.hora) : undefined,
+    raw,
+  };
+}
+
 /** Cancelaciones + descuentos del corte de caja en el periodo filtrado */
 export function buildCorteCancelacionesDescuentos(
   records: FinancialRecord[],
@@ -1409,26 +1493,10 @@ export function buildCorteCancelacionesDescuentos(
     if (!p || p.y !== year) continue;
     if (month !== null && p.m !== month) continue;
 
-    const raw = parseCorteDescription(r.description);
-    const kind: 'cancelacion' | 'descuento' =
-      r.category === 'Corte Cancelacion' ? 'cancelacion' : 'descuento';
-    const amount = Number(r.amount) || 0;
-
-    const item: CorteDetailItem = {
-      id: r.id,
-      date: p.key,
-      kind,
-      amount,
-      motivo: String(raw.motivo || (kind === 'descuento' ? 'Descuento' : 'Cancelación')),
-      grupo: raw.grupo ? String(raw.grupo) : undefined,
-      persona: raw.persona ? String(raw.persona) : undefined,
-      producto: raw.producto ? String(raw.producto) : undefined,
-      mesero: raw.mesero ? String(raw.mesero) : undefined,
-      autorizo: raw.autorizo ? String(raw.autorizo) : undefined,
-      mesa: raw.mesa ? String(raw.mesa) : undefined,
-      hora: raw.hora ? String(raw.hora) : undefined,
-      raw,
-    };
+    const item = toCorteDetailItem(r);
+    if (!item) continue;
+    const amount = item.amount;
+    const kind = item.kind;
 
     const day =
       byDate.get(p.key) ||

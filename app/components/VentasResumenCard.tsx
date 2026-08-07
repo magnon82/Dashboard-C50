@@ -33,6 +33,8 @@ export interface VentasResumenCardProps {
   availableYears: number[];
   /** Comparativo semanal / Infocaja year set used to build weekly maps. */
   weeklyDataYears: number[];
+  /** staff_rpt OS+extra por día — fallback Eventos si Sheets vacío. */
+  eventosFallbackByDate?: Record<string, number> | null;
   /** Show Efectivo / Tarjetas donut (Ventas page). Default false. */
   showPaymentMix?: boolean;
   /**
@@ -58,6 +60,7 @@ export function VentasResumenCard({
   onMonthChange,
   availableYears,
   weeklyDataYears,
+  eventosFallbackByDate,
   showPaymentMix = false,
   filtersBelowBreakdown = false,
   title,
@@ -65,8 +68,11 @@ export function VentasResumenCard({
   className = '',
 }: VentasResumenCardProps) {
   const weeklyByYear = useMemo(
-    () => buildWeeklySalesByYear(records, weeklyDataYears),
-    [records, weeklyDataYears]
+    () =>
+      buildWeeklySalesByYear(records, weeklyDataYears, {
+        eventosFallbackByDate,
+      }),
+    [records, weeklyDataYears, eventosFallbackByDate]
   );
 
   const yearWeeks = useMemo(() => {

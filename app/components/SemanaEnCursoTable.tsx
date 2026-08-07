@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Card, Metric, Text } from '@tremor/react';
 import { SemanaEnCursoChart } from '@/app/components/SemanaEnCursoChart';
 import {
@@ -34,23 +34,43 @@ function varPctClass(pct: number | null | undefined) {
   return pct >= 0 ? 'text-emerald-700' : 'text-rose-700';
 }
 
+/** Resalta Total vs WI/Eventos (suite: orange soft + navy, estilo Venta día). */
+const totalColBodyStyle: CSSProperties = {
+  backgroundColor: SUITE.orangeSoft,
+  boxShadow: `inset 1px 0 0 ${SUITE.orange}, inset -1px 0 0 ${SUITE.orange}`,
+};
+const totalColHeadStyle: CSSProperties = {
+  backgroundColor: SUITE.orange,
+  color: SUITE.navy,
+};
+const totalColFootStyle: CSSProperties = {
+  backgroundColor: SUITE.orange,
+  color: SUITE.navy,
+};
+
 function moneyCell(
   v: number | null | undefined,
-  opts?: { emphasize?: boolean; muted?: boolean }
+  opts?: { muted?: boolean; totalCol?: boolean }
 ) {
   const n = v ?? 0;
   const empty = n <= 0;
+  const totalCol = opts?.totalCol === true;
   const color = empty
     ? '#94a3b8'
-    : opts?.muted
-      ? undefined
-      : theme.tableTotal;
+    : totalCol
+      ? SUITE.navy
+      : opts?.muted
+        ? undefined
+        : theme.tableTotal;
   return (
     <td
       className={`px-2 py-2 text-right tabular-nums ${
-        opts?.emphasize ? 'font-semibold' : 'font-medium'
-      } ${opts?.muted && !empty ? 'text-slate-600' : ''}`}
-      style={color != null ? { color } : undefined}
+        totalCol ? 'font-bold' : 'font-medium'
+      } ${opts?.muted && !empty && !totalCol ? 'text-slate-600' : ''}`}
+      style={{
+        ...(color != null ? { color } : {}),
+        ...(totalCol ? totalColBodyStyle : {}),
+      }}
     >
       {empty ? '—' : money(n)}
     </td>
@@ -99,6 +119,11 @@ export type SemanaEnCursoTableProps = {
   /** Semana seleccionada (Acumulado). Default = weekToDate.weekNumber. */
   selectedWeek?: number;
   onWeekChange?: (week: number) => void;
+  /**
+   * Eventos staff_rpt ya cargados en la página (YTD).
+   * Si se pasa, no se hace fetch propio del rango de la semana.
+   */
+  eventosFallbackByDate?: Record<string, number> | null;
 };
 
 /** Comparativo semana en curso: año actual | año anterior | Var. */
@@ -109,12 +134,16 @@ export function SemanaEnCursoTable({
   weekOptions,
   selectedWeek,
   onWeekChange,
+  eventosFallbackByDate: eventosFallbackFromParent,
 }: SemanaEnCursoTableProps) {
   const [staffRptEventos, setStaffRptEventos] = useState<
     Record<string, number>
   >({});
 
+  const parentProvidesFallback = eventosFallbackFromParent != null;
+
   useEffect(() => {
+    if (parentProvidesFallback) return;
     let cancelled = false;
     async function load() {
       const ranges: Array<{ from: string; to: string }> = [
@@ -156,6 +185,7 @@ export function SemanaEnCursoTable({
       cancelled = true;
     };
   }, [
+    parentProvidesFallback,
     weekToDateProp.mondayKey,
     weekToDateProp.asOf,
     weekToDateProp.prevMondayKey,
@@ -163,8 +193,19 @@ export function SemanaEnCursoTable({
   ]);
 
   const weekToDate = useMemo(
-    () => withEventosStaffRptFallback(weekToDateProp, staffRptEventos),
-    [weekToDateProp, staffRptEventos]
+    () =>
+      withEventosStaffRptFallback(
+        weekToDateProp,
+        parentProvidesFallback
+          ? eventosFallbackFromParent
+          : staffRptEventos
+      ),
+    [
+      weekToDateProp,
+      parentProvidesFallback,
+      eventosFallbackFromParent,
+      staffRptEventos,
+    ]
   );
 
   const cardClass = 'rounded-[24px] border-0 p-5 md:p-6';
@@ -287,7 +328,12 @@ export function SemanaEnCursoTable({
                   WI
                 </th>
                 <th className="px-2 py-2 text-right font-semibold">Eventos</th>
-                <th className="px-2 py-2 text-right font-semibold">Total</th>
+                <th
+                  className="px-2 py-2 text-right font-bold"
+                  style={totalColHeadStyle}
+                >
+                  Total
+                </th>
                 <th className="px-2 py-2 text-right font-semibold">Pers.</th>
                 <th className="px-2 py-2 text-right font-semibold">Ch. prom.</th>
                 {showDescCanc && (
@@ -300,7 +346,12 @@ export function SemanaEnCursoTable({
                   WI
                 </th>
                 <th className="px-2 py-2 text-right font-semibold">Eventos</th>
-                <th className="px-2 py-2 text-right font-semibold">Total</th>
+                <th
+                  className="px-2 py-2 text-right font-bold"
+                  style={totalColHeadStyle}
+                >
+                  Total
+                </th>
                 <th className="px-2 py-2 text-right font-semibold">Pers.</th>
                 <th className="border-l border-l-white/25 px-2 py-2 text-right font-semibold">
                   % venta
@@ -317,7 +368,7 @@ export function SemanaEnCursoTable({
                   </td>
                   {moneyCell(d.ventaWi)}
                   {moneyCell(d.eventos)}
-                  {moneyCell(d.total, { emphasize: true })}
+                  {moneyCell(d.total, { totalCol: true })}
                   <td
                     className="px-2 py-2 text-right font-medium tabular-nums"
                     style={{
@@ -347,7 +398,7 @@ export function SemanaEnCursoTable({
                   </td>
                   {moneyCell(d.prevVentaWi, { muted: true })}
                   {moneyCell(d.prevEventos, { muted: true })}
-                  {moneyCell(d.prevTotal, { muted: true })}
+                  {moneyCell(d.prevTotal, { muted: true, totalCol: true })}
                   <td className="px-2 py-2 text-right font-medium tabular-nums text-slate-600">
                     {(d.prevComensales ?? 0) > 0 ? pax(d.prevComensales!) : '—'}
                   </td>
@@ -383,7 +434,10 @@ export function SemanaEnCursoTable({
                     ? money(weekToDate.totalEventos)
                     : '—'}
                 </td>
-                <td className="px-2 py-2.5 text-right tabular-nums">
+                <td
+                  className="px-2 py-2.5 text-right tabular-nums font-bold"
+                  style={totalColFootStyle}
+                >
                   {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
                 </td>
                 <td className="px-2 py-2.5 text-right tabular-nums">
@@ -412,7 +466,10 @@ export function SemanaEnCursoTable({
                     ? money(weekToDate.prevTotalEventos)
                     : '—'}
                 </td>
-                <td className="px-2 py-2.5 text-right tabular-nums">
+                <td
+                  className="px-2 py-2.5 text-right tabular-nums font-bold"
+                  style={totalColFootStyle}
+                >
                   {weekToDate.prevTotal > 0 ? money(weekToDate.prevTotal) : '—'}
                 </td>
                 <td className="px-2 py-2.5 text-right tabular-nums">

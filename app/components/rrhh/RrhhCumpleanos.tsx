@@ -244,9 +244,6 @@ export function RrhhCumpleanos() {
           <h3 className="text-base font-bold" style={{ color: theme.title }}>
             Próximos cumpleaños
           </h3>
-          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
-            Del más cercano al más lejano
-          </p>
 
           <UpcomingBirthdaysList
             upcoming={upcoming}

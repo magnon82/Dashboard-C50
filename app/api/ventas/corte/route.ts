@@ -1,0 +1,320 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import {
+  SESSION_COOKIE,
+  canAccessAdmin,
+  canAccessModule,
+  verifySessionToken,
+  type SessionUser,
+} from '@/app/lib/auth';
+import {
+  STAFF_RPT_TABLE,
+  asStaffRptRow,
+  resolveDayTombola,
+  sumInfocajaDay,
+  type DayTombolaResult,
+  type StaffRptRow,
+} from '@/app/lib/staff-rpt';
+import { isTpvSchemaError, tpvSchemaHint } from '@/app/lib/tpv-api';
+import { shiftIsoDate, todayCdmxIso } from '@/app/lib/tpv-cortes';
+import {
+  toCorteDetailItem,
+  type CorteDetailItem,
+} from '@/app/lib/ventas-semana';
+import { getServiceSupabase } from '@/app/lib/users';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export type VentasCorteMode = 'date' | 'yesterday' | 'latest' | 'none';
+
+async function requireVentasViewer(): Promise<SessionUser | NextResponse> {
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (!token) {
+    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+  }
+  const session = await verifySessionToken(token);
+  if (!session) {
+    return NextResponse.json({ error: 'Sesión inválida' }, { status: 401 });
+  }
+  const ok =
+    canAccessAdmin(session) || canAccessModule(session, 'ventas');
+  if (!ok) {
+    return NextResponse.json({ error: 'Sin acceso a Ventas' }, { status: 403 });
+  }
+  return session;
+}
+
+function parseIso(s: string | null): string | null {
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return s;
+}
+
+function summarizeRpt(rpt: StaffRptRow) {
+  return {
+    rpt_date: rpt.rpt_date,
+    wi_amount: rpt.wi_amount,
+    eventos_amount: rpt.eventos_amount,
+    eventos_os_amount: rpt.eventos_os_amount,
+    eventos_extra_amount: rpt.eventos_extra_amount,
+    propinas: rpt.propinas,
+    efectivo_tombola: rpt.efectivo_tombola,
+    efectivo_contado: rpt.efectivo_contado,
+    efectivo_infocaja: rpt.efectivo_infocaja,
+    bancos_neto_tpv: rpt.bancos_neto_tpv,
+    bancos_cobrado_tpv: rpt.bancos_cobrado_tpv,
+    bancos_propina_tpv: rpt.bancos_propina_tpv,
+    tpv_accounted: rpt.tpv_accounted,
+    tpv_complete: rpt.tpv_complete,
+    notes: rpt.notes,
+    created_by: rpt.created_by,
+    updated_by: rpt.updated_by,
+    created_at: rpt.created_at,
+    updated_at: rpt.updated_at,
+  };
+}
+
+/** Línea de detalle sin `raw` (payload API más liviano). */
+export type CorteCancDescLine = Omit<CorteDetailItem, 'raw'>;
+
+type CorteCancDesc = {
+  cancelacionesCount: number;
+  cancelacionesAmount: number;
+  descuentosCount: number;
+  descuentosAmount: number;
+  cancelaciones: CorteCancDescLine[];
+  descuentos: CorteCancDescLine[];
+};
+
+function toApiLine(item: CorteDetailItem): CorteCancDescLine {
+  const { raw: _raw, ...rest } = item;
+  return rest;
+}
+
+/**
+ * Conteos/montos + líneas Infocaja corte_caja (mismo origen que hub Ventas cancelaciones).
+ */
+async function loadCancDescForDate(date: string): Promise<CorteCancDesc> {
+  const sb = getServiceSupabase();
+  const { data, error } = await sb
+    .from('financial_records')
+    .select('id, date, category, amount, description')
+    .eq('source_file', 'corte_caja')
+    .in('category', ['Corte Cancelacion', 'Corte Descuento'])
+    .eq('date', date)
+    .order('id', { ascending: true });
+
+  if (error) throw new Error(error.message);
+
+  let cancelacionesAmount = 0;
+  let descuentosAmount = 0;
+  const cancelaciones: CorteCancDescLine[] = [];
+  const descuentos: CorteCancDescLine[] = [];
+
+  for (const row of data || []) {
+    const item = toCorteDetailItem({
+      id: String(row.id),
+      date: String(row.date),
+      category: String(row.category),
+      amount: Number(row.amount) || 0,
+      description: row.description != null ? String(row.description) : '',
+    });
+    if (!item) continue;
+    const line = toApiLine(item);
+    if (item.kind === 'cancelacion') {
+      cancelaciones.push(line);
+      cancelacionesAmount += item.amount;
+    } else {
+      descuentos.push(line);
+      descuentosAmount += item.amount;
+    }
+  }
+
+  return {
+    cancelacionesCount: cancelaciones.length,
+    cancelacionesAmount: Math.round(cancelacionesAmount * 100) / 100,
+    descuentosCount: descuentos.length,
+    descuentosAmount: Math.round(descuentosAmount * 100) / 100,
+    cancelaciones,
+    descuentos,
+  };
+}
+
+function emptyCancDesc(): CorteCancDesc {
+  return {
+    cancelacionesCount: 0,
+    cancelacionesAmount: 0,
+    descuentosCount: 0,
+    descuentosAmount: 0,
+    cancelaciones: [],
+    descuentos: [],
+  };
+}
+
+async function loadInfocajaForDate(date: string) {
+  const sb = getServiceSupabase();
+  const { data, error } = await sb
+    .from('financial_records')
+    .select('category, amount')
+    .eq('source_file', 'infocaja')
+    .eq('date', date);
+  if (error) throw new Error(error.message);
+  return sumInfocajaDay(data || []);
+}
+
+/**
+ * GET /api/ventas/corte
+ * Reporte completo de un corte diario (staff_rpt_diario + cancelaciones/descuentos).
+ * Tómbola: Infocaja efectivo − propinas tarjeta (con o sin cierre RPT).
+ *
+ * Query: date? (YYYY-MM-DD). Sin date → ayer CDMX; si no hay, el más reciente.
+ */
+export async function GET(req: NextRequest) {
+  const auth = await requireVentasViewer();
+  if (auth instanceof NextResponse) return auth;
+
+  const yesterdayDate = shiftIsoDate(todayCdmxIso(), -1);
+  const requestedDate = parseIso(req.nextUrl.searchParams.get('date'));
+
+  try {
+    const sb = getServiceSupabase();
+
+    async function loadRptByDate(date: string): Promise<StaffRptRow | null> {
+      const { data, error } = await sb
+        .from(STAFF_RPT_TABLE)
+        .select('*')
+        .eq('rpt_date', date)
+        .maybeSingle();
+      if (error) {
+        if (isTpvSchemaError(error.message)) {
+          const err = new Error(error.message);
+          (err as Error & { schemaMissing?: boolean }).schemaMissing = true;
+          throw err;
+        }
+        throw new Error(error.message);
+      }
+      if (!data) return null;
+      return asStaffRptRow(data as Record<string, unknown>);
+    }
+
+    async function loadLatestRpt(): Promise<StaffRptRow | null> {
+      const { data, error } = await sb
+        .from(STAFF_RPT_TABLE)
+        .select('*')
+        .order('rpt_date', { ascending: false })
+        .limit(1);
+      if (error) {
+        if (isTpvSchemaError(error.message)) {
+          const err = new Error(error.message);
+          (err as Error & { schemaMissing?: boolean }).schemaMissing = true;
+          throw err;
+        }
+        throw new Error(error.message);
+      }
+      const row = data?.[0];
+      if (!row) return null;
+      return asStaffRptRow(row as Record<string, unknown>);
+    }
+
+    let mode: VentasCorteMode = 'none';
+    let rpt: StaffRptRow | null = null;
+    let statsDate: string | null = null;
+
+    if (requestedDate) {
+      mode = 'date';
+      rpt = await loadRptByDate(requestedDate);
+      statsDate = requestedDate;
+    } else {
+      rpt = await loadRptByDate(yesterdayDate);
+      if (rpt) {
+        mode = 'yesterday';
+        statsDate = rpt.rpt_date;
+      } else {
+        rpt = await loadLatestRpt();
+        if (rpt) {
+          mode = 'latest';
+          statsDate = rpt.rpt_date;
+        } else {
+          // Sin cortes: aún mostrar tómbola de ayer desde Infocaja.
+          statsDate = yesterdayDate;
+          mode = 'yesterday';
+        }
+      }
+    }
+
+    const cancDesc = statsDate
+      ? await loadCancDescForDate(statsDate)
+      : emptyCancDesc();
+
+    let tombola: DayTombolaResult | null = null;
+    if (statsDate) {
+      try {
+        const infocaja = await loadInfocajaForDate(statsDate);
+        tombola = resolveDayTombola({ rpt, infocaja });
+      } catch {
+        tombola = rpt ? resolveDayTombola({ rpt, infocaja: null }) : null;
+      }
+    }
+
+    return NextResponse.json({
+      ready: true,
+      mode,
+      requestedDate,
+      yesterdayDate,
+      todayDate: todayCdmxIso(),
+      date: statsDate,
+      isYesterday: statsDate === yesterdayDate,
+      hasCorte: Boolean(rpt),
+      corte: rpt ? summarizeRpt(rpt) : null,
+      tombola,
+      cancDesc,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al cargar corte';
+    const schemaMissing = Boolean(
+      (e as Error & { schemaMissing?: boolean })?.schemaMissing
+    );
+    const todayDate = todayCdmxIso();
+    if (schemaMissing || isTpvSchemaError(msg)) {
+      return NextResponse.json(
+        {
+          ready: false,
+          mode: 'none' as VentasCorteMode,
+          requestedDate,
+          yesterdayDate,
+          todayDate,
+          date: null,
+          isYesterday: false,
+          hasCorte: false,
+          corte: null,
+          tombola: null,
+          cancDesc: emptyCancDesc(),
+          schemaMissing: true,
+          error:
+            'Falta la tabla staff_rpt_diario. Ejecuta supabase/staff_corte_prod_fix.sql',
+          hint: tpvSchemaHint(msg),
+        },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json(
+      {
+        ready: false,
+        mode: 'none' as VentasCorteMode,
+        requestedDate,
+        yesterdayDate,
+        todayDate,
+        date: null,
+        isYesterday: false,
+        hasCorte: false,
+        corte: null,
+        tombola: null,
+        cancDesc: emptyCancDesc(),
+        error: msg,
+        hint: isTpvSchemaError(msg) ? tpvSchemaHint(msg) : undefined,
+      },
+      { status: 500 }
+    );
+  }
+}
