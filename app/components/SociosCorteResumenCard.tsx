@@ -44,25 +44,36 @@ function Kpi({
   label,
   value,
   hint,
+  highlight,
 }: {
   label: string;
   value: string;
   hint?: string;
+  /** Resalta el total (Venta día): borde + fondo más fuertes */
+  highlight?: boolean;
 }) {
   return (
     <div
       className="rounded-2xl px-3 py-3 sm:px-4"
-      style={{ backgroundColor: '#F8FAFC' }}
+      style={
+        highlight
+          ? {
+              backgroundColor: SUITE.orangeSoft,
+              border: `2px solid ${SUITE.orange}`,
+              boxShadow: `0 0 0 1px ${SUITE.orangeSoft}`,
+            }
+          : { backgroundColor: '#F8FAFC' }
+      }
     >
       <p
         className="text-[11px] font-semibold uppercase tracking-wide"
-        style={{ color: theme.muted }}
+        style={{ color: highlight ? SUITE.orangeDeep : theme.muted }}
       >
         {label}
       </p>
       <p
         className="mt-1 text-base font-bold tabular-nums sm:text-lg"
-        style={{ color: theme.title }}
+        style={{ color: highlight ? SUITE.navy : theme.title }}
       >
         {value}
       </p>
@@ -215,12 +226,17 @@ export function SociosCorteResumenCard({
       ) : (
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Kpi label="Venta día" value={moneyMx(ventaDia)} hint="WI + Eventos" />
             <Kpi label="WI" value={moneyMx(corte.wi_amount)} />
             <Kpi
               label="Eventos"
               value={moneyMx(corte.eventos_amount)}
               hint={eventosHint}
+            />
+            <Kpi
+              label="Venta día"
+              value={moneyMx(ventaDia)}
+              hint="WI + Eventos"
+              highlight
             />
           </div>
           {corte.notes ? (
