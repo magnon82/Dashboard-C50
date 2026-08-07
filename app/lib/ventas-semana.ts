@@ -897,8 +897,9 @@ function eventosFallbackLookup(
   if (fallback instanceof Map) {
     return fallback.has(key) ? fallback.get(key) : undefined;
   }
-  return Object.prototype.hasOwnProperty.call(fallback, key)
-    ? fallback[key]
+  const record = fallback as Record<string, number>;
+  return Object.prototype.hasOwnProperty.call(record, key)
+    ? record[key]
     : undefined;
 }
 
