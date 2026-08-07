@@ -13,7 +13,8 @@ export default function AdminCortesTpvPage() {
       actions={
         <Link
           href="/admin"
-          className="inline-flex min-h-10 items-center rounded-xl border border-white/25 px-3 text-sm font-semibold text-white/90 hover:bg-white/10"
+          className="inline-flex min-h-10 items-center rounded-xl px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90"
+          style={{ backgroundColor: SUITE.navy }}
         >
           ← Master Panel
         </Link>
