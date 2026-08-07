@@ -199,6 +199,40 @@ function detectAreaHeader(name: string): string | null {
   return null;
 }
 
+/**
+ * En hojas recientes, la fila bajo LIMPIEZA se llama literalmente «Limpieza»
+ * (no «Román Sánchez») y trae Ent/Sal. No tratarla como otro encabezado.
+ */
+function rowHasScheduleData(
+  row: unknown[],
+  pairs: { ent: number; sal: number }[]
+): boolean {
+  for (const pair of pairs) {
+    const entCell = row[pair.ent];
+    const salCell = row[pair.sal];
+    if (isOffMarker(entCell) || isOffMarker(salCell)) return true;
+    if (cellToTime(entCell) && cellToTime(salCell)) return true;
+  }
+  return false;
+}
+
+/** Placeholder de sección con horas → nombre de persona canónico. */
+function resolveAreaPlaceholderPerson(
+  area: string,
+  rawName: string
+): string | null {
+  const key = rawName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  if (area === 'Limpieza' && key === 'limpieza') {
+    // Dual Mesero+Limpieza (C50): fila genérica = Román Sánchez
+    return 'Román Sánchez';
+  }
+  return null;
+}
+
 function parseWeekNumber(sheetName: string, cellB3: unknown): number | null {
   const fromName = /semana\s*(\d+)/i.exec(sheetName);
   if (fromName) return Number(fromName[1]);
@@ -327,13 +361,26 @@ export function parseHorariosWeekSheet(
     if (!rawName) continue;
 
     const areaHeader = detectAreaHeader(rawName);
+    let name: string | null = null;
     if (areaHeader) {
-      currentArea = areaHeader;
-      continue;
+      // Misma sección + fila con horas (p. ej. «Limpieza» bajo LIMPIEZA) → persona
+      if (
+        currentArea === areaHeader &&
+        rowHasScheduleData(row, pairs)
+      ) {
+        name = resolveAreaPlaceholderPerson(areaHeader, rawName);
+        if (!name) {
+          currentArea = areaHeader;
+          continue;
+        }
+      } else {
+        currentArea = areaHeader;
+        continue;
+      }
+    } else {
+      name = cleanPersonName(rawName);
+      if (isSectionOrPlaceholder(name)) continue;
     }
-
-    const name = cleanPersonName(rawName);
-    if (isSectionOrPlaceholder(name)) continue;
 
     // ¿Algún Ent./Sal. con hora o off?
     let anyShift = false;

@@ -772,11 +772,50 @@ export function RrhhHorarios() {
     if (pastLocked || !addEmpId || !weekDetail) return;
     const emp = employees.find((e) => e.id === addEmpId);
     if (!emp) return;
-    if (rows.some((r) => r.employee_id === emp.id)) {
+    const dual = hasDualLimpiezaServicio(emp);
+    const already = rows.filter((r) => r.employee_id === emp.id);
+    if (already.length > 0) {
+      // Ya en grilla como fila simple → promover a dual (servicio + Limpieza)
+      if (
+        dual &&
+        already.length === 1 &&
+        !already[0]!.dualTrack
+      ) {
+        const plain = already[0]!;
+        const datesList = dates;
+        const servicio: PersonRow = {
+          ...plain,
+          rowKey: personRowKey(emp.id, 'servicio'),
+          dualLimpiezaServicio: true,
+          dualTrack: 'servicio',
+          area: resolveRowSection(emp, [], [], emp.full_name, 'servicio')
+            .section,
+          puesto:
+            resolveRowSection(emp, [], [], emp.full_name, 'servicio').puesto ||
+            emp.puesto,
+        };
+        const limpieza: PersonRow = {
+          rowKey: personRowKey(emp.id, 'limpieza'),
+          employee_id: emp.id,
+          full_name: emp.full_name,
+          area: 'Limpieza',
+          puesto: 'Limpieza',
+          dualLimpiezaServicio: true,
+          dualTrack: 'limpieza',
+          days: datesList.map(() => emptyDay()),
+        };
+        setRows((prev) =>
+          [...prev.filter((r) => r.employee_id !== emp.id), servicio, limpieza].sort(
+            comparePersonRows
+          )
+        );
+        setAddEmpId('');
+        setToast('Fila Limpieza agregada (rol dual)');
+        return;
+      }
       setToast('Ya está en la grilla');
       return;
     }
-    const dual = hasDualLimpiezaServicio(emp);
     const tracks: Array<DualRoleTrack | null> = dual
       ? ['servicio', 'limpieza']
       : [null];
@@ -1475,7 +1514,14 @@ function AreaFragment({
             style={{ color: theme.title, boxShadow: '1px 0 0 #e2e8f0' }}
           >
             {formatHrListName(p.full_name)}
-            {p.dualLimpiezaServicio ? (
+            {p.dualTrack === 'limpieza' ? (
+              <span
+                className="ml-1 rounded border border-sky-300 bg-sky-50 px-1 text-[9px] font-bold uppercase tracking-wide text-sky-900"
+                title="Fila de limpieza (mañana); no solapar con servicio"
+              >
+                limpieza
+              </span>
+            ) : p.dualLimpiezaServicio ? (
               <span
                 className="ml-1 rounded border border-amber-300 bg-amber-50 px-1 text-[9px] font-bold uppercase tracking-wide text-amber-900"
                 title="Rol dual: Limpieza y servicio no pueden solaparse"

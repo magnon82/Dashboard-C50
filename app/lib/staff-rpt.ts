@@ -260,6 +260,41 @@ export function expectedTombolaDeposit(
 }
 
 /**
+ * Tómbola del día desde un corte cerrado: Infocaja efectivo − propinas TPV.
+ * Si falta Infocaja, usa el monto depositado (contado / tómbola).
+ */
+export function dayTombolaFromRpt(rpt: StaffRptRow): {
+  amount: number;
+  source: 'formula' | 'depositado';
+  efectivo: number | null;
+  propinas_tpv: number;
+} {
+  const tips = Math.max(
+    0,
+    Number(rpt.bancos_propina_tpv ?? rpt.propinas) || 0
+  );
+  const expected = expectedTombolaDeposit(rpt.efectivo_infocaja, tips);
+  if (expected != null) {
+    return {
+      amount: expected,
+      source: 'formula',
+      efectivo: Number(rpt.efectivo_infocaja),
+      propinas_tpv: tips,
+    };
+  }
+  const depositado =
+    rpt.efectivo_contado != null && Number.isFinite(rpt.efectivo_contado)
+      ? Math.max(0, Math.round(Number(rpt.efectivo_contado) * 100) / 100)
+      : Math.max(0, Math.round(Number(rpt.efectivo_tombola) * 100) / 100);
+  return {
+    amount: depositado,
+    source: 'depositado',
+    efectivo: null,
+    propinas_tpv: tips,
+  };
+}
+
+/**
  * Alerta cuando el efectivo en tómbola es menor que lo esperado:
  * Infocaja Efectivo − propinas TPV. WARNING (no hard-block): un faltante real
  * puede cerrarse con acknowledge_shortage + nota.

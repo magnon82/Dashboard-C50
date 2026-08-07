@@ -194,6 +194,8 @@ export type HrScheduleShift = {
   employee_puesto?: string | null;
   /** Notas de ficha (flags dual/externo) cuando el join las trae. */
   employee_notes?: string | null;
+  /** Roles secundarios de ficha cuando el join los trae. */
+  employee_puestos_secundarios?: string[] | null;
 };
 
 /**

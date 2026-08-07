@@ -570,6 +570,10 @@ export interface DaySale {
   label: string;
   weekday: string;
   total: number;
+  /** Eventos del día (Sheets eventos); WI = max(0, total − eventos) */
+  eventos: number;
+  /** Walk-in / resto: Infocaja Venta Total − Eventos */
+  ventaWi: number;
   /** Suma descuentos + cortesías + cancelaciones del día (CORTE) */
   cortes: number;
   /** Comensales Infocaja (Personas); 0 si no hay dato */
@@ -587,6 +591,10 @@ export interface DaySale {
    * `undefined` = no comparable (p.ej. domingo cerrado <2026); no graficar ni sumar en totales prev.
    */
   prevTotal?: number;
+  /** Eventos mismo día año anterior; undefined si domingo cerrado <2026 */
+  prevEventos?: number;
+  /** WI mismo día año anterior; undefined si domingo cerrado <2026 */
+  prevVentaWi?: number;
   /** Comensales mismo día de semana del año anterior; undefined si domingo cerrado <2026 */
   prevComensales?: number;
   /** % vs mismo día año anterior; null si no hay base */
@@ -860,7 +868,122 @@ export function weekOptionsYearInCourse(todayIso?: string): Array<{
   return opts;
 }
 
+/**
+ * Eventos del día: prefer `financial_records` (Sheets), si falta usar staff_rpt (OS+extra).
+ * `financial` / `staffRpt` ausentes o no finitos se tratan como missing.
+ */
+export function resolveDayEventosAmount(
+  financial: number | null | undefined,
+  staffRpt: number | null | undefined
+): number {
+  const fr =
+    financial != null && Number.isFinite(Number(financial))
+      ? Number(financial)
+      : null;
+  const rpt =
+    staffRpt != null && Number.isFinite(Number(staffRpt))
+      ? Number(staffRpt)
+      : null;
+  if (fr != null && fr > 0) return fr;
+  if (rpt != null && rpt > 0) return rpt;
+  return Math.max(0, fr ?? rpt ?? 0);
+}
+
+function eventosFallbackLookup(
+  fallback: ReadonlyMap<string, number> | Record<string, number> | undefined,
+  key: string
+): number | undefined {
+  if (!fallback) return undefined;
+  if (fallback instanceof Map) {
+    return fallback.has(key) ? fallback.get(key) : undefined;
+  }
+  return Object.prototype.hasOwnProperty.call(fallback, key)
+    ? fallback[key]
+    : undefined;
+}
+
+/**
+ * Reescribe Eventos/WI (y totales) con fallback staff_rpt cuando Sheets eventos falta.
+ * No altera Total Infocaja ni días futuros / domingos cerrados.
+ */
+export function withEventosStaffRptFallback<
+  T extends {
+    days: DaySale[];
+    asOf: string;
+    totalEventos: number;
+    totalVentaWi: number;
+    prevTotalEventos: number;
+    prevTotalVentaWi: number;
+  },
+>(
+  wtd: T,
+  fallbackByDate?: ReadonlyMap<string, number> | Record<string, number> | null
+): T {
+  if (!fallbackByDate) return wtd;
+
+  let totalEventos = 0;
+  let totalVentaWi = 0;
+  let prevTotalEventos = 0;
+  let prevTotalVentaWi = 0;
+
+  const days = wtd.days.map((d) => {
+    const closed = shouldExcludeSunday(d.date);
+    const inRange = d.date <= wtd.asOf && !closed;
+    const dayEventos = inRange
+      ? resolveDayEventosAmount(
+          d.eventos,
+          eventosFallbackLookup(fallbackByDate, d.date)
+        )
+      : 0;
+    const dayVentaWi = Math.max(0, d.total - dayEventos);
+    if (inRange) {
+      totalEventos += dayEventos;
+      totalVentaWi += dayVentaWi;
+    }
+
+    let prevEventos = d.prevEventos;
+    let prevVentaWi = d.prevVentaWi;
+    if (
+      d.prevDate &&
+      d.prevTotal != null &&
+      !shouldExcludeSunday(d.prevDate)
+    ) {
+      prevEventos = resolveDayEventosAmount(
+        d.prevEventos,
+        eventosFallbackLookup(fallbackByDate, d.prevDate)
+      );
+      prevVentaWi = Math.max(0, d.prevTotal - prevEventos);
+      // Solo acumular prev en días que ya entraron al comparable (misma regla que build)
+      const comparable =
+        inRange && (d.date < wtd.asOf || d.total > 0);
+      if (comparable) {
+        prevTotalEventos += prevEventos;
+        prevTotalVentaWi += prevVentaWi;
+      }
+    }
+
+    return {
+      ...d,
+      eventos: dayEventos,
+      ventaWi: dayVentaWi,
+      prevEventos,
+      prevVentaWi,
+    };
+  });
+
+  return {
+    ...wtd,
+    days,
+    totalEventos,
+    totalVentaWi,
+    prevTotalEventos,
+    prevTotalVentaWi,
+  };
+}
+
 /** Semana en curso (siempre Lun→Dom) con ventas diarias Infocaja + cortes CORTE.
+ *  Desglose: Eventos (Sheets `eventos`, o staff_rpt OS+extra si falta) +
+ *  WI = max(0, Venta Total − Eventos); Total = Infocaja.
  *  Días futuros del semana: fila presente, venta "—" (0), comparación año anterior si hay dato.
  *  Totales agregados = lun–hoy (no incluyen días futuros).
  *  Compara día a día vs misma semana del año anterior (solo ventas diarias; no prorratea Acumulado).
@@ -884,10 +1007,19 @@ export function buildWeekToDateSales(
      * Semana actual → WTD hasta hoy; semanas anteriores → lun–dom completo.
      */
     week?: number;
+    /**
+     * Eventos por día desde staff_rpt_diario (OS+extra).
+     * Solo se usa si no hay monto >0 en financial_records source_file=eventos.
+     */
+    eventosFallbackByDate?: ReadonlyMap<string, number> | Record<string, number>;
   }
 ): {
   days: DaySale[];
   total: number;
+  /** Σ Eventos lun–asOf */
+  totalEventos: number;
+  /** Σ WI lun–asOf */
+  totalVentaWi: number;
   totalCortes: number;
   /** Suma comensales (días con dato); 0 si ninguno */
   totalComensales: number;
@@ -900,6 +1032,10 @@ export function buildWeekToDateSales(
   year: number;
   prevYear: number;
   prevTotal: number;
+  /** Σ Eventos días comparables del año anterior */
+  prevTotalEventos: number;
+  /** Σ WI días comparables del año anterior */
+  prevTotalVentaWi: number;
   /** Suma personas días comparables del año anterior */
   prevTotalComensales: number;
   prevMondayKey: string;
@@ -967,6 +1103,17 @@ export function buildWeekToDateSales(
     }
   }
 
+  /** Eventos diarios (Sheets) — mismo contrato que weeklyEventosFromRecords */
+  const eventosByDate = new Map<string, number>();
+  for (const r of records) {
+    if (r.source_file !== 'eventos' || r.category !== 'Eventos') continue;
+    const p = parseIsoDate(r.date);
+    if (!p) continue;
+    if (p.key < mondayKey || p.key > asOf) continue;
+    if (shouldExcludeSunday(p.key)) continue;
+    eventosByDate.set(p.key, (eventosByDate.get(p.key) || 0) + Number(r.amount));
+  }
+
   const cortesByDate = new Map<string, number>();
   for (const r of records) {
     if (r.source_file !== 'corte_caja') continue;
@@ -977,20 +1124,30 @@ export function buildWeekToDateSales(
     cortesByDate.set(p.key, (cortesByDate.get(p.key) || 0) + Number(r.amount));
   }
 
-  // Ventas + personas diarias Infocaja del año anterior (semana comparable)
+  // Ventas + personas + eventos diarios Infocaja/Eventos del año anterior (semana comparable)
   const prevByDate = new Map<string, number>();
   const prevComensalesByDate = new Map<string, number>();
+  const prevEventosByDate = new Map<string, number>();
   for (const r of records) {
-    if (r.source_file !== 'infocaja') continue;
-    const p = parseIsoDate(r.date);
-    if (!p || p.y !== prevYear) continue;
-    const amt = Number(r.amount);
-    if (r.category === 'Venta Total') {
-      prevByDate.set(p.key, (prevByDate.get(p.key) || 0) + amt);
-    } else if (r.category === 'Infocaja Personas') {
-      prevComensalesByDate.set(
+    if (r.source_file === 'infocaja') {
+      const p = parseIsoDate(r.date);
+      if (!p || p.y !== prevYear) continue;
+      const amt = Number(r.amount);
+      if (r.category === 'Venta Total') {
+        prevByDate.set(p.key, (prevByDate.get(p.key) || 0) + amt);
+      } else if (r.category === 'Infocaja Personas') {
+        prevComensalesByDate.set(
+          p.key,
+          (prevComensalesByDate.get(p.key) || 0) + amt
+        );
+      }
+    } else if (r.source_file === 'eventos' && r.category === 'Eventos') {
+      const p = parseIsoDate(r.date);
+      if (!p || p.y !== prevYear) continue;
+      if (shouldExcludeSunday(p.key)) continue;
+      prevEventosByDate.set(
         p.key,
-        (prevComensalesByDate.get(p.key) || 0) + amt
+        (prevEventosByDate.get(p.key) || 0) + Number(r.amount)
       );
     }
   }
@@ -1000,10 +1157,14 @@ export function buildWeekToDateSales(
 
   const days: DaySale[] = [];
   let total = 0;
+  let totalEventos = 0;
+  let totalVentaWi = 0;
   let totalCortes = 0;
   let totalComensales = 0;
   let sinPropinaConComensales = 0;
   let prevTotal = 0;
+  let prevTotalEventos = 0;
+  let prevTotalVentaWi = 0;
   let prevTotalComensales = 0;
   /** Personas del año en curso solo en días comparables (para var. % semana) */
   let comparableComensales = 0;
@@ -1016,6 +1177,14 @@ export function buildWeekToDateSales(
     const isFuture = key > asOf;
     const closedSunday = shouldExcludeSunday(key);
     const amt = isFuture || closedSunday ? 0 : byDate.get(key) || 0;
+    const dayEventos =
+      isFuture || closedSunday
+        ? 0
+        : resolveDayEventosAmount(
+            eventosByDate.get(key),
+            eventosFallbackLookup(opts?.eventosFallbackByDate, key)
+          );
+    const dayVentaWi = Math.max(0, amt - dayEventos);
     const cortes = isFuture || closedSunday ? 0 : cortesByDate.get(key) || 0;
     const comensales =
       isFuture || closedSunday ? 0 : comensalesByDate.get(key) || 0;
@@ -1024,6 +1193,8 @@ export function buildWeekToDateSales(
       !isFuture && !closedSunday && comensales > 0 ? amt / comensales : null;
     if (!isFuture && !closedSunday) {
       total += amt;
+      totalEventos += dayEventos;
+      totalVentaWi += dayVentaWi;
       totalCortes += cortes;
       if (comensales > 0) {
         totalComensales += comensales;
@@ -1033,6 +1204,8 @@ export function buildWeekToDateSales(
 
     let prevDate = '';
     let prevDayTotal: number | undefined;
+    let prevDayEventos: number | undefined;
+    let prevDayVentaWi: number | undefined;
     let prevDayComensales: number | undefined;
     let dayChange: number | null = null;
     let dayComensalesChange: number | null = null;
@@ -1044,9 +1217,16 @@ export function buildWeekToDateSales(
       if (prevClosedSunday) {
         // Domingo año anterior <2026: omitir (no $0) en tabla, gráfica y totales prev / var %
         prevDayTotal = undefined;
+        prevDayEventos = undefined;
+        prevDayVentaWi = undefined;
         prevDayComensales = undefined;
       } else {
         prevDayTotal = prevByDate.get(prevDate) || 0;
+        prevDayEventos = resolveDayEventosAmount(
+          prevEventosByDate.get(prevDate),
+          eventosFallbackLookup(opts?.eventosFallbackByDate, prevDate)
+        );
+        prevDayVentaWi = Math.max(0, prevDayTotal - prevDayEventos);
         prevDayComensales = prevComensalesByDate.get(prevDate) || 0;
         // Solo comparar días ya transcurridos (antes de asOf), o asOf si ya hay venta
         const comparable =
@@ -1054,6 +1234,8 @@ export function buildWeekToDateSales(
         if (comparable) {
           prevAsOfKey = prevDate;
           prevTotal += prevDayTotal;
+          prevTotalEventos += prevDayEventos;
+          prevTotalVentaWi += prevDayVentaWi;
           prevTotalComensales += prevDayComensales;
           comparableComensales += comensales;
           if (prevDayTotal > 0) {
@@ -1072,12 +1254,16 @@ export function buildWeekToDateSales(
       label: formatShort(key),
       weekday: d.toLocaleDateString('es-MX', { weekday: 'short' }),
       total: amt,
+      eventos: dayEventos,
+      ventaWi: dayVentaWi,
       cortes,
       comensales,
       chequePromedio,
       prevDate,
       prevLabel: prevDate ? formatShort(prevDate) : undefined,
       prevTotal: prevDayTotal,
+      prevEventos: prevDayEventos,
+      prevVentaWi: prevDayVentaWi,
       prevComensales: prevDayComensales,
       changePct: dayChange,
       comensalesChangePct: dayComensalesChange,
@@ -1101,6 +1287,8 @@ export function buildWeekToDateSales(
   return {
     days,
     total,
+    totalEventos,
+    totalVentaWi,
     totalCortes,
     totalComensales,
     chequePromedio: weekChequePromedio,
@@ -1111,6 +1299,8 @@ export function buildWeekToDateSales(
     year,
     prevYear,
     prevTotal,
+    prevTotalEventos,
+    prevTotalVentaWi,
     prevTotalComensales,
     prevMondayKey,
     prevAsOfKey,

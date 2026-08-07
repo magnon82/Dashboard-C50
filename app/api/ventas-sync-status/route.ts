@@ -7,6 +7,10 @@ import {
   canAccessModule,
   type SessionUser,
 } from '@/app/lib/auth';
+import {
+  formatVentasHubAlert,
+  type VentasLastDayHubStats,
+} from '@/app/lib/hub-alerts';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
   evaluateInfocajaSyncHealth,
@@ -53,8 +57,39 @@ async function loadMaxInfocajaDate(): Promise<string | null> {
   return String(data.date).slice(0, 10);
 }
 
+/** Venta Total + conteo de cancelaciones del último día Infocaja. */
+async function loadLastVentasDayStats(
+  date: string
+): Promise<VentasLastDayHubStats> {
+  const sb = getServiceSupabase();
+
+  const [ventaRes, cancRes] = await Promise.all([
+    sb
+      .from('financial_records')
+      .select('amount')
+      .eq('source_file', 'infocaja')
+      .eq('category', 'Venta Total')
+      .eq('date', date)
+      .limit(1)
+      .maybeSingle(),
+    sb
+      .from('financial_records')
+      .select('id', { count: 'exact', head: true })
+      .eq('source_file', 'corte_caja')
+      .eq('category', 'Corte Cancelacion')
+      .eq('date', date),
+  ]);
+
+  return {
+    date,
+    ventaTotal: Number(ventaRes.data?.amount) || 0,
+    cancelacionesCount: cancRes.count ?? 0,
+  };
+}
+
 /**
  * GET /api/ventas-sync-status — ¿Infocaja al día según hora CDMX?
+ * Incluye KPIs del último día (venta total + # cancelaciones) para el hub Ventas.
  */
 export async function GET() {
   const auth = await requireViewer();
@@ -63,12 +98,23 @@ export async function GET() {
   try {
     const maxInfocajaDate = await loadMaxInfocajaDate();
     const health = evaluateInfocajaSyncHealth({ maxInfocajaDate });
-    const hubAlert = formatInfocajaSyncHubAlert(health);
+    const lastDay = maxInfocajaDate
+      ? await loadLastVentasDayStats(maxInfocajaDate)
+      : null;
+    const hubAlert = formatVentasHubAlert({
+      stale: health.stale,
+      maxInfocajaDate: health.maxInfocajaDate,
+      lastDay,
+    });
+    /** Reportes Socios / banner: solo frescura del sync. */
+    const hubAlertSync = formatInfocajaSyncHubAlert(health);
 
     return NextResponse.json({
       ready: true,
       health,
+      lastDay,
       hubAlert,
+      hubAlertSync,
       canDispatch:
         canAccessAdmin(auth) &&
         Boolean(
@@ -79,7 +125,12 @@ export async function GET() {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json(
-      { ready: false, error: msg, hubAlert: { text: 'Sin alertas', severity: 'ok' } },
+      {
+        ready: false,
+        error: msg,
+        hubAlert: { text: 'Sin alertas', severity: 'ok' },
+        hubAlertSync: { text: 'Sin alertas', severity: 'ok' },
+      },
       { status: 500 }
     );
   }

@@ -95,13 +95,17 @@ export default function HubPage() {
                 });
                 if (!res.ok) return;
                 const json = (await res.json()) as {
-                  hubAlert?: { text: string; severity: 'warn' | 'ok' };
+                  hubAlert?: HubModuleAlert;
+                  hubAlertSync?: HubModuleAlert;
                 };
-                const alert = json.hubAlert;
-                if (!alert) return;
-                if (canSeeModule(user, 'ventas')) next.ventas = alert;
+                // Ventas: KPIs último día (+ sync warn si atrasado).
+                if (canSeeModule(user, 'ventas') && json.hubAlert) {
+                  next.ventas = json.hubAlert;
+                }
+                // Socios: solo frescura Infocaja.
                 if (canSeeModule(user, 'reportes-socios')) {
-                  next['reportes-socios'] = alert;
+                  next['reportes-socios'] =
+                    json.hubAlertSync || json.hubAlert || calmNoAlert();
                 }
               } catch {
                 /* keep calm seed */

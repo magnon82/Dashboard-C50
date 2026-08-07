@@ -22,6 +22,7 @@ import {
   readLocalHorariosBuffer,
   resolveLocalHorariosPath,
 } from '@/app/lib/hr-schedule-local';
+import { isRomanSanchezName } from '@/app/lib/hr-puestos';
 
 const WEEK_SELECT =
   'id, week_start, week_end, status, notes, created_by, published_by, published_at, created_at, updated_at';
@@ -315,6 +316,8 @@ async function upsertParsedWeek(
       shiftsSkippedUnmatched += 1;
       continue;
     }
+    const isLimp = s.area === 'Limpieza';
+    const roman = isRomanSanchezName(s.employee_name);
     shiftRows.push({
       week_id: weekRow.id,
       employee_id,
@@ -322,9 +325,14 @@ async function upsertParsedWeek(
       start_time: s.start_time,
       end_time: s.end_time,
       area: s.area,
-      role_label: null,
+      role_label: isLimp ? 'Limpieza' : null,
       origin: 'manual',
-      notes: null,
+      notes:
+        roman && isLimp
+          ? 'dual_limpieza_mesero:limpieza'
+          : roman && s.area === 'Meseros'
+            ? 'dual_limpieza_mesero:mesero'
+            : null,
     });
   }
 

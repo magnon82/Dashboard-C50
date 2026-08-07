@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { Card, Metric, Text } from '@tremor/react';
 import { SemanaEnCursoChart } from '@/app/components/SemanaEnCursoChart';
 import {
@@ -7,7 +8,11 @@ import {
   filterSelectClass,
 } from '@/app/components/SectionHeader';
 import { getTheme, SUITE } from '@/app/lib/themes';
-import { formatShort, type DaySale } from '@/app/lib/ventas-semana';
+import {
+  formatShort,
+  withEventosStaffRptFallback,
+  type DaySale,
+} from '@/app/lib/ventas-semana';
 
 const theme = getTheme('suite');
 
@@ -29,9 +34,34 @@ function varPctClass(pct: number | null | undefined) {
   return pct >= 0 ? 'text-emerald-700' : 'text-rose-700';
 }
 
+function moneyCell(
+  v: number | null | undefined,
+  opts?: { emphasize?: boolean; muted?: boolean }
+) {
+  const n = v ?? 0;
+  const empty = n <= 0;
+  const color = empty
+    ? '#94a3b8'
+    : opts?.muted
+      ? undefined
+      : theme.tableTotal;
+  return (
+    <td
+      className={`px-2 py-2 text-right tabular-nums ${
+        opts?.emphasize ? 'font-semibold' : 'font-medium'
+      } ${opts?.muted && !empty ? 'text-slate-600' : ''}`}
+      style={color != null ? { color } : undefined}
+    >
+      {empty ? '—' : money(n)}
+    </td>
+  );
+}
+
 export type WeekToDateData = {
   days: DaySale[];
   total: number;
+  totalEventos: number;
+  totalVentaWi: number;
   totalCortes: number;
   totalComensales: number;
   chequePromedio: number | null;
@@ -42,9 +72,13 @@ export type WeekToDateData = {
   year: number;
   prevYear: number;
   prevTotal: number;
+  prevTotalEventos: number;
+  prevTotalVentaWi: number;
   prevTotalComensales: number;
   changePct: number | null;
   comensalesChangePct: number | null;
+  prevMondayKey?: string;
+  prevAsOfKey?: string;
 };
 
 export type SemanaWeekOption = {
@@ -69,20 +103,78 @@ export type SemanaEnCursoTableProps = {
 
 /** Comparativo semana en curso: año actual | año anterior | Var. */
 export function SemanaEnCursoTable({
-  weekToDate,
+  weekToDate: weekToDateProp,
   showDescCanc = true,
   className = 'mb-8',
   weekOptions,
   selectedWeek,
   onWeekChange,
 }: SemanaEnCursoTableProps) {
+  const [staffRptEventos, setStaffRptEventos] = useState<
+    Record<string, number>
+  >({});
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const ranges: Array<{ from: string; to: string }> = [
+        { from: weekToDateProp.mondayKey, to: weekToDateProp.asOf },
+      ];
+      if (
+        weekToDateProp.prevMondayKey &&
+        weekToDateProp.prevAsOfKey &&
+        weekToDateProp.prevMondayKey <= weekToDateProp.prevAsOfKey
+      ) {
+        ranges.push({
+          from: weekToDateProp.prevMondayKey,
+          to: weekToDateProp.prevAsOfKey,
+        });
+      }
+
+      const merged: Record<string, number> = {};
+      await Promise.all(
+        ranges.map(async ({ from, to }) => {
+          try {
+            const qs = new URLSearchParams({ from, to });
+            const res = await fetch(`/api/ventas/staff-rpt-eventos?${qs}`, {
+              cache: 'no-store',
+            });
+            const json = (await res.json()) as {
+              byDate?: Record<string, number>;
+            };
+            if (!res.ok || !json.byDate) return;
+            Object.assign(merged, json.byDate);
+          } catch {
+            /* staff_rpt opcional: sin fallback se queda Sheets/0 */
+          }
+        })
+      );
+      if (!cancelled) setStaffRptEventos(merged);
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    weekToDateProp.mondayKey,
+    weekToDateProp.asOf,
+    weekToDateProp.prevMondayKey,
+    weekToDateProp.prevAsOfKey,
+  ]);
+
+  const weekToDate = useMemo(
+    () => withEventosStaffRptFallback(weekToDateProp, staffRptEventos),
+    [weekToDateProp, staffRptEventos]
+  );
+
   const cardClass = 'rounded-[24px] border-0 p-5 md:p-6';
   const cardStyle = {
     backgroundColor: theme.cardBg,
     boxShadow: SUITE.shadow,
   } as const;
 
-  const yearColSpan = showDescCanc ? 5 : 4;
+  // Fecha + WI + Eventos + Total + Personas + Cheque [+ Desc]
+  const yearColSpan = showDescCanc ? 7 : 6;
   const daysWithSale = weekToDate.days.filter((d) => d.total > 0).length;
   const isCurrentWeekWtd = weekToDate.asOf < weekToDate.sundayKey;
   const showWeekSelect =
@@ -161,68 +253,73 @@ export function SemanaEnCursoTable({
               >
                 <th
                   rowSpan={2}
-                  className="border-b border-white/15 px-4 py-2.5 text-left align-bottom"
+                  className="border-b border-white/15 px-3 py-2.5 text-left align-bottom"
                 >
                   Día
                 </th>
                 <th
                   colSpan={yearColSpan}
-                  className="border-b border-white/15 border-l border-l-white/25 px-4 py-2 text-center"
+                  className="border-b border-white/15 border-l border-l-white/25 px-3 py-2 text-center"
                 >
                   {weekToDate.year}
                 </th>
                 <th
-                  colSpan={3}
-                  className="border-b border-white/15 border-l border-l-white/25 px-4 py-2 text-center"
+                  colSpan={5}
+                  className="border-b border-white/15 border-l border-l-white/25 px-3 py-2 text-center"
                 >
                   {weekToDate.prevYear}
                 </th>
                 <th
                   colSpan={2}
-                  className="border-b border-white/15 border-l border-l-white/25 px-4 py-2 text-center"
+                  className="border-b border-white/15 border-l border-l-white/25 px-3 py-2 text-center"
                 >
                   Var.
                 </th>
               </tr>
               <tr
-                className="text-[11px] uppercase tracking-wide text-white/95"
+                className="text-[10px] uppercase tracking-wide text-white/95"
                 style={{ backgroundColor: theme.tableFoot }}
               >
-                <th className="border-l border-l-white/25 px-3 py-2 text-left font-semibold">
+                <th className="border-l border-l-white/25 px-2 py-2 text-left font-semibold">
                   Fecha
                 </th>
-                <th className="px-3 py-2 text-right font-semibold">Venta</th>
-                <th className="px-3 py-2 text-right font-semibold">Personas</th>
-                <th className="px-3 py-2 text-right font-semibold">Cheque prom.</th>
+                <th className="px-2 py-2 text-right font-semibold" title="Walk-in">
+                  WI
+                </th>
+                <th className="px-2 py-2 text-right font-semibold">Eventos</th>
+                <th className="px-2 py-2 text-right font-semibold">Total</th>
+                <th className="px-2 py-2 text-right font-semibold">Pers.</th>
+                <th className="px-2 py-2 text-right font-semibold">Ch. prom.</th>
                 {showDescCanc && (
-                  <th className="px-3 py-2 text-right font-semibold">Desc./Canc.</th>
+                  <th className="px-2 py-2 text-right font-semibold">Desc./Canc.</th>
                 )}
-                <th className="border-l border-l-white/25 px-3 py-2 text-left font-semibold">
+                <th className="border-l border-l-white/25 px-2 py-2 text-left font-semibold">
                   Fecha
                 </th>
-                <th className="px-3 py-2 text-right font-semibold">Venta</th>
-                <th className="px-3 py-2 text-right font-semibold">Personas</th>
-                <th className="border-l border-l-white/25 px-3 py-2 text-right font-semibold">
+                <th className="px-2 py-2 text-right font-semibold" title="Walk-in">
+                  WI
+                </th>
+                <th className="px-2 py-2 text-right font-semibold">Eventos</th>
+                <th className="px-2 py-2 text-right font-semibold">Total</th>
+                <th className="px-2 py-2 text-right font-semibold">Pers.</th>
+                <th className="border-l border-l-white/25 px-2 py-2 text-right font-semibold">
                   % venta
                 </th>
-                <th className="px-3 py-2 text-right font-semibold">% personas</th>
+                <th className="px-2 py-2 text-right font-semibold">% pers.</th>
               </tr>
             </thead>
             <tbody>
               {weekToDate.days.map((d, i) => (
                 <tr key={d.date} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                  <td className="px-4 py-2 capitalize text-slate-700">{d.weekday}</td>
-                  <td className="border-l border-slate-200 px-3 py-2 text-slate-600">
+                  <td className="px-3 py-2 capitalize text-slate-700">{d.weekday}</td>
+                  <td className="border-l border-slate-200 px-2 py-2 text-slate-600">
                     {d.label}
                   </td>
+                  {moneyCell(d.ventaWi)}
+                  {moneyCell(d.eventos)}
+                  {moneyCell(d.total, { emphasize: true })}
                   <td
-                    className="px-3 py-2 text-right font-semibold tabular-nums"
-                    style={{ color: d.total > 0 ? theme.tableTotal : '#94a3b8' }}
-                  >
-                    {d.total > 0 ? money(d.total) : '—'}
-                  </td>
-                  <td
-                    className="px-3 py-2 text-right font-medium tabular-nums"
+                    className="px-2 py-2 text-right font-medium tabular-nums"
                     style={{
                       color: d.comensales > 0 ? theme.tableTotal : '#94a3b8',
                     }}
@@ -230,7 +327,7 @@ export function SemanaEnCursoTable({
                     {d.comensales > 0 ? pax(d.comensales) : '—'}
                   </td>
                   <td
-                    className="px-3 py-2 text-right font-medium tabular-nums"
+                    className="px-2 py-2 text-right font-medium tabular-nums"
                     style={{
                       color: d.chequePromedio != null ? theme.tableTotal : '#94a3b8',
                     }}
@@ -239,30 +336,30 @@ export function SemanaEnCursoTable({
                   </td>
                   {showDescCanc && (
                     <td
-                      className="px-3 py-2 text-right font-medium tabular-nums"
+                      className="px-2 py-2 text-right font-medium tabular-nums"
                       style={{ color: d.cortes > 0 ? '#b45309' : '#94a3b8' }}
                     >
                       {d.cortes > 0 ? money(d.cortes) : '—'}
                     </td>
                   )}
-                  <td className="border-l border-slate-200 px-3 py-2 text-slate-500">
+                  <td className="border-l border-slate-200 px-2 py-2 text-slate-500">
                     {d.prevLabel ?? '—'}
                   </td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums text-slate-600">
-                    {(d.prevTotal ?? 0) > 0 ? money(d.prevTotal!) : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums text-slate-600">
+                  {moneyCell(d.prevVentaWi, { muted: true })}
+                  {moneyCell(d.prevEventos, { muted: true })}
+                  {moneyCell(d.prevTotal, { muted: true })}
+                  <td className="px-2 py-2 text-right font-medium tabular-nums text-slate-600">
                     {(d.prevComensales ?? 0) > 0 ? pax(d.prevComensales!) : '—'}
                   </td>
                   <td
-                    className={`border-l border-slate-200 px-3 py-2 text-right font-semibold tabular-nums ${varPctClass(
+                    className={`border-l border-slate-200 px-2 py-2 text-right font-semibold tabular-nums ${varPctClass(
                       d.changePct
                     )}`}
                   >
                     {varPctLabel(d.changePct)}
                   </td>
                   <td
-                    className={`px-3 py-2 text-right font-semibold tabular-nums ${varPctClass(
+                    className={`px-2 py-2 text-right font-semibold tabular-nums ${varPctClass(
                       d.comensalesChangePct
                     )}`}
                   >
@@ -273,40 +370,60 @@ export function SemanaEnCursoTable({
             </tbody>
             <tfoot>
               <tr className="font-bold text-white" style={{ backgroundColor: theme.tableFoot }}>
-                <td className="px-4 py-2.5" colSpan={2}>
+                <td className="px-3 py-2.5" colSpan={2}>
                   {totalLabel}
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">
+                <td className="px-2 py-2.5 text-right tabular-nums">
+                  {weekToDate.totalVentaWi > 0
+                    ? money(weekToDate.totalVentaWi)
+                    : '—'}
+                </td>
+                <td className="px-2 py-2.5 text-right tabular-nums">
+                  {weekToDate.totalEventos > 0
+                    ? money(weekToDate.totalEventos)
+                    : '—'}
+                </td>
+                <td className="px-2 py-2.5 text-right tabular-nums">
                   {weekToDate.total > 0 ? money(weekToDate.total) : '—'}
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">
+                <td className="px-2 py-2.5 text-right tabular-nums">
                   {weekToDate.totalComensales > 0
                     ? pax(weekToDate.totalComensales)
                     : '—'}
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">
+                <td className="px-2 py-2.5 text-right tabular-nums">
                   {weekToDate.chequePromedio != null
                     ? money(weekToDate.chequePromedio)
                     : '—'}
                 </td>
                 {showDescCanc && (
-                  <td className="px-3 py-2.5 text-right tabular-nums">
+                  <td className="px-2 py-2.5 text-right tabular-nums">
                     {weekToDate.totalCortes > 0 ? money(weekToDate.totalCortes) : '—'}
                   </td>
                 )}
-                <td className="border-l border-white/20 px-3 py-2.5 text-slate-200">—</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">
+                <td className="border-l border-white/20 px-2 py-2.5 text-slate-200">—</td>
+                <td className="px-2 py-2.5 text-right tabular-nums">
+                  {weekToDate.prevTotalVentaWi > 0
+                    ? money(weekToDate.prevTotalVentaWi)
+                    : '—'}
+                </td>
+                <td className="px-2 py-2.5 text-right tabular-nums">
+                  {weekToDate.prevTotalEventos > 0
+                    ? money(weekToDate.prevTotalEventos)
+                    : '—'}
+                </td>
+                <td className="px-2 py-2.5 text-right tabular-nums">
                   {weekToDate.prevTotal > 0 ? money(weekToDate.prevTotal) : '—'}
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">
+                <td className="px-2 py-2.5 text-right tabular-nums">
                   {weekToDate.prevTotalComensales > 0
                     ? pax(weekToDate.prevTotalComensales)
                     : '—'}
                 </td>
-                <td className="border-l border-white/20 px-3 py-2.5 text-right tabular-nums">
+                <td className="border-l border-white/20 px-2 py-2.5 text-right tabular-nums">
                   {varPctLabel(weekToDate.changePct)}
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">
+                <td className="px-2 py-2.5 text-right tabular-nums">
                   {varPctLabel(weekToDate.comensalesChangePct)}
                 </td>
               </tr>

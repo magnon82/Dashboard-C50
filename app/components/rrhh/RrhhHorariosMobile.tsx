@@ -245,7 +245,11 @@ export function RrhhHorariosMobile({
                               style={{ color: theme.title }}
                             >
                               {formatHrListName(p.full_name)}
-                              {p.dualLimpiezaServicio ? (
+                              {p.dualTrack === 'limpieza' ? (
+                                <span className="ml-1 rounded border border-sky-300 bg-sky-50 px-1 text-[9px] font-bold uppercase text-sky-900">
+                                  limpieza
+                                </span>
+                              ) : p.dualLimpiezaServicio ? (
                                 <span className="ml-1 rounded border border-amber-300 bg-amber-50 px-1 text-[9px] font-bold uppercase text-amber-900">
                                   dual
                                 </span>

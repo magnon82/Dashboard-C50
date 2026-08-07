@@ -20,6 +20,7 @@ export const HR_PUESTO_CATALOG = [
   'Meserx',
   'Hostess',
   'Bartender',
+  'Runner',
   'Encargado de Cocina',
   'Cocinero',
   'Lavaloza',
@@ -74,6 +75,10 @@ const PUESTO_ALIASES: Record<string, HrPuestoCatalog> = {
   barra: 'Bartender',
   barman: 'Bartender',
   bartender: 'Bartender',
+  runner: 'Runner',
+  garrotero: 'Runner',
+  garrotera: 'Runner',
+  busboy: 'Runner',
   'encargado de cocina': 'Encargado de Cocina',
   'encargada de cocina': 'Encargado de Cocina',
   cocinero: 'Cocinero',
@@ -131,6 +136,7 @@ export function isServicioPuesto(raw: string | null | undefined): boolean {
     k === 'capitan' ||
     k === 'hostess' ||
     k === 'bartender' ||
+    k === 'runner' ||
     k === 'gerente'
   );
 }
@@ -191,6 +197,20 @@ export function employeeRoleList(e: {
   return primary ? [primary, ...secondary] : [...secondary];
 }
 
+/** Román Sánchez (cualquier orden / acentos) — legado dual limpieza+mesero. */
+export function isRomanSanchezName(fullName: string | null | undefined): boolean {
+  const tokens = new Set(
+    String(fullName || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+  return tokens.has('roman') && tokens.has('sanchez');
+}
+
 /** Limpieza + al menos un rol de servicio → candado de solape en horarios. */
 export function hasDualLimpiezaServicio(e: {
   puesto?: string | null;
@@ -203,12 +223,8 @@ export function hasDualLimpiezaServicio(e: {
   const hasServ = roles.some((r) => isServicioPuesto(r));
   if (hasLimp && hasServ) return true;
   if (notesHasFlag(e.notes, 'dual_limpieza_mesero')) return true;
-  // Legado: Román Sánchez hardcodeado en propose
-  const n = String(e.full_name || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-  return /\broman\b/.test(n) && /\bsanchez\b/.test(n);
+  // Legado: Román Sánchez (nombre), aunque falte puestos_secundarios en DB
+  return isRomanSanchezName(e.full_name);
 }
 
 /**

@@ -3,12 +3,14 @@ Ingestor Gmail -> Supabase: facturas CFDI (PDF/XML).
 
 Descubre mensajes con:
   - Adjunto XML/PDF (Factura/CFDI/QROFA/Comprobante/gobierno)
-  - ZIP CFDI (SuKarne y portales que empaquetan XML+PDF)
+  - ZIP CFDI (SuKarne, Turbinux/LOGISTICA Y LUPULO, UUID packs con XML+PDF)
   - PDFs de "Compras y venta de barra" (Propimex VCC-*, etc.)
-  - Enlaces MyBusinessPOS (poscloud -> Azure blob)
-  - Enlaces Interfactura ("Descargar XML/PDF", Heineken/Moctezuma)
-  - Recibos Mifel de contribuciones (comprobante de pago sin CFDI)
+  - Enlaces MyBusinessPOS / "MR & AB" (poscloud -> Azure blob; sin adjuntos)
+  - Enlaces Interfactura ("Descargar XML/PDF", Cuauhtémoc/Heineken/Moctezuma)
+  - Recibos Mifel de contribuciones (comprobante bancario sin CFDI)
   - Acuses SAT / líneas de captura del contador (CP Oscar Noguez · onoguez8a@hotmail.com)
+
+Excluye CFDI TipoDeComprobante=P (REP / complemento de pago): no son facturas de gasto.
 
 Alias opcional: deliveredto:facturacion@carranza50.com.mx
 
@@ -132,9 +134,12 @@ def build_queries(
         ),
         wrap(
             "has:attachment filename:zip "
-            "(from:sukarne.com OR subject:Factura OR subject:CFDI OR "
-            "subject:Facturaci OR subject:\"Comprobante Fiscal\" OR "
-            "subject:\"Facturación Electrónica\")"
+            "(from:sukarne.com OR from:turbinux.com OR "
+            "subject:Factura OR subject:CFDI OR subject:Facturaci OR "
+            "subject:\"Comprobante Fiscal\" OR "
+            "subject:\"Facturación Electrónica\" OR "
+            "subject:\"Nota de Ingreso\" OR subject:REP OR "
+            "filename:CFDI OR filename:cfdi)"
         ),
     ]
 
@@ -563,6 +568,8 @@ def _row_from_cfdi_bytes(
     rfc_hint: str | None = None,
 ) -> dict | None:
     meta = parse_cfdi_xml(xml_bytes) if xml_bytes else None
+    if meta and not is_cfdi_expense_invoice(meta):
+        return None
     meta = meta or {}
     folio = meta.get("folio") or folio_hint
     serie = meta.get("serie") or serie_hint
@@ -610,6 +617,7 @@ def _row_from_cfdi_bytes(
         "has_xml": bool(xml_path),
         "filename": Path(pdf_path or xml_path or "").name,
         "source": source,
+        "tipo_comprobante": meta.get("tipo_comprobante"),
     }
     if extra:
         payload_row.update(extra)
@@ -832,8 +840,35 @@ def _local(tag: str) -> str:
     return tag
 
 
+# SAT TipoDeComprobante: I ingreso, E egreso, T traslado, N nómina, P pago (REP).
+# Solo I/E entran al pipeline de gastos/facturas; P (y N/T) se omiten.
+_CFDI_EXPENSE_TIPOS = frozenset({"I", "E"})
+
+
+def is_cfdi_pago_rep(meta: dict | None) -> bool:
+    """True for CFDI complemento de pago / REP (TipoDeComprobante=P)."""
+    if not meta:
+        return False
+    tipo = str(meta.get("tipo_comprobante") or "").strip().upper()
+    return tipo == "P"
+
+
+def is_cfdi_expense_invoice(meta: dict | None) -> bool:
+    """True when CFDI should become a factura/gasto row.
+
+    Missing tipo (XML roto / parcial) → allow (legacy PDFs paired later).
+    Explicit non-expense tipos (P/N/T) → reject.
+    """
+    if not meta:
+        return True
+    tipo = str(meta.get("tipo_comprobante") or "").strip().upper()
+    if not tipo:
+        return True
+    return tipo in _CFDI_EXPENSE_TIPOS
+
+
 def parse_cfdi_xml(data: bytes) -> dict | None:
-    """Extract UUID, RFCs, total, fecha from CFDI XML."""
+    """Extract UUID, RFCs, total, fecha, TipoDeComprobante from CFDI XML."""
     try:
         root = ET.fromstring(data)
     except ET.ParseError:
@@ -846,6 +881,13 @@ def parse_cfdi_xml(data: bytes) -> dict | None:
     fecha = attrs.get("Fecha") or attrs.get("fecha")
     serie = attrs.get("Serie") or attrs.get("serie") or ""
     folio = attrs.get("Folio") or attrs.get("folio") or ""
+    tipo = (
+        attrs.get("TipoDeComprobante")
+        or attrs.get("tipoDeComprobante")
+        or attrs.get("tipodecomprobante")
+        or ""
+    )
+    tipo = str(tipo).strip().upper() or None
 
     emisor_rfc = emisor_nombre = receptor_rfc = receptor_nombre = None
     uuid = None
@@ -869,7 +911,9 @@ def parse_cfdi_xml(data: bytes) -> dict | None:
     except ValueError:
         amount = 0.0
 
-    if amount == 0:
+    # REP (tipo P) often has Total=0; do NOT promote ImpPagado into gastos.
+    # Only fall back to Pago nodes for unexpected zero-total ingreso XMLs.
+    if amount == 0 and tipo != "P":
         for el in root.iter():
             name = _local(el.tag)
             if name in ("Pago", "DoctoRelacionado"):
@@ -896,6 +940,7 @@ def parse_cfdi_xml(data: bytes) -> dict | None:
         "fecha": fecha_iso,
         "serie": serie or None,
         "folio": folio or None,
+        "tipo_comprobante": tipo,
         "emisor_rfc": emisor_rfc,
         "emisor_nombre": emisor_nombre,
         "receptor_rfc": receptor_rfc,
@@ -1021,16 +1066,24 @@ def _record_from_payload(payload: dict, emisor: str, amount: float, fecha: str) 
 
 def _expand_zip_attachments(
     zips: list[tuple[str, bytes]],
-) -> tuple[list[tuple[str, bytes, dict | None]], list[tuple[str, bytes]]]:
-    """Unpack CFDI XML/PDF from ZIP attachments (SuKarne, etc.)."""
+) -> tuple[list[tuple[str, bytes, dict | None]], list[tuple[str, bytes]], int]:
+    """Unpack CFDI XML/PDF from ZIP attachments (SuKarne, Turbinux, UUID packs).
+
+    Returns (xmls, pdfs, skipped_pago_count). REP/pago XMLs are omitted from xmls.
+    """
     xmls: list[tuple[str, bytes, dict | None]] = []
     pdfs: list[tuple[str, bytes]] = []
+    skipped_pago = 0
+
     for zname, zdata in zips:
         try:
             zf = zipfile.ZipFile(io.BytesIO(zdata))
         except zipfile.BadZipFile:
             print(f"  ZIP inválido: {zname}")
             continue
+        local_expense = 0
+        local_pdfs: list[tuple[str, bytes]] = []
+        had_xml = False
         for name in zf.namelist():
             if name.endswith("/") or name.startswith("__MACOSX"):
                 continue
@@ -1044,10 +1097,24 @@ def _expand_zip_attachments(
                 continue
             base = Path(name).name
             if lower.endswith(".xml"):
-                xmls.append((base, data, parse_cfdi_xml(data)))
+                had_xml = True
+                meta = parse_cfdi_xml(data)
+                if meta and not is_cfdi_expense_invoice(meta):
+                    skipped_pago += 1
+                    print(
+                        f"  Skip CFDI pago/REP en ZIP {zname}: {base} "
+                        f"(tipo={meta.get('tipo_comprobante')})"
+                    )
+                    continue
+                xmls.append((base, data, meta))
+                local_expense += 1
             else:
-                pdfs.append((base, data))
-    return xmls, pdfs
+                local_pdfs.append((base, data))
+        # Drop PDFs from ZIPs that only contained REP/pago XMLs
+        if local_expense or not had_xml:
+            pdfs.extend(local_pdfs)
+
+    return xmls, pdfs, skipped_pago
 
 
 def process_message(
@@ -1080,6 +1147,8 @@ def process_message(
     xmls: list[tuple[str, bytes, dict | None]] = []
     pdfs: list[tuple[str, bytes]] = []
     zips: list[tuple[str, bytes]] = []
+    skipped_pago = 0
+    skipped_pago_stems: set[str] = set()
 
     for part in parts:
         filename = (part.get("filename") or "").strip()
@@ -1094,18 +1163,33 @@ def process_message(
         if not data:
             continue
         if lower.endswith(".xml"):
-            xmls.append((filename, data, parse_cfdi_xml(data)))
+            meta = parse_cfdi_xml(data)
+            if meta and not is_cfdi_expense_invoice(meta):
+                skipped_pago += 1
+                skipped_pago_stems.add(stem_key(filename))
+                if meta.get("uuid"):
+                    skipped_pago_stems.add(
+                        re.sub(r"[^A-Za-z0-9]+", "", str(meta["uuid"]).upper())
+                    )
+                print(
+                    f"  Skip CFDI pago/REP: {filename} "
+                    f"(tipo={meta.get('tipo_comprobante')})"
+                )
+                continue
+            xmls.append((filename, data, meta))
         elif lower.endswith(".zip"):
             zips.append((filename, data))
         else:
             pdfs.append((filename, data))
 
     if zips:
-        z_xmls, z_pdfs = _expand_zip_attachments(zips)
+        z_xmls, z_pdfs, z_skip = _expand_zip_attachments(zips)
+        skipped_pago += z_skip
         xmls.extend(z_xmls)
         pdfs.extend(z_pdfs)
 
     if not xmls and not pdfs:
+        # Link-only: still may download a REP XML — filtered in _row_from_cfdi_bytes
         return process_link_only_cfdi(
             msj.get("payload"),
             subject,
@@ -1132,13 +1216,18 @@ def process_message(
         )
 
     pdf_by_stem = {stem_key(fn): (fn, data) for fn, data in pdfs}
-    used_pdf_stems: set[str] = set()
+    used_pdf_stems: set[str] = set(skipped_pago_stems)
     rows: list[dict] = list(link_rows)
     subj_amount = amount_from_subject(subject)
     subj_emisor = emisor_from_subject(subject)
 
     for filename, data, meta in xmls:
         meta = meta or {}
+        if not is_cfdi_expense_invoice(meta):
+            skipped_pago += 1
+            skipped_pago_stems.add(stem_key(filename))
+            used_pdf_stems.add(stem_key(filename))
+            continue
         fecha = meta.get("fecha") or msg_date or date.today().isoformat()
         year = fecha[:4]
         dest_dir = save_root / year
@@ -1162,6 +1251,7 @@ def process_message(
             "receptor_nombre": meta.get("receptor_nombre"),
             "serie": meta.get("serie"),
             "folio": meta.get("folio"),
+            "tipo_comprobante": meta.get("tipo_comprobante"),
             "total": amount,
             "fecha": fecha,
             "subject": subject,
@@ -1178,10 +1268,19 @@ def process_message(
         rows.append(_record_from_payload(payload, emisor, amount, fecha))
 
     # PDF-only: folio from filename / subject / gobierno / invoice-like names
+    # Also skip PDFs paired to a REP/pago XML we already rejected.
     barra = bool(re.search(r"compras\s+y\s+venta", subject or "", re.I))
     for filename, data in pdfs:
         stem = stem_key(filename)
-        if stem in used_pdf_stems:
+        if stem in used_pdf_stems or stem in skipped_pago_stems:
+            continue
+        # Subject-only REP mail with PDF representation of the pago
+        if skipped_pago and re.search(
+            r"\bREP\b|complemento\s+de\s+pago|pago\s+recibido|"
+            r"nota\s+de\s+ingreso|recibo\s+electr[oó]nico\s+de\s+pago",
+            subject or "",
+            re.I,
+        ):
             continue
         serie, folio = folio_from_filename(filename)
         sat_meta = extract_sat_acuse_meta(data)
@@ -1277,6 +1376,9 @@ def process_message(
             )
         )
 
+    if skipped_pago and not rows:
+        # Message was only REP/pago — surface in dry-run stats via empty list
+        pass
     return rows
 
 
@@ -1374,7 +1476,8 @@ def main() -> None:
 
     print(
         f"Facturas indexadas: {len(records)} "
-        f"(errores: {errors}, links: {link_ok}, zip: {zip_ok})"
+        f"(errores: {errors}, links: {link_ok}, zip: {zip_ok}; "
+        f"REP/pago omitidos se loguean como 'Skip CFDI pago/REP')"
     )
     if args.dry_run:
         if records:

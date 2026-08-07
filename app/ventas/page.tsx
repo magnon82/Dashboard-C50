@@ -7,6 +7,7 @@ import { MonthlyTotalComparisonChart } from '@/app/components/MonthlyCharts';
 import { SuiteShell } from '@/app/components/SuiteShell';
 import { VentasResumenCard } from '@/app/components/VentasResumenCard';
 import { SemanaEnCursoTable } from '@/app/components/SemanaEnCursoTable';
+import { VentasTombolaSemanalCard } from '@/app/components/VentasTombolaSemanalCard';
 import { DetalleSemanalCard } from '@/app/components/DetalleSemanalCard';
 import { ChequePromedioMensualCard } from '@/app/components/ChequePromedioMensualCard';
 import { PromedioVentaSemanalPorMesCard } from '@/app/components/PromedioVentaSemanalPorMesCard';
@@ -293,6 +294,12 @@ export default function Dashboard() {
             const current = semanaEnCursoOptions[0]?.week;
             setConsultaSemana(current != null && w === current ? null : w);
           }}
+        />
+
+        <VentasTombolaSemanalCard
+          mondayKey={weekToDate.mondayKey}
+          sundayKey={weekToDate.sundayKey}
+          weekNumber={weekToDate.weekNumber}
         />
 
         <ChequePromedioMensualCard records={records} years={COMPARE_YEARS} />

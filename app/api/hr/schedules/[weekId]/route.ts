@@ -57,6 +57,9 @@ function mapShift(raw: Record<string, unknown>): HrScheduleShift {
     employee_area: emp?.area ?? null,
     employee_puesto: emp?.puesto ?? null,
     employee_notes: emp?.notes ?? null,
+    employee_puestos_secundarios: Array.isArray(emp?.puestos_secundarios)
+      ? emp.puestos_secundarios
+      : null,
   };
 }
 

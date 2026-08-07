@@ -182,3 +182,64 @@ export function pickRrhhHubAlert(opts: {
 export function calmNoAlert(): HubModuleAlert {
   return { text: 'Sin alertas', severity: 'ok' };
 }
+
+/** Fecha corta hub: "5 ago". */
+export function formatHubShortDate(iso: string): string {
+  const day = String(iso || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return day || '—';
+  return new Date(`${day}T12:00:00`).toLocaleDateString('es-MX', {
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
+/** Dinero compacto para la línea del hub (sin centavos). */
+export function formatHubMoney(amount: number): string {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return '$—';
+  return `$${Math.round(n).toLocaleString('es-MX')}`;
+}
+
+export type VentasLastDayHubStats = {
+  /** Último día Infocaja con Venta Total (YYYY-MM-DD). */
+  date: string;
+  ventaTotal: number;
+  /** Filas `Corte Cancelacion` de ese día (conteo, no monto). */
+  cancelacionesCount: number;
+};
+
+/**
+ * Alerta hub Ventas: KPIs del último día de registro.
+ * Si el sync Infocaja está atrasado, prioriza ese aviso y deja KPIs en `detail`.
+ */
+export function formatVentasHubAlert(opts: {
+  stale: boolean;
+  maxInfocajaDate?: string | null;
+  lastDay?: VentasLastDayHubStats | null;
+}): HubModuleAlert {
+  const day = opts.lastDay;
+  const kpiText = day
+    ? (() => {
+        const short = formatHubShortDate(day.date);
+        const money = formatHubMoney(day.ventaTotal);
+        const n = Math.max(0, Math.floor(Number(day.cancelacionesCount) || 0));
+        const canc = n === 1 ? '1 cancelación' : `${n} cancelaciones`;
+        return `Últ. ${short}: ${money} · ${canc}`;
+      })()
+    : null;
+
+  if (opts.stale) {
+    const max = opts.maxInfocajaDate || day?.date || '—';
+    return {
+      text: `Sync ventas atrasado (últ. ${max})`,
+      severity: 'warn',
+      detail: kpiText || undefined,
+    };
+  }
+
+  if (kpiText) {
+    return { text: kpiText, severity: 'ok' };
+  }
+
+  return { text: 'Sin alertas', severity: 'ok' };
+}

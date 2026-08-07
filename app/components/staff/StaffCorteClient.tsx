@@ -938,29 +938,27 @@ export function StaffCorteClient() {
               Master · días pendientes
             </p>
             {pendingAdminDays.length > 0 ? (
-              <label className="block text-xs font-semibold text-slate-600">
-                Pendientes (últimos 7)
-                <select
-                  value={pendingSelectValue}
-                  onChange={(e) => {
-                    const v = e.target.value.slice(0, 10);
-                    if (v) selectCorteDate(v);
-                  }}
-                  className="mt-1 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm capitalize"
-                >
-                  <option value="">
-                    {pendingSelectValue
-                      ? '— Elegir otro día —'
-                      : 'Elegir día pendiente'}
+              <select
+                value={pendingSelectValue}
+                onChange={(e) => {
+                  const v = e.target.value.slice(0, 10);
+                  if (v) selectCorteDate(v);
+                }}
+                aria-label="Elegir día pendiente"
+                className="block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm capitalize"
+              >
+                <option value="">
+                  {pendingSelectValue
+                    ? '— Elegir otro día —'
+                    : 'Elegir día pendiente'}
+                </option>
+                {pendingAdminDays.map((d) => (
+                  <option key={d.date} value={d.date}>
+                    {formatCorteDateDisplay(d.date)} ·{' '}
+                    {corteStatusLabel(d)}
                   </option>
-                  {pendingAdminDays.map((d) => (
-                    <option key={d.date} value={d.date}>
-                      {formatCorteDateDisplay(d.date)} ·{' '}
-                      {corteStatusLabel(d)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                ))}
+              </select>
             ) : (
               <p className="text-xs text-slate-500">
                 No hay días pendientes en la ventana Master.

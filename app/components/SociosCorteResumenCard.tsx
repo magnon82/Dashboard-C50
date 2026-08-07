@@ -20,12 +20,6 @@ type SociosCortePayload = {
     eventos_amount: number;
     eventos_os_amount: number;
     eventos_extra_amount: number;
-    propinas: number;
-    efectivo_tombola: number;
-    bancos_neto_tpv: number | null;
-    bancos_cobrado_tpv: number | null;
-    bancos_propina_tpv: number | null;
-    tpv_complete: boolean;
     notes: string | null;
     updated_at: string;
     updated_by: string | null;
@@ -204,7 +198,7 @@ export function SociosCorteResumenCard({
         </p>
       ) : (
         <p className="mb-4 text-sm" style={{ color: theme.muted }}>
-          Cierre diario de piso (WI, eventos, bancos TPV, tómbola).
+          Cierre diario de piso (WI y eventos).
         </p>
       )}
 
@@ -220,22 +214,13 @@ export function SociosCorteResumenCard({
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Kpi label="Venta día" value={moneyMx(ventaDia)} hint="WI + Eventos" />
             <Kpi label="WI" value={moneyMx(corte.wi_amount)} />
             <Kpi
               label="Eventos"
               value={moneyMx(corte.eventos_amount)}
               hint={eventosHint}
-            />
-            <Kpi
-              label="Bancos TPV"
-              value={moneyMx(corte.bancos_neto_tpv)}
-            />
-            <Kpi label="Propinas" value={moneyMx(corte.propinas)} />
-            <Kpi
-              label="Tómbola"
-              value={moneyMx(corte.efectivo_tombola)}
             />
           </div>
           {corte.notes ? (

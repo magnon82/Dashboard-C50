@@ -127,6 +127,31 @@ export function dualShiftTrack(s: {
   return 'servicio';
 }
 
+/** Meta dual desde ficha y/o campos embebidos del turno (staff sin plantilla). */
+export function dualMetaFromEmployeeAndShift(
+  emp: HrEmployee | undefined,
+  s?: Pick<
+    HrScheduleShift,
+    | 'employee_name'
+    | 'employee_puesto'
+    | 'employee_notes'
+    | 'employee_puestos_secundarios'
+  >
+): {
+  full_name?: string | null;
+  puesto?: string | null;
+  puestos_secundarios?: string[] | null;
+  notes?: string | null;
+} {
+  return {
+    full_name: emp?.full_name || s?.employee_name || null,
+    puesto: emp?.puesto || s?.employee_puesto || null,
+    puestos_secundarios:
+      emp?.puestos_secundarios ?? s?.employee_puestos_secundarios ?? null,
+    notes: emp?.notes || s?.employee_notes || null,
+  };
+}
+
 /** Sección de grilla: puesto family → área de turnos → plantilla; nunca «Piso» suelto. */
 export function resolveRowSection(
   emp: HrEmployee | undefined,
@@ -135,12 +160,17 @@ export function resolveRowSection(
   fallbackName: string,
   dualTrack?: DualRoleTrack | null
 ): { section: string; puesto: string | null } {
-  const dual = emp ? hasDualLimpiezaServicio(emp) : false;
+  const dual =
+    Boolean(dualTrack) ||
+    (emp
+      ? hasDualLimpiezaServicio(emp)
+      : hasDualLimpiezaServicio({ full_name: fallbackName }));
 
-  if (dual && dualTrack === 'limpieza') {
+  // Pista explícita manda aunque no haya ficha en memoria (consulta Staff).
+  if (dualTrack === 'limpieza') {
     return { section: 'Limpieza', puesto: 'Limpieza' };
   }
-  if (dual && dualTrack === 'servicio') {
+  if (dualTrack === 'servicio') {
     const posKey = emp ? plantillaPositionKey(emp) : null;
     const fromPuesto = posKey ? scheduleSectionFromPosition(posKey) : null;
     const section =
@@ -343,13 +373,9 @@ export function buildRowsFromShifts(
 
   for (const s of shifts) {
     const emp = empById.get(s.employee_id);
-    const dual = emp
-      ? hasDualLimpiezaServicio(emp)
-      : hasDualLimpiezaServicio({
-          full_name: s.employee_name,
-          puesto: s.employee_puesto,
-          notes: s.employee_notes,
-        });
+    const dual = hasDualLimpiezaServicio(
+      dualMetaFromEmployeeAndShift(emp, s)
+    );
 
     const areas = shiftAreasByEmp.get(s.employee_id) || [];
     if (s.area) areas.push(s.area);
@@ -423,17 +449,52 @@ export function buildRowsFromShifts(
     applyShiftToDay(row, di, s);
   }
 
-  // Duales: asegurar ambas pistas (Limpieza + servicio) si ya hay turnos
+  // Duales en plantilla con turnos: marcar aunque la detección por shift fallara
+  for (const e of employees) {
+    if (!hasDualLimpiezaServicio(e)) continue;
+    if ([...byKey.values()].some((r) => r.employee_id === e.id)) {
+      dualSeen.add(e.id);
+    }
+  }
+
+  // Duales: asegurar ambas pistas; migrar fila simple → servicio + Limpieza vacía
   for (const empId of dualSeen) {
     const emp = empById.get(empId);
+    const plain = byKey.get(empId);
     const name =
       emp?.full_name ||
+      plain?.full_name ||
       [...byKey.values()].find((r) => r.employee_id === empId)?.full_name ||
       empId.slice(0, 8);
+
+    if (plain && !plain.dualTrack) {
+      byKey.delete(empId);
+      const servicioKey = personRowKey(empId, 'servicio');
+      if (!byKey.has(servicioKey)) {
+        const migrated = makeDualRow(emp, empId, name, 'servicio', dates);
+        migrated.days = plain.days.map((d) => ({ ...d, extra: d.extra ? [...d.extra] : undefined }));
+        byKey.set(servicioKey, migrated);
+      }
+    }
+
     for (const track of ['servicio', 'limpieza'] as DualRoleTrack[]) {
       const key = personRowKey(empId, track);
       if (!byKey.has(key)) {
         byKey.set(key, makeDualRow(emp, empId, name, track, dates));
+      } else {
+        // Corregir sección si nació sin ficha (p. ej. consulta Staff)
+        const row = byKey.get(key)!;
+        const resolved = resolveRowSection(
+          emp,
+          shiftAreasByEmp.get(empId) || [],
+          shiftRolesByEmp.get(empId) || [],
+          name,
+          track
+        );
+        row.area = resolved.section;
+        row.puesto = resolved.puesto || row.puesto;
+        row.dualLimpiezaServicio = true;
+        row.dualTrack = track;
       }
     }
   }

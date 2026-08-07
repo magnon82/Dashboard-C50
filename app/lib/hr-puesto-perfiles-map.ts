@@ -86,6 +86,15 @@ export const HR_PUESTO_PERFIL_COVERAGE: HrPuestoPerfilCoverage[] = [
     nota: 'Carpeta Barra / archivo Bar Tender',
   },
   {
+    catalogo: 'Runner',
+    equipo: 'Piso',
+    driveRel: 'Piso/Runner/',
+    descripcion: 'ok',
+    kpi: 'ok',
+    actividades: 'ok',
+    nota: 'Match directo; alias garrotero/busboy',
+  },
+  {
     catalogo: 'Encargado de Cocina',
     equipo: 'Cocina',
     driveRel: 'Cocina/CHEF/',
@@ -173,7 +182,7 @@ export const HR_PUESTO_PERFIL_COVERAGE: HrPuestoPerfilCoverage[] = [
     descripcion: 'gap',
     kpi: 'gap',
     actividades: 'gap',
-    nota: 'Sin perfil; sin documento (no inventar Runner u otro)',
+    nota: 'Sin perfil; sin documento',
   },
   {
     catalogo: 'Socios',
@@ -188,12 +197,6 @@ export const HR_PUESTO_PERFIL_COVERAGE: HrPuestoPerfilCoverage[] = [
 
 /** Carpetas Drive sin puesto activo en catálogo / plantilla. */
 export const HR_DRIVE_ONLY_PERFILES: HrDriveOnlyPerfil[] = [
-  {
-    driveRel: 'Piso/Runner/',
-    docs: 'Perfil + KPI + actividades',
-    estado: 'Drive-only',
-    nota: 'Sin puesto activo en catálogo BMS; no ligar a Limpieza',
-  },
   {
     driveRel: 'Cocina/Sub-Chef/',
     docs: 'Solo perfil',

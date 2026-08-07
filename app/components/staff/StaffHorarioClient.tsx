@@ -8,6 +8,7 @@ import {
   formatHrDate,
   formatHrPuesto,
   todayIsoCdmx,
+  type HrEmployee,
   type HrScheduleShift,
 } from '@/app/lib/hr';
 import { formatHrListName } from '@/app/lib/hr-person-match';
@@ -69,9 +70,32 @@ function TeamScheduleTable({
     const today = todayIsoCdmx();
     return dates.findIndex((d) => d.slice(0, 10) === today);
   }, [dates]);
+  /** Fichas sintéticas desde el join de turnos (dual Limpieza+servicio sin plantilla). */
+  const shiftEmployees = useMemo(() => {
+    const byId = new Map<string, HrEmployee>();
+    for (const s of shifts) {
+      if (byId.has(s.employee_id)) continue;
+      byId.set(s.employee_id, {
+        id: s.employee_id,
+        full_name: s.employee_name || s.employee_id.slice(0, 8),
+        status: 'activo',
+        puesto: s.employee_puesto ?? null,
+        puestos_secundarios: s.employee_puestos_secundarios ?? null,
+        area: s.employee_area ?? null,
+        fecha_ingreso: null,
+        email: null,
+        phone: null,
+        drive_folder_path: null,
+        notes: s.employee_notes ?? null,
+        force_include: false,
+        force_exclude: false,
+      });
+    }
+    return [...byId.values()];
+  }, [shifts]);
   const rows = useMemo(
-    () => buildRowsFromShifts([], shifts, dates),
-    [shifts, dates]
+    () => buildRowsFromShifts(shiftEmployees, shifts, dates),
+    [shiftEmployees, shifts, dates]
   );
   const grouped = useMemo(() => {
     const map = new Map<string, PersonRow[]>();
@@ -202,6 +226,21 @@ function TeamScheduleTable({
                       }}
                     >
                       {formatHrListName(p.full_name)}
+                      {p.dualTrack === 'limpieza' ? (
+                        <span
+                          className="ml-1 rounded border border-sky-300 bg-sky-50 px-1 text-[9px] font-bold uppercase tracking-wide text-sky-900"
+                          title="Turno de limpieza (doble rol)"
+                        >
+                          limpieza
+                        </span>
+                      ) : p.dualLimpiezaServicio ? (
+                        <span
+                          className="ml-1 rounded border border-amber-300 bg-amber-50 px-1 text-[9px] font-bold uppercase tracking-wide text-amber-900"
+                          title="Rol dual: Limpieza y servicio"
+                        >
+                          dual
+                        </span>
+                      ) : null}
                     </td>
                     {p.days.map((d, di) => {
                       const isToday = di === todayIdx;
