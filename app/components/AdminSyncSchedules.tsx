@@ -1,8 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatTimestampCdmxShort } from '@/app/lib/admin-last-updates';
-import { modeLabelEs, type SyncScheduleMode, type SyncWorkflowKey } from '@/app/lib/admin-sync-schedules';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  formatTimestampCdmx,
+  formatTimestampCdmxShort,
+} from '@/app/lib/admin-last-updates';
+import {
+  modeLabelEs,
+  type SourceSyncReportRow,
+  type SyncScheduleMode,
+  type SyncWorkflowKey,
+} from '@/app/lib/admin-sync-schedules';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -221,12 +229,27 @@ function ScheduleCard({
   );
 }
 
+function originBadge(kind: SourceSyncReportRow['originKind']): {
+  label: string;
+  background: string;
+  color: string;
+} {
+  if (kind === 'cloud') {
+    return { label: 'Cloud', background: '#E7F6EE', color: '#1F6B45' };
+  }
+  if (kind === 'suite') {
+    return { label: 'Suite', background: '#E8EEF7', color: SUITE.navy };
+  }
+  return { label: 'Manual', background: '#F1F5F9', color: '#64748B' };
+}
+
 /**
  * Controles de programación de sync en /admin → Datos e inventario.
  */
 export function AdminSyncSchedules() {
   const [open, setOpen] = useState(true);
   const [rows, setRows] = useState<ScheduleRow[]>([]);
+  const [sourceReport, setSourceReport] = useState<SourceSyncReportRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [canDispatch, setCanDispatch] = useState(false);
@@ -246,6 +269,11 @@ export function AdminSyncSchedules() {
         throw new Error(typeof data?.error === 'string' ? data.error : `Error ${res.status}`);
       }
       setRows(Array.isArray(data.schedules) ? (data.schedules as ScheduleRow[]) : []);
+      setSourceReport(
+        Array.isArray(data.sourceReport)
+          ? (data.sourceReport as SourceSyncReportRow[])
+          : []
+      );
       setCanDispatch(Boolean(data.canDispatch));
       setFetchedAt(typeof data.fetchedAt === 'string' ? data.fetchedAt : null);
     } catch (err: unknown) {
@@ -255,6 +283,12 @@ export function AdminSyncSchedules() {
       setLoading(false);
     }
   }, []);
+
+  const reportStats = useMemo(() => {
+    const withSync = sourceReport.filter((r) => r.lastIngestedAt).length;
+    const empty = sourceReport.length - withSync;
+    return { withSync, empty, total: sourceReport.length };
+  }, [sourceReport]);
 
   useEffect(() => {
     if (!open || fetchedRef.current) return;
@@ -297,11 +331,11 @@ export function AdminSyncSchedules() {
       <div className="flex flex-wrap items-start justify-between gap-3 px-5 pb-3 pt-5">
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-bold" style={{ color: theme.title }}>
-            Programación de sincronizaciones
+            Reporte de actualizaciones · sincronizaciones
           </h2>
           <p className="mt-1 max-w-2xl text-sm" style={{ color: theme.muted }}>
-            Horarios programados (CDMX) y última sync por fuente. Los cron de GitHub Actions son
-            solo lectura; desde aquí puedes disparar un sync manual si hay token configurado.
+            Última ingestión de cada fuente de origen (fecha y hora CDMX), con horario programado
+            y tipo Cloud/Manual. Debajo: controles por pipeline (Actions).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -364,6 +398,115 @@ export function AdminSyncSchedules() {
             </p>
           ) : null}
 
+          {/* Reporte plano: todas las fuentes */}
+          <div
+            className="overflow-hidden rounded-xl border"
+            style={{ borderColor: SUITE.border }}
+          >
+            <div
+              className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5"
+              style={{ borderColor: SUITE.border, background: '#F8FAFC' }}
+            >
+              <p className="text-xs font-bold uppercase tracking-wide" style={{ color: SUITE.navy }}>
+                Fuentes de origen · última sync
+              </p>
+              <p className="text-[11px] tabular-nums" style={{ color: theme.muted }}>
+                {reportStats.total} fuentes · {reportStats.withSync} con sync ·{' '}
+                {reportStats.empty} sin registro
+              </p>
+            </div>
+            <div className="max-h-[28rem] overflow-auto">
+              <table className="w-full min-w-[720px] border-collapse text-left text-[11px]">
+                <thead>
+                  <tr style={{ background: SUITE.navy, color: '#fff' }}>
+                    <th className="sticky top-0 px-3 py-2 font-semibold">Fuente</th>
+                    <th className="sticky top-0 px-3 py-2 font-semibold">Grupo</th>
+                    <th className="sticky top-0 px-3 py-2 font-semibold">Tipo</th>
+                    <th className="sticky top-0 px-3 py-2 font-semibold">Programación</th>
+                    <th className="sticky top-0 px-3 py-2 font-semibold">Última sync</th>
+                    <th className="sticky top-0 px-3 py-2 font-semibold">Dato (fecha)</th>
+                    <th className="sticky top-0 px-3 py-2 font-semibold text-right">Filas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && sourceReport.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-6 text-center" style={{ color: theme.muted }}>
+                        Cargando reporte…
+                      </td>
+                    </tr>
+                  ) : (
+                    sourceReport.map((r) => {
+                      const badge = originBadge(r.originKind);
+                      return (
+                        <tr
+                          key={r.sourceFile}
+                          className="border-t"
+                          style={{ borderColor: SUITE.border }}
+                        >
+                          <td className="px-3 py-2 align-top">
+                            <code
+                              className="rounded bg-[#F4F6F9] px-1.5 py-0.5 font-mono text-[10px]"
+                              style={{ color: SUITE.navy }}
+                            >
+                              {r.sourceFile}
+                            </code>
+                            <p
+                              className="mt-0.5 max-w-[220px] text-[10px] leading-snug"
+                              style={{ color: theme.muted }}
+                              title={r.updateHint}
+                            >
+                              {r.scheduleLabel}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2 align-top" style={{ color: theme.muted }}>
+                            {r.groupLabel}
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <span
+                              className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                              style={{
+                                background: badge.background,
+                                color: badge.color,
+                              }}
+                            >
+                              {badge.label}
+                            </span>
+                          </td>
+                          <td
+                            className="max-w-[200px] px-3 py-2 align-top leading-snug"
+                            style={{ color: SUITE.orangeDeep }}
+                          >
+                            {r.schedule}
+                          </td>
+                          <td className="px-3 py-2 align-top font-semibold tabular-nums" style={{ color: SUITE.navy }}>
+                            {r.lastIngestedAt
+                              ? formatTimestampCdmx(r.lastIngestedAt) ||
+                                formatTimestampCdmxShort(r.lastIngestedAt)
+                              : '—'}
+                          </td>
+                          <td className="px-3 py-2 align-top tabular-nums" style={{ color: theme.muted }}>
+                            {r.lastDate || '—'}
+                          </td>
+                          <td
+                            className="px-3 py-2 align-top text-right tabular-nums"
+                            style={{ color: theme.muted }}
+                          >
+                            {r.rowCount > 0 ? r.rowCount.toLocaleString('es-MX') : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <p className="text-xs font-bold uppercase tracking-wide" style={{ color: SUITE.navySoft }}>
+            Pipelines · disparo manual
+          </p>
+
           <div className="space-y-2.5">
             {rows.map((row) => (
               <ScheduleCard
@@ -378,15 +521,14 @@ export function AdminSyncSchedules() {
           </div>
 
           <p className="text-xs leading-relaxed" style={{ color: theme.muted }}>
-            Catálogo en{' '}
-            <code className="text-[11px]">app/lib/admin-sync-schedules.ts</code>
+            Reporte: max{' '}
+            <code className="text-[11px]">financial_records.created_at</code> por{' '}
+            <code className="text-[11px]">source_file</code>
             {' · '}
-            última sync desde{' '}
-            <code className="text-[11px]">financial_records.created_at</code>
-            {' / '}
-            <code className="text-[11px]">hr_drive_sync_state</code>
-            {' vía '}
-            <code className="text-[11px]">/api/admin/sync-schedules</code>.
+            RR.HH. vía soft-sync / hr_*
+            {' · '}
+            catálogo en{' '}
+            <code className="text-[11px]">app/lib/admin-sync-schedules.ts</code>.
           </p>
         </div>
       ) : null}

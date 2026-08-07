@@ -4,6 +4,14 @@
  * Los cron de GitHub no se editan desde la UI; aquí solo se documentan + disparo manual.
  */
 
+import {
+  ALL_SOURCE_FILES,
+  SOURCE_FILE_GROUPS,
+  SOURCE_FILE_UPDATE,
+} from '@/app/lib/admin-resources';
+import type { DetectedSourceFile } from '@/app/lib/storage-format';
+import type { HrLastUpdateProbe } from '@/app/lib/admin-last-updates';
+
 export type SyncScheduleMode = 'cloud' | 'manual' | 'mixed';
 
 export type SyncWorkflowKey = 'gmail' | 'saldos' | 'hr';
@@ -165,4 +173,102 @@ export function modeLabelEs(mode: SyncScheduleMode): string {
     case 'mixed':
       return 'Mixto';
   }
+}
+
+/** Fila del reporte Master: una por source_file (+ RH). */
+export type SourceSyncReportRow = {
+  sourceFile: string;
+  groupLabel: string;
+  scheduleLabel: string;
+  mode: SyncScheduleMode;
+  schedule: string;
+  updateHint: string;
+  rowCount: number;
+  lastDate: string | null;
+  lastIngestedAt: string | null;
+  /** cloud | manual — etiqueta corta para UI */
+  originKind: 'cloud' | 'manual' | 'suite';
+};
+
+function groupLabelFor(sourceFile: string): string {
+  for (const g of SOURCE_FILE_GROUPS) {
+    if (g.sources.includes(sourceFile)) return g.label;
+  }
+  return 'Otros';
+}
+
+function scheduleForSource(sourceFile: string): AdminSyncSchedule | null {
+  for (const s of ADMIN_SYNC_SCHEDULES) {
+    if (s.sourceFiles?.includes(sourceFile)) return s;
+    // gmail area also covers infocaja/corte via areaId ventas; facturas separate
+    if (
+      s.id === 'sync-gmail' &&
+      (sourceFile === 'infocaja' ||
+        sourceFile === 'corte_caja' ||
+        sourceFile === 'factura_cfdi')
+    ) {
+      return s;
+    }
+  }
+  return null;
+}
+
+/**
+ * Reporte plano: última ingestión de cada fuente de origen documentada +
+ * cualquier source_file detectado extra + fila RR.HH.
+ */
+export function buildSourceSyncReport(
+  detected: DetectedSourceFile[],
+  hr: HrLastUpdateProbe,
+): SourceSyncReportRow[] {
+  const bySource = new Map(detected.map((d) => [d.sourceFile, d] as const));
+  const catalog = new Set(ALL_SOURCE_FILES);
+  const extras = detected
+    .map((d) => d.sourceFile)
+    .filter((sf) => sf && sf !== 'dashboard_auth' && !catalog.has(sf));
+  const ordered = [...ALL_SOURCE_FILES, ...extras.sort((a, b) => a.localeCompare(b))];
+
+  const rows: SourceSyncReportRow[] = ordered.map((sourceFile) => {
+    const hit = bySource.get(sourceFile);
+    const sched = scheduleForSource(sourceFile);
+    const mode = sched?.mode ?? 'manual';
+    return {
+      sourceFile,
+      groupLabel: groupLabelFor(sourceFile),
+      scheduleLabel: sched?.label ?? 'Sin catálogo de sync',
+      mode,
+      schedule: sched?.schedule ?? 'Manual / al reindexar',
+      updateHint: SOURCE_FILE_UPDATE[sourceFile] ?? '—',
+      rowCount: hit?.rowCount ?? 0,
+      lastDate: hit?.lastDate ?? null,
+      lastIngestedAt: hit?.lastIngestedAt ?? null,
+      originKind: mode === 'cloud' ? 'cloud' : 'manual',
+    };
+  });
+
+  rows.push({
+    sourceFile: 'hr_* (soft-sync Drive)',
+    groupLabel: 'RR.HH.',
+    scheduleLabel: 'RR.HH. · Soft-sync Drive',
+    mode: 'cloud',
+    schedule: 'Diario 12:00 PM CDMX',
+    updateHint:
+      'Soft-sync Drive → hr_* · Diario 12:00 PM CDMX (Actions). Import nómina/horarios: /rrhh.',
+    rowCount: 0,
+    lastDate: null,
+    lastIngestedAt: hr.lastAt,
+    originKind: 'suite',
+  });
+
+  // Más recientes primero; sin sync al final
+  rows.sort((a, b) => {
+    const ta = a.lastIngestedAt || '';
+    const tb = b.lastIngestedAt || '';
+    if (ta && tb) return tb.localeCompare(ta);
+    if (ta) return -1;
+    if (tb) return 1;
+    return a.sourceFile.localeCompare(b.sourceFile);
+  });
+
+  return rows;
 }

@@ -10,6 +10,7 @@ import {
   ADMIN_SYNC_SCHEDULES,
   SYNC_WORKFLOW_FILES,
   actionsUrlFor,
+  buildSourceSyncReport,
   type SyncWorkflowKey,
 } from '@/app/lib/admin-sync-schedules';
 import { buildAreaLastUpdates } from '@/app/lib/admin-last-updates';
@@ -115,10 +116,13 @@ export async function GET() {
     };
   });
 
+  const sourceReport = buildSourceSyncReport(detected.detectedSourceFiles, hr);
+
   return NextResponse.json({
     fetchedAt: new Date().toISOString(),
     canDispatch,
     schedules,
+    sourceReport,
     note:
       'Los cron de GitHub Actions son solo lectura aquí. Editar horarios = cambiar el .yml en el repo.',
   });

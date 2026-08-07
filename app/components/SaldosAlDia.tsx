@@ -1,6 +1,7 @@
 'use client';
 
 import { formatShort } from '@/app/lib/ventas-semana';
+import { formatTimestampCdmx } from '@/app/lib/admin-last-updates';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import {
   totalEfectivoMasBancos,
@@ -58,6 +59,19 @@ export function SaldosAlDia({ data, loading }: Props) {
             <p className="mt-2 text-xs" style={{ color: theme.muted }}>
               {data.efectivoFecha ? `Al ${formatShort(data.efectivoFecha)}` : 'Sin datos'}
             </p>
+            <p className="mt-0.5 text-xs" style={{ color: theme.muted }}>
+              {data.efectivoSyncedAt
+                ? `Última sincronización ${formatTimestampCdmx(data.efectivoSyncedAt) || '—'}`
+                : 'Última sincronización —'}
+              {' · '}
+              cada hora :07
+            </p>
+            {data.efectivoStale ? (
+              <p className="mt-1 text-xs font-medium" style={{ color: SUITE.orangeDeep }}>
+                El Excel de FLUJO EFECTIVO no trae gastos después de esa fecha. Actualízalo en
+                Drive; la sync ya está corriendo.
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-[24px] bg-white px-5 py-5" style={{ boxShadow: SUITE.shadow }}>
@@ -140,6 +154,13 @@ export function SaldosAlDia({ data, loading }: Props) {
               ) : (
                 'Sin datos'
               )}
+            </p>
+            <p className="mt-0.5 text-xs" style={{ color: theme.muted }}>
+              {data.cxpSyncedAt
+                ? `Última sincronización ${formatTimestampCdmx(data.cxpSyncedAt) || '—'}`
+                : 'Última sincronización —'}
+              {' · '}
+              cada hora :07
             </p>
           </div>
         </div>

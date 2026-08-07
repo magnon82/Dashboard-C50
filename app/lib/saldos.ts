@@ -21,6 +21,10 @@ export function todayCdmxIso(at: Date = new Date()): string {
 export interface SaldosAlDiaData {
   efectivo: number | null;
   efectivoFecha: string | null;
+  /** Max created_at among flujo_efectivo_saldo rows (ISO). */
+  efectivoSyncedAt: string | null;
+  /** True when saldo date is before yesterday CDMX (archivo sin días recientes). */
+  efectivoStale: boolean;
   mifel: number;
   bbva: number;
   bancos: number;
@@ -30,6 +34,8 @@ export interface SaldosAlDiaData {
   cxpTotal: number | null;
   cxpProgramado: number | null;
   cxpSaldo: number | null;
+  /** Max created_at among cxp_por_pagar rows (ISO). */
+  cxpSyncedAt: string | null;
 }
 
 /** Round to centavos — avoids float noise like 107378800.36999999. */
@@ -94,6 +100,34 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
       )
     : null;
 
+  // Fecha de tarjeta = último gasto en FLUJO (movimientos), no la fila de saldo.
+  const gastosFlujo = records
+    .filter((r) => r.source_file === 'flujo_efectivo_mov' && r.type === 'expense')
+    .map((r) => ({ ...r, parsed: parseIsoDate(r.date) }))
+    .filter((r) => r.parsed && r.parsed.y <= currentYear + 1);
+  const gastosAnio = gastosFlujo.filter((r) => r.parsed!.y === currentYear);
+  const poolGastos = gastosAnio.length > 0 ? gastosAnio : gastosFlujo;
+  const ultimoGasto = poolGastos.length
+    ? poolGastos.reduce((best, cur) =>
+        cur.parsed!.key >= best.parsed!.key ? cur : best
+      )
+    : null;
+
+  let efectivoSyncedAt: string | null = null;
+  for (const r of [...saldosEfectivo, ...gastosFlujo]) {
+    const at = r.created_at;
+    if (!at) continue;
+    if (!efectivoSyncedAt || at > efectivoSyncedAt) efectivoSyncedAt = at;
+  }
+
+  // Fecha mostrada: último gasto; fallback al día del saldo si no hay movs.
+  const efectivoFecha =
+    ultimoGasto?.date ?? saldoEfectivoHoy?.date ?? null;
+
+  const todayIso = todayCdmxIso();
+  const pickedIso = efectivoFecha ? efectivoFecha.slice(0, 10) : null;
+  const efectivoStale = Boolean(pickedIso && pickedIso < todayIso);
+
   // Manual override wins over Excel presupuesto_saldos
   const bancosManual = pickBancosFromSource(records, SOURCE_SALDOS_BANCOS_MANUAL, true);
   const bancosPresupuesto = pickBancosFromSource(records, SOURCE_SALDOS_PRESUPUESTO, false);
@@ -104,18 +138,11 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
   const bancos = moneyCents(mifel + bbva);
   const efectivo = saldoEfectivoHoy ? moneyAmount(saldoEfectivoHoy.amount) : null;
 
-  const totales = records.filter(
-    (r) => r.source_file === 'cxp_por_pagar' && r.category === 'Cuentas Por Pagar'
-  );
-  const prog = records.filter(
-    (r) => r.source_file === 'cxp_por_pagar' && r.category === 'CXP Pagos Programados'
-  );
-  const prov = records.filter(
-    (r) => r.source_file === 'cxp_por_pagar' && r.category === 'CXP Proveedores'
-  );
-  const serv = records.filter(
-    (r) => r.source_file === 'cxp_por_pagar' && r.category === 'CXP Servicios'
-  );
+  const cxpRows = records.filter((r) => r.source_file === 'cxp_por_pagar');
+  const totales = cxpRows.filter((r) => r.category === 'Cuentas Por Pagar');
+  const prog = cxpRows.filter((r) => r.category === 'CXP Pagos Programados');
+  const prov = cxpRows.filter((r) => r.category === 'CXP Proveedores');
+  const serv = cxpRows.filter((r) => r.category === 'CXP Servicios');
 
   const latest = (rows: FinancialRecord[]) =>
     rows.length ? rows.reduce((best, cur) => (cur.date > best.date ? cur : best)) : null;
@@ -132,9 +159,18 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
   const cxpProgramado = totalRow || progRow || provRow || servRow ? programado : null;
   const cxpSaldo = cxpTotal != null ? Math.max(0, cxpTotal - programado) : null;
 
+  let cxpSyncedAt: string | null = null;
+  for (const r of cxpRows) {
+    const at = r.created_at;
+    if (!at) continue;
+    if (!cxpSyncedAt || at > cxpSyncedAt) cxpSyncedAt = at;
+  }
+
   return {
     efectivo,
-    efectivoFecha: saldoEfectivoHoy?.date ?? null,
+    efectivoFecha,
+    efectivoSyncedAt,
+    efectivoStale,
     mifel,
     bbva,
     bancos,
@@ -144,5 +180,6 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
     cxpTotal,
     cxpProgramado,
     cxpSaldo,
+    cxpSyncedAt,
   };
 }
