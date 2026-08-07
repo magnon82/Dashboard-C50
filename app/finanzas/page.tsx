@@ -13,10 +13,12 @@ import { buildSaldosAlDia } from '@/app/lib/saldos';
 import {
   availablePresupuestoMonths,
   availableSemanasBancosMonths,
+  buildPresupuestoLastUpdate,
   buildPresupuestoRubros,
   buildResumenBancosSemanal,
   latestMonthWithSemanasBancos,
 } from '@/app/lib/presupuesto';
+import { formatTimestampCdmx } from '@/app/lib/admin-last-updates';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import { MESES } from '@/app/lib/ventas-semana';
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
@@ -164,14 +166,24 @@ export default function FinanzasPage() {
     [records, year, month]
   );
 
-  const hoy = new Date().toLocaleDateString('es-MX', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+  const presupuestoUpdate = useMemo(
+    () => buildPresupuestoLastUpdate(records, { year, month }),
+    [records, year, month]
+  );
+
+  const subtitle = useMemo(() => {
+    if (presupuestoUpdate.lastAt) {
+      const t = formatTimestampCdmx(presupuestoUpdate.lastAt);
+      return t
+        ? `Presupuesto actualizado: ${t} · carga manual`
+        : 'Presupuesto · carga manual';
+    }
+    if (loading) return 'Cargando…';
+    return 'Presupuesto · carga manual (sin fecha de ingest para este mes)';
+  }, [presupuestoUpdate.lastAt, loading]);
 
   return (
-    <SuiteShell title="Finanzas" subtitle={`Actualizado al ${hoy}`}>
+    <SuiteShell title="Finanzas" subtitle={subtitle}>
       {error && (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <p className="font-semibold">No se cargaron los datos</p>
@@ -270,6 +282,7 @@ export default function FinanzasPage() {
       <ResumenBancosSemanal
         weeks={weeks}
         loading={loading}
+        lastUpdatedAt={presupuestoUpdate.lastAt}
         filters={
           <>
             <label className={filterControlClass}>
@@ -318,6 +331,8 @@ export default function FinanzasPage() {
         records={records}
         year={year}
         month={month}
+        lastUpdatedAt={presupuestoUpdate.lastAt}
+        lastUpdatesBySource={presupuestoUpdate.bySource}
       />
     </SuiteShell>
   );

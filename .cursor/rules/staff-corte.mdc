@@ -1,6 +1,6 @@
 ---
 description: Staff Corte del día — flujo unificado TPV + cierre RPT
-globs: app/staff/**/*,app/components/staff/**/*,app/api/staff-corte/**/*,app/lib/staff-rpt.ts,supabase/staff_rpt_diario.sql
+globs: app/staff/**/*,app/components/staff/**/*,app/api/staff-corte/**/*,app/lib/staff-rpt.ts,supabase/staff_rpt_diario.sql,supabase/staff_rpt_efectivo_recibido.sql
 alwaysApply: false
 ---
 
@@ -15,12 +15,23 @@ Un solo flujo en `/staff/corte` (hub `/staff`):
 1. Fecha de corte (CDMX overnight 00:00–05:59 → día anterior) — read-only
 2. Terminales T1–T3: **2 fotos = prueba de bancos** (venta/Totalización + propinas/Reporte). Tras cada foto, staff confirma el monto de ese ticket. O «No se utilizó» para la terminal entera
 3. Bancos / propinas en el cierre = suma TPV (solo lectura). Neto banco = cobrado + propinas (propinas no se descuentan del depósito bancario)
-4. Cierre: WI; si hay evento → **OS (VENTA)** + **venta extra** (como Global), total = OS+extra → `eventos_amount`; tómbola = Infocaja − propinas TPV. **Sin cortesías** (Gmail)
+4. Cierre: WI; si hay evento → **OS (VENTA)** + **venta extra** (como Global), total = OS+extra → `eventos_amount`; **efectivo recibido** + **efectivo en tómbola (después de propinas)** = captura **manual** (Infocaja casi nunca llega antes). **Sin cortesías** (Gmail)
 5. Un «Cerrar corte del día» → upsert `staff_rpt_diario` (+ columnas `eventos_os_amount` / `eventos_extra_amount`; patch `supabase/staff_rpt_eventos_split.sql`)
 6. Completo = 3/3 terminales con ambas fotos + montos (o unused) + cierre guardado
+7. **Conciliación Infocaja (post-hoc):** cuando existe Infocaja Efectivo del día, UI/API comparan `efectivo_contado` (recibido) vs Infocaja (±$1). No bloquea el cierre. Soft hint si aún no hay reporte.
 
 Bancos desde fotos: **hoy en adelante** (sin backfill histórico).
 Global / comisiones de vendedores: viven en `/eventos` → **Global** (Sheet EVENTOS C50 · pestaña Global) y en `ingest_eventos.py`; el corte no las reemplaza.
+
+## Efectivo (columnas)
+
+| Columna | Significado |
+|---|---|
+| `efectivo_contado` | Efectivo **recibido** (manual al cerrar) |
+| `efectivo_tombola` | Depósito en tómbola **después de propinas** (manual) |
+| `efectivo_infocaja` | Snapshot Infocaja al cerrar/actualizar (null si aún no había) |
+
+Patch de comentarios: `supabase/staff_rpt_efectivo_recibido.sql` (sin columnas nuevas).
 
 ## Tablas
 

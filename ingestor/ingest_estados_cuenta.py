@@ -552,6 +552,12 @@ def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
             matched_rubro, matched_parent, confidence = "Impuestos", None, 0.85
     iso = f"{year or 2026:04d}-{month or 1:02d}-01"
 
+    mtime_ms: float | None = None
+    try:
+        mtime_ms = path.stat().st_mtime * 1000.0
+    except OSError:
+        mtime_ms = None
+
     payload = {
         "bank": bank,
         "filename": path.name,
@@ -567,6 +573,9 @@ def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
         "match_status": "matched" if matched_rubro and confidence >= 0.7 else "unmatched",
         "index_only": True,
         "gobierno": bool(is_gobierno_text(body, path.name, concepto)),
+        "mtime_ms": mtime_ms,
+        "month": month,
+        "year": year,
     }
     return {
         "date": iso,

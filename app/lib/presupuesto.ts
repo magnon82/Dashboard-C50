@@ -4,6 +4,7 @@ import {
   toIsoLocal,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
+import { sumFacturasGastoPorMes } from '@/app/lib/facturas';
 
 export interface RubroRow {
   rubro: string;
@@ -48,6 +49,81 @@ export interface SemanaBancos {
 }
 
 export const SOURCE_AJUSTE = 'presupuesto_ajuste';
+
+/** Fuentes escritas por `ingest_presupuesto.py` (sin ajustes admin). */
+export const PRESUPUESTO_INGEST_SOURCES = [
+  'presupuesto_mensual',
+  'presupuesto_saldos',
+  'presupuesto_rubro',
+  'presupuesto_semana',
+  'presupuesto_sem_detalle',
+  'presupuesto_ingreso',
+] as const;
+
+export type PresupuestoIngestSource =
+  (typeof PRESUPUESTO_INGEST_SOURCES)[number];
+
+const PRESUPUESTO_INGEST_SET = new Set<string>(PRESUPUESTO_INGEST_SOURCES);
+
+export type PresupuestoSourceLastUpdate = {
+  sourceFile: string;
+  lastAt: string;
+};
+
+export type PresupuestoLastUpdateInfo = {
+  /** Max `created_at` de ingest Excel (+ ajuste si includeAjuste). */
+  lastAt: string | null;
+  bySource: PresupuestoSourceLastUpdate[];
+};
+
+/**
+ * Última carga de presupuesto en Supabase (`financial_records.created_at`).
+ * Opcionalmente acota al mes de negocio (`date`) que se está viendo.
+ */
+export function buildPresupuestoLastUpdate(
+  records: Array<{
+    source_file?: string | null;
+    created_at?: string | null;
+    date?: string;
+  }>,
+  opts?: { year?: number; month?: number; includeAjuste?: boolean },
+): PresupuestoLastUpdateInfo {
+  const includeAjuste = opts?.includeAjuste !== false;
+  const year = opts?.year;
+  const month = opts?.month;
+  const bySource = new Map<string, string>();
+
+  for (const r of records) {
+    const sf = String(r.source_file || '');
+    if (!sf) continue;
+    const isIngest = PRESUPUESTO_INGEST_SET.has(sf);
+    const isAjuste = sf === SOURCE_AJUSTE;
+    if (!isIngest && !(includeAjuste && isAjuste)) continue;
+
+    const created = String(r.created_at || '').trim();
+    if (!created) continue;
+
+    if (year != null || month != null) {
+      const p = parseIsoDate(String(r.date || ''));
+      if (!p) continue;
+      if (year != null && p.y !== year) continue;
+      if (month != null && p.m !== month) continue;
+    }
+
+    const prev = bySource.get(sf);
+    if (!prev || created > prev) bySource.set(sf, created);
+  }
+
+  const list: PresupuestoSourceLastUpdate[] = Array.from(bySource.entries())
+    .map(([sourceFile, lastAt]) => ({ sourceFile, lastAt }))
+    .sort((a, b) => a.sourceFile.localeCompare(b.sourceFile, 'es'));
+
+  let lastAt: string | null = null;
+  for (const row of list) {
+    if (!lastAt || row.lastAt > lastAt) lastAt = row.lastAt;
+  }
+  return { lastAt, bySource: list };
+}
 
 /** Padres colapsables en la UI (nombres de display). */
 export const COLLAPSIBLE_PARENTS = [
@@ -1366,13 +1442,21 @@ export function isPresupuestoMesVisibleEnBalance(
   return hasPresupuestoSemanaMonth(records, year, month);
 }
 
-/** Totales mensuales de ingresos / gastos (misma base que ResumenBancosSemanal). */
+/**
+ * Totales mensuales de ingresos / gastos.
+ * Ingresos y efectivo: `presupuesto_semana` + `flujo_efectivo_semana`.
+ * Gastos bancarios: facturas CFDI I/E del mes si hay sync; si no, `suma_gasto`.
+ * Nunca REP/pago (tipo P).
+ */
 export interface BalanceMensual {
   year: number;
   month: number;
   /** Bancos (ingresos) + efectivo ingresos */
   ingresos: number;
-  /** Bancos (suma_gasto) + efectivo egresos */
+  /**
+   * Gastos bancarios (facturas CFDI I/E si hay; si no suma_gasto) +
+   * efectivo egresos.
+   */
   gastos: number;
   /** ingresos − gastos */
   balance: number;
@@ -1393,9 +1477,11 @@ export type BuildBalanceMensualOptions = {
 };
 
 /**
- * Balance por mes a partir del resumen semanal de Finanzas
- * (`presupuesto_semana` + `flujo_efectivo_semana`).
- * Por defecto lista meses cerrados; el acumulado usa solo `incorporado`.
+ * Balance por mes:
+ * - Visibilidad / ingresos / efectivo ← presupuesto (+ flujo efectivo).
+ * - Gastos bancarios ← facturas CFDI (I/E) del mes cuando existen;
+ *   si no hay facturas, roll-forward `suma_gasto` del presupuesto.
+ * REP/pago (tipo P) no entran (filtro en `sumFacturasGastoPorMes`).
  */
 export function buildBalanceMensualPorAno(
   records: FinancialRecord[],
@@ -1419,11 +1505,17 @@ export function buildBalanceMensualPorAno(
     const weeks = buildResumenBancosSemanal(records, year, month, today);
     if (weeks.length === 0) continue;
     let ingresos = 0;
-    let gastos = 0;
+    let sumaGastoPresupuesto = 0;
+    let efectivoEgresos = 0;
     for (const w of weeks) {
       ingresos += Number(w.ingresos || 0) + Number(w.efectivo_ingresos || 0);
-      gastos += Number(w.suma_gasto || 0) + Number(w.efectivo_egresos || 0);
+      sumaGastoPresupuesto += Number(w.suma_gasto || 0);
+      efectivoEgresos += Number(w.efectivo_egresos || 0);
     }
+    const facturas = sumFacturasGastoPorMes(records, year, month);
+    const gastosBancos =
+      facturas.count > 0 ? facturas.total : sumaGastoPresupuesto;
+    const gastos = gastosBancos + efectivoEgresos;
     if (ingresos === 0 && gastos === 0) continue;
     out.push({
       year,

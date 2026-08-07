@@ -83,10 +83,10 @@ function ScheduleCard({
   const modeStyle = modeBadgeStyle(row.mode);
   const busy = row.workflow != null && busyWorkflow === row.workflow;
   const lastLabel = row.lastAt
-    ? `Última sync: ${formatTimestampCdmxShort(row.lastAt)}`
+    ? `${row.mode === 'manual' ? 'Última carga' : 'Última sync'}: ${formatTimestampCdmxShort(row.lastAt)}`
     : row.lastDisplay ||
       (row.mode === 'manual' || row.mode === 'mixed'
-        ? 'Última sync: Manual / sin sync cloud'
+        ? 'Última carga: sin registro'
         : 'Última sync: Sin registro');
 
   return (
@@ -200,7 +200,8 @@ function ScheduleCard({
                   </span>
                   {s.lastIngestedAt ? (
                     <span className="font-semibold" style={{ color: SUITE.orangeDeep }}>
-                      últ. sync {formatTimestampCdmxShort(s.lastIngestedAt)}
+                      últ. {row.mode === 'manual' ? 'carga' : 'sync'}{' '}
+                      {formatTimestampCdmxShort(s.lastIngestedAt)}
                     </span>
                   ) : s.lastDate ? (
                     <span style={{ color: theme.muted }}>dato {s.lastDate}</span>

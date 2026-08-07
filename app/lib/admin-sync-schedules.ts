@@ -109,7 +109,17 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
     mode: 'manual',
     schedule: 'Manual (ingest_presupuesto.py) · ajustes en /admin',
     areaId: 'presupuesto',
-    note: 'Sin automatizar aún (TODO automate).',
+    sourceFiles: [
+      'presupuesto_mensual',
+      'presupuesto_saldos',
+      'presupuesto_rubro',
+      'presupuesto_semana',
+      'presupuesto_sem_detalle',
+      'presupuesto_ingreso',
+      'presupuesto_ajuste',
+    ],
+    note:
+      'Carga manual: no hay workflow Actions. Tras editar el Excel en Drive, correr ingest_presupuesto.py en PC admin. Ajustes en /admin no requieren re-ingest.',
   },
   {
     id: 'bancos',
@@ -118,6 +128,14 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
     mode: 'manual',
     schedule: 'Manual / al reindexar · saldos bancarios solo /admin',
     areaId: 'bancos',
+    sourceFiles: [
+      'estado_mifel',
+      'estado_bbva',
+      'estado_pdf_index',
+      'estado_cuenta_pdf_index',
+    ],
+    note:
+      'Comprobantes (estado_pdf_index) y estados Excel/PDF: sin workflow Actions. Tras subir PDFs a COMPROBANTES BANCARIOS, correr ingest_estados_cuenta.py --index-pdfs --pdf-only en PC admin. Saldos bancarios manuales solo en /admin.',
   },
   {
     id: 'eventos',

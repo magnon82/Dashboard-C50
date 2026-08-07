@@ -9,8 +9,8 @@ import {
 export const STAFF_RPT_TABLE = 'staff_rpt_diario';
 
 /**
- * Tolerancia histórica ($1). El cierre ya NO hard-bloquea si tómbola < esperado
- * (Infocaja − propinas TPV): es alerta operativa + cierre con acknowledge_shortage.
+ * Tolerancia ($1) al conciliar efectivo recibido del corte vs Infocaja Efectivo.
+ * El cierre NO depende de Infocaja (llega por correo después); la comparación es post-hoc.
  */
 export const EFECTIVO_TOLERANCE_MXN = 1;
 
@@ -24,7 +24,12 @@ export interface StaffRptRow {
   /** Venta extra del evento (Global · VENTA EXTRA). */
   eventos_extra_amount: number;
   propinas: number;
+  /** Efectivo depositado en tómbola (después de propinas). Captura manual. */
   efectivo_tombola: number;
+  /**
+   * Efectivo recibido del día (captura manual en cierre).
+   * Se concilia después con Infocaja Efectivo cuando el reporte llega por correo.
+   */
   efectivo_contado: number | null;
   efectivo_infocaja: number | null;
   bancos_neto_tpv: number | null;
@@ -315,14 +320,34 @@ export function applyTombolaDeficitRecovery(
 }
 
 /**
- * Tómbola del día desde un corte cerrado: Infocaja efectivo − propinas TPV.
- * Si falta Infocaja, usa el monto depositado (contado / tómbola).
+ * Tómbola del día desde un corte cerrado: depósito manual en tómbola.
+ * Si hay Infocaja, también expone la fórmula recibido Infocaja − propinas TPV
+ * (referencia); el monto reportado prefiere el depósito capturado.
  */
 export function dayTombolaFromRpt(rpt: StaffRptRow): DayTombolaResult {
   const tips = Math.max(
     0,
     Number(rpt.bancos_propina_tpv ?? rpt.propinas) || 0
   );
+  // Depósito físico capturado en el cierre (después de propinas).
+  const depositado = Math.max(
+    0,
+    Math.round(Number(rpt.efectivo_tombola) * 100) / 100
+  );
+  if (Number.isFinite(depositado) && rpt.efectivo_tombola != null) {
+    return {
+      amount: depositado,
+      source: 'depositado',
+      efectivo:
+        rpt.efectivo_contado != null && Number.isFinite(rpt.efectivo_contado)
+          ? Number(rpt.efectivo_contado)
+          : rpt.efectivo_infocaja != null &&
+              Number.isFinite(rpt.efectivo_infocaja)
+            ? Number(rpt.efectivo_infocaja)
+            : null,
+      propinas_tpv: tips,
+    };
+  }
   const expected = expectedTombolaDeposit(rpt.efectivo_infocaja, tips);
   if (expected != null) {
     return {
@@ -332,13 +357,8 @@ export function dayTombolaFromRpt(rpt: StaffRptRow): DayTombolaResult {
       propinas_tpv: tips,
     };
   }
-  // Monto depositado capturado (siempre ≥ 0); la fórmula puede ser negativa.
-  const depositado =
-    rpt.efectivo_contado != null && Number.isFinite(rpt.efectivo_contado)
-      ? Math.max(0, Math.round(Number(rpt.efectivo_contado) * 100) / 100)
-      : Math.max(0, Math.round(Number(rpt.efectivo_tombola) * 100) / 100);
   return {
-    amount: depositado,
+    amount: 0,
     source: 'depositado',
     efectivo: null,
     propinas_tpv: tips,
@@ -347,9 +367,8 @@ export function dayTombolaFromRpt(rpt: StaffRptRow): DayTombolaResult {
 
 /**
  * Tómbola del día con o sin corte cerrado.
- * Preferencia: efectivo Infocaja (live o snapshot) − propinas de tarjeta
- * (TPV del corte si existe; si no, Infocaja Propina).
- * Sin Infocaja: monto depositado del corte.
+ * Preferencia: depósito capturado en el corte (`efectivo_tombola`);
+ * si no hay cierre, Infocaja − propinas de tarjeta.
  */
 export function resolveDayTombola(input: {
   rpt?: StaffRptRow | null;
@@ -357,6 +376,10 @@ export function resolveDayTombola(input: {
 }): DayTombolaResult | null {
   const rpt = input.rpt ?? null;
   const info = input.infocaja ?? null;
+
+  if (rpt && Number.isFinite(Number(rpt.efectivo_tombola))) {
+    return dayTombolaFromRpt(rpt);
+  }
 
   const tipsFromTpv =
     rpt?.bancos_propina_tpv != null
@@ -394,58 +417,113 @@ export function resolveDayTombola(input: {
   return null;
 }
 
+export type EfectivoInfocajaReconcile = {
+  /** Ambos montos presentes y |delta| > tolerancia. */
+  mismatch: boolean;
+  /** Ambos montos presentes y |delta| ≤ tolerancia. */
+  match: boolean;
+  /** true si ya hay Infocaja Efectivo para la fecha. */
+  hasInfocaja: boolean;
+  /** true si el corte tiene efectivo recibido capturado. */
+  hasRecibido: boolean;
+  recibido: number | null;
+  infocaja: number | null;
+  delta: number | null;
+  message: string | null;
+  /**
+   * @deprecated Alias de mismatch (compat UI antigua que usaba belowInfocaja).
+   * Ya no significa «tómbola &lt; Infocaja − tips».
+   */
+  belowInfocaja: boolean;
+  /** @deprecated Usar `infocaja` — era el esperado tómbola (Infocaja − tips). */
+  expected: number | null;
+};
+
 /**
- * Alerta cuando el efectivo en tómbola es menor que lo esperado:
- * Infocaja Efectivo − propinas TPV. WARNING (no hard-block): un faltante real
- * puede cerrarse con acknowledge_shortage + nota.
+ * Conciliación post-hoc: efectivo recibido del corte vs Infocaja Efectivo.
+ * No bloquea el cierre (Infocaja suele llegar por correo después).
+ */
+export function reconcileEfectivoRecibidoVsInfocaja(
+  recibido: number | null | undefined,
+  infocajaEfectivo: number | null | undefined
+): EfectivoInfocajaReconcile {
+  const hasRecibido =
+    recibido != null && Number.isFinite(Number(recibido)) && Number(recibido) >= 0;
+  const hasInfocaja =
+    infocajaEfectivo != null &&
+    Number.isFinite(Number(infocajaEfectivo));
+  const r = hasRecibido ? Math.round(Number(recibido) * 100) / 100 : null;
+  const i = hasInfocaja
+    ? Math.round(Number(infocajaEfectivo) * 100) / 100
+    : null;
+
+  if (r == null || i == null) {
+    return {
+      mismatch: false,
+      match: false,
+      hasInfocaja,
+      hasRecibido,
+      recibido: r,
+      infocaja: i,
+      delta: null,
+      message: hasInfocaja
+        ? null
+        : hasRecibido
+          ? 'Infocaja aún no disponible; la conciliación se hará cuando llegue el reporte del día.'
+          : null,
+      belowInfocaja: false,
+      expected: i,
+    };
+  }
+
+  const delta = Math.round((r - i) * 100) / 100;
+  const match = Math.abs(delta) <= EFECTIVO_TOLERANCE_MXN;
+  if (match) {
+    return {
+      mismatch: false,
+      match: true,
+      hasInfocaja: true,
+      hasRecibido: true,
+      recibido: r,
+      infocaja: i,
+      delta,
+      message: `Efectivo recibido del corte (${moneyMx(r)}) coincide con Infocaja (${moneyMx(i)}).`,
+      belowInfocaja: false,
+      expected: i,
+    };
+  }
+
+  const message = `Efectivo recibido del corte (${moneyMx(r)}) no coincide con Infocaja Efectivo (${moneyMx(i)}). Diferencia ${moneyMx(delta)}.`;
+  return {
+    mismatch: true,
+    match: false,
+    hasInfocaja: true,
+    hasRecibido: true,
+    recibido: r,
+    infocaja: i,
+    delta,
+    message,
+    belowInfocaja: true,
+    expected: i,
+  };
+}
+
+/**
+ * @deprecated Preferir `reconcileEfectivoRecibidoVsInfocaja`.
+ * Firma antigua: (contado/tombola, efectivo Infocaja, propinas) → ahora ignora propinas
+ * y compara recibido vs Infocaja.
  */
 export function efectivoMismatch(
   contado: number | null | undefined,
   efectivoRecibido: number | null | undefined,
-  propinasTerminales: number | null | undefined = 0
-): {
-  mismatch: boolean;
-  belowInfocaja: boolean;
-  expected: number | null;
-  delta: number | null;
-  message: string | null;
-} {
-  const expected = expectedTombolaDeposit(
-    efectivoRecibido,
-    propinasTerminales
-  );
-  if (contado == null || expected == null) {
-    return {
-      mismatch: false,
-      belowInfocaja: false,
-      expected,
-      delta: null,
-      message: null,
-    };
-  }
-  const delta = Math.round((Number(contado) - expected) * 100) / 100;
-  if (delta >= 0) {
-    return {
-      mismatch: false,
-      belowInfocaja: false,
-      expected,
-      delta,
-      message: null,
-    };
-  }
-  const faltante = Math.abs(delta);
-  const tips = Math.max(0, Number(propinasTerminales) || 0);
-  const message = `Efectivo en tómbola (${moneyMx(contado)}) es menor que lo esperado (${moneyMx(expected)} = Infocaja ${moneyMx(efectivoRecibido)} − propinas TPV ${moneyMx(tips)}). Faltan ${moneyMx(faltante)}. Confirma el faltante para poder cerrar.`;
-  return {
-    mismatch: true,
-    belowInfocaja: true,
-    expected,
-    delta,
-    message,
-  };
+  _propinasTerminales: number | null | undefined = 0
+): EfectivoInfocajaReconcile {
+  // Firma legacy: 2º arg era Infocaja; 1º era tómbola/contado.
+  // Nueva semántica: 1º = recibido del corte, 2º = Infocaja.
+  return reconcileEfectivoRecibidoVsInfocaja(contado, efectivoRecibido);
 }
 
-/** Nota automática al cerrar con faltante (tómbola < efectivo − propinas). */
+/** @deprecated Ya no se usa en cierre (Infocaja post-hoc). */
 export function shortageCloseNote(
   contado: number,
   efectivoRecibido: number,
@@ -461,9 +539,7 @@ export function shortageCloseNote(
 }
 
 /**
- * Regla de piso: efectivo_contado y efectivo_tombola deben coincidir
- * (un solo monto capturado como «Efectivo en Tómbola»).
- * Centavos redondeados (parseMoneyInput).
+ * @deprecated Contado (recibido) y tómbola son montos distintos; ya no deben forzarse iguales.
  */
 export function efectivoTombolaMustMatch(
   contado: number,

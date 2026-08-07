@@ -10,6 +10,7 @@ import {
 import {
   STAFF_RPT_TABLE,
   asStaffRptRow,
+  reconcileEfectivoRecibidoVsInfocaja,
   resolveDayTombola,
   sumInfocajaDay,
   type DayTombolaResult,
@@ -166,7 +167,8 @@ async function loadInfocajaForDate(date: string) {
 /**
  * GET /api/ventas/corte
  * Reporte completo de un corte diario (staff_rpt_diario + cancelaciones/descuentos).
- * Tómbola: Infocaja efectivo − propinas tarjeta (con o sin cierre RPT).
+ * Tómbola: depósito capturado en el corte; sin cierre → Infocaja − propinas.
+ * Conciliación: efectivo recibido (corte) vs Infocaja Efectivo (live).
  *
  * Query: date? (YYYY-MM-DD). Sin date → ayer CDMX; si no hay, el más reciente.
  */
@@ -248,14 +250,34 @@ export async function GET(req: NextRequest) {
       : emptyCancDesc();
 
     let tombola: DayTombolaResult | null = null;
+    let cashCheck = reconcileEfectivoRecibidoVsInfocaja(null, null);
+    let liveInfocajaEfectivo: number | null = null;
     if (statsDate) {
       try {
         const infocaja = await loadInfocajaForDate(statsDate);
+        liveInfocajaEfectivo = infocaja.hasEfectivo ? infocaja.efectivo : null;
         tombola = resolveDayTombola({ rpt, infocaja });
+        cashCheck = reconcileEfectivoRecibidoVsInfocaja(
+          rpt?.efectivo_contado ?? null,
+          liveInfocajaEfectivo
+        );
       } catch {
         tombola = rpt ? resolveDayTombola({ rpt, infocaja: null }) : null;
+        cashCheck = reconcileEfectivoRecibidoVsInfocaja(
+          rpt?.efectivo_contado ?? null,
+          rpt?.efectivo_infocaja ?? null
+        );
       }
     }
+
+    const corteSummary = rpt
+      ? {
+          ...summarizeRpt(rpt),
+          // Prefer live Infocaja for post-hoc reconcile when snapshot was null at close.
+          efectivo_infocaja:
+            liveInfocajaEfectivo ?? rpt.efectivo_infocaja,
+        }
+      : null;
 
     return NextResponse.json({
       ready: true,
@@ -266,8 +288,9 @@ export async function GET(req: NextRequest) {
       date: statsDate,
       isYesterday: statsDate === yesterdayDate,
       hasCorte: Boolean(rpt),
-      corte: rpt ? summarizeRpt(rpt) : null,
+      corte: corteSummary,
       tombola,
+      cashCheck,
       cancDesc,
     });
   } catch (e) {

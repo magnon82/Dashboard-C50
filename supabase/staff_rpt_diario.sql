@@ -22,8 +22,11 @@ create table if not exists public.staff_rpt_diario (
   eventos_amount numeric(12, 2) not null default 0,
   -- Snapshot propinas = suma propina TPV del día (no tecleo aparte)
   propinas numeric(12, 2) not null default 0,
+  -- Depósito en tómbola DESPUÉS de propinas (captura manual al cerrar)
   efectivo_tombola numeric(12, 2) not null default 0,
+  -- Efectivo recibido del día (manual). Conciliación post-hoc vs Infocaja.
   efectivo_contado numeric(12, 2),
+  -- Snapshot Infocaja Efectivo si el reporte ya existía al cerrar (puede ser null)
   efectivo_infocaja numeric(12, 2),
   bancos_neto_tpv numeric(12, 2),
   bancos_cobrado_tpv numeric(12, 2),

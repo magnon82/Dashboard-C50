@@ -20,10 +20,8 @@ import {
   asStaffRptRow,
   buildBancosFromTpv,
   buildStaffCorteStatus,
-  efectivoMismatch,
-  efectivoTombolaMustMatch,
   parseMoneyInput,
-  shortageCloseNote,
+  reconcileEfectivoRecibidoVsInfocaja,
   sumInfocajaDay,
   totalEventosAmount,
 } from '@/app/lib/staff-rpt';
@@ -323,10 +321,10 @@ export async function GET(request: Request) {
       }
     }
 
-    const cashCheck = efectivoMismatch(
+    // Conciliación post-hoc: efectivo recibido (corte) vs Infocaja Efectivo.
+    const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
       rpt?.efectivo_contado ?? null,
-      infocaja.hasEfectivo ? infocaja.efectivo : null,
-      bancos.propina
+      infocaja.hasEfectivo ? infocaja.efectivo : null
     );
 
     const isMaster = canAccessAdmin(auth);
@@ -428,10 +426,10 @@ export async function GET(request: Request) {
 /**
  * PUT /api/staff-corte — Cerrar / actualizar cierre del día (upsert 1 fila).
  * Body JSON: { date?, wi_amount, eventos_os_amount?, eventos_extra_amount?,
- *              eventos_amount? (legacy), efectivo_tombola?, efectivo_contado,
- *              notes?, acknowledge_shortage? }
+ *              eventos_amount? (legacy), efectivo_contado (recibido),
+ *              efectivo_tombola (después de propinas), notes? }
  * Con evento: OS + venta extra (como Global). Total = OS + extra → eventos_amount.
- * Bancos/propinas = TPV. Tómbola esperada = Infocaja − propinas TPV.
+ * Bancos/propinas = TPV. Infocaja no bloquea el cierre (conciliación post-hoc).
  */
 export async function PUT(request: Request) {
   const auth = await requireVentasSession();
@@ -496,48 +494,29 @@ export async function PUT(request: Request) {
       eventosExtra = 0;
     }
 
-    const efectivoContado = parseMoneyInput(body.efectivo_contado);
-    if (efectivoContado == null || efectivoContado < 0) {
+    /** Efectivo recibido del día (manual; se concilia luego vs Infocaja). */
+    const efectivoRecibido = parseMoneyInput(body.efectivo_contado);
+    if (efectivoRecibido == null || efectivoRecibido < 0) {
       return NextResponse.json(
-        { error: 'Indica el efectivo en tómbola (obligatorio)' },
+        { error: 'Indica el efectivo recibido (obligatorio)' },
         { status: 400 }
       );
     }
 
-    /** Un solo monto UI «Efectivo en Tómbola» → ambas columnas. */
-    const tombolaRaw = parseMoneyInput(body.efectivo_tombola);
-    if (tombolaRaw != null && tombolaRaw < 0) {
+    /** Efectivo en tómbola después de propinas (manual). */
+    const tombola = parseMoneyInput(body.efectivo_tombola);
+    if (tombola == null || tombola < 0) {
       return NextResponse.json(
-        { error: 'El efectivo en tómbola no puede ser negativo' },
+        { error: 'Indica el efectivo en tómbola después de propinas (obligatorio)' },
         { status: 400 }
       );
     }
-    if (tombolaRaw != null) {
-      const match = efectivoTombolaMustMatch(efectivoContado, tombolaRaw);
-      if (!match.ok) {
-        return NextResponse.json(
-          {
-            error: match.message,
-            blockers: [
-              'El efectivo en tómbola debe coincidir en contado y tómbola.',
-            ],
-          },
-          { status: 400 }
-        );
-      }
-    }
-    const tombola = efectivoContado;
 
     const notesRaw = body.notes;
-    let notes =
+    const notes =
       notesRaw == null || String(notesRaw).trim() === ''
         ? null
         : String(notesRaw).trim().slice(0, 2000);
-
-    const acknowledgeShortage =
-      body.acknowledge_shortage === true ||
-      body.acknowledge_shortage === 'true' ||
-      body.acknowledge_shortage === 1;
 
     const sb = getServiceSupabase();
     let uploads;
@@ -564,39 +543,11 @@ export async function PUT(request: Request) {
     }
 
     const { infocaja } = await loadInfocajaDay(sb, date);
-    const cashCheck = efectivoMismatch(
-      efectivoContado,
-      infocaja.hasEfectivo ? infocaja.efectivo : null,
-      bancos.propina
+    // Informativo: no bloquea el cierre si Infocaja falta o no coincide.
+    const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
+      efectivoRecibido,
+      infocaja.hasEfectivo ? infocaja.efectivo : null
     );
-
-    // Regla ops: tómbola < (Infocaja − propinas TPV) = warning + cierre con ack.
-    // No hard-blockear faltantes reales.
-    if (cashCheck.belowInfocaja && !acknowledgeShortage) {
-      return NextResponse.json(
-        {
-          error:
-            cashCheck.message ||
-            'Efectivo en tómbola menor que lo esperado (Infocaja − propinas TPV). Confirma el faltante para cerrar.',
-          cashCheck,
-          requiresShortageAck: true,
-          blockers: [
-            'Confirma el faltante de efectivo (tómbola < Infocaja − propinas TPV) para poder cerrar.',
-          ],
-        },
-        { status: 409 }
-      );
-    }
-
-    if (cashCheck.belowInfocaja && acknowledgeShortage) {
-      const auto = shortageCloseNote(
-        efectivoContado,
-        infocaja.efectivo,
-        bancos.propina
-      );
-      notes = notes ? `${notes}\n${auto}`.slice(0, 2000) : auto;
-    } else {
-    }
 
     const now = new Date().toISOString();
     const row = {
@@ -607,7 +558,7 @@ export async function PUT(request: Request) {
       eventos_extra_amount: eventosExtra,
       propinas: bancos.propina,
       efectivo_tombola: tombola,
-      efectivo_contado: efectivoContado,
+      efectivo_contado: efectivoRecibido,
       efectivo_infocaja: infocaja.hasEfectivo ? infocaja.efectivo : null,
       bancos_neto_tpv: bancos.neto,
       bancos_cobrado_tpv: bancos.cobrado,
@@ -686,7 +637,7 @@ export async function PUT(request: Request) {
       bancos,
       infocaja,
       cashCheck,
-      warning: cashCheck.belowInfocaja ? cashCheck.message : null,
+      warning: cashCheck.mismatch ? cashCheck.message : null,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error al cerrar corte';

@@ -6,6 +6,7 @@ import {
   filterSelectClass,
   SectionHeader,
 } from '@/app/components/SectionHeader';
+import { formatTimestampCdmx } from '@/app/lib/admin-last-updates';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import { MESES } from '@/app/lib/ventas-semana';
 
@@ -77,6 +78,7 @@ export function ComprobantesIndex({
   const [preferIndex, setPreferIndex] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [indexedAt, setIndexedAt] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -100,16 +102,23 @@ export function ComprobantesIndex({
       if (!res.ok) {
         setError(json.error || `Error ${res.status}`);
         setItems([]);
+        setIndexedAt(null);
         return;
       }
       setItems(json.items || []);
       setSource(json.source || '');
       setRootExists(Boolean(json.rootExists));
       setLocalFsEnabled(Boolean(json.localFsEnabled));
+      setIndexedAt(
+        typeof json.indexedAt === 'string' && json.indexedAt
+          ? json.indexedAt
+          : null
+      );
       setLoadedOnce(true);
     } catch {
       setError('No se pudo cargar el índice de comprobantes');
       setItems([]);
+      setIndexedAt(null);
     } finally {
       setLoading(false);
     }
@@ -251,7 +260,20 @@ export function ComprobantesIndex({
                   : source || '—'}
             {rootExists
               ? ''
-              : ' · vista previa PDF solo en PC de admin (en línea: solo índice)'}.
+              : ' · vista previa PDF solo en PC de admin (en línea: solo índice)'}
+            .
+            {indexedAt ? (
+              <>
+                {' '}
+                Índice actualizado:{' '}
+                <span className="font-semibold" style={{ color: SUITE.navy }}>
+                  {formatTimestampCdmx(indexedAt)}
+                </span>
+                <span> · carga manual</span>
+              </>
+            ) : source === 'index' && !loading ? (
+              <span> · índice: sin carga registrada · carga manual</span>
+            ) : null}
             {!showAll && sortedItems.length > PAGE_SIZE
               ? ` · mostrando ${PAGE_SIZE} de ${sortedItems.length}`
               : sortedItems.length

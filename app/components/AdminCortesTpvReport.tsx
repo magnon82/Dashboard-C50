@@ -882,9 +882,12 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                                   ['WI', day.rpt.wi_amount],
                                   ['Eventos', day.rpt.eventos_amount],
                                   [
+                                    'Efectivo recibido',
+                                    day.rpt.efectivo_contado,
+                                  ],
+                                  [
                                     'Efectivo en tómbola',
-                                    day.rpt.efectivo_tombola ??
-                                      day.rpt.efectivo_contado,
+                                    day.rpt.efectivo_tombola,
                                   ],
                                   ['Infocaja', day.rpt.efectivo_infocaja],
                                   ['Bancos neto TPV', day.rpt.bancos_neto_tpv],
@@ -900,6 +903,39 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                                 </div>
                               ))}
                             </div>
+                            {(() => {
+                              const recibido = day.rpt.efectivo_contado;
+                              const info = day.rpt.efectivo_infocaja;
+                              if (
+                                recibido == null ||
+                                info == null ||
+                                !Number.isFinite(Number(recibido)) ||
+                                !Number.isFinite(Number(info))
+                              ) {
+                                return info == null ? (
+                                  <p className="mt-2 text-[11px] text-slate-400">
+                                    Infocaja pendiente — conciliar efectivo
+                                    recibido cuando llegue el reporte.
+                                  </p>
+                                ) : null;
+                              }
+                              const delta =
+                                Math.round(
+                                  (Number(recibido) - Number(info)) * 100
+                                ) / 100;
+                              const ok = Math.abs(delta) <= 1;
+                              return (
+                                <p
+                                  className={`mt-2 text-[11px] font-medium ${
+                                    ok ? 'text-emerald-700' : 'text-amber-800'
+                                  }`}
+                                >
+                                  {ok
+                                    ? 'Efectivo recibido coincide con Infocaja.'
+                                    : `Descuadre efectivo recibido vs Infocaja: ${moneyMx(delta)}.`}
+                                </p>
+                              );
+                            })()}
                             <p className="mt-2 text-[11px] text-slate-400">
                               Cerrado por {day.rpt.created_by}
                               {day.rpt.updated_by

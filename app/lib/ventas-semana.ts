@@ -11,6 +11,8 @@ export interface FinancialRecord {
   amount: number;
   description: string;
   source_file?: string | null;
+  /** Ingestión / insert en Supabase (timestamptz ISO). */
+  created_at?: string | null;
 }
 
 export interface WeekSale {

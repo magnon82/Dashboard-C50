@@ -360,21 +360,27 @@ async function walkPdfs(
   return out;
 }
 
-async function loadFromIndex(): Promise<ComprobanteItem[]> {
+async function loadFromIndex(): Promise<{
+  items: ComprobanteItem[];
+  indexedAt: string | null;
+}> {
   const sb = getServiceSupabase();
   const all: ComprobanteItem[] = [];
+  let indexedAt: string | null = null;
   let from = 0;
   const pageSize = 1000;
   while (true) {
     const { data, error } = await sb
       .from('financial_records')
-      .select('date,amount,description,category,source_file')
+      .select('date,amount,description,category,source_file,created_at')
       .eq('source_file', SOURCE_ESTADO_PDF_INDEX)
       .order('date', { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) throw new Error(error.message);
     if (!data?.length) break;
     for (const row of data) {
+      const created = String(row.created_at || '');
+      if (created && (!indexedAt || created > indexedAt)) indexedAt = created;
       const d = parseJson(row.description);
       const filename = String(d.filename || '');
       const rel = String(d.rel_path || '');
@@ -428,7 +434,7 @@ async function loadFromIndex(): Promise<ComprobanteItem[]> {
     if (data.length < pageSize) break;
     from += pageSize;
   }
-  return all;
+  return { items: all, indexedAt };
 }
 
 function isUnderRoot(filePath: string, root: string): boolean {
@@ -547,12 +553,15 @@ export async function GET(request: Request) {
     const rootExists = localFs && existsSync(root);
     let items: ComprobanteItem[] = [];
     let source: 'index' | 'scan' | 'index+scan' = 'index';
+    let indexedAt: string | null = null;
 
     // Local disk is complete (~hundreds/year). A sparse Supabase index was
     // preferred before and capped the UI at a handful of month-start rows.
     if (preferIndex && !forceScan) {
       try {
-        items = await loadFromIndex();
+        const loaded = await loadFromIndex();
+        items = loaded.items;
+        indexedAt = loaded.indexedAt;
       } catch {
         items = [];
       }
@@ -568,7 +577,9 @@ export async function GET(request: Request) {
         source = 'scan';
       } else {
         try {
-          items = await loadFromIndex();
+          const loaded = await loadFromIndex();
+          items = loaded.items;
+          indexedAt = loaded.indexedAt;
           source = 'index';
         } catch {
           items = [];
@@ -576,7 +587,9 @@ export async function GET(request: Request) {
       }
     } else {
       try {
-        items = await loadFromIndex();
+        const loaded = await loadFromIndex();
+        items = loaded.items;
+        indexedAt = loaded.indexedAt;
       } catch {
         items = [];
       }
@@ -598,6 +611,7 @@ export async function GET(request: Request) {
       items: itemsOut,
       count: itemsOut.length,
       source,
+      indexedAt,
       root: clientSafeRoot(root),
       rootExists,
       localFsEnabled: localFs,

@@ -5,13 +5,25 @@ import type {
   RubroRow,
   PresupuestoMeta,
   RubroDesglose,
+  PresupuestoSourceLastUpdate,
 } from '@/app/lib/presupuesto';
 import {
   COLLAPSIBLE_PARENTS,
   buildRubroDesglose,
 } from '@/app/lib/presupuesto';
+import { formatTimestampCdmx } from '@/app/lib/admin-last-updates';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
+
+const SOURCE_SHORT: Record<string, string> = {
+  presupuesto_mensual: 'Mensual',
+  presupuesto_saldos: 'Saldos',
+  presupuesto_rubro: 'Rubros',
+  presupuesto_semana: 'Semana',
+  presupuesto_sem_detalle: 'Detalle SEM',
+  presupuesto_ingreso: 'Ingresos',
+  presupuesto_ajuste: 'Ajuste admin',
+};
 
 const theme = getTheme('suite');
 
@@ -38,6 +50,10 @@ interface Props {
   records?: FinancialRecord[];
   year?: number;
   month?: number;
+  /** ISO timestamptz última carga (mes). */
+  lastUpdatedAt?: string | null;
+  /** Detalle por source_file (opcional). */
+  lastUpdatesBySource?: PresupuestoSourceLastUpdate[];
 }
 
 const PARENT_SET = new Set<string>(COLLAPSIBLE_PARENTS);
@@ -49,7 +65,10 @@ export function PresupuestoRubros({
   records = [],
   year,
   month,
+  lastUpdatedAt,
+  lastUpdatesBySource = [],
 }: Props) {
+  const lastLabel = lastUpdatedAt ? formatTimestampCdmx(lastUpdatedAt) : null;
   const [openParents, setOpenParents] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(COLLAPSIBLE_PARENTS.map((p) => [p, false]))
   );
@@ -144,6 +163,31 @@ export function PresupuestoRubros({
         >
           Presupuesto vs real · por rubro
         </p>
+        {lastLabel ? (
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+            Presupuesto actualizado:{' '}
+            <span className="font-semibold" style={{ color: SUITE.navy }}>
+              {lastLabel}
+            </span>
+            <span> · carga manual</span>
+          </p>
+        ) : !loading ? (
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+            Presupuesto: sin carga registrada para este mes · carga manual
+          </p>
+        ) : null}
+        {lastUpdatesBySource.length > 1 ? (
+          <p className="mt-0.5 text-[11px] leading-relaxed" style={{ color: theme.muted }}>
+            {lastUpdatesBySource
+              .map((s) => {
+                const label = SOURCE_SHORT[s.sourceFile] || s.sourceFile;
+                const t = formatTimestampCdmx(s.lastAt);
+                return t ? `${label}: ${t}` : null;
+              })
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        ) : null}
         {meta.venta > 0 && (
           <p className="mt-1 text-sm" style={{ color: theme.muted }}>
             Venta del mes {money(meta.venta)}

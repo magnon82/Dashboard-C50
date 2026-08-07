@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import type { SemanaBancos } from '@/app/lib/presupuesto';
+import { formatTimestampCdmx } from '@/app/lib/admin-last-updates';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -76,18 +77,42 @@ interface Props {
   weeks: SemanaBancos[];
   loading?: boolean;
   filters?: ReactNode;
+  /** ISO timestamptz de la última carga de presupuesto para el mes. */
+  lastUpdatedAt?: string | null;
 }
 
-export function ResumenBancosSemanal({ weeks, loading, filters }: Props) {
+export function ResumenBancosSemanal({
+  weeks,
+  loading,
+  filters,
+  lastUpdatedAt,
+}: Props) {
+  const lastLabel = lastUpdatedAt ? formatTimestampCdmx(lastUpdatedAt) : null;
+
   return (
     <section className="mb-8">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <p
-          className="text-xs font-bold uppercase tracking-[0.16em]"
-          style={{ color: theme.muted }}
-        >
-          Resumen semanal de movimientos
-        </p>
+        <div className="min-w-0">
+          <p
+            className="text-xs font-bold uppercase tracking-[0.16em]"
+            style={{ color: theme.muted }}
+          >
+            Resumen semanal de movimientos
+          </p>
+          {lastLabel ? (
+            <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+              Presupuesto actualizado:{' '}
+              <span className="font-semibold" style={{ color: SUITE.navy }}>
+                {lastLabel}
+              </span>
+              <span> · carga manual</span>
+            </p>
+          ) : !loading ? (
+            <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+              Presupuesto: sin carga registrada para este mes · carga manual
+            </p>
+          ) : null}
+        </div>
         {filters ? (
           <div className="flex flex-wrap items-center gap-2">{filters}</div>
         ) : null}

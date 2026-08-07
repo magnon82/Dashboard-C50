@@ -1,10 +1,16 @@
-import type { FinancialRecord } from '@/app/lib/ventas-semana';
+import {
+  parseIsoDate,
+  type FinancialRecord,
+} from '@/app/lib/ventas-semana';
 import {
   listPdfComprobantes,
   type PdfComprobanteHit,
 } from '@/app/lib/estados-cuenta';
 
 export const SOURCE_FACTURA_CFDI = 'factura_cfdi';
+
+/** SAT TipoDeComprobante que cuentan como factura/gasto (no REP/pago). */
+const CFDI_EXPENSE_TIPOS = new Set(['I', 'E']);
 
 export interface FacturaItem {
   id: string;
@@ -16,6 +22,8 @@ export interface FacturaItem {
   emisor_rfc: string | null;
   emisor_nombre: string | null;
   receptor_rfc: string | null;
+  /** SAT TipoDeComprobante: I/E/…; null si legacy sin campo. */
+  tipo_comprobante: string | null;
   pdf_path: string | null;
   xml_path: string | null;
   has_pdf: boolean;
@@ -23,6 +31,25 @@ export interface FacturaItem {
   filename: string;
   gmail_id: string | null;
   subject: string | null;
+}
+
+/** True for CFDI complemento de pago / REP (TipoDeComprobante=P). */
+export function isFacturaCfdiPagoRep(
+  tipo: string | null | undefined
+): boolean {
+  return String(tipo || '').trim().toUpperCase() === 'P';
+}
+
+/**
+ * True when CFDI should count as factura/gasto.
+ * Missing tipo (legacy PDF) → allow. Explicit P/N/T → reject.
+ */
+export function isFacturaCfdiExpenseInvoice(
+  tipo: string | null | undefined
+): boolean {
+  const t = String(tipo || '').trim().toUpperCase();
+  if (!t) return true;
+  return CFDI_EXPENSE_TIPOS.has(t);
 }
 
 export interface FacturaFaltante {
@@ -64,6 +91,12 @@ function parseJson(raw: unknown): Record<string, unknown> {
 export function parseFacturaRecord(r: FinancialRecord): FacturaItem | null {
   if (r.source_file !== SOURCE_FACTURA_CFDI) return null;
   const d = parseJson(r.description);
+  const tipo_comprobante = d.tipo_comprobante
+    ? String(d.tipo_comprobante).trim().toUpperCase()
+    : null;
+  // Defensa en lectura: REP/pago (y N/T) no deben aparecer como factura/gasto
+  // aunque hayan entrado a financial_records (ingest ya los omite).
+  if (!isFacturaCfdiExpenseInvoice(tipo_comprobante)) return null;
   const pdf_path = d.pdf_path ? String(d.pdf_path) : null;
   const xml_path = d.xml_path ? String(d.xml_path) : null;
   return {
@@ -81,6 +114,7 @@ export function parseFacturaRecord(r: FinancialRecord): FacturaItem | null {
           ? r.category
           : null,
     receptor_rfc: d.receptor_rfc ? String(d.receptor_rfc) : null,
+    tipo_comprobante,
     pdf_path,
     xml_path,
     has_pdf: Boolean(d.has_pdf ?? pdf_path),
@@ -89,6 +123,29 @@ export function parseFacturaRecord(r: FinancialRecord): FacturaItem | null {
     gmail_id: d.gmail_id ? String(d.gmail_id) : null,
     subject: d.subject ? String(d.subject) : null,
   };
+}
+
+/**
+ * Suma de facturas CFDI (I/E) de un mes calendario — base de gastos
+ * del Balance cuando hay sync Gmail/ERP. Excluye REP/pago (P) y N/T.
+ */
+export function sumFacturasGastoPorMes(
+  records: FinancialRecord[],
+  year: number,
+  month: number
+): { total: number; count: number } {
+  let total = 0;
+  let count = 0;
+  for (const r of records) {
+    const f = parseFacturaRecord(r);
+    if (!f) continue;
+    const p = parseIsoDate(f.date);
+    if (!p || p.y !== year || p.m !== month) continue;
+    if (!Number.isFinite(f.amount) || f.amount === 0) continue;
+    total += f.amount;
+    count += 1;
+  }
+  return { total, count };
 }
 
 function PathBasename(p: string): string {

@@ -6,8 +6,10 @@ import { SectionHeader } from '@/app/components/SectionHeader';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import {
   buildBalanceMensualPorAno,
+  buildPresupuestoLastUpdate,
   sumBalanceMensual,
 } from '@/app/lib/presupuesto';
+import { formatTimestampCdmx } from '@/app/lib/admin-last-updates';
 import { MESES, type FinancialRecord } from '@/app/lib/ventas-semana';
 
 const theme = getTheme('suite');
@@ -35,7 +37,8 @@ export type BalanceMensualSociosCardProps = {
 
 /**
  * Balance mensual 2026 para Reportes Socios.
- * Misma base que el resumen semanal de Finanzas (sin detalle de movimientos).
+ * Ingresos/efectivo desde presupuesto; gastos bancarios desde facturas CFDI
+ * (I/E) cuando hay sync, si no desde suma_gasto del presupuesto.
  */
 export function BalanceMensualSociosCard({
   records,
@@ -47,6 +50,17 @@ export function BalanceMensualSociosCard({
     [records]
   );
   const ytd = useMemo(() => sumBalanceMensual(rows), [rows]);
+  const presupuestoUpdate = useMemo(
+    () =>
+      buildPresupuestoLastUpdate(records, {
+        year: BALANCE_YEAR,
+        includeAjuste: false,
+      }),
+    [records]
+  );
+  const lastLabel = presupuestoUpdate.lastAt
+    ? formatTimestampCdmx(presupuestoUpdate.lastAt)
+    : null;
 
   const cardClass = 'rounded-[24px] border-0 p-5 md:p-6';
 
@@ -79,9 +93,23 @@ export function BalanceMensualSociosCard({
       />
 
       <p className="mb-4 text-xs" style={{ color: theme.muted }}>
-        Totales mensuales · sin detalle de movimientos · {BALANCE_YEAR}. El mes
-        aparece al cerrar el calendario; se incorpora al acumulado a partir del
-        día 10 del mes siguiente.
+        Totales mensuales · ingresos y efectivo desde presupuesto · gastos
+        bancarios actualizados con facturas CFDI (I/E; sin comprobantes de
+        pago/REP) · {BALANCE_YEAR}. El mes aparece al cerrar el calendario; se
+        incorpora al acumulado a partir del día 10 del mes siguiente.
+        {lastLabel ? (
+          <>
+            {' '}
+            Presupuesto actualizado:{' '}
+            <span className="font-semibold" style={{ color: SUITE.navy }}>
+              {lastLabel}
+            </span>
+            {' '}
+            · carga manual.
+          </>
+        ) : !loading ? (
+          <> Presupuesto · carga manual (sin fecha de ingest en {BALANCE_YEAR}).</>
+        ) : null}
       </p>
 
       {loading ? (

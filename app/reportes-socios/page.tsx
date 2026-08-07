@@ -31,8 +31,16 @@ const COMPARE_YEARS = Array.from(
   (_, i) => COMPARE_YEAR_MAX - i
 );
 
-/** Fuentes del resumen semanal de Finanzas (ingresos / gastos / efectivo). */
-const BALANCE_SOURCES = ['presupuesto_semana', 'flujo_efectivo_semana'].join(',');
+/**
+ * Fuentes Balance Socios:
+ * - presupuesto_semana + flujo_efectivo_semana → ingresos, efectivo, visibilidad
+ * - factura_cfdi → gastos bancarios (I/E; ingest ya omite REP/pago)
+ */
+const BALANCE_SOURCES = [
+  'presupuesto_semana',
+  'flujo_efectivo_semana',
+  'factura_cfdi',
+].join(',');
 
 export default function ReportesSociosPage() {
   const [records, setRecords] = useState<FinancialRecord[]>([]);

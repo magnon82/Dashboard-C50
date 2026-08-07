@@ -199,9 +199,15 @@ function CancDescToggle({
   tone: 'rose' | 'amber';
   onToggle: () => void;
 }) {
-  const bg = tone === 'rose' ? '#FFF1F2' : '#FFFBEB';
-  const border = tone === 'rose' ? '1px solid #FECDD3' : '1px solid #FDE68A';
   const labelColor = tone === 'rose' ? '#BE123C' : '#B45309';
+  const toneClasses =
+    tone === 'rose'
+      ? open
+        ? 'border-rose-400 bg-rose-50 hover:bg-rose-100'
+        : 'border-rose-300 bg-rose-50 hover:bg-rose-100'
+      : open
+        ? 'border-amber-400 bg-amber-50 hover:bg-amber-100'
+        : 'border-amber-300 bg-amber-50 hover:bg-amber-100';
   const chevron = open ? '▴' : '▾';
 
   return (
@@ -209,12 +215,8 @@ function CancDescToggle({
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      className="w-full rounded-2xl px-3 py-3 text-left transition hover:brightness-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 sm:px-4"
-      style={{
-        backgroundColor: bg,
-        border,
-        outlineColor: labelColor,
-      }}
+      className={`group w-full cursor-pointer rounded-2xl border-[1.5px] px-3 py-3 text-left shadow-sm transition-[background-color,box-shadow,transform,border-color] duration-150 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 sm:px-4 ${toneClasses}`}
+      style={{ outlineColor: labelColor }}
     >
       <div className="flex items-start justify-between gap-2">
         <p
@@ -224,7 +226,7 @@ function CancDescToggle({
           {label}
         </p>
         <span
-          className="text-xs font-semibold tabular-nums"
+          className="text-xs font-semibold tabular-nums transition-transform duration-150 group-hover:scale-110"
           style={{ color: labelColor }}
           aria-hidden
         >
@@ -424,16 +426,39 @@ export function VentasCortesReportCard({
 
   const tombolaAmount =
     tombola?.amount ??
-    (corte != null
-      ? corte.efectivo_contado ?? corte.efectivo_tombola
-      : null);
+    (corte != null ? corte.efectivo_tombola : null);
 
   const tombolaHint =
-    tombola?.efectivo != null
-      ? `Infocaja ${moneyMx(tombola.efectivo)} − propinas ${moneyMx(tombola.propinas_tpv)}`
-      : corte?.efectivo_infocaja != null
-        ? `Infocaja efectivo ${moneyMx(corte.efectivo_infocaja)}`
-        : undefined;
+    corte?.efectivo_tombola != null
+      ? 'Depósito capturado en el corte'
+      : tombola?.efectivo != null
+        ? `Infocaja ${moneyMx(tombola.efectivo)} − propinas ${moneyMx(tombola.propinas_tpv)}`
+        : corte?.efectivo_infocaja != null
+          ? `Infocaja efectivo ${moneyMx(corte.efectivo_infocaja)}`
+          : undefined;
+
+  const recibidoVsInfocaja = (() => {
+    if (!corte) return null;
+    const r = corte.efectivo_contado;
+    const i = corte.efectivo_infocaja;
+    if (r == null || i == null) {
+      if (r != null && i == null) {
+        return {
+          kind: 'pending' as const,
+          message: 'Infocaja pendiente de conciliar',
+        };
+      }
+      return null;
+    }
+    const delta = Math.round((Number(r) - Number(i)) * 100) / 100;
+    if (Math.abs(delta) <= 1) {
+      return { kind: 'match' as const, message: 'Coincide con Infocaja' };
+    }
+    return {
+      kind: 'mismatch' as const,
+      message: `vs Infocaja ${moneyMx(i)} · Δ ${moneyMx(delta)}`,
+    };
+  })();
 
   function applyDate() {
     if (!dateInput || !/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) return;
@@ -612,11 +637,29 @@ export function VentasCortesReportCard({
                   }
                 />
                 <Kpi
-                  label="Tómbola / efectivo"
+                  label="Efectivo recibido"
+                  value={moneyOrDash(corte.efectivo_contado)}
+                  hint={
+                    recibidoVsInfocaja
+                      ? recibidoVsInfocaja.message
+                      : corte.efectivo_infocaja != null
+                        ? `Infocaja ${moneyMx(corte.efectivo_infocaja)}`
+                        : 'Captura manual del corte'
+                  }
+                  tone={
+                    recibidoVsInfocaja?.kind === 'mismatch'
+                      ? 'rose'
+                      : recibidoVsInfocaja?.kind === 'match'
+                        ? 'default'
+                        : 'default'
+                  }
+                />
+                <Kpi
+                  label="Tómbola"
                   value={moneyMx(tombolaAmount)}
                   hint={
                     tombolaAmount != null && tombolaAmount < 0
-                      ? `${tombolaHint ?? 'Infocaja − propinas'} · no alcanzó el efectivo`
+                      ? `${tombolaHint ?? 'Depósito'} · no alcanzó el efectivo`
                       : tombolaHint
                   }
                   tone={
