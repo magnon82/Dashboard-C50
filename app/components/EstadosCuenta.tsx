@@ -108,12 +108,15 @@ function FacturaRefLink({
   const pdfHref = factura ? facturaPdfHref(factura) : null;
 
   if (!xmlHref && !pdfHref) {
-    // Folio en CXP/estado pero sin CFDI ni acuse/comprobante indexado
+    // Folio en CXP/estado pero sin CFDI: no es factura; a lo sumo ref. de pago
     return (
-      <span className="text-slate-500" title="Referencia sin XML/PDF indexado">
+      <span
+        className="text-slate-500"
+        title="Referencia sin CFDI (comprobante de pago / sin factura XML)"
+      >
         {label}
         <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-          sin XML
+          sin CFDI
         </span>
       </span>
     );
@@ -124,7 +127,13 @@ function FacturaRefLink({
       <span
         className="font-semibold"
         style={{ color: SUITE.orangeDeep }}
-        title={factura ? `Factura ${facturaLabel(factura)}` : undefined}
+        title={
+          factura
+            ? xmlHref
+              ? `Factura ${facturaLabel(factura)}`
+              : `Comprobante de pago (sin CFDI) · ${facturaLabel(factura)}`
+            : undefined
+        }
       >
         {label}
       </span>
@@ -142,9 +151,9 @@ function FacturaRefLink({
         ) : (
           <span
             className="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
-            title="Sin XML indexado"
+            title="Comprobante de pago fiscal · sin CFDI XML · no es factura ni gasto"
           >
-            sin XML
+            sin CFDI
           </span>
         )}
         {pdfHref ? (
@@ -157,7 +166,7 @@ function FacturaRefLink({
               title={
                 xmlHref
                   ? 'Descargar PDF'
-                  : 'Acuse / comprobante PDF (sin CFDI XML)'
+                  : 'Comprobante de pago / acuse PDF (sin CFDI XML · no cuenta como gasto)'
               }
               className="underline-offset-2 hover:underline"
               style={{ color: SUITE.orangeDeep }}

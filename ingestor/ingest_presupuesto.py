@@ -1109,10 +1109,15 @@ def extract_week_bank_components(
             inicial = total
 
     # ── presupuesto_ingreso: detalle por banco (TOTAL bloques SEM / anticipos) ─
+    today = date.today()
     for w in weeks:
         mv = mifel_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
         bv = bbva_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
         week_monday = monday_of_month_sem(year, month, w)
+        # No publicar ingresos de SEM cuyo lunes aún no llega (evita cifras
+        # pegadas del mes anterior en machotes futuros).
+        if week_monday > today:
+            continue
         bank_parts = (
             (
                 "MIFEL",

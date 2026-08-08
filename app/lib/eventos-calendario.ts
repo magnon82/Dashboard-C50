@@ -269,6 +269,7 @@ const QUOTE_STATUS_RANK: Record<string, number> = {
   borrador: 2,
   vencida: 1,
   rechazada: 0,
+  perdida: 0,
 };
 
 function pickBetterQuoteId(
@@ -479,6 +480,7 @@ export async function buildUpcomingCalendar(
       )
       .gte('event_date', today)
       .neq('status', 'rechazada')
+      .neq('status', 'perdida')
       .order('updated_at', { ascending: false })
       .limit(300);
 

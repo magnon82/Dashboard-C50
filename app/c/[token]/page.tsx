@@ -105,7 +105,9 @@ export default function PublicCotizacionPage() {
       ? 'Esta cotización fue rechazada y ya no está disponible para aceptar.'
       : doc.status === 'vencida'
         ? 'Esta cotización está vencida. Contacta a Eventos para una nueva propuesta.'
-        : null;
+        : doc.status === 'perdida'
+          ? 'Esta cotización ya no está disponible.'
+          : null;
 
   return (
     <div style={{ backgroundColor: SUITE.pageBg, minHeight: '100vh' }}>

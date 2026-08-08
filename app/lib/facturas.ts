@@ -28,6 +28,11 @@ export interface FacturaItem {
   xml_path: string | null;
   has_pdf: boolean;
   has_xml: boolean;
+  /**
+   * Solo true si NO hay CFDI XML: acuse/PDF de pago fiscal (monto suele
+   * repetir la factura). Con XML = factura real (I/E sí cuenta como gasto).
+   */
+  es_comprobante_pago: boolean;
   filename: string;
   gmail_id: string | null;
   subject: string | null;
@@ -41,8 +46,22 @@ export function isFacturaCfdiPagoRep(
 }
 
 /**
- * True when CFDI should count as factura/gasto.
- * Missing tipo (legacy PDF) → allow. Explicit P/N/T → reject.
+ * Regla fija: con XML = factura (nunca comprobante de pago aquí).
+ * Sin XML (PDF/acuse) = comprobante de pago fiscal; no contar como gasto
+ * (el monto suele duplicar la factura real).
+ */
+export function isComprobantePagoFiscalSinXml(
+  f: Pick<FacturaItem, 'has_xml' | 'xml_path' | 'es_comprobante_pago'>
+): boolean {
+  // XML manda: facturas CFDI reales no se degradan por flags legacy.
+  if (f.has_xml || Boolean(f.xml_path)) return false;
+  return true;
+}
+
+/**
+ * True when TipoDeComprobante es factura de gasto (I/E).
+ * Sin tipo (legacy con XML) → permitir; P/N/T → rechazar.
+ * La exclusión de filas sin XML es aparte (isComprobantePagoFiscalSinXml).
  */
 export function isFacturaCfdiExpenseInvoice(
   tipo: string | null | undefined
@@ -99,6 +118,11 @@ export function parseFacturaRecord(r: FinancialRecord): FacturaItem | null {
   if (!isFacturaCfdiExpenseInvoice(tipo_comprobante)) return null;
   const pdf_path = d.pdf_path ? String(d.pdf_path) : null;
   const xml_path = d.xml_path ? String(d.xml_path) : null;
+  // Path o flag: presencia de XML = factura CFDI (no usar `??` con false).
+  const has_xml = Boolean(xml_path) || d.has_xml === true;
+  // Solo sin XML: comprobante de pago. Flags sat_acuse/es_comprobante_pago
+  // no pueden degradar una fila que sí tiene XML.
+  const es_comprobante_pago = !has_xml;
   return {
     id: r.id,
     date: String(d.fecha || r.date || '').slice(0, 10),
@@ -118,7 +142,8 @@ export function parseFacturaRecord(r: FinancialRecord): FacturaItem | null {
     pdf_path,
     xml_path,
     has_pdf: Boolean(d.has_pdf ?? pdf_path),
-    has_xml: Boolean(d.has_xml ?? xml_path),
+    has_xml,
+    es_comprobante_pago,
     filename: String(d.filename || PathBasename(pdf_path || xml_path || '')),
     gmail_id: d.gmail_id ? String(d.gmail_id) : null,
     subject: d.subject ? String(d.subject) : null,
@@ -126,8 +151,8 @@ export function parseFacturaRecord(r: FinancialRecord): FacturaItem | null {
 }
 
 /**
- * Suma de facturas CFDI (I/E) de un mes calendario — base de gastos
- * del Balance cuando hay sync Gmail/ERP. Excluye REP/pago (P) y N/T.
+ * Suma facturas CFDI reales (I/E **con XML**) del mes — base de gastos.
+ * Excluye REP/pago (P), N/T y filas sin XML (comprobantes de pago / acuses).
  */
 export function sumFacturasGastoPorMes(
   records: FinancialRecord[],
@@ -138,7 +163,7 @@ export function sumFacturasGastoPorMes(
   let count = 0;
   for (const r of records) {
     const f = parseFacturaRecord(r);
-    if (!f) continue;
+    if (!f || isComprobantePagoFiscalSinXml(f)) continue;
     const p = parseIsoDate(f.date);
     if (!p || p.y !== year || p.m !== month) continue;
     if (!Number.isFinite(f.amount) || f.amount === 0) continue;
@@ -154,17 +179,37 @@ function PathBasename(p: string): string {
   return parts[parts.length - 1] || '';
 }
 
-export function listFacturas(records: FinancialRecord[]): FacturaItem[] {
-  const out: FacturaItem[] = [];
-  for (const r of records) {
-    const f = parseFacturaRecord(r);
-    if (f) out.push(f);
-  }
+function sortFacturaItems(out: FacturaItem[]): FacturaItem[] {
   out.sort((a, b) => {
     if (a.date !== b.date) return b.date.localeCompare(a.date);
     return (a.emisor_nombre || '').localeCompare(b.emisor_nombre || '', 'es');
   });
   return out;
+}
+
+/** Facturas CFDI con XML (I/E): sí son facturas y cuentan como gasto. */
+export function listFacturas(records: FinancialRecord[]): FacturaItem[] {
+  const out: FacturaItem[] = [];
+  for (const r of records) {
+    const f = parseFacturaRecord(r);
+    if (f && !isComprobantePagoFiscalSinXml(f)) out.push(f);
+  }
+  return sortFacturaItems(out);
+}
+
+/**
+ * PDF/acuses sin XML: comprobantes de pago fiscales (monto suele = factura).
+ * No entran a listFacturas ni a sumFacturasGastoPorMes.
+ */
+export function listComprobantesPagoFiscal(
+  records: FinancialRecord[]
+): FacturaItem[] {
+  const out: FacturaItem[] = [];
+  for (const r of records) {
+    const f = parseFacturaRecord(r);
+    if (f && isComprobantePagoFiscalSinXml(f)) out.push(f);
+  }
+  return sortFacturaItems(out);
 }
 
 function amountClose(a: number, b: number, tolPct = 0.02, tolAbs = 1): boolean {

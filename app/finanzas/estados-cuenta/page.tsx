@@ -8,7 +8,6 @@ export default function EstadosCuentaConsultaPage() {
   return (
     <SuiteShell
       title="Estados de Cuenta"
-      subtitle="Consulta independiente · PDFs bancarios"
       actions={
         <button
           type="button"

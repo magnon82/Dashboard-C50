@@ -160,7 +160,7 @@ create table if not exists public.event_quotes (
   client_id uuid references public.event_clients (id) on delete set null,
   lead_id uuid references public.event_leads (id) on delete set null,
   status text not null default 'borrador'
-    check (status in ('borrador', 'enviada', 'aceptada', 'rechazada', 'vencida')),
+    check (status in ('borrador', 'enviada', 'aceptada', 'rechazada', 'vencida', 'perdida')),
   event_date date,
   pax integer not null default 10,
   celebration text,
@@ -179,6 +179,8 @@ create table if not exists public.event_quotes (
   payment_method text,
   client_accept_note text,
   payment_link_url text,
+  perdida_note text,
+  perdida_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -200,6 +202,46 @@ alter table public.event_quotes
 
 alter table public.event_quotes
   add column if not exists payment_link_url text;
+
+alter table public.event_quotes
+  add column if not exists perdida_note text;
+
+alter table public.event_quotes
+  add column if not exists perdida_at timestamptz;
+
+-- Status check ampliado (idempotente si la tabla ya existía).
+do $$
+declare
+  r record;
+begin
+  for r in
+    select c.conname
+    from pg_constraint c
+    join pg_class t on c.conrelid = t.oid
+    join pg_namespace n on t.relnamespace = n.oid
+    where n.nspname = 'public'
+      and t.relname = 'event_quotes'
+      and c.contype = 'c'
+      and pg_get_constraintdef(c.oid) ~* 'status'
+      and pg_get_constraintdef(c.oid) !~* 'payment_method'
+  loop
+    execute format('alter table public.event_quotes drop constraint %I', r.conname);
+  end loop;
+  alter table public.event_quotes
+    drop constraint if exists event_quotes_status_check;
+  alter table public.event_quotes
+    add constraint event_quotes_status_check
+    check (
+      status in (
+        'borrador',
+        'enviada',
+        'aceptada',
+        'rechazada',
+        'vencida',
+        'perdida'
+      )
+    );
+end $$;
 
 do $$
 begin

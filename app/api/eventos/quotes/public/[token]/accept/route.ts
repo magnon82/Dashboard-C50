@@ -90,13 +90,15 @@ export async function POST(request: Request, ctx: RouteCtx) {
     }
 
     const status = String(quote.status || '');
-    if (status === 'rechazada' || status === 'vencida') {
+    if (status === 'rechazada' || status === 'vencida' || status === 'perdida') {
       return NextResponse.json(
         {
           error:
             status === 'rechazada'
               ? 'Esta cotización fue rechazada y ya no se puede aceptar'
-              : 'Esta cotización está vencida',
+              : status === 'perdida'
+                ? 'Esta cotización fue cerrada como perdida y ya no se puede aceptar'
+                : 'Esta cotización está vencida',
         },
         { status: 409 }
       );

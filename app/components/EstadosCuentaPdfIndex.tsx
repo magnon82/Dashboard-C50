@@ -397,20 +397,7 @@ export function EstadosCuentaPdfIndex({
         </SectionHeader>
       )}
 
-      {standalone && (
-        <p className="mb-4 text-sm" style={{ color: theme.muted }}>
-          PDFs mensuales en Administración\Bancos · más recientes primero.
-          Usa Abrir PDF para consultar en la plataforma.
-        </p>
-      )}
-
-      {!open && !standalone ? (
-        <p className="text-sm" style={{ color: theme.muted }}>
-          PDFs mensuales en Administración\Bancos (colapsado).
-        </p>
-      ) : (
-        content
-      )}
+      {!open && !standalone ? null : content}
     </section>
   );
 }

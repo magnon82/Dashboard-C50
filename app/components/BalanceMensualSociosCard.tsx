@@ -94,9 +94,9 @@ export function BalanceMensualSociosCard({
 
       <p className="mb-4 text-xs" style={{ color: theme.muted }}>
         Totales mensuales · ingresos y efectivo desde presupuesto · gastos
-        bancarios actualizados con facturas CFDI (I/E; sin comprobantes de
-        pago/REP) · {BALANCE_YEAR}. El mes aparece al cerrar el calendario; se
-        incorpora al acumulado a partir del día 10 del mes siguiente.
+        bancarios con facturas CFDI XML (I/E; sin PDF-only/acuses ni REP) ·{' '}
+        {BALANCE_YEAR}. El mes aparece al cerrar el calendario; se incorpora al
+        acumulado a partir del día 10 del mes siguiente.
         {lastLabel ? (
           <>
             {' '}

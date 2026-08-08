@@ -184,6 +184,22 @@ export async function createServiceOrderFromQuote(
     return { order: null, created: false, error: 'Cotización no encontrada' };
   }
 
+  const quoteStatus = String(quote.status || '');
+  if (
+    quoteStatus === 'perdida' ||
+    quoteStatus === 'rechazada' ||
+    quoteStatus === 'vencida'
+  ) {
+    return {
+      order: null,
+      created: false,
+      error:
+        quoteStatus === 'perdida'
+          ? 'No se puede generar OS de una cotización perdida'
+          : `No se puede generar OS de una cotización ${quoteStatus}`,
+    };
+  }
+
   const { data: existing, error: exErr } = await sb
     .from('event_service_orders')
     .select('*')
@@ -475,6 +491,8 @@ export async function createServiceOrderFromLead(
     .select('id, status, updated_at')
     .eq('lead_id', leadId)
     .neq('status', 'rechazada')
+    .neq('status', 'perdida')
+    .neq('status', 'vencida')
     .order('updated_at', { ascending: false })
     .limit(20);
 

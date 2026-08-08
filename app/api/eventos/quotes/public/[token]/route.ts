@@ -95,7 +95,10 @@ export async function GET(request: Request, ctx: RouteCtx) {
         );
         return NextResponse.json({
           doc,
-          can_accept: doc.status !== 'rechazada' && doc.status !== 'vencida',
+          can_accept:
+            doc.status !== 'rechazada' &&
+            doc.status !== 'vencida' &&
+            doc.status !== 'perdida',
           accepted: false,
           payment_method_label: null,
           bbva: getBbvaTransferDetails(),
@@ -148,6 +151,7 @@ export async function GET(request: Request, ctx: RouteCtx) {
       can_accept:
         doc.status !== 'rechazada' &&
         doc.status !== 'vencida' &&
+        doc.status !== 'perdida' &&
         !accepted,
       accepted,
       payment_method_label,

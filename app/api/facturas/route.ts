@@ -10,6 +10,7 @@ import {
   type SessionUser,
 } from '@/app/lib/auth';
 import {
+  listComprobantesPagoFiscal,
   listFacturas,
   listFacturasFaltantes,
   findComprobanteForFacturaLike,
@@ -324,11 +325,18 @@ export async function GET(request: Request) {
     );
 
     let facturas = listFacturas(records);
+    let comprobantesPago = listComprobantesPagoFiscal(records);
     if (year) {
       facturas = facturas.filter((f) => Number(f.date.slice(0, 4)) === year);
+      comprobantesPago = comprobantesPago.filter(
+        (f) => Number(f.date.slice(0, 4)) === year
+      );
     }
     if (month) {
       facturas = facturas.filter(
+        (f) => Number(f.date.slice(5, 7)) === month
+      );
+      comprobantesPago = comprobantesPago.filter(
         (f) => Number(f.date.slice(5, 7)) === month
       );
     }
@@ -336,9 +344,12 @@ export async function GET(request: Request) {
       facturas = facturas.filter(
         (f) => Number(f.date.slice(8, 10)) === day
       );
+      comprobantesPago = comprobantesPago.filter(
+        (f) => Number(f.date.slice(8, 10)) === day
+      );
     }
     if (q) {
-      facturas = facturas.filter((f) => {
+      const matchesQ = (f: (typeof facturas)[number]) => {
         const hay = [
           f.emisor_nombre,
           f.emisor_rfc,
@@ -347,11 +358,14 @@ export async function GET(request: Request) {
           f.filename,
           f.subject,
           f.date,
+          f.es_comprobante_pago ? 'comprobante pago fiscal' : '',
         ]
           .join(' ')
           .toLowerCase();
         return hay.includes(q);
-      });
+      };
+      facturas = facturas.filter(matchesQ);
+      comprobantesPago = comprobantesPago.filter(matchesQ);
     }
 
     const faltantesRaw = listFacturasFaltantes(records, { year, month, day });
@@ -372,7 +386,7 @@ export async function GET(request: Request) {
       : faltantesRaw;
 
     const pdfs = listPdfComprobantes(records);
-    const withComprobante = facturas.map((f) => {
+    const enrichFacturaRow = (f: (typeof facturas)[number]) => {
       let pdf_path = f.pdf_path;
       let has_pdf = f.has_pdf;
       // If ingest only stored XML, expose companion PDF when it exists on disk.
@@ -403,7 +417,9 @@ export async function GET(request: Request) {
         comprobante_path: comp?.rel_path || null,
         comprobante_filename: comp?.filename || null,
       };
-    });
+    };
+    const withComprobante = facturas.map(enrichFacturaRow);
+    const comprobantesPagoRows = comprobantesPago.map(enrichFacturaRow);
 
     const faltantesWithComp = faltantes.map((row) => {
       const comp = findComprobanteForFacturaLike(
@@ -449,8 +465,11 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       items: view === 'faltantes' ? [] : withComprobante.map(stripLocalPaths),
+      comprobantesPago:
+        view === 'faltantes' ? [] : comprobantesPagoRows.map(stripLocalPaths),
       faltantes: faltantesWithComp.map(stripLocalPaths),
       count: withComprobante.length,
+      comprobantesPagoCount: comprobantesPagoRows.length,
       faltantesCount: faltantesWithComp.length,
       root: clientSafeRoot(DEFAULT_ROOT),
       rootExists,

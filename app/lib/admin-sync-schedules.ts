@@ -276,3 +276,297 @@ export function buildSourceSyncReport(
 
   return rows;
 }
+
+/* ─── Vista Master por módulo (estilo FUENTE / CANAL / ESTADO) ─── */
+
+export type SyncModuleId = 'finanzas' | 'ventas' | 'rrhh' | 'master';
+
+export type SyncStatusKind = 'ok' | 'stale' | 'never' | 'manual';
+
+export type ModuleSyncSourceDef = {
+  id: string;
+  /** Código corto UI (F1, V1, H1…). */
+  sourceCode: string;
+  moduleId: SyncModuleId;
+  moduleLabel: string;
+  label: string;
+  channel: string;
+  detail: string;
+  /** source_file a agregar para lastAt / regs (vacío si solo RH). */
+  sourceFiles: string[];
+  /** Área admin-last-updates alternativa (p.ej. rrhh). */
+  areaId?: string | null;
+  includeHr?: boolean;
+  /** Sin datos → Manual/fijo (no “Sin sync”). */
+  fixedManual?: boolean;
+  /** Siempre badge Manual/fijo (p.ej. overrides / auth). */
+  forceManualStatus?: boolean;
+  workflow?: SyncWorkflowKey;
+  actionHref?: string;
+  actionLabel?: string;
+};
+
+export type ModuleSyncRow = {
+  id: string;
+  sourceCode: string;
+  moduleId: SyncModuleId;
+  moduleLabel: string;
+  label: string;
+  channel: string;
+  lastAt: string | null;
+  status: SyncStatusKind;
+  records: number | null;
+  detail: string;
+  workflow?: SyncWorkflowKey;
+  canDispatch?: boolean;
+  actionHref?: string;
+  actionLabel?: string;
+};
+
+const STALE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function maxIso(...vals: Array<string | null | undefined>): string | null {
+  const ok = vals.filter((v): v is string => Boolean(v));
+  if (!ok.length) return null;
+  return ok.reduce((a, b) => (a >= b ? a : b));
+}
+
+function statusFromAt(
+  at: string | null,
+  neverAs: SyncStatusKind = 'never',
+): SyncStatusKind {
+  if (!at) return neverAs;
+  const age = Date.now() - Date.parse(at);
+  if (Number.isNaN(age) || age > STALE_MS) return 'stale';
+  return 'ok';
+}
+
+/**
+ * Catálogo operativo por módulo (C50). Códigos propios; columnas UX = BDMX Master.
+ * No inventa filas BDMX S1–S8: mapea fuentes reales de financial_records / RH.
+ */
+export const MODULE_SYNC_SOURCES: ModuleSyncSourceDef[] = [
+  {
+    id: 'f1-cxp',
+    sourceCode: 'F1',
+    moduleId: 'finanzas',
+    moduleLabel: 'Finanzas',
+    label: 'Cuentas por pagar',
+    channel: 'Sheets · CxP vivo + Excel histórico',
+    detail: 'cxp_por_pagar (hora) · cxp / cxp_saldos (sync-finanzas)',
+    sourceFiles: ['cxp_por_pagar', 'cxp', 'cxp_saldos'],
+    workflow: 'saldos',
+    actionHref: '/finanzas/gastos',
+    actionLabel: 'Ver CxP',
+  },
+  {
+    id: 'f2-comprobantes',
+    sourceCode: 'F2',
+    moduleId: 'finanzas',
+    moduleLabel: 'Finanzas',
+    label: 'Drive comprobantes (PDF pagos)',
+    channel: 'Índice Drive · reindex Suite',
+    detail: 'estado_pdf_index',
+    sourceFiles: ['estado_pdf_index'],
+    fixedManual: true,
+    actionHref: '/finanzas/comprobantes',
+    actionLabel: 'Ver comprobantes',
+  },
+  {
+    id: 'f3-estados',
+    sourceCode: 'F3',
+    moduleId: 'finanzas',
+    moduleLabel: 'Finanzas',
+    label: 'Estados de cuenta',
+    channel: 'Excel Mifel/BBVA · índice PDF',
+    detail: 'estado_mifel / estado_bbva · estado_cuenta_pdf_index',
+    sourceFiles: ['estado_mifel', 'estado_bbva', 'estado_cuenta_pdf_index'],
+    workflow: 'finanzas',
+    actionHref: '/finanzas/estados-cuenta',
+    actionLabel: 'Ver',
+  },
+  {
+    id: 'f4-presupuesto',
+    sourceCode: 'F4',
+    moduleId: 'finanzas',
+    moduleLabel: 'Finanzas',
+    label: 'Presupuesto',
+    channel: 'Drive Excel · sync-finanzas',
+    detail: 'presupuesto_* (mensual, rubros, semanas, ingresos)',
+    sourceFiles: [
+      'presupuesto_mensual',
+      'presupuesto_saldos',
+      'presupuesto_rubro',
+      'presupuesto_semana',
+      'presupuesto_sem_detalle',
+      'presupuesto_ingreso',
+    ],
+    workflow: 'finanzas',
+    actionHref: '/finanzas',
+    actionLabel: 'Presupuesto',
+  },
+  {
+    id: 'f5-flujo',
+    sourceCode: 'F5',
+    moduleId: 'finanzas',
+    moduleLabel: 'Finanzas',
+    label: 'Saldos al día / flujo',
+    channel: 'Actions · cada hora :07 CDMX',
+    detail: 'flujo_efectivo_saldo / semana / mov',
+    sourceFiles: [
+      'flujo_efectivo_saldo',
+      'flujo_efectivo_semana',
+      'flujo_efectivo_mov',
+    ],
+    workflow: 'saldos',
+    actionHref: '/finanzas',
+    actionLabel: 'Saldos',
+  },
+  {
+    id: 'f6-cfdi',
+    sourceCode: 'F6',
+    moduleId: 'finanzas',
+    moduleLabel: 'Finanzas',
+    label: 'Correo Finanzas (Gmail CFDI)',
+    channel: 'Gmail · sync-gmail (best-effort)',
+    detail: 'factura_cfdi → financial_records',
+    sourceFiles: ['factura_cfdi'],
+    workflow: 'gmail',
+    actionHref: '/finanzas/facturas',
+    actionLabel: 'Sincronizar',
+  },
+  {
+    id: 'f7-overrides',
+    sourceCode: 'F7',
+    moduleId: 'finanzas',
+    moduleLabel: 'Finanzas',
+    label: 'Overrides Suite',
+    channel: 'Solo /admin · captura manual',
+    detail: 'presupuesto_ajuste · saldos_bancos_manual',
+    sourceFiles: ['presupuesto_ajuste', 'saldos_bancos_manual'],
+    fixedManual: true,
+    forceManualStatus: true,
+    actionHref: '/admin',
+    actionLabel: 'Admin',
+  },
+  {
+    id: 'v1-gmail-ventas',
+    sourceCode: 'V1',
+    moduleId: 'ventas',
+    moduleLabel: 'Ventas',
+    label: 'Infocaja + CORTE',
+    channel: 'Gmail · sync-gmail (Lun–sáb + Dom)',
+    detail: 'infocaja · corte_caja',
+    sourceFiles: ['infocaja', 'corte_caja'],
+    workflow: 'gmail',
+    actionHref: '/ventas',
+    actionLabel: 'Sincronizar',
+  },
+  {
+    id: 'v2-eventos',
+    sourceCode: 'V2',
+    moduleId: 'ventas',
+    moduleLabel: 'Ventas',
+    label: 'Eventos / ventas semana (legacy)',
+    channel: 'Manual · ingest scripts',
+    detail: 'eventos · ventas_semana (módulo /eventos es aparte)',
+    sourceFiles: ['eventos', 'ventas_semana'],
+    fixedManual: true,
+    actionHref: '/eventos',
+    actionLabel: 'Eventos',
+  },
+  {
+    id: 'h1-rrhh',
+    sourceCode: 'H1',
+    moduleId: 'rrhh',
+    moduleLabel: 'RR.HH.',
+    label: 'Soft-sync Drive',
+    channel: 'Actions · diario 12:00 PM CDMX',
+    detail: 'hr_* · hr_drive_sync_state',
+    sourceFiles: [],
+    areaId: 'rrhh',
+    includeHr: true,
+    workflow: 'hr',
+    actionHref: '/rrhh',
+    actionLabel: 'RR.HH.',
+  },
+  {
+    id: 'a1-auth',
+    sourceCode: 'A1',
+    moduleId: 'master',
+    moduleLabel: 'Master',
+    label: 'Usuarios Suite',
+    channel: 'Solo /admin · manual',
+    detail: 'dashboard_auth',
+    sourceFiles: ['dashboard_auth'],
+    fixedManual: true,
+    forceManualStatus: true,
+    actionHref: '/admin',
+    actionLabel: 'Usuarios',
+  },
+];
+
+/**
+ * Filas Master por módulo: agrega lastAt/regs desde detected + sonda RH.
+ */
+export function buildModuleSyncRows(
+  detected: DetectedSourceFile[],
+  hr: HrLastUpdateProbe,
+  opts?: { canDispatch?: boolean },
+): ModuleSyncRow[] {
+  const bySource = new Map(detected.map((d) => [d.sourceFile, d] as const));
+  const canDispatch = Boolean(opts?.canDispatch);
+
+  return MODULE_SYNC_SOURCES.map((def) => {
+    let lastAt: string | null = null;
+    let records = 0;
+    const parts: string[] = [];
+
+    for (const sf of def.sourceFiles) {
+      const hit = bySource.get(sf);
+      if (!hit) continue;
+      lastAt = maxIso(lastAt, hit.lastIngestedAt);
+      records += hit.rowCount;
+      if (hit.lastIngestedAt) {
+        parts.push(`${sf}`);
+      }
+    }
+
+    if (def.includeHr && hr.lastAt) {
+      lastAt = maxIso(lastAt, hr.lastAt);
+    }
+
+    const neverAs: SyncStatusKind = def.fixedManual ? 'manual' : 'never';
+    const status: SyncStatusKind = def.forceManualStatus
+      ? 'manual'
+      : statusFromAt(lastAt, neverAs);
+
+    const detail =
+      parts.length > 0
+        ? `${def.detail} · ${records.toLocaleString('es-MX')} regs`
+        : def.detail;
+
+    return {
+      id: def.id,
+      sourceCode: def.sourceCode,
+      moduleId: def.moduleId,
+      moduleLabel: def.moduleLabel,
+      label: def.label,
+      channel: def.channel,
+      lastAt,
+      status,
+      records: def.sourceFiles.length === 0 && !def.includeHr
+        ? null
+        : def.includeHr && def.sourceFiles.length === 0
+          ? null
+          : records > 0
+            ? records
+            : null,
+      detail,
+      workflow: def.workflow,
+      canDispatch: Boolean(def.workflow && canDispatch),
+      actionHref: def.actionHref,
+      actionLabel: def.actionLabel,
+    };
+  });
+}

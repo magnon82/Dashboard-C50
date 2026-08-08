@@ -1,5 +1,8 @@
 import { normRubroKey, type RubroRow } from '@/app/lib/presupuesto';
-import type { FinancialRecord } from '@/app/lib/ventas-semana';
+import {
+  todayMexicoIso,
+  type FinancialRecord,
+} from '@/app/lib/ventas-semana';
 
 export const SOURCE_ESTADO_MIFEL = 'estado_mifel';
 export const SOURCE_ESTADO_BBVA = 'estado_bbva';
@@ -501,6 +504,11 @@ export function filterEstadoMovimientos(
     if (status !== 'all' && m.match_status !== status) continue;
     if (opts.expensesOnly && !(m.cargo && m.cargo > 0)) continue;
     if (opts.incomeOnly && !(m.abono && m.abono > 0)) continue;
+    // No ingresos en fechas futuras (p. ej. SEM aún no iniciada del mes en curso).
+    if (opts.incomeOnly) {
+      const iso = String(m.date || '').slice(0, 10);
+      if (iso && iso > todayMexicoIso()) continue;
+    }
     if (ingresoTipo !== 'all') {
       if (m.ingresoTipo !== ingresoTipo) continue;
     }
@@ -745,12 +753,17 @@ export function availableEstadoMonths(
   records: FinancialRecord[],
   opts: { incomeOnly?: boolean; expensesOnly?: boolean } = {}
 ): Array<{ year: number; month: number }> {
+  const today = todayMexicoIso();
   const set = new Set<string>();
   for (const r of records) {
     const m = parseEstadoMovimiento(r);
     if (!m) continue;
     if (opts.expensesOnly && !(m.cargo && m.cargo > 0)) continue;
     if (opts.incomeOnly && !(m.abono && m.abono > 0)) continue;
+    if (opts.incomeOnly) {
+      const iso = String(m.date || '').slice(0, 10);
+      if (iso && iso > today) continue;
+    }
     const ym = yearMonthFromMovimiento(m);
     if (!ym) continue;
     set.add(`${ym.year}-${String(ym.month).padStart(2, '0')}`);

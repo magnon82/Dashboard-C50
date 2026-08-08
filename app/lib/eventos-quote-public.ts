@@ -120,6 +120,8 @@ type QuoteRowForDoc = {
   payment_method?: string | null;
   client_accept_note?: string | null;
   payment_link_url?: string | null;
+  perdida_note?: string | null;
+  perdida_at?: string | null;
   client?: {
     company_name?: string | null;
     contact_name?: string | null;
@@ -170,5 +172,7 @@ export function buildCotizacionDocFromQuoteRow(
     payment_method: data.payment_method || null,
     client_accept_note: data.client_accept_note || null,
     payment_link_url: data.payment_link_url || null,
+    perdida_note: data.perdida_note || null,
+    perdida_at: data.perdida_at || null,
   };
 }

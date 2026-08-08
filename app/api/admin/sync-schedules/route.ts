@@ -10,6 +10,7 @@ import {
   ADMIN_SYNC_SCHEDULES,
   SYNC_WORKFLOW_FILES,
   actionsUrlFor,
+  buildModuleSyncRows,
   buildSourceSyncReport,
   type SyncWorkflowKey,
 } from '@/app/lib/admin-sync-schedules';
@@ -124,11 +125,16 @@ export async function GET() {
   });
 
   const sourceReport = buildSourceSyncReport(detected.detectedSourceFiles, hr);
+  const moduleRows = buildModuleSyncRows(detected.detectedSourceFiles, hr, {
+    canDispatch,
+  });
 
   return NextResponse.json({
     fetchedAt: new Date().toISOString(),
+    timezone: 'America/Mexico_City',
     canDispatch,
     schedules,
+    moduleRows,
     sourceReport,
     note:
       'Los cron de GitHub Actions son solo lectura aquí. Editar horarios = cambiar el .yml en el repo.',

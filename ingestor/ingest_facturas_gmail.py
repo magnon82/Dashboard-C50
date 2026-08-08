@@ -12,6 +12,10 @@ Descubre mensajes con:
 
 Excluye CFDI TipoDeComprobante=P (REP / complemento de pago): no son facturas de gasto.
 
+PDF-only (sin XML) se indexan con es_comprobante_pago=True: son comprobantes
+de pago fiscales (acuses/recibos), NO facturas de gasto. El monto suele
+coincidir con la factura real; el dashboard no los suma a gastos.
+
 Alias opcional: deliveredto:facturacion@carranza50.com.mx
 
 Mismo OAuth que Infocaja (google_auth.py · gmail.readonly).
@@ -1267,7 +1271,9 @@ def process_message(
         }
         rows.append(_record_from_payload(payload, emisor, amount, fecha))
 
-    # PDF-only: folio from filename / subject / gobierno / invoice-like names
+    # PDF-only: comprobantes de pago fiscales (acuses/recibos), NO facturas.
+    # Se marcan es_comprobante_pago para no contarlos como gasto (doble conteo).
+    # Folio from filename / subject / gobierno / invoice-like names.
     # Also skip PDFs paired to a REP/pago XML we already rejected.
     barra = bool(re.search(r"compras\s+y\s+venta", subject or "", re.I))
     for filename, data in pdfs:
@@ -1362,6 +1368,8 @@ def process_message(
             "xml_path": None,
             "has_pdf": True,
             "has_xml": False,
+            # No es factura de gasto: acuse/recibo de pago (monto suele = CFDI).
+            "es_comprobante_pago": True,
             "filename": Path(pdf_path).name,
             "source": "gmail_facturacion_pdf",
             "gobierno": gov,

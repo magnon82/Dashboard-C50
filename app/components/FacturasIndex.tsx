@@ -26,6 +26,8 @@ type FacturaRow = {
   xml_path: string | null;
   has_pdf: boolean;
   has_xml: boolean;
+  /** PDF/acuse sin CFDI — no cuenta como gasto. */
+  es_comprobante_pago?: boolean;
   filename: string;
   comprobante_path: string | null;
   comprobante_filename: string | null;
@@ -68,8 +70,11 @@ export function FacturasIndex() {
   const [month, setMonth] = useState<number | 'all'>('all');
   const [day, setDay] = useState<number | 'all'>('all');
   const [query, setQuery] = useState('');
-  const [tab, setTab] = useState<'facturas' | 'faltantes'>('facturas');
+  const [tab, setTab] = useState<'facturas' | 'comprobantes' | 'faltantes'>(
+    'facturas'
+  );
   const [items, setItems] = useState<FacturaRow[]>([]);
+  const [comprobantesPago, setComprobantesPago] = useState<FacturaRow[]>([]);
   const [faltantes, setFaltantes] = useState<FaltanteRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,10 +99,12 @@ export function FacturasIndex() {
       if (!res.ok) {
         setError(json.error || `Error ${res.status}`);
         setItems([]);
+        setComprobantesPago([]);
         setFaltantes([]);
         return;
       }
       setItems(json.items || []);
+      setComprobantesPago(json.comprobantesPago || []);
       setFaltantes(json.faltantes || []);
       setRootExists(Boolean(json.rootExists));
       setComprobantesRootExists(Boolean(json.comprobantesRootExists));
@@ -106,6 +113,7 @@ export function FacturasIndex() {
     } catch {
       setError('No se pudo cargar el índice de facturas');
       setItems([]);
+      setComprobantesPago([]);
       setFaltantes([]);
     } finally {
       setLoading(false);
@@ -123,10 +131,20 @@ export function FacturasIndex() {
 
   const years = useMemo(() => [2026, 2025, 2024, 2023], []);
 
-  const activeList = tab === 'facturas' ? items : faltantes;
+  const activeList =
+    tab === 'facturas'
+      ? items
+      : tab === 'comprobantes'
+        ? comprobantesPago
+        : faltantes;
   const visibleItems = useMemo(
     () => (showAll ? items : items.slice(0, PAGE_SIZE)),
     [items, showAll]
+  );
+  const visibleComprobantes = useMemo(
+    () =>
+      showAll ? comprobantesPago : comprobantesPago.slice(0, PAGE_SIZE),
+    [comprobantesPago, showAll]
   );
   const visibleFaltantes = useMemo(
     () => (showAll ? faltantes : faltantes.slice(0, PAGE_SIZE)),
@@ -137,9 +155,11 @@ export function FacturasIndex() {
   return (
     <section className="mb-0">
       <p className="mb-4 text-sm" style={{ color: theme.muted }}>
-        Facturas CFDI (PDF/XML) desde Gmail · {FACTURACION_HINT}. Más recientes
-        primero. Faltantes incluye gastos/CXP sin CFDI — también IMSS, impuestos
-        y pagos a instituciones de gobierno (a menudo solo comprobante bancario).
+        Facturas = CFDI con XML (I/E; sí cuentan como gasto) ·{' '}
+        {FACTURACION_HINT}. Más recientes primero. La pestaña «Comprob. pago»
+        son PDF/acuses sin XML (no son facturas; no suman a gastos para evitar
+        doble conteo). Faltantes: gastos/CXP sin CFDI — también IMSS, impuestos
+        y gobierno.
       </p>
 
       <div
@@ -225,6 +245,19 @@ export function FacturasIndex() {
             type="button"
             className="h-8 rounded-[10px] px-3 text-xs font-semibold"
             style={
+              tab === 'comprobantes'
+                ? { backgroundColor: '#0F766E', color: '#fff' }
+                : { color: '#475569' }
+            }
+            onClick={() => setTab('comprobantes')}
+            title="PDF/acuses sin CFDI XML — no cuentan como gasto"
+          >
+            Comprob. pago ({comprobantesPago.length})
+          </button>
+          <button
+            type="button"
+            className="h-8 rounded-[10px] px-3 text-xs font-semibold"
+            style={
               tab === 'faltantes'
                 ? { backgroundColor: SUITE.orangeDeep, color: '#fff' }
                 : { color: '#475569' }
@@ -257,7 +290,7 @@ export function FacturasIndex() {
         ) : tab === 'facturas' ? (
           items.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-slate-500">
-              Sin facturas indexadas. Ejecuta{' '}
+              Sin facturas CFDI (con XML) indexadas. Ejecuta{' '}
               <code className="text-xs">ingest_facturas_gmail.py</code> (mismo
               OAuth que Infocaja).
             </p>
@@ -383,6 +416,160 @@ export function FacturasIndex() {
                 ))}
               </tbody>
             </table>
+          )
+        ) : tab === 'comprobantes' ? (
+          comprobantesPago.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-slate-500">
+              Sin comprobantes de pago fiscales (PDF/acuse sin XML) para este
+              filtro. No son facturas y no cuentan como gasto.
+            </p>
+          ) : (
+            <>
+              <div
+                className="border-b border-teal-100 px-4 py-2.5 text-xs"
+                style={{ backgroundColor: 'rgba(15, 118, 110, 0.06)' }}
+              >
+                <span
+                  className="mr-2 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                  style={{
+                    backgroundColor: 'rgba(15, 118, 110, 0.15)',
+                    color: '#0F766E',
+                  }}
+                >
+                  No cuenta como gasto
+                </span>
+                <span className="text-slate-600">
+                  Comprobantes de pago fiscales (PDF/acuse sin CFDI). El monto
+                  suele coincidir con la factura real — no se suman para evitar
+                  doble conteo.
+                </span>
+              </div>
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr
+                    style={{ backgroundColor: theme.tableHead, color: '#fff' }}
+                  >
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Fecha
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Emisor / concepto
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Folio
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Monto
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Tipo
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-semibold">
+                      Archivos
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleComprobantes.map((it) => (
+                    <tr
+                      key={it.id}
+                      className="border-t border-slate-100 align-top"
+                    >
+                      <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                        {it.date}
+                      </td>
+                      <td
+                        className="max-w-[220px] px-3 py-2 font-medium"
+                        style={{ color: SUITE.navy }}
+                      >
+                        {it.emisor_nombre || '—'}
+                        {it.filename && (
+                          <span className="mt-0.5 block truncate text-[10px] font-normal text-slate-400">
+                            {it.filename}
+                          </span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                        {[it.serie, it.folio].filter(Boolean).join('-') || '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                        {money(it.amount)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className="inline-block rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                          style={{
+                            backgroundColor: 'rgba(15, 118, 110, 0.12)',
+                            color: '#0F766E',
+                          }}
+                          title="Comprobante de pago fiscal · sin CFDI XML · no es factura ni gasto"
+                        >
+                          Sin CFDI · no gasto
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="inline-flex flex-wrap items-center justify-end gap-2">
+                          {rootExists && it.pdf_path ? (
+                            <>
+                              <a
+                                className="text-xs font-semibold underline-offset-2 hover:underline"
+                                style={{ color: SUITE.orangeDeep }}
+                                href={openFacturaView(it.id)}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={
+                                  it.filename || 'Ver PDF comprobante de pago'
+                                }
+                              >
+                                Ver PDF
+                              </a>
+                              <a
+                                className="text-xs font-semibold underline-offset-2 hover:underline"
+                                style={{ color: SUITE.orangeDeep }}
+                                href={openFacturaDownload(it.id, 'pdf')}
+                                download
+                                title="Descargar PDF"
+                              >
+                                PDF
+                              </a>
+                            </>
+                          ) : null}
+                          {comprobantesRootExists && it.comprobante_path ? (
+                            <a
+                              className="text-xs font-semibold underline-offset-2 hover:underline"
+                              style={{ color: '#0F766E' }}
+                              href={openComprobante(it.comprobante_path)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={it.comprobante_filename || 'Comprobante'}
+                            >
+                              Bancario
+                            </a>
+                          ) : null}
+                          {!rootExists && it.has_pdf ? (
+                            <span
+                              className="text-xs text-slate-400"
+                              title={
+                                localFsEnabled
+                                  ? 'Configura FACTURAS_PATH o monta FACTURAS CFDI en este PC'
+                                  : 'PDF indexado; vista previa en la nube requiere Storage o Drive API'
+                              }
+                            >
+                              Solo índice
+                            </span>
+                          ) : null}
+                          {rootExists && !it.pdf_path ? (
+                            <span className="text-xs text-slate-400">
+                              Sin archivo
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )
         ) : faltantes.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-slate-500">

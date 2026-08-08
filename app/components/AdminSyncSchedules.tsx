@@ -1,14 +1,17 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SuiteCard } from '@/app/components/SuiteShell';
 import {
   formatTimestampCdmx,
   formatTimestampCdmxShort,
 } from '@/app/lib/admin-last-updates';
 import {
   modeLabelEs,
-  type SourceSyncReportRow,
+  type ModuleSyncRow,
   type SyncScheduleMode,
+  type SyncStatusKind,
   type SyncWorkflowKey,
 } from '@/app/lib/admin-sync-schedules';
 import { getTheme, SUITE } from '@/app/lib/themes';
@@ -40,6 +43,28 @@ type ScheduleRow = {
   lastSource: string;
   sourceDetails?: SourceDetail[];
 };
+
+function formatAt(iso: string | null): string {
+  if (!iso) return 'Sin sincronizar';
+  return formatTimestampCdmx(iso) || formatTimestampCdmxShort(iso) || iso;
+}
+
+function statusStyle(status: SyncStatusKind): {
+  bg: string;
+  color: string;
+  label: string;
+} {
+  switch (status) {
+    case 'ok':
+      return { bg: '#ECFDF5', color: '#065F46', label: 'Al día' };
+    case 'stale':
+      return { bg: '#FFF7ED', color: '#9A3412', label: '> 7 días' };
+    case 'manual':
+      return { bg: '#F1F5F9', color: '#334155', label: 'Manual / fijo' };
+    default:
+      return { bg: '#FEF2F2', color: '#991B1B', label: 'Sin sync' };
+  }
+}
 
 function modeBadgeStyle(mode: SyncScheduleMode): { background: string; color: string } {
   switch (mode) {
@@ -229,27 +254,14 @@ function ScheduleCard({
   );
 }
 
-function originBadge(kind: SourceSyncReportRow['originKind']): {
-  label: string;
-  background: string;
-  color: string;
-} {
-  if (kind === 'cloud') {
-    return { label: 'Cloud', background: '#E7F6EE', color: '#1F6B45' };
-  }
-  if (kind === 'suite') {
-    return { label: 'Suite', background: '#E8EEF7', color: SUITE.navy };
-  }
-  return { label: 'Manual', background: '#F1F5F9', color: '#64748B' };
-}
-
 /**
- * Controles de programación de sync en /admin → Datos e inventario.
+ * Controles de sincronización en /admin → Datos e inventario.
+ * Vista principal: tablas por módulo (estilo Master BDMX).
  */
 export function AdminSyncSchedules() {
   const [open, setOpen] = useState(true);
   const [rows, setRows] = useState<ScheduleRow[]>([]);
-  const [sourceReport, setSourceReport] = useState<SourceSyncReportRow[]>([]);
+  const [moduleRows, setModuleRows] = useState<ModuleSyncRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [canDispatch, setCanDispatch] = useState(false);
@@ -257,6 +269,7 @@ export function AdminSyncSchedules() {
   const [dispatchMsg, setDispatchMsg] = useState<string | null>(null);
   const [msgWorkflow, setMsgWorkflow] = useState<SyncWorkflowKey | null>(null);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  const [pipelinesOpen, setPipelinesOpen] = useState(false);
   const fetchedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -269,10 +282,8 @@ export function AdminSyncSchedules() {
         throw new Error(typeof data?.error === 'string' ? data.error : `Error ${res.status}`);
       }
       setRows(Array.isArray(data.schedules) ? (data.schedules as ScheduleRow[]) : []);
-      setSourceReport(
-        Array.isArray(data.sourceReport)
-          ? (data.sourceReport as SourceSyncReportRow[])
-          : []
+      setModuleRows(
+        Array.isArray(data.moduleRows) ? (data.moduleRows as ModuleSyncRow[]) : [],
       );
       setCanDispatch(Boolean(data.canDispatch));
       setFetchedAt(typeof data.fetchedAt === 'string' ? data.fetchedAt : null);
@@ -283,12 +294,6 @@ export function AdminSyncSchedules() {
       setLoading(false);
     }
   }, []);
-
-  const reportStats = useMemo(() => {
-    const withSync = sourceReport.filter((r) => r.lastIngestedAt).length;
-    const empty = sourceReport.length - withSync;
-    return { withSync, empty, total: sourceReport.length };
-  }, [sourceReport]);
 
   useEffect(() => {
     if (!open || fetchedRef.current) return;
@@ -320,22 +325,25 @@ export function AdminSyncSchedules() {
     }
   }
 
-  const cloudCount = rows.filter((r) => r.mode === 'cloud').length;
-  const manualCount = rows.filter((r) => r.mode === 'manual' || r.mode === 'mixed').length;
+  const byModule = useMemo(() => {
+    const map = new Map<string, ModuleSyncRow[]>();
+    for (const row of moduleRows) {
+      const list = map.get(row.moduleLabel) || [];
+      list.push(row);
+      map.set(row.moduleLabel, list);
+    }
+    return [...map.entries()];
+  }, [moduleRows]);
 
   return (
-    <section
-      className="mb-8 overflow-hidden rounded-[20px] bg-white"
-      style={{ boxShadow: SUITE.shadow, borderTop: `4px solid ${SUITE.orange}` }}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3 px-5 pb-3 pt-5">
+    <section className="mb-8">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-bold" style={{ color: theme.title }}>
-            Reporte de actualizaciones · sincronizaciones
+          <h2 className="text-xl font-bold" style={{ color: SUITE.navy }}>
+            Sincronizaciones
           </h2>
-          <p className="mt-1 max-w-2xl text-sm" style={{ color: theme.muted }}>
-            Última ingestión de cada fuente de origen (fecha y hora CDMX), con horario programado
-            y tipo Cloud/Manual. Debajo: controles por pipeline (Actions).
+          <p className="mt-1 text-sm" style={{ color: SUITE.muted }}>
+            Actualizaciones por módulo y fuente de datos (F1–F7 · V1–V2 · H1 · A1) · hora CDMX
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -344,8 +352,8 @@ export function AdminSyncSchedules() {
               type="button"
               onClick={() => void load()}
               disabled={loading}
-              className="rounded-lg border px-3 py-2 text-sm font-semibold transition-colors hover:bg-slate-50 disabled:opacity-50"
-              style={{ borderColor: SUITE.border, color: SUITE.navy }}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-opacity disabled:opacity-50"
+              style={{ background: '#059669' }}
             >
               {loading ? 'Actualizando…' : 'Actualizar'}
             </button>
@@ -353,8 +361,8 @@ export function AdminSyncSchedules() {
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="rounded-lg px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: SUITE.navy }}
+            className="rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-slate-50"
+            style={{ borderColor: SUITE.border, color: SUITE.navy }}
           >
             {open ? 'Ocultar' : 'Mostrar'}
           </button>
@@ -362,174 +370,188 @@ export function AdminSyncSchedules() {
       </div>
 
       {open ? (
-        <div className="space-y-3 border-t border-slate-100 px-5 py-4">
-          <div
-            className="flex flex-wrap items-center gap-2 rounded-xl px-3.5 py-2.5 text-[11px]"
-            style={{ background: '#F8FAFC', color: theme.muted }}
-          >
-            <span className="font-semibold" style={{ color: SUITE.navy }}>
-              Resumen:
-            </span>
-            {loading && rows.length === 0 ? (
-              <span>Cargando horarios…</span>
-            ) : (
-              <>
-                <span className="tabular-nums font-semibold" style={{ color: SUITE.navySoft }}>
-                  {cloudCount} cloud · {manualCount} manual
-                </span>
-                {fetchedAt ? (
-                  <span className="ml-auto tabular-nums">
-                    Consultado {formatTimestampCdmxShort(fetchedAt)}
-                  </span>
-                ) : null}
-              </>
-            )}
-            {!canDispatch && !loading ? (
-              <span className="w-full text-[10px]" style={{ color: '#B45309' }}>
-                Sin GH_WORKFLOW_DISPATCH_TOKEN: usa «Ver Actions → Run workflow» para sync
-                manual.
-              </span>
-            ) : null}
-          </div>
-
+        <div className="space-y-4">
           {error ? (
             <p className="text-sm" style={{ color: '#B45309' }}>
               {error}
             </p>
           ) : null}
 
-          {/* Reporte plano: todas las fuentes */}
-          <div
-            className="overflow-hidden rounded-xl border"
-            style={{ borderColor: SUITE.border }}
-          >
-            <div
-              className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2.5"
-              style={{ borderColor: SUITE.border, background: '#F8FAFC' }}
-            >
-              <p className="text-xs font-bold uppercase tracking-wide" style={{ color: SUITE.navy }}>
-                Fuentes de origen · última sync
-              </p>
-              <p className="text-[11px] tabular-nums" style={{ color: theme.muted }}>
-                {reportStats.total} fuentes · {reportStats.withSync} con sync ·{' '}
-                {reportStats.empty} sin registro
-              </p>
-            </div>
-            <div className="max-h-[28rem] overflow-auto">
-              <table className="w-full min-w-[720px] border-collapse text-left text-[11px]">
-                <thead>
-                  <tr style={{ background: SUITE.navy, color: '#fff' }}>
-                    <th className="sticky top-0 px-3 py-2 font-semibold">Fuente</th>
-                    <th className="sticky top-0 px-3 py-2 font-semibold">Grupo</th>
-                    <th className="sticky top-0 px-3 py-2 font-semibold">Tipo</th>
-                    <th className="sticky top-0 px-3 py-2 font-semibold">Programación</th>
-                    <th className="sticky top-0 px-3 py-2 font-semibold">Última sync</th>
-                    <th className="sticky top-0 px-3 py-2 font-semibold">Dato (fecha)</th>
-                    <th className="sticky top-0 px-3 py-2 font-semibold text-right">Filas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading && sourceReport.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-3 py-6 text-center" style={{ color: theme.muted }}>
-                        Cargando reporte…
-                      </td>
-                    </tr>
-                  ) : (
-                    sourceReport.map((r) => {
-                      const badge = originBadge(r.originKind);
-                      return (
-                        <tr
-                          key={r.sourceFile}
-                          className="border-t"
-                          style={{ borderColor: SUITE.border }}
-                        >
-                          <td className="px-3 py-2 align-top">
-                            <code
-                              className="rounded bg-[#F4F6F9] px-1.5 py-0.5 font-mono text-[10px]"
-                              style={{ color: SUITE.navy }}
-                            >
-                              {r.sourceFile}
-                            </code>
-                            <p
-                              className="mt-0.5 max-w-[220px] text-[10px] leading-snug"
-                              style={{ color: theme.muted }}
-                              title={r.updateHint}
-                            >
-                              {r.scheduleLabel}
-                            </p>
-                          </td>
-                          <td className="px-3 py-2 align-top" style={{ color: theme.muted }}>
-                            {r.groupLabel}
-                          </td>
-                          <td className="px-3 py-2 align-top">
-                            <span
-                              className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
-                              style={{
-                                background: badge.background,
-                                color: badge.color,
-                              }}
-                            >
-                              {badge.label}
-                            </span>
-                          </td>
-                          <td
-                            className="max-w-[200px] px-3 py-2 align-top leading-snug"
-                            style={{ color: SUITE.orangeDeep }}
-                          >
-                            {r.schedule}
-                          </td>
-                          <td className="px-3 py-2 align-top font-semibold tabular-nums" style={{ color: SUITE.navy }}>
-                            {r.lastIngestedAt
-                              ? formatTimestampCdmx(r.lastIngestedAt) ||
-                                formatTimestampCdmxShort(r.lastIngestedAt)
-                              : '—'}
-                          </td>
-                          <td className="px-3 py-2 align-top tabular-nums" style={{ color: theme.muted }}>
-                            {r.lastDate || '—'}
-                          </td>
-                          <td
-                            className="px-3 py-2 align-top text-right tabular-nums"
-                            style={{ color: theme.muted }}
-                          >
-                            {r.rowCount > 0 ? r.rowCount.toLocaleString('es-MX') : '—'}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {fetchedAt ? (
+            <p className="text-xs" style={{ color: SUITE.muted }}>
+              Consulta: {formatAt(fetchedAt)}
+              {!canDispatch && !loading ? (
+                <span className="ml-2" style={{ color: '#B45309' }}>
+                  · Sin GH_WORKFLOW_DISPATCH_TOKEN (usa Actions → Run workflow)
+                </span>
+              ) : null}
+            </p>
+          ) : loading && moduleRows.length === 0 ? (
+            <p className="text-xs" style={{ color: SUITE.muted }}>
+              Cargando sincronizaciones…
+            </p>
+          ) : null}
 
-          <p className="text-xs font-bold uppercase tracking-wide" style={{ color: SUITE.navySoft }}>
-            Pipelines · disparo manual
-          </p>
+          {dispatchMsg ? (
+            <p className="text-xs" style={{ color: theme.muted }}>
+              {dispatchMsg}
+              {msgWorkflow ? ` · ${msgWorkflow}` : ''}
+            </p>
+          ) : null}
 
-          <div className="space-y-2.5">
-            {rows.map((row) => (
-              <ScheduleCard
-                key={row.id}
-                row={row}
-                onDispatch={dispatch}
-                busyWorkflow={busyWorkflow}
-                dispatchMsg={dispatchMsg}
-                msgWorkflow={msgWorkflow}
-              />
+          <div className="space-y-4">
+            {byModule.map(([moduleLabel, moduleList]) => (
+              <SuiteCard key={moduleLabel} className="!p-0 overflow-hidden">
+                <div
+                  className="border-b px-4 py-2.5 text-sm font-bold"
+                  style={{ borderColor: SUITE.border, color: SUITE.navyDeep }}
+                >
+                  {moduleLabel}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-left text-sm">
+                    <thead>
+                      <tr
+                        className="border-b text-xs uppercase"
+                        style={{ color: SUITE.muted, borderColor: SUITE.border }}
+                      >
+                        <th className="px-4 py-2 pr-2">Fuente</th>
+                        <th className="py-2 pr-2">Canal / sync</th>
+                        <th className="py-2 pr-2">Última actualización</th>
+                        <th className="py-2 pr-2">Regs</th>
+                        <th className="py-2 pr-2">Estado</th>
+                        <th className="px-4 py-2">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {moduleList.map((row) => {
+                        const st = statusStyle(row.status);
+                        const busy =
+                          row.workflow != null && busyWorkflow === row.workflow;
+                        const showDispatch =
+                          row.workflow &&
+                          row.canDispatch &&
+                          (row.actionLabel === 'Sincronizar' ||
+                            row.moduleId === 'rrhh');
+                        return (
+                          <tr
+                            key={row.id}
+                            className="border-b align-top"
+                            style={{ borderColor: 'rgba(15,23,42,0.06)' }}
+                          >
+                            <td className="px-4 py-3 pr-2">
+                              <p className="font-semibold" style={{ color: SUITE.text }}>
+                                <span
+                                  className="mr-1.5 text-xs font-bold"
+                                  style={{ color: SUITE.muted }}
+                                >
+                                  {row.sourceCode}
+                                </span>
+                                {row.label}
+                              </p>
+                              <p className="mt-0.5 text-xs" style={{ color: SUITE.muted }}>
+                                {row.detail}
+                              </p>
+                            </td>
+                            <td className="py-3 pr-2 text-xs" style={{ color: SUITE.muted }}>
+                              {row.channel}
+                            </td>
+                            <td className="whitespace-nowrap py-3 pr-2 font-medium">
+                              {formatAt(row.lastAt)}
+                            </td>
+                            <td className="py-3 pr-2 tabular-nums">
+                              {row.records != null
+                                ? row.records.toLocaleString('es-MX')
+                                : '—'}
+                            </td>
+                            <td className="py-3 pr-2">
+                              <span
+                                className="rounded-full px-2 py-0.5 text-xs font-semibold"
+                                style={{ background: st.bg, color: st.color }}
+                              >
+                                {st.label}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col items-start gap-1">
+                                {showDispatch && row.workflow ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy || !canDispatch}
+                                    onClick={() => dispatch(row.workflow!)}
+                                    className="text-xs font-semibold underline-offset-2 hover:underline disabled:opacity-45"
+                                    style={{ color: SUITE.navy }}
+                                  >
+                                    {busy ? 'Encolando…' : 'Sincronizar →'}
+                                  </button>
+                                ) : null}
+                                {row.actionHref && !showDispatch ? (
+                                  <Link
+                                    href={row.actionHref}
+                                    className="text-xs font-semibold underline-offset-2 hover:underline"
+                                    style={{ color: SUITE.navy }}
+                                  >
+                                    {row.actionLabel || 'Abrir'} →
+                                  </Link>
+                                ) : null}
+                                {row.actionHref && showDispatch ? (
+                                  <Link
+                                    href={row.actionHref}
+                                    className="text-[11px] font-medium underline-offset-2 hover:underline"
+                                    style={{ color: SUITE.muted }}
+                                  >
+                                    Abrir módulo
+                                  </Link>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </SuiteCard>
             ))}
           </div>
 
-          <p className="text-xs leading-relaxed" style={{ color: theme.muted }}>
-            Reporte: max{' '}
-            <code className="text-[11px]">financial_records.created_at</code> por{' '}
-            <code className="text-[11px]">source_file</code>
-            {' · '}
-            RR.HH. vía soft-sync / hr_*
-            {' · '}
-            catálogo en{' '}
-            <code className="text-[11px]">app/lib/admin-sync-schedules.ts</code>.
-          </p>
+          <div>
+            <button
+              type="button"
+              onClick={() => setPipelinesOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide"
+              style={{ color: SUITE.navySoft }}
+              aria-expanded={pipelinesOpen}
+            >
+              Pipelines · disparo manual
+              <Chevron open={pipelinesOpen} />
+            </button>
+
+            {pipelinesOpen ? (
+              <div className="mt-2.5 space-y-2.5">
+                {rows.map((row) => (
+                  <ScheduleCard
+                    key={row.id}
+                    row={row}
+                    onDispatch={dispatch}
+                    busyWorkflow={busyWorkflow}
+                    dispatchMsg={dispatchMsg}
+                    msgWorkflow={msgWorkflow}
+                  />
+                ))}
+                <p className="text-xs leading-relaxed" style={{ color: theme.muted }}>
+                  Timestamps: max{' '}
+                  <code className="text-[11px]">financial_records.created_at</code> por{' '}
+                  <code className="text-[11px]">source_file</code>
+                  {' · '}
+                  RR.HH. vía soft-sync / hr_*
+                  {' · '}
+                  catálogo en{' '}
+                  <code className="text-[11px]">app/lib/admin-sync-schedules.ts</code>.
+                </p>
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </section>

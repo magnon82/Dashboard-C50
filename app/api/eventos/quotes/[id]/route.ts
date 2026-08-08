@@ -24,7 +24,14 @@ const QUOTE_STATUSES = [
   'aceptada',
   'rechazada',
   'vencida',
+  'perdida',
 ] as const;
+
+const QUOTE_OS_BLOCKED_STATUSES = new Set([
+  'perdida',
+  'rechazada',
+  'vencida',
+]);
 
 type RouteCtx = { params: Promise<{ id: string }> };
 
@@ -110,8 +117,9 @@ export async function GET(_request: Request, ctx: RouteCtx) {
 
 /**
  * PATCH /api/eventos/quotes/[id]
- * Body: { status, generate_os?, payment_link_url?, regenerate_public_token?, revoke_public_token? }
+ * Body: { status, perdida_note?, generate_os?, payment_link_url?, regenerate_public_token?, revoke_public_token? }
  * Si status=aceptada (o generate_os=true), crea/actualiza OS digital.
+ * Si status=perdida, exige perdida_note y no genera OS.
  */
 export async function PATCH(request: Request, ctx: RouteCtx) {
   const auth = await requireEventosSession();
@@ -126,6 +134,7 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
 
   let body: {
     status?: string;
+    perdida_note?: string | null;
     generate_os?: boolean;
     payment_link_url?: string | null;
     regenerate_public_token?: boolean;
@@ -216,13 +225,89 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
     return NextResponse.json({ error: 'status inválido' }, { status: 400 });
   }
 
+  const perdidaNote =
+    typeof body.perdida_note === 'string' ? body.perdida_note.trim() : '';
+  if (body.status === 'perdida' && !perdidaNote) {
+    return NextResponse.json(
+      { error: 'Indica una nota al cerrar como perdida' },
+      { status: 400 }
+    );
+  }
+
   try {
     const sb = getServiceSupabase();
     const now = new Date().toISOString();
     let quote: Record<string, unknown> | null = null;
 
+    if (body.status === 'perdida' || body.generate_os === true || body.status === 'aceptada') {
+      const { data: current, error: curErr } = await sb
+        .from('event_quotes')
+        .select('id, status, lead_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (curErr) {
+        return NextResponse.json({ error: curErr.message }, { status: 500 });
+      }
+      if (!current) {
+        return NextResponse.json(
+          { error: 'Cotización no encontrada' },
+          { status: 404 }
+        );
+      }
+      const curStatus = String(current.status || '');
+      if (body.status === 'perdida') {
+        if (curStatus === 'aceptada') {
+          return NextResponse.json(
+            {
+              error:
+                'No se puede marcar como perdida una cotización ya aceptada',
+            },
+            { status: 409 }
+          );
+        }
+        if (curStatus === 'perdida') {
+          return NextResponse.json(
+            { error: 'Esta cotización ya está marcada como perdida' },
+            { status: 409 }
+          );
+        }
+        const { data: osRow } = await sb
+          .from('event_service_orders')
+          .select('id')
+          .eq('quote_id', id)
+          .maybeSingle();
+        if (osRow?.id) {
+          return NextResponse.json(
+            {
+              error:
+                'No se puede marcar como perdida: ya tiene orden de servicio',
+            },
+            { status: 409 }
+          );
+        }
+      }
+      if (
+        (body.generate_os === true || body.status === 'aceptada') &&
+        QUOTE_OS_BLOCKED_STATUSES.has(curStatus)
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              curStatus === 'perdida'
+                ? 'No se puede generar OS de una cotización perdida'
+                : `No se puede generar OS de una cotización ${curStatus}`,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     const patch: Record<string, unknown> = { updated_at: now };
     if (body.status) patch.status = body.status;
+    if (body.status === 'perdida') {
+      patch.perdida_note = perdidaNote;
+      patch.perdida_at = now;
+    }
     if (body.payment_link_url !== undefined) {
       const url =
         typeof body.payment_link_url === 'string'
@@ -241,23 +326,45 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
         )
         .single();
       if (error) {
+        const missingPerdida = /perdida_note|perdida_at|status|schema cache|column/i.test(
+          error.message
+        );
         const missingLink = /payment_link_url|schema cache|column/i.test(
           error.message
         );
         return NextResponse.json(
           {
-            error: missingLink
-              ? 'Falta migrar payment_link_url. Ejecuta supabase/eventos_quote_accept.sql'
-              : error.message,
+            error: missingPerdida && body.status === 'perdida'
+              ? 'Falta migrar estado perdida. Ejecuta supabase/eventos_quote_perdida.sql'
+              : missingLink
+                ? 'Falta migrar payment_link_url. Ejecuta supabase/eventos_quote_accept.sql'
+                : error.message,
           },
-          { status: missingLink ? 503 : 500 }
+          {
+            status:
+              (missingPerdida && body.status === 'perdida') || missingLink
+                ? 503
+                : 500,
+          }
         );
       }
       quote = data;
+
+      if (body.status === 'perdida') {
+        const leadId = (data as { lead_id?: string | null }).lead_id || null;
+        if (leadId) {
+          await sb
+            .from('event_leads')
+            .update({ stage: 'perdido', updated_at: now })
+            .eq('id', leadId)
+            .neq('stage', 'ganado');
+        }
+      }
     }
 
     const shouldOs =
-      body.generate_os === true || body.status === 'aceptada';
+      body.status !== 'perdida' &&
+      (body.generate_os === true || body.status === 'aceptada');
 
     if (!shouldOs) {
       return NextResponse.json({ quote, service_order: null });

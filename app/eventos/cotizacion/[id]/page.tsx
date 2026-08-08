@@ -25,6 +25,8 @@ export default function CotizacionByIdPage() {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [perdidaOpen, setPerdidaOpen] = useState(false);
+  const [perdidaNote, setPerdidaNote] = useState('');
 
   async function load() {
     if (!id) return;
@@ -121,6 +123,38 @@ export default function CotizacionByIdPage() {
     }
   }
 
+  async function confirmClosePerdida() {
+    if (!canEdit || !id) return;
+    const note = perdidaNote.trim();
+    if (!note) {
+      setErr('Escribe el motivo para cerrar como perdida');
+      return;
+    }
+    setBusy(true);
+    setMsg('');
+    setErr('');
+    try {
+      const res = await fetch(`/api/eventos/quotes/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'perdida', perdida_note: note }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(json.error || 'No se pudo cerrar como perdida');
+        return;
+      }
+      setMsg('Cotización marcada como perdida');
+      setPerdidaOpen(false);
+      setPerdidaNote('');
+      await load();
+    } catch {
+      setErr('Error de red al cerrar como perdida');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <p className="px-4 py-16 text-center text-sm text-slate-500">
@@ -158,6 +192,18 @@ export default function CotizacionByIdPage() {
     canEdit &&
     (doc.payment_method === 'tarjeta_link' ||
       doc.status === 'aceptada');
+  const isPerdida = doc.status === 'perdida';
+  const canMarkPerdida =
+    canEdit &&
+    !serviceOrderId &&
+    !isPerdida &&
+    doc.status !== 'aceptada';
+  const canGenerateOs =
+    canEdit &&
+    !serviceOrderId &&
+    !isPerdida &&
+    doc.status !== 'rechazada' &&
+    doc.status !== 'vencida';
 
   return (
     <div style={{ backgroundColor: SUITE.pageBg, minHeight: '100vh' }}>
@@ -170,7 +216,7 @@ export default function CotizacionByIdPage() {
           >
             Ver OS digital
           </a>
-        ) : canEdit ? (
+        ) : canGenerateOs ? (
           <button
             type="button"
             disabled={busy}
@@ -181,9 +227,45 @@ export default function CotizacionByIdPage() {
             {busy ? 'Generando…' : 'Aceptar y generar OS'}
           </button>
         ) : null}
+        {canMarkPerdida ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setPerdidaOpen(true);
+              setPerdidaNote('');
+              setErr('');
+            }}
+            className="rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-800 disabled:opacity-50"
+          >
+            Cerrar perdida
+          </button>
+        ) : null}
         {msg && <p className="text-xs font-medium text-emerald-700">{msg}</p>}
         {err && <p className="text-xs font-medium text-red-700">{err}</p>}
       </div>
+
+      {isPerdida ? (
+        <div className="mx-auto max-w-[820px] px-4 pt-3 print:hidden">
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">
+            <p className="font-semibold">
+              Cotización perdida
+              {doc.perdida_at
+                ? ` · ${new Date(doc.perdida_at).toLocaleString('es-MX', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}`
+                : ''}
+            </p>
+            {doc.perdida_note ? (
+              <p className="mt-1 text-slate-700">Motivo: {doc.perdida_note}</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {doc.status === 'aceptada' || doc.accepted_at ? (
         <div className="mx-auto max-w-[820px] px-4 pt-3 print:hidden">
@@ -245,6 +327,71 @@ export default function CotizacionByIdPage() {
       ) : null}
 
       <EventosCotizacionDocument doc={doc} shareUrl={publicShareUrl} />
+
+      {perdidaOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 print:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cotizacion-detail-perdida-title"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/45"
+            aria-label="Cerrar"
+            disabled={busy}
+            onClick={() => {
+              if (!busy) setPerdidaOpen(false);
+            }}
+          />
+          <div
+            className="relative z-10 w-full max-w-md rounded-t-[24px] bg-white p-5 sm:rounded-[24px]"
+            style={{ boxShadow: SUITE.shadow }}
+          >
+            <h4
+              id="cotizacion-detail-perdida-title"
+              className="text-base font-bold"
+              style={{ color: SUITE.navy }}
+            >
+              Cerrar como perdida
+            </h4>
+            <p className="mt-1 text-sm text-slate-500">
+              {doc.quote_number || id.slice(0, 8)}
+              {doc.client_name ? ` · ${doc.client_name}` : ''}
+            </p>
+            <label className="mt-4 block text-xs font-semibold text-slate-700">
+              Motivo (obligatorio)
+              <textarea
+                value={perdidaNote}
+                onChange={(e) => setPerdidaNote(e.target.value)}
+                rows={3}
+                placeholder="Ej. eligieron otro venue / presupuesto / sin respuesta…"
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                autoFocus
+              />
+            </label>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setPerdidaOpen(false)}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={busy || !perdidaNote.trim()}
+                onClick={() => void confirmClosePerdida()}
+                className="rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-50"
+                style={{ backgroundColor: '#9f1239' }}
+              >
+                {busy ? 'Guardando…' : 'Confirmar perdida'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

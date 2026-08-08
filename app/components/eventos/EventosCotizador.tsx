@@ -75,7 +75,28 @@ const STATUS_LABELS: Record<string, string> = {
   aceptada: 'Aceptada',
   rechazada: 'Rechazada',
   vencida: 'Vencida',
+  perdida: 'Perdida',
 };
+
+function canCloseQuoteAsPerdida(q: {
+  status: string;
+  service_order_id?: string | null;
+}): boolean {
+  if (q.service_order_id) return false;
+  return q.status !== 'perdida' && q.status !== 'aceptada';
+}
+
+function canGenerateOsFromQuote(q: {
+  status: string;
+  service_order_id?: string | null;
+}): boolean {
+  if (q.service_order_id) return false;
+  return (
+    q.status !== 'perdida' &&
+    q.status !== 'rechazada' &&
+    q.status !== 'vencida'
+  );
+}
 
 type DraftLine = {
   key: string;
@@ -105,6 +126,8 @@ type SavedQuote = {
   public_path?: string | null;
   accepted_at?: string | null;
   payment_method?: string | null;
+  perdida_note?: string | null;
+  perdida_at?: string | null;
 };
 
 export function EventosCotizador({
@@ -173,6 +196,8 @@ export function EventosCotizador({
   const [quotesError, setQuotesError] = useState<string | null>(null);
   const [quotesLoading, setQuotesLoading] = useState(true);
   const [copiedPublicId, setCopiedPublicId] = useState<string | null>(null);
+  const [perdidaQuote, setPerdidaQuote] = useState<SavedQuote | null>(null);
+  const [perdidaNote, setPerdidaNote] = useState('');
   const [altaBusy, setAltaBusy] = useState(false);
   const [altaForm, setAltaForm] = useState({
     company_name: '',
@@ -555,6 +580,8 @@ export function EventosCotizador({
             public_path?: string | null;
             accepted_at?: string | null;
             payment_method?: string | null;
+            perdida_note?: string | null;
+            perdida_at?: string | null;
           }) => ({
             id: q.id,
             quote_number: q.quote_number || null,
@@ -569,6 +596,8 @@ export function EventosCotizador({
             public_path: q.public_path || null,
             accepted_at: q.accepted_at || null,
             payment_method: q.payment_method || null,
+            perdida_note: q.perdida_note || null,
+            perdida_at: q.perdida_at || null,
           })
         )
       );
@@ -1258,6 +1287,56 @@ export function EventosCotizador({
     }
   }
 
+  function openPerdidaModal(q: SavedQuote) {
+    if (!canEdit || !canCloseQuoteAsPerdida(q)) return;
+    setPerdidaQuote(q);
+    setPerdidaNote('');
+    setErr('');
+  }
+
+  function closePerdidaModal() {
+    if (busy) return;
+    setPerdidaQuote(null);
+    setPerdidaNote('');
+  }
+
+  async function confirmClosePerdida() {
+    if (!canEdit || !perdidaQuote) return;
+    const note = perdidaNote.trim();
+    if (!note) {
+      setErr('Escribe el motivo para cerrar como perdida');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await fetch(`/api/eventos/quotes/${perdidaQuote.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'perdida', perdida_note: note }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErr(
+          [json.error, json.hint].filter(Boolean).join(' — ') ||
+            'No se pudo cerrar como perdida'
+        );
+        return;
+      }
+      setMsg(
+        `Cotización ${perdidaQuote.quote_number || ''} marcada como perdida`
+      );
+      setPerdidaQuote(null);
+      setPerdidaNote('');
+      await loadQuotes();
+    } catch {
+      setErr('Error de red al cerrar como perdida');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (view === 'list') {
     return (
       <div className="space-y-5">
@@ -1338,7 +1417,11 @@ export function EventosCotizador({
               {quotes.map((q) => (
                 <li
                   key={q.id}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                  className={`rounded-xl border px-4 py-3 text-sm ${
+                    q.status === 'perdida'
+                      ? 'border-rose-200 bg-rose-50/70'
+                      : 'border-slate-200 bg-slate-50'
+                  }`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -1346,7 +1429,15 @@ export function EventosCotizador({
                         {q.quote_number || q.id.slice(0, 8)}
                       </p>
                       <p className="mt-0.5 text-xs text-slate-500">
-                        {STATUS_LABELS[q.status] || q.status}
+                        <span
+                          className={
+                            q.status === 'perdida'
+                              ? 'font-semibold text-rose-800'
+                              : undefined
+                          }
+                        >
+                          {STATUS_LABELS[q.status] || q.status}
+                        </span>
                         {q.payment_method
                           ? ` · ${
                               QUOTE_PAYMENT_METHOD_LABELS[
@@ -1368,6 +1459,11 @@ export function EventosCotizador({
                           : ''}
                         {q.pax ? ` · ${q.pax} pax` : ''}
                       </p>
+                      {q.status === 'perdida' && q.perdida_note ? (
+                        <p className="mt-1 text-xs text-rose-900/80">
+                          Motivo: {q.perdida_note}
+                        </p>
+                      ) : null}
                     </div>
                     <span className="font-bold" style={{ color: SUITE.navy }}>
                       {formatMxn(q.total)}
@@ -1413,7 +1509,7 @@ export function EventosCotizador({
                       >
                         Ver OS
                       </a>
-                    ) : canEdit ? (
+                    ) : canEdit && canGenerateOsFromQuote(q) ? (
                       <button
                         type="button"
                         disabled={busy}
@@ -1425,12 +1521,87 @@ export function EventosCotizador({
                         Generar OS
                       </button>
                     ) : null}
+                    {canEdit && canCloseQuoteAsPerdida(q) ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => openPerdidaModal(q)}
+                        className="rounded-lg border border-rose-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-rose-800 disabled:opacity-50"
+                        title="Cierra la cotización como perdida (requiere nota)"
+                      >
+                        Cerrar perdida
+                      </button>
+                    ) : null}
                   </div>
                 </li>
               ))}
             </ul>
           )}
         </SuiteCard>
+
+        {perdidaQuote ? (
+          <div
+            className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cotizacion-perdida-title"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-slate-900/45"
+              aria-label="Cerrar"
+              onClick={closePerdidaModal}
+            />
+            <div
+              className="relative z-10 w-full max-w-md rounded-t-[24px] bg-white p-5 sm:rounded-[24px]"
+              style={{ boxShadow: SUITE.shadow }}
+            >
+              <h4
+                id="cotizacion-perdida-title"
+                className="text-base font-bold"
+                style={{ color: theme.title }}
+              >
+                Cerrar como perdida
+              </h4>
+              <p className="mt-1 text-sm text-slate-500">
+                {perdidaQuote.quote_number || perdidaQuote.id.slice(0, 8)}
+                {perdidaQuote.client?.company_name
+                  ? ` · ${perdidaQuote.client.company_name}`
+                  : ''}
+              </p>
+              <label className="mt-4 block text-xs font-semibold text-slate-700">
+                Motivo (obligatorio)
+                <textarea
+                  value={perdidaNote}
+                  onChange={(e) => setPerdidaNote(e.target.value)}
+                  rows={3}
+                  placeholder="Ej. eligieron otro venue / presupuesto / sin respuesta…"
+                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                  autoFocus
+                />
+              </label>
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={closePerdidaModal}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !perdidaNote.trim()}
+                  onClick={() => void confirmClosePerdida()}
+                  className="rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  style={{ backgroundColor: '#9f1239' }}
+                >
+                  {busy ? 'Guardando…' : 'Confirmar perdida'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -2987,7 +3158,15 @@ export function EventosCotizador({
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    {STATUS_LABELS[q.status] || q.status}
+                    <span
+                      className={
+                        q.status === 'perdida'
+                          ? 'font-semibold text-rose-800'
+                          : undefined
+                      }
+                    >
+                      {STATUS_LABELS[q.status] || q.status}
+                    </span>
                     {q.event_date
                       ? ` · ${new Date(
                           q.event_date + 'T12:00:00'
@@ -2999,6 +3178,11 @@ export function EventosCotizador({
                       : ''}
                     {q.pax ? ` · ${q.pax} pax` : ''}
                   </div>
+                  {q.status === 'perdida' && q.perdida_note ? (
+                    <p className="mt-0.5 text-[11px] text-rose-900/80">
+                      Motivo: {q.perdida_note}
+                    </p>
+                  ) : null}
                   <div className="mt-1 flex flex-wrap gap-2">
                     <button
                       type="button"

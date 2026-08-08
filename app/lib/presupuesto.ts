@@ -1479,9 +1479,10 @@ export type BuildBalanceMensualOptions = {
 /**
  * Balance por mes:
  * - Visibilidad / ingresos / efectivo ← presupuesto (+ flujo efectivo).
- * - Gastos bancarios ← facturas CFDI (I/E) del mes cuando existen;
- *   si no hay facturas, roll-forward `suma_gasto` del presupuesto.
- * REP/pago (tipo P) no entran (filtro en `sumFacturasGastoPorMes`).
+ * - Gastos bancarios ← facturas CFDI reales (I/E **con XML**) del mes;
+ *   si no hay, roll-forward `suma_gasto` del presupuesto.
+ * Con XML = factura (sí gasto). Sin XML (PDF/acuse) = comprobante de pago
+ * (no gasto; evita doble conteo). REP/pago (tipo P) tampoco entra.
  */
 export function buildBalanceMensualPorAno(
   records: FinancialRecord[],

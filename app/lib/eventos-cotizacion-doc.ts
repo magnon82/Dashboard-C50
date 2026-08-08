@@ -41,6 +41,9 @@ export type CotizacionDoc = {
   client_accept_note?: string | null;
   /** Link de pago pegado por staff (tarjeta_link). */
   payment_link_url?: string | null;
+  /** Staff cerró como perdida */
+  perdida_note?: string | null;
+  perdida_at?: string | null;
 };
 
 /** Browser localStorage key — must be localStorage (not sessionStorage) so preview in a new tab can read it. */
