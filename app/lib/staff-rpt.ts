@@ -320,46 +320,49 @@ export function applyTombolaDeficitRecovery(
 }
 
 /**
- * Tómbola del día desde un corte cerrado: depósito manual en tómbola.
- * Si hay Infocaja, también expone la fórmula recibido Infocaja − propinas TPV
- * (referencia); el monto reportado prefiere el depósito capturado.
+ * Tómbola del día desde un corte cerrado:
+ * **Efectivo recibido − Propina TPV** (puede ser negativo si no alcanzó).
+ * El depósito físico (`efectivo_tombola`) queda como captura operativa aparte.
  */
 export function dayTombolaFromRpt(rpt: StaffRptRow): DayTombolaResult {
   const tips = Math.max(
     0,
     Number(rpt.bancos_propina_tpv ?? rpt.propinas) || 0
   );
-  // Depósito físico capturado en el cierre (después de propinas).
-  const depositado = Math.max(
-    0,
-    Math.round(Number(rpt.efectivo_tombola) * 100) / 100
-  );
-  if (Number.isFinite(depositado) && rpt.efectivo_tombola != null) {
+  const recibido =
+    rpt.efectivo_contado != null && Number.isFinite(Number(rpt.efectivo_contado))
+      ? Number(rpt.efectivo_contado)
+      : null;
+  const fromRecibido = expectedTombolaDeposit(recibido, tips);
+  if (fromRecibido != null) {
     return {
-      amount: depositado,
-      source: 'depositado',
-      efectivo:
-        rpt.efectivo_contado != null && Number.isFinite(rpt.efectivo_contado)
-          ? Number(rpt.efectivo_contado)
-          : rpt.efectivo_infocaja != null &&
-              Number.isFinite(rpt.efectivo_infocaja)
-            ? Number(rpt.efectivo_infocaja)
-            : null,
+      amount: fromRecibido,
+      source: 'formula',
+      efectivo: recibido,
       propinas_tpv: tips,
     };
   }
-  const expected = expectedTombolaDeposit(rpt.efectivo_infocaja, tips);
-  if (expected != null) {
+  const fromInfocaja = expectedTombolaDeposit(rpt.efectivo_infocaja, tips);
+  if (fromInfocaja != null) {
     return {
-      amount: expected,
+      amount: fromInfocaja,
       source: 'formula',
       efectivo: Number(rpt.efectivo_infocaja),
       propinas_tpv: tips,
     };
   }
+  // Último recurso: depósito capturado en el cierre.
+  if (rpt.efectivo_tombola != null && Number.isFinite(Number(rpt.efectivo_tombola))) {
+    return {
+      amount: Math.round(Number(rpt.efectivo_tombola) * 100) / 100,
+      source: 'depositado',
+      efectivo: null,
+      propinas_tpv: tips,
+    };
+  }
   return {
     amount: 0,
-    source: 'depositado',
+    source: 'formula',
     efectivo: null,
     propinas_tpv: tips,
   };
@@ -367,8 +370,8 @@ export function dayTombolaFromRpt(rpt: StaffRptRow): DayTombolaResult {
 
 /**
  * Tómbola del día con o sin corte cerrado.
- * Preferencia: depósito capturado en el corte (`efectivo_tombola`);
- * si no hay cierre, Infocaja − propinas de tarjeta.
+ * Preferencia: efectivo recibido (corte) − propinas TPV;
+ * si no hay cierre, Infocaja Efectivo − propinas.
  */
 export function resolveDayTombola(input: {
   rpt?: StaffRptRow | null;
@@ -376,10 +379,6 @@ export function resolveDayTombola(input: {
 }): DayTombolaResult | null {
   const rpt = input.rpt ?? null;
   const info = input.infocaja ?? null;
-
-  if (rpt && Number.isFinite(Number(rpt.efectivo_tombola))) {
-    return dayTombolaFromRpt(rpt);
-  }
 
   const tipsFromTpv =
     rpt?.bancos_propina_tpv != null
@@ -393,6 +392,21 @@ export function resolveDayTombola(input: {
       : tipsFromInfocaja != null
         ? tipsFromInfocaja
         : Math.max(0, Number(rpt?.propinas) || 0);
+
+  const recibidoCorte =
+    rpt?.efectivo_contado != null &&
+    Number.isFinite(Number(rpt.efectivo_contado))
+      ? Number(rpt.efectivo_contado)
+      : null;
+  const fromRecibido = expectedTombolaDeposit(recibidoCorte, tips);
+  if (fromRecibido != null) {
+    return {
+      amount: fromRecibido,
+      source: 'formula',
+      efectivo: recibidoCorte,
+      propinas_tpv: tips,
+    };
+  }
 
   const efectivoLive =
     info != null && info.hasAny ? info.efectivo : null;

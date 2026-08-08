@@ -9,6 +9,7 @@ import {
 import { getTheme, SUITE } from '@/app/lib/themes';
 import {
   EFECTIVO_TOLERANCE_MXN,
+  expectedTombolaDeposit,
   type EfectivoInfocajaReconcile,
   type StaffRptInfocajaDay,
 } from '@/app/lib/staff-rpt';
@@ -141,27 +142,22 @@ function InfocajaReconcilePanel({
     infocaja && infocaja.propina > 0
       ? lineDelta(corte.bancos_propina_tpv ?? corte.propinas, infocaja.propina)
       : null;
-  // Infocaja Bancarias = neto (sin propina). No comparar vs cobrado TPV
-  // (cobrado = bancarias + propina); usar neto TPV o cobrado − propina.
-  const bancosNetoTpv = (() => {
-    if (corte.bancos_neto_tpv != null && Number.isFinite(corte.bancos_neto_tpv)) {
-      return Number(corte.bancos_neto_tpv);
-    }
+  // Infocaja Bancarias = venta con tarjeta sin propina.
+  // En este repo `bancos_neto_tpv` = cobrado + propina (total al banco);
+  // para conciliar hay que usar cobrado − propina (o cobrado si ya viniera neto).
+  const bancariasDesdeTpv = (() => {
     const cob = corte.bancos_cobrado_tpv;
     const tip = corte.bancos_propina_tpv ?? corte.propinas;
-    if (
-      cob != null &&
-      Number.isFinite(cob) &&
-      tip != null &&
-      Number.isFinite(tip)
-    ) {
-      return Math.round((Number(cob) - Number(tip)) * 100) / 100;
+    if (cob != null && Number.isFinite(cob)) {
+      const tipN =
+        tip != null && Number.isFinite(tip) ? Math.max(0, Number(tip)) : 0;
+      return Math.round((Number(cob) - tipN) * 100) / 100;
     }
     return null;
   })();
   const bancosCmp =
     infocaja && infocaja.bancarias > 0
-      ? lineDelta(bancosNetoTpv, infocaja.bancarias)
+      ? lineDelta(bancariasDesdeTpv, infocaja.bancarias)
       : null;
 
   const secondaryMismatch =
@@ -281,13 +277,13 @@ function InfocajaReconcilePanel({
             </div>
             <div className="flex justify-between gap-3 sm:block">
               <dt style={{ color: styles.body }}>
-                Bancos neto TPV vs Infocaja Bancarias
+                Bancarias (cobrado − propina) vs Infocaja
               </dt>
               <dd
                 className="font-semibold tabular-nums"
                 style={{ color: styles.title }}
               >
-                {moneyOrDash(bancosNetoTpv)}
+                {moneyOrDash(bancariasDesdeTpv)}
                 {' · '}
                 {moneyMx(infocaja.bancarias)}
                 {bancosCmp
@@ -298,8 +294,11 @@ function InfocajaReconcilePanel({
               </dd>
               {corte.bancos_cobrado_tpv != null ? (
                 <p className="mt-0.5 text-[11px]" style={{ color: styles.body }}>
-                  Cobrado TPV {moneyMx(corte.bancos_cobrado_tpv)} incluye
-                  propina; Infocaja Bancarias va neta.
+                  Cobrado TPV {moneyMx(corte.bancos_cobrado_tpv)}
+                  {corte.bancos_propina_tpv != null
+                    ? ` − propina ${moneyMx(corte.bancos_propina_tpv)}`
+                    : ''}
+                  ; Infocaja Bancarias sin propina.
                 </p>
               ) : null}
             </div>
@@ -308,8 +307,8 @@ function InfocajaReconcilePanel({
       </dl>
       <p className="mt-2 text-[11px]" style={{ color: styles.body }}>
         Fuente: reporte Infocaja por correo (misma sync post-cierre de
-        terminales). Bancarias e Infocaja Propina van desglosadas; se compara
-        neto TPV. Tolerancia ±{moneyMx(EFECTIVO_TOLERANCE_MXN)}.
+        terminales). Bancarias = cobrado TPV − propina; Propina aparte.
+        Tolerancia ±{moneyMx(EFECTIVO_TOLERANCE_MXN)}.
       </p>
     </div>
   );
@@ -653,15 +652,24 @@ export function VentasCortesReportCard({
       ? `Cobrado ${moneyOrDash(corte.bancos_cobrado_tpv)} · Propina TPV ${moneyOrDash(corte.bancos_propina_tpv)}`
       : undefined;
 
+  const propinaTpvForTombola =
+    corte != null
+      ? Number(corte.bancos_propina_tpv ?? corte.propinas) || 0
+      : tombola?.propinas_tpv ?? 0;
+  const tombolaFromRecibido =
+    corte != null
+      ? expectedTombolaDeposit(corte.efectivo_contado, propinaTpvForTombola)
+      : null;
   const tombolaAmount =
+    tombolaFromRecibido ??
     tombola?.amount ??
     (corte != null ? corte.efectivo_tombola : null);
 
   const tombolaHint =
-    corte?.efectivo_tombola != null
-      ? 'Depósito capturado en el corte'
+    tombolaFromRecibido != null
+      ? `Efectivo recibido − Propina TPV (${moneyMx(propinaTpvForTombola)})`
       : tombola?.efectivo != null
-        ? `Infocaja ${moneyMx(tombola.efectivo)} − propinas ${moneyMx(tombola.propinas_tpv)}`
+        ? `${tombola.source === 'infocaja' ? 'Infocaja' : 'Efectivo'} ${moneyMx(tombola.efectivo)} − propinas ${moneyMx(tombola.propinas_tpv)}`
         : corte?.efectivo_infocaja != null
           ? `Infocaja efectivo ${moneyMx(corte.efectivo_infocaja)}`
           : undefined;
