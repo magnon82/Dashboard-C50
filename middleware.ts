@@ -38,10 +38,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Público: cotización /c/{token} + API lectura/aceptación por token (sin sesión)
+  // Público: cotización /c/{token}, reservar mesa, APIs sin sesión
   if (
     pathname.startsWith('/c/') ||
-    pathname.startsWith('/api/eventos/quotes/public/')
+    pathname.startsWith('/api/eventos/quotes/public/') ||
+    pathname === '/reservar' ||
+    pathname.startsWith('/reservar/') ||
+    pathname.startsWith('/api/reservas')
   ) {
     return NextResponse.next();
   }

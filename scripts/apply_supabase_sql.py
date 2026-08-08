@@ -30,6 +30,7 @@ SQL_FILES = {
     "reportes": ROOT / "supabase" / "reportes_socios.sql",
     "tpv": ROOT / "supabase" / "tpv_cortes.sql",
     "hr_nacimiento": ROOT / "supabase" / "hr_employee_nacimiento.sql",
+    "reservas": ROOT / "supabase" / "restaurant_reservations.sql",
 }
 
 DEFAULT_ORDER = ["eventos", "eventos_leads", "eventos_leads_source", "reportes", "tpv"]
@@ -128,6 +129,7 @@ def probe_tables(url: str, service: str) -> None:
         "event_quotes",
         "reportes_socios_content",
         "tpv_corte_uploads",
+        "restaurant_reservations",
     ):
         status, body = http_json(
             "GET",
