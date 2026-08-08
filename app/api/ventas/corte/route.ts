@@ -220,6 +220,40 @@ export async function GET(req: NextRequest) {
       return asStaffRptRow(row as Record<string, unknown>);
     }
 
+    /** Fechas con corte cerrado, antiguas → recientes (navegación ← →). */
+    async function loadAvailableCorteDates(): Promise<string[]> {
+      const { data, error } = await sb
+        .from(STAFF_RPT_TABLE)
+        .select('rpt_date')
+        .order('rpt_date', { ascending: true });
+      if (error) {
+        if (isTpvSchemaError(error.message)) {
+          const err = new Error(error.message);
+          (err as Error & { schemaMissing?: boolean }).schemaMissing = true;
+          throw err;
+        }
+        throw new Error(error.message);
+      }
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (const row of data || []) {
+        const d = String((row as { rpt_date?: string }).rpt_date || '').slice(
+          0,
+          10
+        );
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || seen.has(d)) continue;
+        seen.add(d);
+        out.push(d);
+      }
+      return out;
+    }
+
+    const availableDates = await loadAvailableCorteDates();
+    const latestCorteDate =
+      availableDates.length > 0
+        ? availableDates[availableDates.length - 1]
+        : null;
+
     let mode: VentasCorteMode = 'none';
     let rpt: StaffRptRow | null = null;
     let statsDate: string | null = null;
@@ -292,6 +326,9 @@ export async function GET(req: NextRequest) {
       date: statsDate,
       isYesterday: statsDate === yesterdayDate,
       hasCorte: Boolean(rpt),
+      /** Fechas con corte cerrado (asc). Máximo = último realizado. */
+      availableDates,
+      latestCorteDate,
       corte: corteSummary,
       tombola,
       /** Reporte Infocaja del correo (Gmail) para la fecha del corte. */
@@ -317,6 +354,8 @@ export async function GET(req: NextRequest) {
           date: null,
           isYesterday: false,
           hasCorte: false,
+          availableDates: [],
+          latestCorteDate: null,
           corte: null,
           tombola: null,
           infocaja: null,
@@ -340,6 +379,8 @@ export async function GET(req: NextRequest) {
         date: null,
         isYesterday: false,
         hasCorte: false,
+        availableDates: [],
+        latestCorteDate: null,
         corte: null,
         tombola: null,
         infocaja: null,

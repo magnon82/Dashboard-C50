@@ -79,6 +79,10 @@ type CortePayload = {
   infocaja?: StaffRptInfocajaDay | null;
   /** Conciliación efectivo recibido (corte) vs Infocaja Efectivo. */
   cashCheck?: EfectivoInfocajaReconcile | null;
+  /** Fechas con corte cerrado (ascendente). */
+  availableDates?: string[];
+  /** Último corte realizado (máximo navegable). */
+  latestCorteDate?: string | null;
   error?: string;
   hint?: string;
 };
@@ -137,12 +141,27 @@ function InfocajaReconcilePanel({
     infocaja && infocaja.propina > 0
       ? lineDelta(corte.bancos_propina_tpv ?? corte.propinas, infocaja.propina)
       : null;
+  // Infocaja Bancarias = neto (sin propina). No comparar vs cobrado TPV
+  // (cobrado = bancarias + propina); usar neto TPV o cobrado − propina.
+  const bancosNetoTpv = (() => {
+    if (corte.bancos_neto_tpv != null && Number.isFinite(corte.bancos_neto_tpv)) {
+      return Number(corte.bancos_neto_tpv);
+    }
+    const cob = corte.bancos_cobrado_tpv;
+    const tip = corte.bancos_propina_tpv ?? corte.propinas;
+    if (
+      cob != null &&
+      Number.isFinite(cob) &&
+      tip != null &&
+      Number.isFinite(tip)
+    ) {
+      return Math.round((Number(cob) - Number(tip)) * 100) / 100;
+    }
+    return null;
+  })();
   const bancosCmp =
     infocaja && infocaja.bancarias > 0
-      ? lineDelta(
-          corte.bancos_cobrado_tpv ?? corte.bancos_neto_tpv,
-          infocaja.bancarias
-        )
+      ? lineDelta(bancosNetoTpv, infocaja.bancarias)
       : null;
 
   const secondaryMismatch =
@@ -262,15 +281,13 @@ function InfocajaReconcilePanel({
             </div>
             <div className="flex justify-between gap-3 sm:block">
               <dt style={{ color: styles.body }}>
-                Bancos TPV vs Infocaja Bancarias
+                Bancos neto TPV vs Infocaja Bancarias
               </dt>
               <dd
                 className="font-semibold tabular-nums"
                 style={{ color: styles.title }}
               >
-                {moneyOrDash(
-                  corte.bancos_cobrado_tpv ?? corte.bancos_neto_tpv
-                )}
+                {moneyOrDash(bancosNetoTpv)}
                 {' · '}
                 {moneyMx(infocaja.bancarias)}
                 {bancosCmp
@@ -279,13 +296,20 @@ function InfocajaReconcilePanel({
                     : ` · Δ ${moneyMx(bancosCmp.delta)}`
                   : ''}
               </dd>
+              {corte.bancos_cobrado_tpv != null ? (
+                <p className="mt-0.5 text-[11px]" style={{ color: styles.body }}>
+                  Cobrado TPV {moneyMx(corte.bancos_cobrado_tpv)} incluye
+                  propina; Infocaja Bancarias va neta.
+                </p>
+              ) : null}
             </div>
           </>
         ) : null}
       </dl>
       <p className="mt-2 text-[11px]" style={{ color: styles.body }}>
         Fuente: reporte Infocaja por correo (misma sync post-cierre de
-        terminales). Tolerancia ±{moneyMx(EFECTIVO_TOLERANCE_MXN)}.
+        terminales). Bancarias e Infocaja Propina van desglosadas; se compara
+        neto TPV. Tolerancia ±{moneyMx(EFECTIVO_TOLERANCE_MXN)}.
       </p>
     </div>
   );
@@ -680,19 +704,63 @@ export function VentasCortesReportCard({
     };
   })();
 
+  const availableDates = data?.availableDates ?? [];
+  const latestCorteDate =
+    data?.latestCorteDate ??
+    (availableDates.length ? availableDates[availableDates.length - 1] : null);
+
+  function navIndexFor(date: string | null): number {
+    if (!date || !availableDates.length) return -1;
+    const exact = availableDates.indexOf(date);
+    if (exact >= 0) return exact;
+    // Fecha sin corte: anclar al vecino más cercano hacia atrás.
+    for (let i = availableDates.length - 1; i >= 0; i--) {
+      if (availableDates[i] <= date) return i;
+    }
+    return 0;
+  }
+
+  const currentNavDate = displayDate;
+  const currentNavIndex = navIndexFor(currentNavDate);
+  const canGoOlder = currentNavIndex > 0;
+  const canGoNewer =
+    currentNavIndex >= 0 &&
+    latestCorteDate != null &&
+    currentNavDate != null &&
+    currentNavDate < latestCorteDate &&
+    currentNavIndex < availableDates.length - 1;
+
   function applyDate() {
     if (!dateInput || !/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) return;
+    // No pasar del último corte realizado.
+    if (latestCorteDate && dateInput > latestCorteDate) {
+      setDateInput(latestCorteDate);
+      setActiveDate(latestCorteDate);
+      return;
+    }
     setActiveDate(dateInput);
   }
 
-  function goYesterday() {
-    const y = data?.yesterdayDate;
-    if (!y) return;
-    setDateInput(y);
-    setActiveDate(y);
+  function goOlderCorte() {
+    if (!canGoOlder) return;
+    const d = availableDates[currentNavIndex - 1];
+    setDateInput(d);
+    setActiveDate(d);
+  }
+
+  function goNewerCorte() {
+    if (!canGoNewer) return;
+    const d = availableDates[currentNavIndex + 1];
+    setDateInput(d);
+    setActiveDate(d);
   }
 
   function goLatestDefault() {
+    if (latestCorteDate) {
+      setDateInput(latestCorteDate);
+      setActiveDate(latestCorteDate);
+      return;
+    }
     setDateInput('');
     setActiveDate(null);
   }
@@ -753,20 +821,52 @@ export function VentasCortesReportCard({
           </div>
         }
       >
-        <label className={`${filterControlClass} bg-white shadow-sm`}>
-          <span className="shrink-0 text-slate-500">Día</span>
-          <input
-            type="date"
-            className="h-full min-w-[9.5rem] cursor-pointer bg-transparent font-semibold text-slate-800 outline-none"
-            value={dateInput}
-            max={data?.todayDate || data?.yesterdayDate || undefined}
-            onChange={(e) => setDateInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') applyDate();
-            }}
-            aria-label="Fecha del corte"
-          />
-        </label>
+        <div className="inline-flex h-9 items-stretch overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <button
+            type="button"
+            onClick={goOlderCorte}
+            disabled={!canGoOlder || loading}
+            className="inline-flex w-9 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+            aria-label="Corte anterior"
+            title="Corte anterior"
+          >
+            <span aria-hidden className="text-lg leading-none">
+              ←
+            </span>
+          </button>
+          <label
+            className={`${filterControlClass} border-x border-slate-200 bg-white shadow-none`}
+          >
+            <span className="shrink-0 text-slate-500">Día</span>
+            <input
+              type="date"
+              className="h-full min-w-[9.5rem] cursor-pointer bg-transparent font-semibold text-slate-800 outline-none"
+              value={dateInput}
+              max={latestCorteDate || data?.todayDate || undefined}
+              onChange={(e) => setDateInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applyDate();
+              }}
+              aria-label="Fecha del corte"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={goNewerCorte}
+            disabled={!canGoNewer || loading}
+            className="inline-flex w-9 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+            aria-label="Corte siguiente"
+            title={
+              latestCorteDate
+                ? `Siguiente (máx. ${latestCorteDate})`
+                : 'Corte siguiente'
+            }
+          >
+            <span aria-hidden className="text-lg leading-none">
+              →
+            </span>
+          </button>
+        </div>
         <button
           type="button"
           onClick={applyDate}
@@ -777,15 +877,14 @@ export function VentasCortesReportCard({
         </button>
         <button
           type="button"
-          onClick={goYesterday}
-          className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-        >
-          Ayer
-        </button>
-        <button
-          type="button"
           onClick={goLatestDefault}
-          className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          disabled={!latestCorteDate || loading}
+          className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          title={
+            latestCorteDate
+              ? `Último corte: ${latestCorteDate}`
+              : 'Sin cortes'
+          }
         >
           Último
         </button>
