@@ -16,6 +16,7 @@ import {
   companionPdfPathFromXml,
   SOURCE_FACTURA_CFDI,
 } from '@/app/lib/facturas';
+import { fetchFacturaAttachmentFromGmail } from '@/app/lib/gmail-facturas';
 import { listPdfComprobantes } from '@/app/lib/estados-cuenta';
 import { getServiceSupabase } from '@/app/lib/users';
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
@@ -113,6 +114,32 @@ async function loadRecords(
   return all;
 }
 
+function fileDisposition(
+  basename: string,
+  asAttachment: boolean | undefined
+): string {
+  const disposition = asAttachment ? 'attachment' : 'inline';
+  const asciiName = basename.replace(/[^\x20-\x7E]/g, '_');
+  return `${disposition}; filename="${asciiName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(basename)}`;
+}
+
+function binaryFileResponse(
+  body: BodyInit,
+  opts: {
+    basename: string;
+    contentType: string;
+    asAttachment?: boolean;
+  }
+) {
+  return new NextResponse(body, {
+    headers: {
+      'Content-Type': opts.contentType,
+      'Content-Disposition': fileDisposition(opts.basename, opts.asAttachment),
+      'Cache-Control': 'private, max-age=120',
+    },
+  });
+}
+
 async function streamFile(
   filePath: string,
   roots: string | string[],
@@ -139,17 +166,10 @@ async function streamFile(
     }
     const stream = createReadStream(filePath);
     const webStream = Readable.toWeb(stream) as ReadableStream;
-    const basename = path.basename(filePath);
-    const disposition = opts?.asAttachment ? 'attachment' : 'inline';
-    // RFC 5987 filename* keeps accents (e.g. PEÑA); filename= is ASCII fallback.
-    const asciiName = basename.replace(/[^\x20-\x7E]/g, '_');
-    const dispositionHeader = `${disposition}; filename="${asciiName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(basename)}`;
-    return new NextResponse(webStream, {
-      headers: {
-        'Content-Type': isPdf ? 'application/pdf' : 'application/xml',
-        'Content-Disposition': dispositionHeader,
-        'Cache-Control': 'private, max-age=120',
-      },
+    return binaryFileResponse(webStream, {
+      basename: path.basename(filePath),
+      contentType: isPdf ? 'application/pdf' : 'application/xml',
+      asAttachment: opts?.asAttachment,
     });
   } catch {
     return NextResponse.json(
@@ -159,6 +179,24 @@ async function streamFile(
       },
       { status: 404 }
     );
+  }
+}
+
+async function streamFromGmail(
+  gmailId: string,
+  prefer: 'pdf' | 'xml',
+  asAttachment: boolean
+): Promise<NextResponse | null> {
+  try {
+    const file = await fetchFacturaAttachmentFromGmail(gmailId, prefer);
+    if (!file) return null;
+    return binaryFileResponse(new Uint8Array(file.bytes), {
+      basename: file.filename,
+      contentType: file.contentType,
+      asAttachment,
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -212,25 +250,49 @@ export async function GET(request: Request) {
       const xml = d.xml_path ? String(d.xml_path) : '';
       const companion =
         !pdf && xml ? companionPdfPathFromXml(xml) || '' : '';
+      const gmailId = d.gmail_id ? String(d.gmail_id) : '';
+      const prefer: 'pdf' | 'xml' =
+        format === 'xml' ? 'xml' : format === 'pdf' ? 'pdf' : pdf || companion ? 'pdf' : 'xml';
+
       let chosen = '';
-      if (format === 'xml') chosen = xml || pdf;
-      else if (format === 'pdf') {
+      if (prefer === 'xml') {
+        chosen = xml;
+      } else {
         // Prefer real PDF; fall back to companion beside XML; never serve XML as PDF.
         if (pdf && existsSync(pdf)) chosen = pdf;
         else if (companion && existsSync(companion)) chosen = companion;
         else if (pdf) chosen = pdf;
         else if (companion) chosen = companion;
-      } else chosen = pdf || (companion && existsSync(companion) ? companion : '') || xml;
-      if (!chosen) {
-        return NextResponse.json(
-          {
-            error: 'Sin archivo local; re-ejecuta ingest_facturas_gmail.py',
-            gmail_id: d.gmail_id || null,
-          },
-          { status: 404 }
-        );
       }
-      return streamFile(chosen, allowedRoots(), { asAttachment });
+
+      if (chosen) {
+        const local = await streamFile(chosen, allowedRoots(), { asAttachment });
+        if (local.status < 400) return local;
+      }
+
+      // Vercel / sin File Stream: releer adjunto desde Gmail
+      if (gmailId) {
+        const fromGmail = await streamFromGmail(gmailId, prefer, asAttachment);
+        if (fromGmail) return fromGmail;
+        // Pedido PDF sin adjunto PDF: no devolver XML disfrazado
+        if (prefer === 'pdf') {
+          return NextResponse.json(
+            {
+              error: 'Sin PDF en Gmail para esta factura',
+              gmail_id: gmailId,
+            },
+            { status: 404 }
+          );
+        }
+      }
+
+      return NextResponse.json(
+        {
+          error: 'Sin archivo local; re-ejecuta ingest_facturas_gmail.py',
+          gmail_id: gmailId || null,
+        },
+        { status: 404 }
+      );
     } catch (e) {
       return NextResponse.json(
         { error: e instanceof Error ? e.message : 'Error al abrir factura' },

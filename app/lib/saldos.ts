@@ -100,29 +100,36 @@ export function buildSaldosAlDia(records: FinancialRecord[]): SaldosAlDiaData {
       )
     : null;
 
-  // Fecha de tarjeta = último gasto en FLUJO (movimientos), no la fila de saldo.
-  const gastosFlujo = records
-    .filter((r) => r.source_file === 'flujo_efectivo_mov' && r.type === 'expense')
+  // Fecha "Al …" = último día con egreso en flujo; si el saldo llega más lejos
+  // (día con actividad de caja), usar ese día para alinear con el monto.
+  const movsFlujo = records
+    .filter((r) => r.source_file === 'flujo_efectivo_mov')
     .map((r) => ({ ...r, parsed: parseIsoDate(r.date) }))
     .filter((r) => r.parsed && r.parsed.y <= currentYear + 1);
-  const gastosAnio = gastosFlujo.filter((r) => r.parsed!.y === currentYear);
-  const poolGastos = gastosAnio.length > 0 ? gastosAnio : gastosFlujo;
-  const ultimoGasto = poolGastos.length
-    ? poolGastos.reduce((best, cur) =>
+  const movsAnio = movsFlujo.filter((r) => r.parsed!.y === currentYear);
+  const poolMovs = movsAnio.length > 0 ? movsAnio : movsFlujo;
+  const gastosFlujo = poolMovs.filter((r) => r.type === 'expense');
+  const ultimoGasto = gastosFlujo.length
+    ? gastosFlujo.reduce((best, cur) =>
         cur.parsed!.key >= best.parsed!.key ? cur : best
       )
     : null;
 
   let efectivoSyncedAt: string | null = null;
-  for (const r of [...saldosEfectivo, ...gastosFlujo]) {
+  for (const r of [...saldosEfectivo, ...movsFlujo]) {
     const at = r.created_at;
     if (!at) continue;
     if (!efectivoSyncedAt || at > efectivoSyncedAt) efectivoSyncedAt = at;
   }
 
-  // Fecha mostrada: último gasto; fallback al día del saldo si no hay movs.
+  const fechaGastoIso = ultimoGasto?.date?.slice(0, 10) ?? null;
+  const fechaSaldoIso = saldoEfectivoHoy?.date?.slice(0, 10) ?? null;
   const efectivoFecha =
-    ultimoGasto?.date ?? saldoEfectivoHoy?.date ?? null;
+    fechaGastoIso && fechaSaldoIso
+      ? fechaGastoIso >= fechaSaldoIso
+        ? ultimoGasto!.date
+        : saldoEfectivoHoy!.date
+      : (ultimoGasto?.date ?? saldoEfectivoHoy?.date ?? null);
 
   const todayIso = todayCdmxIso();
   const pickedIso = efectivoFecha ? efectivoFecha.slice(0, 10) : null;

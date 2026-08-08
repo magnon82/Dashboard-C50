@@ -63,15 +63,7 @@ export function SaldosAlDia({ data, loading }: Props) {
               {data.efectivoSyncedAt
                 ? `Última sincronización ${formatTimestampCdmx(data.efectivoSyncedAt) || '—'}`
                 : 'Última sincronización —'}
-              {' · '}
-              cada hora :07
             </p>
-            {data.efectivoStale ? (
-              <p className="mt-1 text-xs font-medium" style={{ color: SUITE.orangeDeep }}>
-                El Excel de FLUJO EFECTIVO no trae gastos después de esa fecha. Actualízalo en
-                Drive; la sync ya está corriendo.
-              </p>
-            ) : null}
           </div>
 
           <div className="rounded-[24px] bg-white px-5 py-5" style={{ boxShadow: SUITE.shadow }}>
@@ -159,8 +151,6 @@ export function SaldosAlDia({ data, loading }: Props) {
               {data.cxpSyncedAt
                 ? `Última sincronización ${formatTimestampCdmx(data.cxpSyncedAt) || '—'}`
                 : 'Última sincronización —'}
-              {' · '}
-              cada hora :07
             </p>
           </div>
         </div>

@@ -132,7 +132,6 @@ function FacturaRefLink({
         {xmlHref ? (
           <a
             href={xmlHref}
-            download
             title="Descargar XML"
             className="underline-offset-2 hover:underline"
             style={{ color: SUITE.orangeDeep }}
@@ -140,27 +139,33 @@ function FacturaRefLink({
           >
             XML
           </a>
-        ) : null}
-        {xmlHref && pdfHref ? (
-          <span className="text-slate-300" aria-hidden>
-            ·
-          </span>
-        ) : null}
-        {pdfHref ? (
-          <a
-            href={pdfHref}
-            download
-            title={
-              xmlHref
-                ? 'Descargar PDF'
-                : 'Acuse / comprobante PDF (sin CFDI XML)'
-            }
-            className="underline-offset-2 hover:underline"
-            style={{ color: SUITE.orangeDeep }}
-            onClick={(e) => e.stopPropagation()}
+        ) : (
+          <span
+            className="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
+            title="Sin XML indexado"
           >
-            {xmlHref ? 'PDF' : 'Acuse PDF'}
-          </a>
+            sin XML
+          </span>
+        )}
+        {pdfHref ? (
+          <>
+            <span className="text-slate-300" aria-hidden>
+              ·
+            </span>
+            <a
+              href={pdfHref}
+              title={
+                xmlHref
+                  ? 'Descargar PDF'
+                  : 'Acuse / comprobante PDF (sin CFDI XML)'
+              }
+              className="underline-offset-2 hover:underline"
+              style={{ color: SUITE.orangeDeep }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              PDF
+            </a>
+          </>
         ) : null}
       </div>
     </div>

@@ -2,6 +2,7 @@
 Suma Cuentas por Pagar desde Google Sheet CXP:
   - Total = suma SALDO A LA FECHA (col I) en PROVEEDORES + SERVICIOS
   - Pagos programados = misma columna en filas con fondo amarillo
+    (incluye amarillas con FECHA vacía; omite subtotales blancos sin fecha)
   - Saldo x pagar = Total - Programados (dashboard)
 
 source_file=cxp_por_pagar
@@ -77,6 +78,38 @@ def has_valid_date(cell: dict) -> bool:
     return bool(DATE_RE.match(fv.replace(" ", "")))
 
 
+def row_is_yellow(values: list[dict]) -> bool:
+    for cell in values[:13]:
+        bg = (cell.get("effectiveFormat") or {}).get("backgroundColor")
+        if is_yellow_bg(bg):
+            return True
+    return False
+
+
+def cell_text(values: list[dict], idx: int) -> str:
+    if len(values) <= idx:
+        return ""
+    return str((values[idx].get("formattedValue") or "")).strip()
+
+
+def should_count_row(values: list[dict], saldo: float, yellow: bool) -> bool:
+    """
+    Cuenta filas con SALDO > 0 si:
+      - tienen fecha válida en A, o
+      - están en amarillo (programadas) aunque A esté vacío
+        (continúan un bloque / celda de fecha vacía en la API).
+    No cuenta subtotales blancos sin fecha (evita doble conteo).
+    """
+    if saldo <= 0:
+        return False
+    if has_valid_date(values[0]):
+        return True
+    if not yellow:
+        return False
+    # Amarillo sin fecha: exige proveedor para no tomar encabezados
+    return bool(cell_text(values, 2))
+
+
 def sum_tab_with_colors(service, spreadsheet_id: str, title: str) -> tuple[float, float]:
     result = (
         service.spreadsheets()
@@ -103,19 +136,11 @@ def sum_tab_with_colors(service, spreadsheet_id: str, title: str) -> tuple[float
         values = row.get("values") or []
         if len(values) <= COL_SALDO:
             continue
-        if not has_valid_date(values[0]):
-            continue
 
         saldo = cell_number(values[COL_SALDO]) or 0.0
-        if saldo <= 0:
+        yellow = row_is_yellow(values)
+        if not should_count_row(values, saldo, yellow):
             continue
-
-        yellow = False
-        for cell in values[:13]:
-            bg = (cell.get("effectiveFormat") or {}).get("backgroundColor")
-            if is_yellow_bg(bg):
-                yellow = True
-                break
 
         total += saldo
         if yellow:

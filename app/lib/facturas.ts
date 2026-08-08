@@ -691,31 +691,39 @@ export function facturaOpenHref(
 
 /** URL para ver PDF en el navegador (Content-Disposition: inline). */
 export function facturaPdfViewHref(f: FacturaItem): string | null {
-  const pdf = facturaEffectivePdfPath(f);
-  if (pdf) return facturaOpenHref(pdf);
-  if (f.id && f.has_pdf) {
+  if (f.id && (f.has_pdf || facturaEffectivePdfPath(f) || f.gmail_id)) {
     return `/api/facturas?id=${encodeURIComponent(f.id)}&format=pdf`;
   }
-  return null;
+  const pdf = facturaEffectivePdfPath(f);
+  return pdf ? facturaOpenHref(pdf) : null;
 }
 
 /** URL de descarga PDF (preferido) o XML vía API existente. */
 export function facturaDownloadHref(f: FacturaItem): string | null {
+  if (f.id && (f.has_pdf || facturaEffectivePdfPath(f) || f.xml_path || f.gmail_id)) {
+    const format =
+      f.has_pdf || facturaEffectivePdfPath(f) ? 'pdf' : f.has_xml || f.xml_path ? 'xml' : 'pdf';
+    return `/api/facturas?id=${encodeURIComponent(f.id)}&format=${format}&download=1`;
+  }
   const filePath = facturaEffectivePdfPath(f) || f.xml_path;
-  if (filePath) {
-    return facturaOpenHref(filePath, { download: true });
-  }
-  if (f.id) {
-    return `/api/facturas?id=${encodeURIComponent(f.id)}&download=1`;
-  }
-  return null;
+  return filePath ? facturaOpenHref(filePath, { download: true }) : null;
 }
 
+/** Descarga XML: por id (Vercel/Gmail) o path local. */
 export function facturaXmlHref(f: FacturaItem): string | null {
+  if (!(f.has_xml || f.xml_path)) return null;
+  if (f.id) {
+    return `/api/facturas?id=${encodeURIComponent(f.id)}&format=xml&download=1`;
+  }
   return f.xml_path ? facturaOpenHref(f.xml_path, { download: true }) : null;
 }
 
+/** Descarga PDF aunque no haya XML (acuse / solo PDF). */
 export function facturaPdfHref(f: FacturaItem): string | null {
+  if (!(f.has_pdf || facturaEffectivePdfPath(f) || f.gmail_id)) return null;
+  if (f.id) {
+    return `/api/facturas?id=${encodeURIComponent(f.id)}&format=pdf&download=1`;
+  }
   const pdf = facturaEffectivePdfPath(f);
   return pdf ? facturaOpenHref(pdf, { download: true }) : null;
 }
