@@ -51,7 +51,14 @@ function hasDispatchToken(): boolean {
 }
 
 function resolveWorkflow(raw: unknown): SyncWorkflowKey | null {
-  if (raw === 'gmail' || raw === 'saldos' || raw === 'hr') return raw;
+  if (
+    raw === 'gmail' ||
+    raw === 'saldos' ||
+    raw === 'hr' ||
+    raw === 'finanzas'
+  ) {
+    return raw;
+  }
   return null;
 }
 
@@ -129,7 +136,7 @@ export async function GET() {
 }
 
 /**
- * POST /api/admin/sync-schedules — { workflow: 'gmail'|'saldos'|'hr' }
+ * POST /api/admin/sync-schedules — { workflow: 'gmail'|'saldos'|'hr'|'finanzas' }
  * Dispara workflow_dispatch (mismo token que ventas-sync-status).
  */
 export async function POST(req: Request) {
@@ -149,7 +156,7 @@ export async function POST(req: Request) {
   );
   if (!workflow) {
     return NextResponse.json(
-      { error: 'workflow debe ser gmail | saldos | hr' },
+      { error: 'workflow debe ser gmail | saldos | hr | finanzas' },
       { status: 400 },
     );
   }

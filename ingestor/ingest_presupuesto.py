@@ -5,7 +5,7 @@ source_file:
   - presupuesto_mensual  — gastos por canal (Efectivo/Mifel/BBVA) por rubro
   - presupuesto_saldos   — saldo ACTUAL Mifel / BBVA del mes
   - presupuesto_rubro    — presupuesto vs real por rubro (+ canales, padre)
-  - presupuesto_semana   — componentes del roll-forward bancario semanal
+  - presupuesto_semana   — resumen semanal de movimientos (TOTAL!U:Z)
   - presupuesto_sem_detalle — gasto por SEM × rubro × canal (+ nota de concepto)
   - presupuesto_ingreso  — ingresos bancarios semanales Mifel/BBVA (TOTAL, llenado manual)
 """
@@ -851,13 +851,75 @@ def classify_anticipo_tipo(bank: str, note: str | None) -> str:
     return "otro"
 
 
+# Panel Resumen semanal de movimientos en TOTAL (cols U–Z).
+# U = etiqueta · V–Z = semanas 1–5
+RESUMEN_PANEL_LABELS = {
+    "inicial": "inicial",
+    "ingresos": "ingresos",
+    "pagos mifel": "pagos_mifel",
+    "comisiones": "comisiones",
+    "pagos bbva": "pagos_bbva",
+    "inversiones": "inversiones",
+    "suma ingreso": "suma_ingreso",
+    "suma gastos": "suma_gasto",
+    "total": "total",
+}
+
+
+def extract_total_resumen_panel(wb) -> dict[int, dict[str, float]]:
+    """
+    Lee TOTAL!U2:Z15 — fuente canónica del Resumen semanal de movimientos.
+    Devuelve {week: {inicial, ingresos, pagos_mifel, ...}}.
+    """
+    if "TOTAL" not in wb.sheetnames:
+        return {}
+    rows = list(
+        wb["TOTAL"].iter_rows(
+            min_row=1, max_row=20, min_col=21, max_col=26, values_only=True
+        )
+    )
+    if len(rows) < 3:
+        return {}
+
+    # Fila 2: (None, 1, 2, 3, 4, 5) — col U vacía, V–Z = nº semana
+    header = rows[1]
+    week_indexes: list[tuple[int, int]] = []
+    for i, v in enumerate(header):
+        if i == 0:
+            continue
+        try:
+            w = int(float(v))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= w <= 6:
+            week_indexes.append((w, i))
+    if not week_indexes:
+        return {}
+
+    by_week: dict[int, dict[str, float]] = {w: {"week": w} for w, _ in week_indexes}
+    for row in rows[2:]:
+        label = str(row[0] or "").strip().lower()
+        key = RESUMEN_PANEL_LABELS.get(label)
+        if not key:
+            continue
+        for w, idx in week_indexes:
+            by_week[w][key] = money_or_0(row[idx] if idx < len(row) else None)
+
+    # Solo semanas con al menos una fila del panel
+    return {
+        w: payload
+        for w, payload in by_week.items()
+        if any(k != "week" for k in payload)
+    }
+
+
 def extract_week_bank_components(
     wb, year: int, month: int, anticipos_notes: dict[tuple[str, int], str] | None = None
 ) -> tuple[list[dict], list[dict]]:
-    """Build per-week bank roll-forward + per-bank ingreso rows from SEM + TOTAL panel.
+    """Build per-week bank roll-forward + per-bank ingreso rows.
 
-    Bank ingresos are weekly aggregates typed manually on TOTAL (ventas M+N +
-    anticipos entradas). SEM sheets have no income line items — only pagos/gastos.
+    presupuesto_semana: panel TOTAL!U:Z (resumen semanal de movimientos).
+    presupuesto_ingreso: agregados manuales TOTAL (ventas M+N + anticipos).
 
     presupuesto_ingreso emits separate rows:
       - tipo=ventas          (SEM n ventas M+N)
@@ -868,6 +930,8 @@ def extract_week_bank_components(
     notes = anticipos_notes or {}
     if "TOTAL" not in wb.sheetnames:
         return [], []
+
+    resumen_panel = extract_total_resumen_panel(wb)
 
     total_rows = [
         list(r) + [None] * 20
@@ -924,7 +988,7 @@ def extract_week_bank_components(
                 mifel_inv_in[w] = mifel_inv_in.get(w, 0) + entrada
                 mifel_inv_out[w] = mifel_inv_out.get(w, 0) + salida
 
-    # SEM sheet bank pagos — incluir toda hoja SEM n existente (aunque esté en ceros)
+    # SEM sheet bank pagos — fallback si el panel U:Z no existe
     week_pagos: dict[int, dict] = {}
     for n in range(1, 6):
         name = f"SEM {n}"
@@ -939,56 +1003,115 @@ def extract_week_bank_components(
             "pagos_bbva": money_or_0(r1[7]),
         }
 
-    weeks = sorted(week_pagos.keys())
+    weeks = sorted(set(resumen_panel.keys()) | set(week_pagos.keys()) | set(mifel_weeks.keys()) | set(bbva_weeks.keys()))
     if not weeks:
         return [], []
 
-    inicial = mifel_inicial + bbva_inicial
     records: list[dict] = []
     ingreso_records: list[dict] = []
+
+    # ── presupuesto_semana: panel TOTAL!U:Z (canónico) ─────────────────────
+    if resumen_panel:
+        for w in sorted(resumen_panel.keys()):
+            panel = resumen_panel[w]
+            mv = mifel_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
+            bv = bbva_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
+            ingresos_mifel = mv["ventas"] + mifel_inv_in.get(w, 0.0)
+            ingresos_bbva = bv["ventas"] + bbva_inv_in.get(w, 0.0)
+            inicial = float(panel.get("inicial") or 0)
+            ingresos = float(panel.get("ingresos") or 0)
+            pagos_mifel = float(panel.get("pagos_mifel") or 0)
+            comisiones = float(panel.get("comisiones") or 0)
+            pagos_bbva = float(panel.get("pagos_bbva") or 0)
+            inversiones = float(panel.get("inversiones") or 0)
+            suma_ingreso = float(
+                panel.get("suma_ingreso")
+                if panel.get("suma_ingreso") is not None
+                else inicial + ingresos
+            )
+            suma_gasto = float(
+                panel.get("suma_gasto")
+                if panel.get("suma_gasto") is not None
+                else pagos_mifel + comisiones + pagos_bbva + inversiones
+            )
+            total = float(
+                panel.get("total")
+                if panel.get("total") is not None
+                else suma_ingreso - suma_gasto
+            )
+            payload = {
+                "week": w,
+                "inicial": inicial,
+                "ingresos": ingresos,
+                "ingresos_mifel": ingresos_mifel,
+                "ingresos_bbva": ingresos_bbva,
+                "pagos_mifel": pagos_mifel,
+                "comisiones": comisiones,
+                "pagos_bbva": pagos_bbva,
+                "inversiones": inversiones,
+                "suma_ingreso": suma_ingreso,
+                "suma_gasto": suma_gasto,
+                "total": total,
+                "source": "total_UZ",
+            }
+            records.append(
+                {
+                    "date": month_date,
+                    "type": "expense",
+                    "category": f"Semana {w}",
+                    "amount": total,
+                    "description": json.dumps(payload, ensure_ascii=False),
+                    "source_file": SOURCE_SEMANA,
+                }
+            )
+    else:
+        # Fallback legacy: reconstruir desde SEM + bloques Mifel/BBVA
+        inicial = mifel_inicial + bbva_inicial
+        for w in weeks:
+            mp = week_pagos.get(w, {"pagos_mifel": 0.0, "pagos_bbva": 0.0})
+            mv = mifel_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
+            bv = bbva_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
+            ingresos_mifel = mv["ventas"] + mifel_inv_in.get(w, 0.0)
+            ingresos_bbva = bv["ventas"] + bbva_inv_in.get(w, 0.0)
+            ingresos = ingresos_mifel + ingresos_bbva
+            comisiones = mv["comisiones"] + bv["comisiones"]
+            inversiones = mifel_inv_out.get(w, 0.0) + bbva_inv_out.get(w, 0.0)
+            pagos_mifel = mp["pagos_mifel"]
+            pagos_bbva = mp["pagos_bbva"]
+            suma_ingreso = inicial + ingresos
+            suma_gasto = pagos_mifel + comisiones + pagos_bbva + inversiones
+            total = suma_ingreso - suma_gasto
+            payload = {
+                "week": w,
+                "inicial": inicial,
+                "ingresos": ingresos,
+                "ingresos_mifel": ingresos_mifel,
+                "ingresos_bbva": ingresos_bbva,
+                "pagos_mifel": pagos_mifel,
+                "comisiones": comisiones,
+                "pagos_bbva": pagos_bbva,
+                "inversiones": inversiones,
+                "suma_ingreso": suma_ingreso,
+                "suma_gasto": suma_gasto,
+                "total": total,
+                "source": "legacy_sem",
+            }
+            records.append(
+                {
+                    "date": month_date,
+                    "type": "expense",
+                    "category": f"Semana {w}",
+                    "amount": total,
+                    "description": json.dumps(payload, ensure_ascii=False),
+                    "source_file": SOURCE_SEMANA,
+                }
+            )
+            inicial = total
+
+    # ── presupuesto_ingreso: detalle por banco (TOTAL bloques SEM / anticipos) ─
     for w in weeks:
-        mp = week_pagos.get(w, {"pagos_mifel": 0.0, "pagos_bbva": 0.0})
         mv = mifel_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
         bv = bbva_weeks.get(w, {"ventas": 0.0, "comisiones": 0.0})
-        ingresos_mifel = mv["ventas"] + mifel_inv_in.get(w, 0.0)
-        ingresos_bbva = bv["ventas"] + bbva_inv_in.get(w, 0.0)
-        # Entradas de anticipos se suman a ingresos (como en la tabla resumen)
-        ingresos = ingresos_mifel + ingresos_bbva
-        comisiones = mv["comisiones"] + bv["comisiones"]
-        inversiones = mifel_inv_out.get(w, 0.0) + bbva_inv_out.get(w, 0.0)
-        pagos_mifel = mp["pagos_mifel"]
-        pagos_bbva = mp["pagos_bbva"]
-
-        suma_ingreso = inicial + ingresos
-        suma_gasto = pagos_mifel + comisiones + pagos_bbva + inversiones
-        total = suma_ingreso - suma_gasto
-
-        payload = {
-            "week": w,
-            "inicial": inicial,
-            "ingresos": ingresos,
-            "ingresos_mifel": ingresos_mifel,
-            "ingresos_bbva": ingresos_bbva,
-            "pagos_mifel": pagos_mifel,
-            "comisiones": comisiones,
-            "pagos_bbva": pagos_bbva,
-            "inversiones": inversiones,
-            "suma_ingreso": suma_ingreso,
-            "suma_gasto": suma_gasto,
-            "total": total,
-        }
-        records.append(
-            {
-                "date": month_date,
-                "type": "expense",
-                "category": f"Semana {w}",
-                "amount": total,
-                "description": json.dumps(payload, ensure_ascii=False),
-                "source_file": SOURCE_SEMANA,
-            }
-        )
-
-        # Filas visibles en /finanzas/ingresos — una por componente (ventas / anticipo).
         week_monday = monday_of_month_sem(year, month, w)
         bank_parts = (
             (
@@ -1060,8 +1183,6 @@ def extract_week_bank_components(
                         "source_file": SOURCE_INGRESO,
                     }
                 )
-
-        inicial = total
 
     return records, ingreso_records
 

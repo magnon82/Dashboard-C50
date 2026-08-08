@@ -14,7 +14,7 @@ import type { HrLastUpdateProbe } from '@/app/lib/admin-last-updates';
 
 export type SyncScheduleMode = 'cloud' | 'manual' | 'mixed';
 
-export type SyncWorkflowKey = 'gmail' | 'saldos' | 'hr';
+export type SyncWorkflowKey = 'gmail' | 'saldos' | 'hr' | 'finanzas';
 
 export type AdminSyncSchedule = {
   id: string;
@@ -45,6 +45,7 @@ export const SYNC_WORKFLOW_FILES: Record<SyncWorkflowKey, string> = {
   gmail: 'sync-gmail.yml',
   saldos: 'sync-saldos.yml',
   hr: 'sync-hr-drive.yml',
+  finanzas: 'sync-finanzas.yml',
 };
 
 export function actionsUrlFor(workflow: SyncWorkflowKey): string {
@@ -101,49 +102,41 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
     note: 'Soft-check en cloud. Import nómina/horarios sigue siendo botón en /rrhh o File Stream en PC.',
   },
   {
-    id: 'cxp-hist',
-    label: 'CxP histórico',
-    feeds: 'cxp, cxp_saldos',
-    mode: 'manual',
-    schedule: 'Manual (ingest_cxp.py)',
-    areaId: 'cxp_hist',
-    sourceFiles: ['cxp', 'cxp_saldos'],
-    note: 'No hay workflow Actions; correr en PC admin.',
-  },
-  {
-    id: 'presupuesto',
-    label: 'Presupuesto',
-    feeds: 'presupuesto_* (+ ajustes solo /admin)',
-    mode: 'manual',
-    schedule: 'Manual (ingest_presupuesto.py) · ajustes en /admin',
+    id: 'sync-finanzas',
+    label: 'Finanzas · Drive/Sheets (antes manual)',
+    feeds: 'cxp + cxp_saldos + presupuesto_* + estado_mifel/bbva (Excel)',
+    mode: 'cloud',
+    schedule: 'Diario 6:37 AM y 6:37 PM CDMX',
+    cronUtc: '37 12 * * * · 37 0 * * *',
     areaId: 'presupuesto',
     sourceFiles: [
+      'cxp',
+      'cxp_saldos',
       'presupuesto_mensual',
       'presupuesto_saldos',
       'presupuesto_rubro',
       'presupuesto_semana',
       'presupuesto_sem_detalle',
       'presupuesto_ingreso',
-      'presupuesto_ajuste',
-    ],
-    note:
-      'Carga manual: no hay workflow Actions. Tras editar el Excel en Drive, correr ingest_presupuesto.py en PC admin. Ajustes en /admin no requieren re-ingest.',
-  },
-  {
-    id: 'bancos',
-    label: 'Bancos / estados de cuenta',
-    feeds: 'estado_* + saldos_bancos_manual',
-    mode: 'manual',
-    schedule: 'Manual / al reindexar · saldos bancarios solo /admin',
-    areaId: 'bancos',
-    sourceFiles: [
       'estado_mifel',
       'estado_bbva',
-      'estado_pdf_index',
-      'estado_cuenta_pdf_index',
     ],
+    workflow: 'finanzas',
+    canDispatch: true,
+    actionsUrl: actionsUrlFor('finanzas'),
     note:
-      'Comprobantes (estado_pdf_index) y estados Excel/PDF: sin workflow Actions. Tras subir PDFs a COMPROBANTES BANCARIOS, correr ingest_estados_cuenta.py --index-pdfs --pdf-only en PC admin. Saldos bancarios manuales solo en /admin.',
+      'Descarga Excel de presupuesto y estados desde Drive; CxP histórico desde Sheets. Ajustes /admin (presupuesto_ajuste, saldos_bancos_manual) siguen manuales. Índices PDF: reindex en Suite o PC.',
+  },
+  {
+    id: 'bancos-pdf',
+    label: 'Bancos · índices PDF',
+    feeds: 'estado_pdf_index, estado_cuenta_pdf_index',
+    mode: 'manual',
+    schedule: 'Manual / botón reindex en Suite',
+    areaId: 'bancos',
+    sourceFiles: ['estado_pdf_index', 'estado_cuenta_pdf_index'],
+    note:
+      'Índice de PDFs de comprobantes/estados. En nube: reindex desde Finanzas/Comprobantes. Excel Mifel/BBVA ya va en sync-finanzas.',
   },
   {
     id: 'eventos',
@@ -153,6 +146,7 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
     schedule: 'Manual (ingest_eventos.py / ingest_ventas_semana.py)',
     areaId: 'eventos',
     sourceFiles: ['eventos', 'ventas_semana'],
+    note: 'Legacy; Eventos vivos usan módulo /eventos (Supabase), no este ingest.',
   },
   {
     id: 'auth',
@@ -161,6 +155,16 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
     mode: 'manual',
     schedule: 'Solo /admin (manual)',
     areaId: 'auth',
+  },
+  {
+    id: 'suite-manual',
+    label: 'Overrides Suite (no Drive)',
+    feeds: 'presupuesto_ajuste, saldos_bancos_manual',
+    mode: 'manual',
+    schedule: 'Solo captura en /admin',
+    areaId: null,
+    sourceFiles: ['presupuesto_ajuste', 'saldos_bancos_manual'],
+    note: 'No hay archivo origen externo: se editan en la Suite.',
   },
 ];
 

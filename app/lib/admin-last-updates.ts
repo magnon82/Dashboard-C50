@@ -55,7 +55,7 @@ export const ADMIN_UPDATE_AREAS: AdminUpdateAreaDef[] = [
     id: 'cxp_hist',
     label: 'CxP líneas / saldos',
     sources: ['cxp', 'cxp_saldos'],
-    mode: 'manual',
+    mode: 'cloud',
     mapNodeIds: ['ingest-cxp'],
   },
   {
@@ -63,14 +63,14 @@ export const ADMIN_UPDATE_AREAS: AdminUpdateAreaDef[] = [
     label: 'Presupuesto',
     sources:
       SOURCE_FILE_GROUPS.find((g) => g.id === 'presupuesto')?.sources ?? [],
-    mode: 'manual',
+    mode: 'cloud',
     mapNodeIds: ['ingest-prep'],
   },
   {
     id: 'bancos',
     label: 'Bancos / estados',
     sources: SOURCE_FILE_GROUPS.find((g) => g.id === 'bancos')?.sources ?? [],
-    mode: 'manual',
+    mode: 'mixed',
     mapNodeIds: ['ingest-estados'],
   },
   {

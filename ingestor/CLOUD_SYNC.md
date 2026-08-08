@@ -23,7 +23,10 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 |----------|-----------------|----------|----------|
 | `sync-gmail.yml` | Lun–Vie 2–6 AM cada hora; Dom 7–11 PM cada hora | `0 8-12 * * 1-5`, `0 1-5 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
 | `sync-saldos.yml` | Cada hora (:07) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
+| `sync-finanzas.yml` | Diario 6:37 AM y 6:37 PM | `37 12 * * *`, `37 0 * * *` | CxP histórico (Sheets) + presupuesto Excel (Drive TOTAL U:Z) + estados Mifel/BBVA Excel si están en Drive |
 | `sync-hr-drive.yml` | Diario 12:00 PM | `0 18 * * *` | Soft-check `hr_*` + `hr_drive_sync_state` |
+
+Siguen **manuales a propósito**: `presupuesto_ajuste`, `saldos_bancos_manual`, `dashboard_auth`, índices PDF masivos (`estado_pdf_index`), Eventos legacy.
 
 ### Certeza del sync de ventas (no solo “confiar en el cron”)
 

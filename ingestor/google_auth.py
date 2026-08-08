@@ -100,22 +100,56 @@ def drive_service():
     return build("drive", "v3", credentials=get_credentials())
 
 
-def download_drive_file_by_name(name: str, dest: Path | None = None) -> Path:
-    """Descarga el primer archivo de Drive con ese nombre exacto."""
+def _drive_list(q: str, page_size: int = 25) -> list[dict]:
+    """Lista archivos en Mi unidad + shared drives."""
     drive = drive_service()
-    safe = name.replace("'", "\\'")
-    q = f"name = '{safe}' and trashed = false"
     res = (
         drive.files()
-        .list(q=q, spaces="drive", fields="files(id, name)", pageSize=5)
+        .list(
+            q=q,
+            spaces="drive",
+            fields="files(id, name, modifiedTime, mimeType)",
+            pageSize=page_size,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+            corpora="allDrives",
+        )
         .execute()
     )
-    files = res.get("files") or []
+    return list(res.get("files") or [])
+
+
+def download_drive_file_by_id(file_id: str, dest: Path) -> Path:
+    drive = drive_service()
+    data = (
+        drive.files()
+        .get_media(fileId=file_id, supportsAllDrives=True)
+        .execute()
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    return dest
+
+
+def download_drive_file_by_name(name: str, dest: Path | None = None) -> Path:
+    """Descarga el primer archivo de Drive con ese nombre exacto."""
+    safe = name.replace("'", "\\'")
+    q = f"name = '{safe}' and trashed = false"
+    files = _drive_list(q, page_size=5)
     if not files:
         raise FileNotFoundError(f"No se encontro en Drive: {name}")
     file_id = files[0]["id"]
     if dest is None:
         dest = Path(tempfile.gettempdir()) / name
-    data = drive.files().get_media(fileId=file_id).execute()
-    dest.write_bytes(data)
-    return dest
+    return download_drive_file_by_id(file_id, dest)
+
+
+def find_drive_files_by_name_contains(
+    *needles: str, page_size: int = 40
+) -> list[dict]:
+    """Busca archivos cuyo nombre contiene todos los needles (AND)."""
+    parts = ["trashed = false", "mimeType != 'application/vnd.google-apps.folder'"]
+    for n in needles:
+        safe = n.replace("'", "\\'")
+        parts.append(f"name contains '{safe}'")
+    return _drive_list(" and ".join(parts), page_size=page_size)
