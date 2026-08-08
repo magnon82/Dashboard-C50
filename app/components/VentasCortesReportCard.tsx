@@ -982,11 +982,11 @@ export function VentasCortesReportCard({
                   }
                 />
                 <Kpi
-                  label="Tómbola"
+                  label="Efectivo en tómbola"
                   value={moneyMx(tombolaAmount)}
                   hint={
                     tombolaAmount != null && tombolaAmount < 0
-                      ? `${tombolaHint ?? 'Depósito'} · no alcanzó el efectivo`
+                      ? `${tombolaHint ?? 'Efectivo − propina'} · no alcanzó el efectivo`
                       : tombolaHint
                   }
                   tone={
