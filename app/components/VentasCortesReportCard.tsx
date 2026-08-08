@@ -7,6 +7,11 @@ import {
   filterControlClass,
 } from '@/app/components/SectionHeader';
 import { getTheme, SUITE } from '@/app/lib/themes';
+import {
+  EFECTIVO_TOLERANCE_MXN,
+  type EfectivoInfocajaReconcile,
+  type StaffRptInfocajaDay,
+} from '@/app/lib/staff-rpt';
 import { moneyMx } from '@/app/lib/tpv-cortes';
 
 const theme = getTheme('suite');
@@ -70,6 +75,10 @@ type CortePayload = {
     cancelaciones?: CorteCancDescLine[];
     descuentos?: CorteCancDescLine[];
   };
+  /** Reporte Infocaja ingerido desde Gmail (mismo del cierre de terminales). */
+  infocaja?: StaffRptInfocajaDay | null;
+  /** Conciliación efectivo recibido (corte) vs Infocaja Efectivo. */
+  cashCheck?: EfectivoInfocajaReconcile | null;
   error?: string;
   hint?: string;
 };
@@ -86,6 +95,205 @@ function formatCorteDateDisplay(iso: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
+}
+
+function lineDelta(
+  corteVal: number | null | undefined,
+  infoVal: number | null | undefined
+): { ok: boolean; delta: number } | null {
+  if (
+    corteVal == null ||
+    infoVal == null ||
+    !Number.isFinite(Number(corteVal)) ||
+    !Number.isFinite(Number(infoVal))
+  ) {
+    return null;
+  }
+  const delta =
+    Math.round((Number(corteVal) - Number(infoVal)) * 100) / 100;
+  return {
+    ok: Math.abs(delta) <= EFECTIVO_TOLERANCE_MXN,
+    delta,
+  };
+}
+
+/** Banner de conciliación corte ↔ reporte Infocaja (Gmail). */
+function InfocajaReconcilePanel({
+  cashCheck,
+  infocaja,
+  corte,
+}: {
+  cashCheck: EfectivoInfocajaReconcile | null | undefined;
+  infocaja: StaffRptInfocajaDay | null | undefined;
+  corte: NonNullable<CortePayload['corte']>;
+}) {
+  const hasRecibido = cashCheck?.hasRecibido ?? corte.efectivo_contado != null;
+  const hasInfocaja =
+    cashCheck?.hasInfocaja ??
+    Boolean(infocaja?.hasEfectivo || corte.efectivo_infocaja != null);
+
+  // Solo comparar líneas Infocaja que vienen con monto (>0) para evitar falsas alertas.
+  const propinasCmp =
+    infocaja && infocaja.propina > 0
+      ? lineDelta(corte.bancos_propina_tpv ?? corte.propinas, infocaja.propina)
+      : null;
+  const bancosCmp =
+    infocaja && infocaja.bancarias > 0
+      ? lineDelta(
+          corte.bancos_cobrado_tpv ?? corte.bancos_neto_tpv,
+          infocaja.bancarias
+        )
+      : null;
+
+  const secondaryMismatch =
+    propinasCmp?.ok === false || bancosCmp?.ok === false;
+  const mismatch = Boolean(cashCheck?.mismatch) || secondaryMismatch;
+  const match =
+    Boolean(cashCheck?.match) &&
+    (propinasCmp == null || propinasCmp.ok) &&
+    (bancosCmp == null || bancosCmp.ok);
+
+  let tone: 'match' | 'mismatch' | 'pending' = 'pending';
+  if (mismatch) tone = 'mismatch';
+  else if (match) tone = 'match';
+  else if (!hasInfocaja && hasRecibido) tone = 'pending';
+
+  const styles =
+    tone === 'match'
+      ? {
+          border: '1px solid #6EE7B7',
+          bg: '#ECFDF5',
+          title: '#065F46',
+          body: '#047857',
+        }
+      : tone === 'mismatch'
+        ? {
+            border: '1px solid #FCA5A5',
+            bg: '#FEF2F2',
+            title: '#991B1B',
+            body: '#B91C1C',
+          }
+        : {
+            border: '1px solid #FDE68A',
+            bg: '#FFFBEB',
+            title: '#92400E',
+            body: '#B45309',
+          };
+
+  const title =
+    tone === 'match'
+      ? 'Conciliación Infocaja · coincide'
+      : tone === 'mismatch'
+        ? 'Alerta · diferencias vs Infocaja'
+        : 'Conciliación Infocaja · pendiente';
+
+  const headline =
+    tone === 'match'
+      ? cashCheck?.message ||
+        'Efectivo recibido del corte coincide con el reporte Infocaja del correo.'
+      : tone === 'mismatch'
+        ? cashCheck?.mismatch
+          ? cashCheck.message ||
+            'Efectivo del corte no coincide con Infocaja Efectivo.'
+          : 'Hay diferencias en propinas o bancos vs el reporte Infocaja del correo.'
+        : hasRecibido
+          ? 'El reporte Infocaja del correo aún no está para este día; la conciliación se hará al sincronizar Gmail.'
+          : 'Sin efectivo recibido en el corte ni reporte Infocaja para conciliar.';
+
+  return (
+    <div
+      className="mt-3 rounded-2xl px-4 py-3"
+      style={{ border: styles.border, backgroundColor: styles.bg }}
+      role={tone === 'mismatch' ? 'alert' : 'status'}
+    >
+      <p
+        className="text-xs font-semibold uppercase tracking-wide"
+        style={{ color: styles.title }}
+      >
+        {title}
+      </p>
+      <p className="mt-1 text-sm font-medium" style={{ color: styles.body }}>
+        {headline}
+      </p>
+      <dl className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+        <div className="flex justify-between gap-3 sm:block">
+          <dt style={{ color: styles.body }}>Efectivo recibido (corte)</dt>
+          <dd className="font-semibold tabular-nums" style={{ color: styles.title }}>
+            {moneyOrDash(cashCheck?.recibido ?? corte.efectivo_contado)}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-3 sm:block">
+          <dt style={{ color: styles.body }}>Infocaja Efectivo (correo)</dt>
+          <dd className="font-semibold tabular-nums" style={{ color: styles.title }}>
+            {moneyOrDash(
+              cashCheck?.infocaja ??
+                infocaja?.efectivo ??
+                corte.efectivo_infocaja
+            )}
+          </dd>
+        </div>
+        {cashCheck?.delta != null && !cashCheck.match ? (
+          <div className="flex justify-between gap-3 sm:col-span-2 sm:block">
+            <dt style={{ color: styles.body }}>Diferencia efectivo</dt>
+            <dd className="font-semibold tabular-nums" style={{ color: styles.title }}>
+              {moneyMx(cashCheck.delta)}
+            </dd>
+          </div>
+        ) : null}
+        {infocaja?.hasAny ? (
+          <>
+            <div className="flex justify-between gap-3 sm:block">
+              <dt style={{ color: styles.body }}>
+                Propinas TPV vs Infocaja Propina
+              </dt>
+              <dd
+                className="font-semibold tabular-nums"
+                style={{ color: styles.title }}
+              >
+                {moneyOrDash(corte.bancos_propina_tpv ?? corte.propinas)}
+                {' · '}
+                {moneyMx(infocaja.propina)}
+                {propinasCmp
+                  ? propinasCmp.ok
+                    ? ' · ok'
+                    : ` · Δ ${moneyMx(propinasCmp.delta)}`
+                  : ''}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3 sm:block">
+              <dt style={{ color: styles.body }}>
+                Bancos TPV vs Infocaja Bancarias
+              </dt>
+              <dd
+                className="font-semibold tabular-nums"
+                style={{ color: styles.title }}
+              >
+                {moneyOrDash(
+                  corte.bancos_cobrado_tpv ?? corte.bancos_neto_tpv
+                )}
+                {' · '}
+                {moneyMx(infocaja.bancarias)}
+                {bancosCmp
+                  ? bancosCmp.ok
+                    ? ' · ok'
+                    : ` · Δ ${moneyMx(bancosCmp.delta)}`
+                  : ''}
+              </dd>
+            </div>
+          </>
+        ) : null}
+      </dl>
+      <p className="mt-2 text-[11px]" style={{ color: styles.body }}>
+        Fuente: reporte Infocaja por correo (misma sync post-cierre de
+        terminales). Tolerancia ±{moneyMx(EFECTIVO_TOLERANCE_MXN)}.
+      </p>
+    </div>
+  );
+}
+
+function moneyOrDash(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  return moneyMx(Number(v));
 }
 
 function Kpi({
@@ -154,11 +362,6 @@ function Kpi({
       ) : null}
     </div>
   );
-}
-
-function moneyOrDash(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(Number(v))) return '—';
-  return moneyMx(v);
 }
 
 function lineTitle(item: CorteCancDescLine): string {
@@ -394,6 +597,8 @@ export function VentasCortesReportCard({
   const corte = data?.corte ?? null;
   const canc = data?.cancDesc;
   const tombola = data?.tombola ?? null;
+  const cashCheck = data?.cashCheck ?? null;
+  const infocaja = data?.infocaja ?? null;
   const displayDate = data?.date ?? activeDate ?? data?.yesterdayDate ?? null;
 
   const title =
@@ -439,6 +644,21 @@ export function VentasCortesReportCard({
 
   const recibidoVsInfocaja = (() => {
     if (!corte) return null;
+    if (cashCheck?.mismatch) {
+      return {
+        kind: 'mismatch' as const,
+        message: `vs Infocaja ${moneyOrDash(cashCheck.infocaja)} · Δ ${moneyMx(cashCheck.delta ?? 0)}`,
+      };
+    }
+    if (cashCheck?.match) {
+      return { kind: 'match' as const, message: 'Coincide con Infocaja' };
+    }
+    if (cashCheck?.hasRecibido && !cashCheck.hasInfocaja) {
+      return {
+        kind: 'pending' as const,
+        message: 'Infocaja pendiente de conciliar',
+      };
+    }
     const r = corte.efectivo_contado;
     const i = corte.efectivo_infocaja;
     if (r == null || i == null) {
@@ -451,7 +671,7 @@ export function VentasCortesReportCard({
       return null;
     }
     const delta = Math.round((Number(r) - Number(i)) * 100) / 100;
-    if (Math.abs(delta) <= 1) {
+    if (Math.abs(delta) <= EFECTIVO_TOLERANCE_MXN) {
       return { kind: 'match' as const, message: 'Coincide con Infocaja' };
     }
     return {
@@ -649,8 +869,8 @@ export function VentasCortesReportCard({
                   tone={
                     recibidoVsInfocaja?.kind === 'mismatch'
                       ? 'rose'
-                      : recibidoVsInfocaja?.kind === 'match'
-                        ? 'default'
+                      : recibidoVsInfocaja?.kind === 'pending'
+                        ? 'amber'
                         : 'default'
                   }
                 />
@@ -682,6 +902,12 @@ export function VentasCortesReportCard({
                   }
                 />
               </div>
+
+              <InfocajaReconcilePanel
+                cashCheck={cashCheck}
+                infocaja={infocaja}
+                corte={corte}
+              />
             </>
           ) : tombolaAmount != null ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

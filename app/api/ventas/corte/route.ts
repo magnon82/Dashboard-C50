@@ -14,6 +14,7 @@ import {
   resolveDayTombola,
   sumInfocajaDay,
   type DayTombolaResult,
+  type StaffRptInfocajaDay,
   type StaffRptRow,
 } from '@/app/lib/staff-rpt';
 import { isTpvSchemaError, tpvSchemaHint } from '@/app/lib/tpv-api';
@@ -251,10 +252,12 @@ export async function GET(req: NextRequest) {
 
     let tombola: DayTombolaResult | null = null;
     let cashCheck = reconcileEfectivoRecibidoVsInfocaja(null, null);
+    let liveInfocaja: StaffRptInfocajaDay | null = null;
     let liveInfocajaEfectivo: number | null = null;
     if (statsDate) {
       try {
         const infocaja = await loadInfocajaForDate(statsDate);
+        liveInfocaja = infocaja.hasAny ? infocaja : null;
         liveInfocajaEfectivo = infocaja.hasEfectivo ? infocaja.efectivo : null;
         tombola = resolveDayTombola({ rpt, infocaja });
         cashCheck = reconcileEfectivoRecibidoVsInfocaja(
@@ -263,9 +266,10 @@ export async function GET(req: NextRequest) {
         );
       } catch {
         tombola = rpt ? resolveDayTombola({ rpt, infocaja: null }) : null;
+        liveInfocajaEfectivo = rpt?.efectivo_infocaja ?? null;
         cashCheck = reconcileEfectivoRecibidoVsInfocaja(
           rpt?.efectivo_contado ?? null,
-          rpt?.efectivo_infocaja ?? null
+          liveInfocajaEfectivo
         );
       }
     }
@@ -290,6 +294,9 @@ export async function GET(req: NextRequest) {
       hasCorte: Boolean(rpt),
       corte: corteSummary,
       tombola,
+      /** Reporte Infocaja del correo (Gmail) para la fecha del corte. */
+      infocaja: liveInfocaja,
+      /** Conciliación efectivo recibido (corte) vs Infocaja Efectivo. */
       cashCheck,
       cancDesc,
     });
@@ -312,6 +319,8 @@ export async function GET(req: NextRequest) {
           hasCorte: false,
           corte: null,
           tombola: null,
+          infocaja: null,
+          cashCheck: null,
           cancDesc: emptyCancDesc(),
           schemaMissing: true,
           error:
@@ -333,6 +342,8 @@ export async function GET(req: NextRequest) {
         hasCorte: false,
         corte: null,
         tombola: null,
+        infocaja: null,
+        cashCheck: null,
         cancDesc: emptyCancDesc(),
         error: msg,
         hint: isTpvSchemaError(msg) ? tpvSchemaHint(msg) : undefined,
