@@ -2,11 +2,7 @@
 
 import { FormEvent, useMemo, useState } from 'react';
 import { BrandLogo } from '@/app/components/BrandLogo';
-import {
-  buildReservaWhatsAppTemplate,
-  buildWhatsAppHref,
-  todayYmdMexico,
-} from '@/app/lib/reservas';
+import { todayYmdMexico } from '@/app/lib/reservas';
 import { SUITE } from '@/app/lib/themes';
 
 const HORAS_SUGERIDAS = [
@@ -54,11 +50,6 @@ export default function ReservarMesaPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
-
-  const level1Href = useMemo(
-    () => buildWhatsAppHref(buildReservaWhatsAppTemplate()),
-    []
-  );
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -299,25 +290,7 @@ export default function ReservarMesaPage() {
           >
             {loading ? 'Enviando…' : 'Reservar mesa'}
           </button>
-
-          <p className="text-center text-xs leading-relaxed" style={{ color: SUITE.muted }}>
-            Sin costo de API: el mensaje se abre en tu WhatsApp y el restaurante
-            responde como siempre. Las reservas viven en el chat (+ registro
-            interno).
-          </p>
         </form>
-
-        <p className="mt-6 text-center text-sm" style={{ color: SUITE.muted }}>
-          <a
-            href={level1Href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold underline-offset-2 hover:underline"
-            style={{ color: SUITE.navy }}
-          >
-            Solo WhatsApp (plantilla vacía)
-          </a>
-        </p>
       </div>
     </main>
   );

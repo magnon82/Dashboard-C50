@@ -2,10 +2,11 @@ name: Sync Gmail diario
 
 # CDMX sin DST desde 2022 (UTC-6).
 # Objetivo: automático, sin depender de “Run workflow”.
-#   · Lun–Sáb 2:17–7:17 AM CDMX cada hora  → 8–13 UTC :17
-#   · Lun–Sáb 8:23,10:23,12:23,14:23 CDMX  → 14,16,18,20 UTC :23
-#       (el Fin de Día suele llegar después de la madrugada)
-#   · Dom 7:17–11:17 PM CDMX cada hora     → lun 1–5 UTC :17
+#   · Diario 2:17–7:17 AM CDMX cada hora  → 8–13 UTC :17
+#       (incluye domingo: el Fin de Día del sábado suele llegar en la noche
+#        y antes no había cron hasta Dom 7:17 PM → banner “atrasado” domingo AM)
+#   · Diario 8:23,10:23,12:23,14:23 CDMX  → 14,16,18,20 UTC :23
+#   · Dom 7:17–11:17 PM CDMX cada hora     → lun 1–5 UTC :17 (refuerzo nocturno)
 # GitHub cron es best-effort: en :00 suele haber saturación y se saltan slots
 # (ago-2026: 0 runs en ventana UTC 8–12 toda la semana). Minuto distinto de :00
 # (como sync-saldos :07) reduce drops. Refuerzos diurnos cubren el hueco.
@@ -13,10 +14,10 @@ name: Sync Gmail diario
 
 on:
   schedule:
-    # Lun–Sáb madrugada 2:17–7:17 AM CDMX (minuto 17 ≠ :00)
-    - cron: "17 8-13 * * 1-6"
-    # Lun–Sáb refuerzo 8:23,10:23,12:23,14:23 CDMX
-    - cron: "23 14,16,18,20 * * 1-6"
+    # Diario madrugada 2:17–7:17 AM CDMX (minuto 17 ≠ :00) — incluye domingo
+    - cron: "17 8-13 * * *"
+    # Diario refuerzo 8:23,10:23,12:23,14:23 CDMX — incluye domingo
+    - cron: "23 14,16,18,20 * * *"
     # Dom 7:17–11:17 PM CDMX (= lun 1–5 UTC)
     - cron: "17 1-5 * * 1"
   workflow_dispatch:

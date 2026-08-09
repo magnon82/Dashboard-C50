@@ -14,6 +14,27 @@ export const STAFF_RPT_TABLE = 'staff_rpt_diario';
  */
 export const EFECTIVO_TOLERANCE_MXN = 1;
 
+/** Snapshot de montos vigentes del corte (para auditoría de ediciones). */
+export type StaffRptValuesSnapshot = {
+  wi_amount: number;
+  eventos_amount: number;
+  eventos_os_amount: number;
+  eventos_extra_amount: number;
+  propinas: number;
+  efectivo_tombola: number;
+  efectivo_contado: number | null;
+  bancos_neto_tpv: number | null;
+  bancos_cobrado_tpv: number | null;
+  bancos_propina_tpv: number | null;
+  notes: string | null;
+};
+
+export type StaffRptEditHistoryEntry = {
+  edited_at: string;
+  edited_by: string;
+  previous: StaffRptValuesSnapshot;
+};
+
 export interface StaffRptRow {
   id: string;
   rpt_date: string;
@@ -42,6 +63,8 @@ export interface StaffRptRow {
   updated_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Ediciones admin previas (más reciente al final). */
+  edit_history?: StaffRptEditHistoryEntry[];
 }
 
 export interface StaffRptTpvTerminalView {
@@ -115,7 +138,60 @@ export function asStaffRptRow(r: Record<string, unknown>): StaffRptRow {
     updated_by: r.updated_by == null ? null : String(r.updated_by),
     created_at: String(r.created_at || ''),
     updated_at: String(r.updated_at || ''),
+    edit_history: parseEditHistory(r.edit_history),
   };
+}
+
+export function snapshotStaffRptValues(
+  rpt: StaffRptRow
+): StaffRptValuesSnapshot {
+  return {
+    wi_amount: rpt.wi_amount,
+    eventos_amount: rpt.eventos_amount,
+    eventos_os_amount: rpt.eventos_os_amount,
+    eventos_extra_amount: rpt.eventos_extra_amount,
+    propinas: rpt.propinas,
+    efectivo_tombola: rpt.efectivo_tombola,
+    efectivo_contado: rpt.efectivo_contado,
+    bancos_neto_tpv: rpt.bancos_neto_tpv,
+    bancos_cobrado_tpv: rpt.bancos_cobrado_tpv,
+    bancos_propina_tpv: rpt.bancos_propina_tpv,
+    notes: rpt.notes,
+  };
+}
+
+function parseEditHistory(raw: unknown): StaffRptEditHistoryEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: StaffRptEditHistoryEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const prev = rec.previous;
+    if (!prev || typeof prev !== 'object') continue;
+    const p = prev as Record<string, unknown>;
+    out.push({
+      edited_at: String(rec.edited_at || ''),
+      edited_by: String(rec.edited_by || ''),
+      previous: {
+        wi_amount: Number(p.wi_amount) || 0,
+        eventos_amount: Number(p.eventos_amount) || 0,
+        eventos_os_amount: Number(p.eventos_os_amount) || 0,
+        eventos_extra_amount: Number(p.eventos_extra_amount) || 0,
+        propinas: Number(p.propinas) || 0,
+        efectivo_tombola: Number(p.efectivo_tombola) || 0,
+        efectivo_contado:
+          p.efectivo_contado == null ? null : Number(p.efectivo_contado),
+        bancos_neto_tpv:
+          p.bancos_neto_tpv == null ? null : Number(p.bancos_neto_tpv),
+        bancos_cobrado_tpv:
+          p.bancos_cobrado_tpv == null ? null : Number(p.bancos_cobrado_tpv),
+        bancos_propina_tpv:
+          p.bancos_propina_tpv == null ? null : Number(p.bancos_propina_tpv),
+        notes: p.notes == null ? null : String(p.notes),
+      },
+    });
+  }
+  return out;
 }
 
 /** Total eventos = OS (VENTA) + venta extra. */

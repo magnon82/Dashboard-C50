@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card } from '@tremor/react';
 import {
   SectionHeader,
@@ -11,9 +11,11 @@ import {
   EFECTIVO_TOLERANCE_MXN,
   expectedTombolaDeposit,
   type EfectivoInfocajaReconcile,
+  type StaffRptEditHistoryEntry,
   type StaffRptInfocajaDay,
+  type StaffRptValuesSnapshot,
 } from '@/app/lib/staff-rpt';
-import { moneyMx } from '@/app/lib/tpv-cortes';
+import { computeNetoBanco, moneyMx } from '@/app/lib/tpv-cortes';
 
 const theme = getTheme('suite');
 
@@ -61,6 +63,7 @@ type CortePayload = {
     updated_by: string | null;
     created_at: string;
     updated_at: string;
+    edit_history?: StaffRptEditHistoryEntry[];
   } | null;
   tombola?: {
     amount: number;
@@ -84,11 +87,44 @@ type CortePayload = {
   availableDates?: string[];
   /** Último corte realizado (máximo navegable). */
   latestCorteDate?: string | null;
+  /** Master: puede editar montos del corte cerrado. */
+  canEditAdmin?: boolean;
   error?: string;
   hint?: string;
 };
 
 type CancDescPanel = 'cancelaciones' | 'descuentos' | null;
+
+type EditFormState = {
+  wi_amount: string;
+  eventos_os_amount: string;
+  eventos_extra_amount: string;
+  efectivo_contado: string;
+  efectivo_tombola: string;
+  bancos_cobrado_tpv: string;
+  bancos_propina_tpv: string;
+  notes: string;
+};
+
+function moneyField(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(Number(v))) return '';
+  return String(v);
+}
+
+function formFromCorte(corte: NonNullable<CortePayload['corte']>): EditFormState {
+  return {
+    wi_amount: moneyField(corte.wi_amount),
+    eventos_os_amount: moneyField(corte.eventos_os_amount),
+    eventos_extra_amount: moneyField(corte.eventos_extra_amount),
+    efectivo_contado: moneyField(corte.efectivo_contado),
+    efectivo_tombola: moneyField(corte.efectivo_tombola),
+    bancos_cobrado_tpv: moneyField(corte.bancos_cobrado_tpv),
+    bancos_propina_tpv: moneyField(
+      corte.bancos_propina_tpv ?? corte.propinas
+    ),
+    notes: corte.notes ?? '',
+  };
+}
 
 function formatCorteDateDisplay(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
@@ -317,6 +353,52 @@ function InfocajaReconcilePanel({
 function moneyOrDash(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(Number(v))) return '—';
   return moneyMx(Number(v));
+}
+
+function EditMoneyField({
+  label,
+  value,
+  onChange,
+  previous,
+  hint,
+  allowNegative,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  previous?: string;
+  hint?: string;
+  allowNegative?: boolean;
+}) {
+  return (
+    <label className="block rounded-2xl border border-slate-200 bg-white px-3 py-3">
+      <span
+        className="text-[11px] font-semibold uppercase tracking-wide"
+        style={{ color: theme.muted }}
+      >
+        {label}
+      </span>
+      {previous ? (
+        <span className="mt-0.5 block text-[11px]" style={{ color: theme.muted }}>
+          Anterior: {previous}
+        </span>
+      ) : null}
+      <input
+        type="number"
+        inputMode="decimal"
+        step="0.01"
+        min={allowNegative ? undefined : 0}
+        className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-base font-semibold tabular-nums text-slate-900 outline-none focus:border-slate-400"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {hint ? (
+        <span className="mt-1 block text-[11px]" style={{ color: theme.muted }}>
+          {hint}
+        </span>
+      ) : null}
+    </label>
+  );
 }
 
 function Kpi({
@@ -574,9 +656,21 @@ export function VentasCortesReportCard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openPanel, setOpenPanel] = useState<CancDescPanel>(null);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState<EditFormState | null>(null);
+  const [editBaseline, setEditBaseline] =
+    useState<StaffRptValuesSnapshot | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editMsg, setEditMsg] = useState<string | null>(null);
+  const [editErr, setEditErr] = useState<string | null>(null);
 
   useEffect(() => {
     setOpenPanel(null);
+    setEditing(false);
+    setEditForm(null);
+    setEditBaseline(null);
+    setEditMsg(null);
+    setEditErr(null);
   }, [activeDate]);
 
   useEffect(() => {
@@ -618,6 +712,7 @@ export function VentasCortesReportCard({
   }, [activeDate]);
 
   const corte = data?.corte ?? null;
+  const canEditAdmin = Boolean(data?.canEditAdmin && corte);
   const canc = data?.cancDesc;
   const tombola = data?.tombola ?? null;
   const cashCheck = data?.cashCheck ?? null;
@@ -773,6 +868,121 @@ export function VentasCortesReportCard({
     setActiveDate(null);
   }
 
+  function startEdit() {
+    if (!corte || !canEditAdmin) return;
+    setEditBaseline({
+      wi_amount: corte.wi_amount,
+      eventos_amount: corte.eventos_amount,
+      eventos_os_amount: corte.eventos_os_amount,
+      eventos_extra_amount: corte.eventos_extra_amount,
+      propinas: corte.propinas,
+      efectivo_tombola: corte.efectivo_tombola,
+      efectivo_contado: corte.efectivo_contado,
+      bancos_neto_tpv: corte.bancos_neto_tpv,
+      bancos_cobrado_tpv: corte.bancos_cobrado_tpv,
+      bancos_propina_tpv: corte.bancos_propina_tpv,
+      notes: corte.notes,
+    });
+    setEditForm(formFromCorte(corte));
+    setEditMsg(null);
+    setEditErr(null);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setEditForm(null);
+    setEditBaseline(null);
+    setEditErr(null);
+  }
+
+  const editLive = useMemo(() => {
+    if (!editForm) return null;
+    const wi = Number(editForm.wi_amount);
+    const os = Number(editForm.eventos_os_amount);
+    const extra = Number(editForm.eventos_extra_amount);
+    const cob = Number(editForm.bancos_cobrado_tpv);
+    const tip = Number(editForm.bancos_propina_tpv);
+    const rec = Number(editForm.efectivo_contado);
+    const venta =
+      Number.isFinite(wi) && Number.isFinite(os) && Number.isFinite(extra)
+        ? Math.round((wi + os + extra) * 100) / 100
+        : null;
+    const neto =
+      Number.isFinite(cob) && Number.isFinite(tip)
+        ? computeNetoBanco(cob, tip)
+        : null;
+    const tombolaRef =
+      Number.isFinite(rec) && Number.isFinite(tip)
+        ? expectedTombolaDeposit(rec, tip)
+        : null;
+    return { venta, neto, tombolaRef };
+  }, [editForm]);
+
+  async function saveEdit() {
+    if (!corte || !editForm || !displayDate) return;
+    setSavingEdit(true);
+    setEditErr(null);
+    setEditMsg(null);
+    try {
+      const res = await fetch('/api/ventas/corte', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: displayDate,
+          wi_amount: editForm.wi_amount,
+          eventos_os_amount: editForm.eventos_os_amount,
+          eventos_extra_amount: editForm.eventos_extra_amount,
+          efectivo_contado: editForm.efectivo_contado,
+          efectivo_tombola: editForm.efectivo_tombola,
+          bancos_cobrado_tpv: editForm.bancos_cobrado_tpv,
+          bancos_propina_tpv: editForm.bancos_propina_tpv,
+          notes: editForm.notes.trim() || null,
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        hint?: string;
+        ok?: boolean;
+        corte?: CortePayload['corte'];
+        cashCheck?: EfectivoInfocajaReconcile | null;
+        infocaja?: StaffRptInfocajaDay | null;
+      };
+      if (!res.ok) {
+        setEditErr(json.error || 'No se pudo guardar');
+        return;
+      }
+      setData((prev) =>
+        prev && json.corte
+          ? {
+              ...prev,
+              hasCorte: true,
+              corte: json.corte,
+              cashCheck: json.cashCheck ?? prev.cashCheck,
+              infocaja: json.infocaja ?? prev.infocaja,
+            }
+          : prev
+      );
+      setEditing(false);
+      setEditForm(null);
+      setEditBaseline(null);
+      setEditMsg(
+        json.hint
+          ? `Corte actualizado. ${json.hint}`
+          : 'Corte actualizado. Los valores anteriores quedaron en el historial.'
+      );
+    } catch (e) {
+      setEditErr(e instanceof Error ? e.message : 'Error de red');
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  const lastHistory =
+    corte?.edit_history && corte.edit_history.length > 0
+      ? corte.edit_history[corte.edit_history.length - 1]
+      : null;
+
   return (
     <Card
       className={`${className} rounded-[24px] border-0 p-5 md:p-6`}
@@ -896,6 +1106,39 @@ export function VentasCortesReportCard({
         >
           Último
         </button>
+        {canEditAdmin && !editing ? (
+          <button
+            type="button"
+            onClick={startEdit}
+            disabled={loading}
+            className="inline-flex h-9 items-center rounded-xl px-3 text-sm font-semibold text-white disabled:opacity-40"
+            style={{ backgroundColor: SUITE.navy }}
+            title="Editar montos del corte cerrado (Master)"
+          >
+            Editar
+          </button>
+        ) : null}
+        {editing ? (
+          <>
+            <button
+              type="button"
+              onClick={cancelEdit}
+              disabled={savingEdit}
+              className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveEdit()}
+              disabled={savingEdit}
+              className="inline-flex h-9 items-center rounded-xl px-3 text-sm font-semibold text-white disabled:opacity-40"
+              style={{ backgroundColor: SUITE.orange }}
+            >
+              {savingEdit ? 'Guardando…' : 'Guardar'}
+            </button>
+          </>
+        ) : null}
       </SectionHeader>
 
       {dateLabel ? (
@@ -933,6 +1176,156 @@ export function VentasCortesReportCard({
 
           {corte ? (
             <>
+              {editMsg ? (
+                <p className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  {editMsg}
+                </p>
+              ) : null}
+              {editErr ? (
+                <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {editErr}
+                </p>
+              ) : null}
+              {lastHistory && !editing ? (
+                <p className="mb-3 text-xs" style={{ color: theme.muted }}>
+                  Última edición Master: {lastHistory.edited_by} ·{' '}
+                  {new Date(lastHistory.edited_at).toLocaleString('es-MX', {
+                    timeZone: 'America/Mexico_City',
+                  })}
+                </p>
+              ) : null}
+
+              {editing && editForm && editBaseline ? (
+                <div className="mb-4 space-y-3 rounded-[20px] border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="text-sm font-semibold" style={{ color: theme.title }}>
+                    Edición Master · se conservan los valores anteriores en historial
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <EditMoneyField
+                      label="WI"
+                      value={editForm.wi_amount}
+                      previous={moneyMx(editBaseline.wi_amount)}
+                      onChange={(v) =>
+                        setEditForm((f) => (f ? { ...f, wi_amount: v } : f))
+                      }
+                    />
+                    <EditMoneyField
+                      label="Eventos · OS"
+                      value={editForm.eventos_os_amount}
+                      previous={moneyMx(editBaseline.eventos_os_amount)}
+                      onChange={(v) =>
+                        setEditForm((f) =>
+                          f ? { ...f, eventos_os_amount: v } : f
+                        )
+                      }
+                    />
+                    <EditMoneyField
+                      label="Eventos · Extra"
+                      value={editForm.eventos_extra_amount}
+                      previous={moneyMx(editBaseline.eventos_extra_amount)}
+                      onChange={(v) =>
+                        setEditForm((f) =>
+                          f ? { ...f, eventos_extra_amount: v } : f
+                        )
+                      }
+                    />
+                    <Kpi
+                      label="Venta día"
+                      value={
+                        editLive?.venta != null
+                          ? moneyMx(editLive.venta)
+                          : '—'
+                      }
+                      hint="WI + OS + Extra (calculado)"
+                      highlight
+                    />
+                    <EditMoneyField
+                      label="Bancos cobrado TPV"
+                      value={editForm.bancos_cobrado_tpv}
+                      previous={moneyOrDash(editBaseline.bancos_cobrado_tpv)}
+                      onChange={(v) =>
+                        setEditForm((f) =>
+                          f ? { ...f, bancos_cobrado_tpv: v } : f
+                        )
+                      }
+                    />
+                    <EditMoneyField
+                      label="Propina TPV"
+                      value={editForm.bancos_propina_tpv}
+                      previous={moneyOrDash(
+                        editBaseline.bancos_propina_tpv ??
+                          editBaseline.propinas
+                      )}
+                      onChange={(v) =>
+                        setEditForm((f) =>
+                          f ? { ...f, bancos_propina_tpv: v } : f
+                        )
+                      }
+                    />
+                    <Kpi
+                      label="Bancos neto TPV"
+                      value={
+                        editLive?.neto != null ? moneyMx(editLive.neto) : '—'
+                      }
+                      hint="Cobrado + propina (calculado)"
+                    />
+                    <EditMoneyField
+                      label="Efectivo recibido"
+                      value={editForm.efectivo_contado}
+                      previous={moneyOrDash(editBaseline.efectivo_contado)}
+                      onChange={(v) =>
+                        setEditForm((f) =>
+                          f ? { ...f, efectivo_contado: v } : f
+                        )
+                      }
+                    />
+                    <EditMoneyField
+                      label="Efectivo en tómbola"
+                      value={editForm.efectivo_tombola}
+                      previous={moneyMx(editBaseline.efectivo_tombola)}
+                      hint={
+                        editLive?.tombolaRef != null
+                          ? `Referencia: recibido − propina ≈ ${moneyMx(editLive.tombolaRef)}`
+                          : undefined
+                      }
+                      allowNegative
+                      onChange={(v) =>
+                        setEditForm((f) =>
+                          f ? { ...f, efectivo_tombola: v } : f
+                        )
+                      }
+                    />
+                  </div>
+                  <label className="block rounded-2xl border border-slate-200 bg-white px-3 py-3">
+                    <span
+                      className="text-[11px] font-semibold uppercase tracking-wide"
+                      style={{ color: theme.muted }}
+                    >
+                      Nota
+                    </span>
+                    {editBaseline.notes ? (
+                      <span
+                        className="mt-0.5 block text-[11px]"
+                        style={{ color: theme.muted }}
+                      >
+                        Anterior: {editBaseline.notes}
+                      </span>
+                    ) : null}
+                    <textarea
+                      rows={2}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                      value={editForm.notes}
+                      onChange={(e) =>
+                        setEditForm((f) =>
+                          f ? { ...f, notes: e.target.value } : f
+                        )
+                      }
+                      maxLength={2000}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Kpi label="WI" value={moneyMx(corte.wi_amount)} />
                 <Kpi
@@ -1009,12 +1402,16 @@ export function VentasCortesReportCard({
                   }
                 />
               </div>
+                </>
+              )}
 
+              {!editing ? (
               <InfocajaReconcilePanel
                 cashCheck={cashCheck}
                 infocaja={infocaja}
                 corte={corte}
               />
+              ) : null}
             </>
           ) : tombolaAmount != null ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

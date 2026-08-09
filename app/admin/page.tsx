@@ -473,20 +473,27 @@ export default function AdminPage() {
   return (
     <SuiteShell
       title="Master Panel"
-      subtitle="Financieros, RR.HH., usuarios, datos e inventario — herramientas de administración del suite."
+      subtitle="Cortes TPV, financieros, RR.HH., usuarios, datos e inventario — herramientas de administración del suite."
     >
-      {/* 1. Financieros */}
+      {/* 1. Cortes TPV (operación · caja) — arriba, independiente de Financieros */}
       <AdminSection
-        title="Financieros"
-        description="Cortes TPV (reporte y edición), saldos bancarios y ajustes ligados al presupuesto."
+        title="Cortes TPV"
+        description="Reporte y carga de fotos por día operativo · misma compresión/OCR que Staff."
+        defaultOpen
       >
         <AdminCajaTpv />
+      </AdminSection>
 
+      {/* 2. Financieros */}
+      <AdminSection
+        title="Financieros"
+        description="Saldos bancarios y ajustes ligados al presupuesto."
+      >
         <AdminSaldosBancos />
         <AdminPresupuestoAjustes />
       </AdminSection>
 
-      {/* 2. RR.HH. · expedientes */}
+      {/* 3. RR.HH. · expedientes */}
       <AdminSection
         title="RR.HH. · expedientes"
         description="Auditoría Altas↔status (solo lista). No da de baja a activos. Corregir en /rrhh → Plantilla → Archivo / Bajas."
@@ -561,7 +568,7 @@ export default function AdminPage() {
         </div>
       </AdminSection>
 
-      {/* 3. Usuarios */}
+      {/* 4. Usuarios */}
       <AdminSection
         title="Usuarios"
         description="Cada cuenta del ERP tiene módulos (qué ve) y funciones (palomitas, p. ej. corte). Al instalar la app en el celular, el usuario entra con su sesión y solo ve lo asignado aquí."
@@ -1041,7 +1048,7 @@ export default function AdminPage() {
       </AdminSection>
 
 
-      {/* 4. Datos e inventario */}
+      {/* 5. Datos e inventario */}
       <AdminSection
         title="Datos e inventario"
         description="Mapa de orígenes y catálogo de lo que vive en almacenamiento, APIs y bases del suite."

@@ -62,9 +62,13 @@ alter table public.staff_rpt_diario
   add column if not exists tpv_complete boolean;
 alter table public.staff_rpt_diario
   add column if not exists bancos_manual numeric(12, 2);
+alter table public.staff_rpt_diario
+  add column if not exists edit_history jsonb not null default '[]'::jsonb;
 
 comment on table public.staff_rpt_diario is
   'Cierre RPT del Corte del día Staff. Bancos/propinas = snapshot TPV (foto).';
+comment on column public.staff_rpt_diario.edit_history is
+  'Historial de ediciones admin: [{edited_at, edited_by, previous: {...}}].';
 
 -- ---------------------------------------------------------------------------
 -- B) tpv_corte_uploads + photo_kind (2 fotos: venta + propina)

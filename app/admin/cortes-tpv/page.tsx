@@ -25,7 +25,7 @@ export default function AdminCortesTpvPage() {
           className="text-[11px] font-bold uppercase tracking-[0.14em]"
           style={{ color: SUITE.navy }}
         >
-          Financieros · Caja
+          Operación · Caja
         </p>
       </div>
       <AdminCortesTpvReport />

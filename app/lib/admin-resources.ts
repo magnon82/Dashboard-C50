@@ -69,15 +69,15 @@ export const ALL_SOURCE_FILES: string[] = SOURCE_FILE_GROUPS.flatMap((g) => g.so
 
 /**
  * Frecuencia de actualización por source_file (texto UI en español).
- * Basado en sync-gmail.yml (L–S 2–7 AM + refuerzos diurnos / Dom 7–11 PM CDMX),
+ * Basado en sync-gmail.yml (diario 2–7 AM + refuerzos diurnos / Dom 7–11 PM CDMX),
  * sync-saldos.yml (cada hora :07), sync-hr-drive.yml (diario 12:00 PM CDMX),
  * más ingestors manuales / Admin. Ver también app/lib/admin-sync-schedules.ts.
  */
 export const SOURCE_FILE_UPDATE: Record<string, string> = {
   infocaja:
-    'Función: venta diaria + efectivo/tarjetas/personas. Lun–sáb 2–7 AM + 8/10/12/14 CDMX · Dom 7–11 PM (Actions)',
+    'Función: venta diaria + efectivo/tarjetas/personas. Diario 2–7 AM + 8/10/12/14 CDMX · refuerzo Dom 7–11 PM (Actions)',
   corte_caja:
-    'Función: cancelaciones/descuentos/cortesías. Lun–sáb 2–7 AM + 8/10/12/14 CDMX · Dom 7–11 PM (Actions)',
+    'Función: cancelaciones/descuentos/cortesías. Diario 2–7 AM + 8/10/12/14 CDMX · refuerzo Dom 7–11 PM (Actions)',
   eventos: 'Función: WI vs Eventos histórico. Manual (ingest_eventos.py)',
   ventas_semana: 'Función: acumulado semanal Excel. Manual (ingest_ventas_semana.py)',
   flujo_efectivo_saldo: 'Función: saldo de caja chica. Cada hora (Actions)',
@@ -583,7 +583,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: 'Infocaja Fin de Día',
         role: 'Función: venta diaria + efectivo/tarjetas/personas → source_file=infocaja (/ventas).',
         updateFrequency:
-          'Lun–sáb 2–7 AM + 8/10/12/14 · Dom 7–11 PM CDMX (Actions · sync-gmail.yml)',
+          'Diario 2–7 AM + 8/10/12/14 · refuerzo Dom 7–11 PM CDMX (Actions · sync-gmail.yml)',
         scripts: ['ingest_infocaja_gmail.py', 'sync_gmail_diario.py'],
         sourceFiles: ['infocaja'],
         routes: ['/ventas'],
@@ -593,7 +593,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: 'CORTE CARRANZA (XLS)',
         role: 'Función: cancelaciones/descuentos/cortesías → source_file=corte_caja (/ventas).',
         updateFrequency:
-          'Lun–sáb 2–7 AM + 8/10/12/14 · Dom 7–11 PM CDMX (Actions · sync-gmail.yml)',
+          'Diario 2–7 AM + 8/10/12/14 · refuerzo Dom 7–11 PM CDMX (Actions · sync-gmail.yml)',
         scripts: ['ingest_corte_gmail.py', 'sync_gmail_diario.py'],
         sourceFiles: ['corte_caja'],
         routes: ['/ventas'],
@@ -626,7 +626,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             kind: 'script',
             note: 'Función: orquesta Infocaja + CORTE; CFDI en paso aparte (Actions)',
             updateFrequency:
-              'Lun–sáb 2–7 AM + 8/10/12/14 · Dom 7–11 PM CDMX (Actions)',
+              'Diario 2–7 AM + 8/10/12/14 · refuerzo Dom 7–11 PM CDMX (Actions)',
           },
           {
             label: 'sync_saldos_al_dia.py',
@@ -736,14 +736,14 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: '.github/workflows/',
         role: 'Automatización en GitHub Actions (horario CDMX).',
         updateFrequency:
-          'Programado · sync-gmail L–S 2–7 AM + refuerzos · Dom 7–11 PM; sync-saldos cada hora :07; sync-hr-drive 12:00 PM',
+          'Programado · sync-gmail diario 2–7 AM + refuerzos · Dom 7–11 PM; sync-saldos cada hora :07; sync-hr-drive 12:00 PM',
         leaves: [
           {
             label: 'sync-gmail.yml',
             kind: 'workflow',
             note: 'Función: ventas diarias + CFDI → ERP (paso best-effort)',
             updateFrequency:
-              'Lun–sáb 2:17–7:17 AM + 8:23/10:23/12:23/14:23 · Dom 7:17–11:17 PM CDMX',
+              'Diario 2:17–7:17 AM + 8:23/10:23/12:23/14:23 · refuerzo Dom 7:17–11:17 PM CDMX',
           },
           {
             label: 'sync-saldos.yml',

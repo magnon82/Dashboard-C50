@@ -20,7 +20,6 @@ type SociosCortePayload = {
     eventos_amount: number;
     eventos_os_amount: number;
     eventos_extra_amount: number;
-    notes: string | null;
     updated_at: string;
     updated_by: string | null;
   } | null;
@@ -239,14 +238,6 @@ export function SociosCorteResumenCard({
               highlight
             />
           </div>
-          {corte.notes ? (
-            <p
-              className="mt-3 text-xs leading-relaxed"
-              style={{ color: theme.muted }}
-            >
-              Nota: {corte.notes}
-            </p>
-          ) : null}
         </>
       )}
     </Card>

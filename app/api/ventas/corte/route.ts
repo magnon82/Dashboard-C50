@@ -10,15 +10,24 @@ import {
 import {
   STAFF_RPT_TABLE,
   asStaffRptRow,
+  parseMoneyInput,
   reconcileEfectivoRecibidoVsInfocaja,
   resolveDayTombola,
+  snapshotStaffRptValues,
   sumInfocajaDay,
+  totalEventosAmount,
   type DayTombolaResult,
+  type StaffRptEditHistoryEntry,
   type StaffRptInfocajaDay,
   type StaffRptRow,
 } from '@/app/lib/staff-rpt';
 import { isTpvSchemaError, tpvSchemaHint } from '@/app/lib/tpv-api';
-import { shiftIsoDate, todayCdmxIso } from '@/app/lib/tpv-cortes';
+import {
+  TPV_CORTE_EPOCH,
+  computeNetoBanco,
+  shiftIsoDate,
+  todayCdmxIso,
+} from '@/app/lib/tpv-cortes';
 import {
   toCorteDetailItem,
   type CorteDetailItem,
@@ -74,6 +83,7 @@ function summarizeRpt(rpt: StaffRptRow) {
     updated_by: rpt.updated_by,
     created_at: rpt.created_at,
     updated_at: rpt.updated_at,
+    edit_history: rpt.edit_history ?? [],
   };
 }
 
@@ -326,6 +336,8 @@ export async function GET(req: NextRequest) {
       date: statsDate,
       isYesterday: statsDate === yesterdayDate,
       hasCorte: Boolean(rpt),
+      /** Master puede editar montos de un corte cerrado (PATCH). */
+      canEditAdmin: canAccessAdmin(auth),
       /** Fechas con corte cerrado (asc). Máximo = último realizado. */
       availableDates,
       latestCorteDate,
@@ -391,5 +403,243 @@ export async function GET(req: NextRequest) {
       },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * PATCH /api/ventas/corte — Master edita un corte cerrado.
+ * Conserva valores previos en edit_history y actualiza todos los montos vigentes.
+ * Body: { date, wi_amount, eventos_os_amount, eventos_extra_amount,
+ *         efectivo_contado, efectivo_tombola, bancos_cobrado_tpv,
+ *         bancos_propina_tpv, notes? }
+ * Bancos neto = cobrado + propina; propinas snapshot = propina TPV.
+ */
+export async function PATCH(request: Request) {
+  const auth = await requireVentasViewer();
+  if (auth instanceof NextResponse) return auth;
+  if (!canAccessAdmin(auth)) {
+    return NextResponse.json(
+      { error: 'Solo Master puede editar cortes cerrados' },
+      { status: 403 }
+    );
+  }
+
+  try {
+    const body = (await request.json()) as Record<string, unknown>;
+    const date = String(body.date || body.rpt_date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return NextResponse.json({ error: 'Fecha inválida' }, { status: 400 });
+    }
+    if (date < TPV_CORTE_EPOCH) {
+      return NextResponse.json(
+        {
+          error: `Solo se editan cortes desde ${TPV_CORTE_EPOCH}`,
+          min_date: TPV_CORTE_EPOCH,
+        },
+        { status: 403 }
+      );
+    }
+
+    const wi = parseMoneyInput(body.wi_amount);
+    if (wi == null || wi < 0) {
+      return NextResponse.json(
+        { error: 'Indica el monto WI (puede ser 0)' },
+        { status: 400 }
+      );
+    }
+
+    const osRaw = parseMoneyInput(body.eventos_os_amount ?? 0);
+    const extraRaw = parseMoneyInput(body.eventos_extra_amount ?? 0);
+    if (osRaw == null || osRaw < 0) {
+      return NextResponse.json(
+        { error: 'Indica el monto OS de eventos (puede ser 0)' },
+        { status: 400 }
+      );
+    }
+    if (extraRaw == null || extraRaw < 0) {
+      return NextResponse.json(
+        { error: 'Indica la venta extra de eventos (0 si no hubo)' },
+        { status: 400 }
+      );
+    }
+    const eventosOs = osRaw;
+    const eventosExtra = extraRaw;
+    const eventos = totalEventosAmount(eventosOs, eventosExtra);
+
+    const efectivoRecibido = parseMoneyInput(body.efectivo_contado);
+    if (efectivoRecibido == null || efectivoRecibido < 0) {
+      return NextResponse.json(
+        { error: 'Indica el efectivo recibido (obligatorio)' },
+        { status: 400 }
+      );
+    }
+
+    // Admin puede corregir tómbola negativa / déficit (permite < 0).
+    const tombola = parseMoneyInput(body.efectivo_tombola);
+    if (tombola == null) {
+      return NextResponse.json(
+        { error: 'Indica el efectivo en tómbola' },
+        { status: 400 }
+      );
+    }
+
+    const cobrado = parseMoneyInput(body.bancos_cobrado_tpv);
+    if (cobrado == null || cobrado < 0) {
+      return NextResponse.json(
+        { error: 'Indica bancos cobrado TPV (puede ser 0)' },
+        { status: 400 }
+      );
+    }
+    const propinaTpv = parseMoneyInput(body.bancos_propina_tpv);
+    if (propinaTpv == null || propinaTpv < 0) {
+      return NextResponse.json(
+        { error: 'Indica propina TPV (puede ser 0)' },
+        { status: 400 }
+      );
+    }
+    const neto = computeNetoBanco(cobrado, propinaTpv);
+
+    const notesRaw = body.notes;
+    const notes =
+      notesRaw == null || String(notesRaw).trim() === ''
+        ? null
+        : String(notesRaw).trim().slice(0, 2000);
+
+    const sb = getServiceSupabase();
+    const { data: existing, error: existErr } = await sb
+      .from(STAFF_RPT_TABLE)
+      .select('*')
+      .eq('rpt_date', date)
+      .maybeSingle();
+
+    if (existErr) {
+      if (isTpvSchemaError(existErr.message)) {
+        return NextResponse.json(
+          {
+            error: existErr.message,
+            hint: tpvSchemaHint(existErr.message),
+          },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json({ error: existErr.message }, { status: 500 });
+    }
+    if (!existing) {
+      return NextResponse.json(
+        {
+          error:
+            'No hay corte cerrado para esa fecha. Usa Staff → Corte del día para crear uno nuevo.',
+        },
+        { status: 404 }
+      );
+    }
+
+    const current = asStaffRptRow(existing as Record<string, unknown>);
+    const now = new Date().toISOString();
+    const historyEntry: StaffRptEditHistoryEntry = {
+      edited_at: now,
+      edited_by: auth.username,
+      previous: snapshotStaffRptValues(current),
+    };
+    const prevHistory = current.edit_history ?? [];
+    const edit_history = [...prevHistory, historyEntry].slice(-40);
+
+    const patch = {
+      wi_amount: wi,
+      eventos_amount: eventos,
+      eventos_os_amount: eventosOs,
+      eventos_extra_amount: eventosExtra,
+      propinas: propinaTpv,
+      efectivo_tombola: tombola,
+      efectivo_contado: efectivoRecibido,
+      bancos_cobrado_tpv: cobrado,
+      bancos_propina_tpv: propinaTpv,
+      bancos_neto_tpv: neto,
+      notes,
+      updated_by: auth.username,
+      updated_at: now,
+      edit_history,
+    };
+
+    let historyColumnMissing = false;
+    let { data: saved, error: updErr } = await sb
+      .from(STAFF_RPT_TABLE)
+      .update(patch)
+      .eq('id', current.id)
+      .select('*')
+      .single();
+
+    // Columna edit_history aún no aplicada → guardar sin historial.
+    if (
+      updErr &&
+      /edit_history|schema cache|Could not find|42703/i.test(updErr.message)
+    ) {
+      historyColumnMissing = true;
+      const { edit_history: _omit, ...withoutHistory } = patch;
+      void _omit;
+      const retry = await sb
+        .from(STAFF_RPT_TABLE)
+        .update(withoutHistory)
+        .eq('id', current.id)
+        .select('*')
+        .single();
+      saved = retry.data;
+      updErr = retry.error;
+    }
+
+    if (updErr || !saved) {
+      if (updErr && isTpvSchemaError(updErr.message)) {
+        return NextResponse.json(
+          {
+            error: updErr.message,
+            hint: tpvSchemaHint(updErr.message),
+          },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json(
+        { error: updErr?.message || 'No se pudo guardar' },
+        { status: 500 }
+      );
+    }
+
+    const rpt = asStaffRptRow(saved as Record<string, unknown>);
+    // Preferir historial recién armado si la columna aún no vuelve en select.
+    if (!rpt.edit_history?.length && edit_history.length) {
+      rpt.edit_history = edit_history;
+    }
+
+    let liveInfocaja: StaffRptInfocajaDay | null = null;
+    try {
+      const info = await loadInfocajaForDate(date);
+      liveInfocaja = info.hasAny ? info : null;
+    } catch {
+      liveInfocaja = null;
+    }
+    const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
+      rpt.efectivo_contado,
+      liveInfocaja?.hasEfectivo ? liveInfocaja.efectivo : rpt.efectivo_infocaja
+    );
+
+    return NextResponse.json({
+      ok: true,
+      canEditAdmin: true,
+      date,
+      corte: {
+        ...summarizeRpt(rpt),
+        efectivo_infocaja:
+          (liveInfocaja?.hasEfectivo ? liveInfocaja.efectivo : null) ??
+          rpt.efectivo_infocaja,
+      },
+      previous: historyEntry.previous,
+      cashCheck,
+      infocaja: liveInfocaja,
+      hint: historyColumnMissing
+        ? 'Guardado. Para historial persistente ejecuta supabase/staff_rpt_edit_history.sql'
+        : undefined,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Error al editar corte';
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

@@ -21,7 +21,7 @@ function summarizeRpt(rpt: StaffRptRow) {
     eventos_amount: rpt.eventos_amount,
     eventos_os_amount: rpt.eventos_os_amount,
     eventos_extra_amount: rpt.eventos_extra_amount,
-    notes: rpt.notes,
+    // Notas operativas del corte solo en Ventas/Cortes (no socios).
     updated_at: rpt.updated_at,
     updated_by: rpt.updated_by,
   };
