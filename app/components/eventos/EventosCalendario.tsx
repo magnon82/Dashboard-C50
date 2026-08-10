@@ -279,7 +279,9 @@ export function EventosCalendario() {
                     style={{ backgroundColor: SUITE.navy }}
                   >
                     <p className="text-[11px] font-bold uppercase tracking-wide text-white/70">
-                      {daysLabel(ev.event_date)}
+                      {ev.status === 'cancelado'
+                        ? 'Cancelado'
+                        : daysLabel(ev.event_date)}
                     </p>
                     <p
                       className="mt-1 text-sm font-bold leading-snug"

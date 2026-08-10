@@ -28,7 +28,7 @@ export function EventosGlobal() {
         return;
       }
       setData(json);
-      if (json.error) setError(json.error);
+      // Soft notes (fallback Sheets→ingest) no se muestran en UI.
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error de red');
       setData(null);
@@ -49,17 +49,10 @@ export function EventosGlobal() {
   return (
     <div className="space-y-4">
       <header className="rounded-2xl bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-bold" style={{ color: SUITE.navy }}>
-          Global · comisiones eventos
-        </h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Columnas VENTA (orden de servicio) y VENTA EXTRA del Sheet{' '}
-          <strong>EVENTOS C50 {year}</strong> · pestaña Global. Es la base para
-          el pago de comisiones a vendedores. El ingest a Ventas (
-          <code className="text-xs">ingest_eventos.py</code>) sigue usando esta
-          misma pestaña.
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-lg font-bold" style={{ color: SUITE.navy }}>
+            Global
+          </h2>
           <label className="text-sm font-medium text-slate-700">
             Año{' '}
             <select
@@ -82,18 +75,13 @@ export function EventosGlobal() {
           >
             Actualizar
           </button>
-          {data?.sheetName ? (
-            <span className="text-xs text-slate-500">
-              {data.sheetName}
-              {data.tab ? ` · ${data.tab}` : ''}
-              {data.source === 'financial_records' ? ' · ingest' : ''} ·{' '}
-              {rows.length} filas
-            </span>
+          {rows.length > 0 ? (
+            <span className="text-xs text-slate-500">{rows.length} filas</span>
           ) : null}
         </div>
       </header>
 
-      {error ? (
+      {error && !data?.rows?.length ? (
         <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
           {error}
         </p>
