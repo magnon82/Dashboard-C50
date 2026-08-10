@@ -728,6 +728,9 @@ export function VentasCortesReportCard({
 }: {
   className?: string;
 }) {
+  // #region agent log
+  const DEBUG_BUILD = 'propinas-desglose-v3';
+  // #endregion
   const [dateInput, setDateInput] = useState('');
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [data, setData] = useState<CortePayload | null>(null);
@@ -741,6 +744,31 @@ export function VentasCortesReportCard({
   const [savingEdit, setSavingEdit] = useState(false);
   const [editMsg, setEditMsg] = useState<string | null>(null);
   const [editErr, setEditErr] = useState<string | null>(null);
+
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '826472',
+      },
+      body: JSON.stringify({
+        sessionId: '826472',
+        runId: 'pre-fix',
+        hypothesisId: 'A',
+        location: 'VentasCortesReportCard.tsx:mount',
+        message: 'VentasCortesReportCard mounted',
+        data: {
+          build: DEBUG_BUILD,
+          href: typeof window !== 'undefined' ? window.location.href : null,
+          path: typeof window !== 'undefined' ? window.location.pathname : null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, []);
+  // #endregion
 
   useEffect(() => {
     setOpenPanel(null);
@@ -1017,6 +1045,32 @@ export function VentasCortesReportCard({
     const tipWiSuggested = tipIncludesServicio
       ? Math.round((tip - tips.servicioTotal) * 100) / 100
       : null;
+    // #region agent log
+    fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '826472',
+      },
+      body: JSON.stringify({
+        sessionId: '826472',
+        runId: 'pre-fix',
+        hypothesisId: 'E',
+        location: 'VentasCortesReportCard.tsx:editLive',
+        message: 'editLive tip breakdown computed',
+        data: {
+          build: DEBUG_BUILD,
+          os,
+          tip,
+          staffTipEventos: tips.staffTipEventos,
+          adminTombola: tips.adminTombola,
+          propinasTotal: tips.propinasTotal,
+          tipWiSuggested,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     return { venta, neto, tombolaRef, tips, tipIncludesServicio, tipWiSuggested };
   }, [editForm]);
 
@@ -1297,9 +1351,46 @@ export function VentasCortesReportCard({
               ) : null}
 
               {editing && editForm && editBaseline ? (
-                <div className="mb-4 space-y-3 rounded-[20px] border border-slate-200 bg-slate-50/80 p-4">
+                <div
+                  className="mb-4 space-y-3 rounded-[20px] border border-slate-200 bg-slate-50/80 p-4"
+                  data-debug-build={DEBUG_BUILD}
+                >
+                  {/* #region agent log */}
+                  {(() => {
+                    fetch(
+                      'http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',
+                      {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'X-Debug-Session-Id': '826472',
+                        },
+                        body: JSON.stringify({
+                          sessionId: '826472',
+                          runId: 'pre-fix',
+                          hypothesisId: 'C',
+                          location: 'VentasCortesReportCard.tsx:edit-render',
+                          message: 'Master edit form rendering',
+                          data: {
+                            build: DEBUG_BUILD,
+                            hasEditLive: Boolean(editLive),
+                            hasTips: Boolean(editLive?.tips),
+                            staffTipEventos: editLive?.tips?.staffTipEventos ?? null,
+                            os: editForm.eventos_os_amount,
+                            showPropinasSection: true,
+                          },
+                          timestamp: Date.now(),
+                        }),
+                      }
+                    ).catch(() => {});
+                    return null;
+                  })()}
+                  {/* #endregion */}
                   <p className="text-sm font-semibold" style={{ color: theme.title }}>
                     Edición Master · se conservan los valores anteriores en historial
+                    <span className="ml-2 text-[10px] font-normal text-emerald-700">
+                      [{DEBUG_BUILD}]
+                    </span>
                   </p>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <EditMoneyField
@@ -1359,7 +1450,43 @@ export function VentasCortesReportCard({
                     />
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                  <div
+                    className="rounded-2xl border border-slate-200 bg-white p-3"
+                    data-testid="propinas-desglose"
+                    data-debug-build={DEBUG_BUILD}
+                  >
+                    {/* #region agent log */}
+                    {(() => {
+                      fetch(
+                        'http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',
+                        {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'X-Debug-Session-Id': '826472',
+                          },
+                          body: JSON.stringify({
+                            sessionId: '826472',
+                            runId: 'pre-fix',
+                            hypothesisId: 'C',
+                            location:
+                              'VentasCortesReportCard.tsx:propinas-desglose',
+                            message: 'Propinas desglose section DOM rendered',
+                            data: {
+                              build: DEBUG_BUILD,
+                              propinaTpv: editForm.bancos_propina_tpv,
+                              propinaEventos:
+                                editLive?.tips?.staffTipEventos ?? null,
+                              total: editLive?.tips?.propinasTotal ?? null,
+                              admin: editLive?.tips?.adminTombola ?? null,
+                            },
+                            timestamp: Date.now(),
+                          }),
+                        }
+                      ).catch(() => {});
+                      return null;
+                    })()}
+                    {/* #endregion */}
                     <p
                       className="mb-3 text-[11px] font-semibold uppercase tracking-wide"
                       style={{ color: theme.muted }}
