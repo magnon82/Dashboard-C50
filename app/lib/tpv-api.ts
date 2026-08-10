@@ -4,6 +4,7 @@ import {
   SESSION_COOKIE,
   canAccessAdmin,
   canAccessCorteTpv,
+  canClosePendingCortes,
   verifySessionToken,
   type SessionUser,
 } from '@/app/lib/auth';
@@ -83,8 +84,8 @@ export function assertWritableCorteDate(
 }
 
 /**
- * Cierre RPT (staff-corte): staff = hoy/ayer; días más atrás solo Master
- * bootstrap (`canAccessAdmin`), ventana de 7 días calendario.
+ * Cierre RPT (staff-corte): staff = hoy/ayer; días más atrás Master o
+ * palomita `staff.corte_pendientes` (ventana 7 días calendario).
  */
 export function assertStaffCorteWritableDate(
   session: SessionUser,
@@ -96,12 +97,12 @@ export function assertStaffCorteWritableDate(
   const { opDay, prevDay } = staffCorteDateWindow();
   if (isStaffWritableCorteDate(corteDate)) return null;
 
-  if (canAccessAdmin(session)) {
+  if (canClosePendingCortes(session)) {
     if (isAdminWritableCorteDate(corteDate)) return null;
     const { minDate, maxDate } = adminCorteDateWindow();
     return NextResponse.json(
       {
-        error: `Master solo puede cerrar el día operativo (${opDay}) o pendientes desde el 1 de agosto (${minDate}–${maxDate}).`,
+        error: `Solo puedes cerrar el día operativo (${opDay}) o pendientes desde el 1 de agosto (${minDate}–${maxDate}).`,
         min_date: minDate,
         max_date: maxDate,
         staff_window_date: opDay,
@@ -113,7 +114,7 @@ export function assertStaffCorteWritableDate(
 
   return NextResponse.json(
     {
-      error: `Solo puedes cerrar el corte del día operativo (${opDay}) o del día anterior (${prevDay}). Días más atrás: solo el admin desde Master.`,
+      error: `Solo puedes cerrar el corte del día operativo (${opDay}) o del día anterior (${prevDay}). Días más atrás: permiso «Cortes pendientes» en Master.`,
       staff_window_date: opDay,
       staff_prev_date: prevDay,
     },

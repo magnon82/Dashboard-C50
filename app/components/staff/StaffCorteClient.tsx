@@ -101,6 +101,7 @@ type DayPayload = {
   dateWindow?: DateWindowPayload;
   adminLookback?: AdminLookbackPayload | null;
   isMasterAdmin?: boolean;
+  canClosePendingCortes?: boolean;
   staffPrevDate?: string;
   defaultDate?: string;
   eventosDelDia?: {
@@ -226,11 +227,16 @@ export function StaffCorteClient() {
     null
   );
   const [payload, setPayload] = useState<DayPayload | null>(null);
-  /** Session + API: evita bloquear el select Master mientras carga useSession. */
-  const isMaster = Boolean(
-    user?.canAccessAdmin ||
+  /** Master o palomita «Cortes pendientes»: ventana 7 días + cierre offline. */
+  const canPendingCortes = Boolean(
+    user?.canClosePendingCortes ||
+      user?.canAccessAdmin ||
+      payload?.canClosePendingCortes ||
       payload?.isMasterAdmin ||
       adminLookback
+  );
+  const isMasterAdmin = Boolean(
+    user?.canAccessAdmin || payload?.isMasterAdmin
   );
   const opDay = dateWindow.opDay;
   const prevDay = dateWindow.prevDay;
@@ -269,7 +275,7 @@ export function StaffCorteClient() {
     ? corteDate
     : '';
 
-  // Mantener selección dentro de la ventana writable (staff: hoy/ayer; master: 7 días).
+  // Mantener selección dentro de la ventana writable (staff: hoy/ayer; pendientes: 7 días).
   useEffect(() => {
     function syncWritableDate() {
       const { opDay: nextOp, prevDay: nextPrev } = staffCorteDateWindow();
@@ -298,8 +304,8 @@ export function StaffCorteClient() {
       setCorteDate((prev) => {
         if (prev === nextOp || prev === nextPrev) return prev;
         if (isAdminWritableCorteDate(prev)) {
-          // Master (o ?date= en ventana 7 días): no forzar hoy antes de resolver sesión.
-          if (isMaster) return prev;
+          // Permiso pendientes (o ?date= en ventana 7 días): no forzar hoy antes de resolver sesión.
+          if (canPendingCortes) return prev;
           const q = new URLSearchParams(window.location.search)
             .get('date')
             ?.slice(0, 10);
@@ -311,16 +317,16 @@ export function StaffCorteClient() {
     syncWritableDate();
     window.addEventListener('focus', syncWritableDate);
     return () => window.removeEventListener('focus', syncWritableDate);
-  }, [isMaster]);
+  }, [canPendingCortes]);
 
-  // Si llega ?date= y el usuario es Master, respetarlo dentro de la ventana.
+  // Si llega ?date= y hay permiso de pendientes, respetarlo dentro de la ventana.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get('date')?.slice(0, 10);
     if (!q || !/^\d{4}-\d{2}-\d{2}$/.test(q)) return;
     if (!isAdminWritableCorteDate(q)) return;
-    if (!isMaster && q !== opDay && q !== prevDay) return;
+    if (!canPendingCortes && q !== opDay && q !== prevDay) return;
     setCorteDate((prev) => (prev === q ? prev : q));
-  }, [isMaster, opDay, prevDay]);
+  }, [canPendingCortes, opDay, prevDay]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -351,7 +357,10 @@ export function StaffCorteClient() {
       }
       if (data.adminLookback && typeof data.adminLookback === 'object') {
         setAdminLookback(data.adminLookback as AdminLookbackPayload);
-      } else if (data.isMasterAdmin !== true) {
+      } else if (
+        data.isMasterAdmin !== true &&
+        data.canClosePendingCortes !== true
+      ) {
         setAdminLookback(null);
       }
       if (!res.ok) {
@@ -430,8 +439,9 @@ export function StaffCorteClient() {
     if (!next || !/^\d{4}-\d{2}-\d{2}$/.test(next)) return;
     if (next === corteDate) return;
     const inAdminWindow = isAdminWritableCorteDate(next);
-    if (!isMaster && next !== opDay && next !== prevDay) return;
-    if (isMaster && !inAdminWindow && next !== opDay && next !== prevDay) return;
+    if (!canPendingCortes && next !== opDay && next !== prevDay) return;
+    if (canPendingCortes && !inAdminWindow && next !== opDay && next !== prevDay)
+      return;
     clearPending();
     setMsg(null);
     setError(null);
@@ -448,8 +458,8 @@ export function StaffCorteClient() {
     setCorteDate(next);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
-      // Persistir día Master (incl. ayer) en ?date=; hoy usa default sin query.
-      if (isMaster && next !== opDay && inAdminWindow) {
+      // Persistir día pendiente (incl. ayer) en ?date=; hoy usa default sin query.
+      if (canPendingCortes && next !== opDay && inAdminWindow) {
         url.searchParams.set('date', next);
       } else {
         url.searchParams.delete('date');
@@ -734,6 +744,9 @@ export function StaffCorteClient() {
           efectivo_contado: String(recibidoNum),
           efectivo_tombola: String(tombolaNum),
           notes: notes || null,
+          ...(canPendingCortes && !payload?.bancos?.canSaveRpt
+            ? { admin_offline: true }
+            : {}),
         }),
       });
       const data = await readTpvApiJson(res);
@@ -832,11 +845,13 @@ export function StaffCorteClient() {
       : savedReconcile;
 
   const canCerrarCorte =
-    Boolean(bancos?.canSaveRpt) && efectivoRecibidoOk && efectivoTombolaOk;
+    (Boolean(bancos?.canSaveRpt) || canPendingCortes) &&
+    efectivoRecibidoOk &&
+    efectivoTombolaOk;
 
   const prevIncomplete =
     !dateWindow.prev.unknown && !dateWindow.prev.corteCompleto;
-  // Banner de ayer solo en Hoy (no pelear con un día pendiente Master más atrás).
+  // Banner de ayer solo en Hoy (no pelear con un día pendiente más atrás).
   const showPrevCatchUpBanner =
     !isPrevDay && prevIncomplete && !isOutsideStaffWindow;
   const opStatusLabel = corteStatusLabel(dateWindow.op);
@@ -926,10 +941,10 @@ export function StaffCorteClient() {
           </button>
         </div>
 
-        {isMaster ? (
+        {canPendingCortes ? (
           <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
-              Master · días pendientes
+              {isMasterAdmin ? 'Master · días pendientes' : 'Días pendientes'}
             </p>
             {pendingAdminDays.length > 0 ? (
               <select
@@ -955,7 +970,7 @@ export function StaffCorteClient() {
               </select>
             ) : (
               <p className="text-xs text-slate-500">
-                No hay días pendientes en la ventana Master.
+                No hay días pendientes en la ventana de 7 días.
               </p>
             )}
             {isOutsideStaffWindow ? (
@@ -963,13 +978,15 @@ export function StaffCorteClient() {
                 Editando · {formatCorteDateDisplay(corteDate)}
               </p>
             ) : null}
-            <Link
-              href="/admin/cortes-tpv"
-              className="inline-flex text-xs font-semibold underline"
-              style={{ color: SUITE.navy }}
-            >
-              Volver a Cortes TPV (Master)
-            </Link>
+            {isMasterAdmin ? (
+              <Link
+                href="/admin/cortes-tpv"
+                className="inline-flex text-xs font-semibold underline"
+                style={{ color: SUITE.navy }}
+              >
+                Volver a Cortes TPV (Master)
+              </Link>
+            ) : null}
           </div>
         ) : null}
 
@@ -1760,8 +1777,9 @@ export function StaffCorteClient() {
         </button>
         {!bancos?.canSaveRpt ? (
           <p className="text-center text-xs text-slate-500">
-            Completa las 3 terminales (2 fotos + montos, o no usada) antes de
-            cerrar
+            {canPendingCortes
+              ? 'TPV incompleto: puedes cerrar offline con el permiso de cortes pendientes (bancos = snapshot TPV o $0).'
+              : 'Completa las 3 terminales (2 fotos + montos, o no usada) antes de cerrar'}
           </p>
         ) : !efectivoRecibidoOk || !efectivoTombolaOk ? (
           <p className="text-center text-xs text-slate-500">

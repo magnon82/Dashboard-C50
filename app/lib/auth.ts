@@ -187,7 +187,18 @@ export function canAccessCorteTpv(session: SessionUser): boolean {
 export function canAccessStaffCorte(session: SessionUser): boolean {
   if (session.role === 'admin' || session.modules.includes('*')) return true;
   if (sessionHasCapability(session, 'staff.corte')) return true;
+  if (sessionHasCapability(session, 'staff.corte_pendientes')) return true;
   return legacySeedStaffCorte(session);
+}
+
+/**
+ * Cerrar / editar cortes pendientes (ventana Master 7 días + offline offline sin TPV).
+ * Admin bootstrap implícito; resto vía palomita `staff.corte_pendientes`.
+ */
+export function canClosePendingCortes(session: SessionUser): boolean {
+  if (canAccessAdmin(session)) return true;
+  if (session.role === 'admin' || session.modules.includes('*')) return true;
+  return sessionHasCapability(session, 'staff.corte_pendientes');
 }
 
 export function isCorteTpvPath(pathname: string): boolean {

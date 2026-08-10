@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { canAccessAdmin } from '@/app/lib/auth';
+import { canAccessAdmin, canClosePendingCortes } from '@/app/lib/auth';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
   assertStaffCorteWritableDate,
@@ -11,6 +11,7 @@ import {
 import {
   adminCorteDateWindow,
   asTpvRow,
+  computeNetoBanco,
   defaultCorteDateCdmx,
   listAdminLookbackDates,
   staffCorteDateWindow,
@@ -327,7 +328,7 @@ export async function GET(request: Request) {
       infocaja.hasEfectivo ? infocaja.efectivo : null
     );
 
-    const isMaster = canAccessAdmin(auth);
+    const canPending = canClosePendingCortes(auth);
     let adminLookback:
       | {
           minDate: string;
@@ -335,7 +336,7 @@ export async function GET(request: Request) {
           days: DayWindowSummary[];
         }
       | undefined;
-    if (isMaster) {
+    if (canPending) {
       const win = adminCorteDateWindow();
       const lookbackDates = listAdminLookbackDates();
       const daySummaries = await Promise.all(
@@ -369,7 +370,8 @@ export async function GET(request: Request) {
         prev: prevSummary,
       },
       adminLookback: adminLookback || null,
-      isMasterAdmin: isMaster,
+      isMasterAdmin: canAccessAdmin(auth),
+      canClosePendingCortes: canPending,
       uploads,
       bancos,
       infocaja,
@@ -427,9 +429,11 @@ export async function GET(request: Request) {
  * PUT /api/staff-corte — Cerrar / actualizar cierre del día (upsert 1 fila).
  * Body JSON: { date?, wi_amount, eventos_os_amount?, eventos_extra_amount?,
  *              eventos_amount? (legacy), efectivo_contado (recibido),
- *              efectivo_tombola (después de propinas), notes? }
+ *              efectivo_tombola (después de propinas), notes?,
+ *              admin_offline? (Master o palomita Cortes pendientes: sin TPV completo),
+ *              bancos_cobrado_tpv?, bancos_propina_tpv? (solo offline) }
  * Con evento: OS + venta extra (como Global). Total = OS + extra → eventos_amount.
- * Bancos/propinas = TPV. Infocaja no bloquea el cierre (conciliación post-hoc).
+ * Bancos/propinas = TPV (o manual si admin_offline sin TPV). Infocaja no bloquea.
  */
 export async function PUT(request: Request) {
   const auth = await requireVentasSession();
@@ -505,7 +509,12 @@ export async function PUT(request: Request) {
 
     /** Efectivo en tómbola después de propinas (manual). */
     const tombola = parseMoneyInput(body.efectivo_tombola);
-    if (tombola == null || tombola < 0) {
+    const adminOffline =
+      canClosePendingCortes(auth) &&
+      (body.admin_offline === true ||
+        body.admin_offline === '1' ||
+        body.admin_offline === 1);
+    if (tombola == null || (!adminOffline && tombola < 0)) {
       return NextResponse.json(
         { error: 'Indica el efectivo en tómbola después de propinas (obligatorio)' },
         { status: 400 }
@@ -531,7 +540,7 @@ export async function PUT(request: Request) {
     }
     const bancos = buildBancosFromTpv(uploads, date);
 
-    if (!bancos.canSaveRpt) {
+    if (!bancos.canSaveRpt && !adminOffline) {
       return NextResponse.json(
         {
           error: 'No se puede cerrar el corte todavía',
@@ -540,6 +549,21 @@ export async function PUT(request: Request) {
         },
         { status: 409 }
       );
+    }
+
+    /** Offline Master: montos TPV opcionales en body; si no, snapshot TPV o 0. */
+    let cobrado = bancos.cobrado;
+    let propina = bancos.propina;
+    let neto = bancos.neto;
+    if (adminOffline && !bancos.canSaveRpt) {
+      const cobIn = parseMoneyInput(body.bancos_cobrado_tpv);
+      const tipIn = parseMoneyInput(body.bancos_propina_tpv);
+      if (cobIn != null && cobIn >= 0) cobrado = cobIn;
+      else if (!bancos.complete) cobrado = 0;
+      if (tipIn != null && tipIn >= 0) propina = tipIn;
+      else if (!bancos.complete) propina = 0;
+      const netoCalc = computeNetoBanco(cobrado, propina);
+      neto = netoCalc ?? Math.round((cobrado + propina) * 100) / 100;
     }
 
     const { infocaja } = await loadInfocajaDay(sb, date);
@@ -556,16 +580,25 @@ export async function PUT(request: Request) {
       eventos_amount: eventos,
       eventos_os_amount: eventosOs,
       eventos_extra_amount: eventosExtra,
-      propinas: bancos.propina,
+      propinas: propina,
       efectivo_tombola: tombola,
       efectivo_contado: efectivoRecibido,
       efectivo_infocaja: infocaja.hasEfectivo ? infocaja.efectivo : null,
-      bancos_neto_tpv: bancos.neto,
-      bancos_cobrado_tpv: bancos.cobrado,
-      bancos_propina_tpv: bancos.propina,
+      bancos_neto_tpv: neto,
+      bancos_cobrado_tpv: cobrado,
+      bancos_propina_tpv: propina,
       tpv_accounted: bancos.day.accounted,
       tpv_complete: bancos.complete,
-      notes,
+      notes:
+        adminOffline && !bancos.canSaveRpt
+          ? (() => {
+              const tag = 'Cierre offline (sin TPV completo).';
+              if (notes?.includes(tag)) return notes;
+              return (
+                [notes, tag].filter(Boolean).join(' ').slice(0, 2000) || null
+              );
+            })()
+          : notes,
       updated_by: auth.username,
       updated_at: now,
     };

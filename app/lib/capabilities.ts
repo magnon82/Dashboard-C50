@@ -6,6 +6,7 @@
 
 export type CapabilityId =
   | 'staff.corte'
+  | 'staff.corte_pendientes'
   | 'rrhh.employees_edit'
   | 'rrhh.schedules_edit';
 
@@ -22,6 +23,12 @@ export const APP_CAPABILITIES: AppCapability[] = [
     id: 'staff.corte',
     label: 'Puede hacer el corte',
     hint: 'Staff · Corte del día / TPV (subir fotos y cerrar caja)',
+  },
+  {
+    id: 'staff.corte_pendientes',
+    label: 'Cortes pendientes',
+    hint:
+      'Staff · Cerrar o editar cortes de días pendientes (ventana 7 días) aunque falte TPV (cierre offline). Incluye acceso a /staff/corte.',
   },
   {
     id: 'rrhh.employees_edit',

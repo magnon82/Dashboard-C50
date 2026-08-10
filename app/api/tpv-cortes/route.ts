@@ -166,6 +166,8 @@ function rptToSummary(
   return {
     wi_amount: r.wi_amount,
     eventos_amount: r.eventos_amount,
+    eventos_os_amount: r.eventos_os_amount,
+    eventos_extra_amount: r.eventos_extra_amount,
     propinas: r.propinas,
     efectivo_tombola: r.efectivo_tombola,
     efectivo_contado: r.efectivo_contado,
@@ -174,6 +176,7 @@ function rptToSummary(
     bancos_cobrado_tpv: r.bancos_cobrado_tpv,
     bancos_propina_tpv: r.bancos_propina_tpv,
     tpv_complete: r.tpv_complete,
+    notes: r.notes,
     created_by: r.created_by,
     updated_by: r.updated_by,
   };

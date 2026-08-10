@@ -666,6 +666,8 @@ export function parseTerminalNumber(raw: unknown): TpvTerminalNumber | null {
 export interface TpvAdminReportRptSummary {
   wi_amount: number;
   eventos_amount: number;
+  eventos_os_amount?: number;
+  eventos_extra_amount?: number;
   propinas: number;
   efectivo_tombola: number;
   efectivo_contado: number | null;
@@ -674,6 +676,7 @@ export interface TpvAdminReportRptSummary {
   bancos_cobrado_tpv: number | null;
   bancos_propina_tpv: number | null;
   tpv_complete: boolean;
+  notes?: string | null;
   created_by: string;
   updated_by: string | null;
 }

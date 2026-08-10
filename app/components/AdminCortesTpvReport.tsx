@@ -227,6 +227,151 @@ type Props = {
   compact?: boolean;
 };
 
+function moneyField(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(Number(v))) return '';
+  return String(v);
+}
+
+type MasterRptFormState = {
+  wi_amount: string;
+  eventos_os_amount: string;
+  eventos_extra_amount: string;
+  efectivo_contado: string;
+  efectivo_tombola: string;
+  bancos_cobrado_tpv: string;
+  bancos_propina_tpv: string;
+  notes: string;
+};
+
+function formFromDayRpt(
+  day: TpvAdminReportDay
+): MasterRptFormState {
+  const rpt = day.rpt;
+  return {
+    wi_amount: moneyField(rpt?.wi_amount ?? 0),
+    eventos_os_amount: moneyField(
+      rpt?.eventos_os_amount ?? rpt?.eventos_amount ?? 0
+    ),
+    eventos_extra_amount: moneyField(rpt?.eventos_extra_amount ?? 0),
+    efectivo_contado: moneyField(rpt?.efectivo_contado ?? 0),
+    efectivo_tombola: moneyField(rpt?.efectivo_tombola ?? 0),
+    bancos_cobrado_tpv: moneyField(
+      rpt?.bancos_cobrado_tpv ?? day.totals.cobrado ?? 0
+    ),
+    bancos_propina_tpv: moneyField(
+      rpt?.bancos_propina_tpv ?? day.totals.propina ?? 0
+    ),
+    notes: rpt?.notes ?? '',
+  };
+}
+
+function MasterRptForm({
+  day,
+  saving,
+  onSave,
+}: {
+  day: TpvAdminReportDay;
+  saving: boolean;
+  onSave: (form: MasterRptFormState) => void;
+}) {
+  const [form, setForm] = useState<MasterRptFormState>(() =>
+    formFromDayRpt(day)
+  );
+
+  useEffect(() => {
+    setForm(formFromDayRpt(day));
+  }, [day.date, day.hasRpt, day.rpt?.updated_by, day.totals.cobrado, day.totals.propina]);
+
+  const offline = !day.complete;
+
+  return (
+    <div
+      className="mb-4 rounded-xl border px-3 py-3"
+      style={{
+        borderColor: offline ? `${SUITE.orange}66` : `${TEAL}44`,
+        backgroundColor: offline ? SUITE.orangeSoft : `${TEAL}0d`,
+      }}
+    >
+      <p
+        className="text-[10px] font-bold uppercase tracking-wide"
+        style={{ color: offline ? SUITE.orangeDeep : TEAL }}
+      >
+        {day.hasRpt ? 'Editar cierre RPT' : 'Generar cierre RPT'}
+        {offline ? ' · offline (sin TPV completo)' : ''}
+      </p>
+      <p className="mt-1 text-[11px] text-slate-500">
+        {offline
+          ? 'Puedes cerrar el día sin fotos TPV. Captura WI, eventos, efectivo y bancos manualmente.'
+          : 'Actualiza montos del cierre. Bancos se rellenan desde TPV si ya están listos.'}
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        {(
+          [
+            ['wi_amount', 'WI'],
+            ['eventos_os_amount', 'Eventos OS'],
+            ['eventos_extra_amount', 'Eventos extra'],
+            ['efectivo_contado', 'Efectivo recibido'],
+            ['efectivo_tombola', 'Efectivo en tómbola'],
+            ['bancos_cobrado_tpv', 'Bancos cobrado'],
+            ['bancos_propina_tpv', 'Propina TPV'],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key} className="block">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              {label}
+            </span>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-semibold tabular-nums text-slate-900"
+              value={form[key]}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, [key]: e.target.value }))
+              }
+            />
+          </label>
+        ))}
+      </div>
+      <label className="mt-2 block">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+          Nota
+        </span>
+        <textarea
+          rows={2}
+          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-900"
+          value={form.notes}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, notes: e.target.value }))
+          }
+          maxLength={2000}
+        />
+      </label>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => onSave(form)}
+          className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-bold text-white disabled:opacity-60"
+          style={{ backgroundColor: SUITE.navy }}
+        >
+          {saving
+            ? 'Guardando…'
+            : day.hasRpt
+              ? 'Guardar cambios'
+              : 'Generar cierre'}
+        </button>
+        <Link
+          href={`/staff/corte?date=${encodeURIComponent(day.date)}`}
+          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          Abrir flujo Staff
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Reporte admin Cortes TPV: listado por fecha, detalle expandible y edición.
  */
@@ -241,6 +386,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
   const [uploads, setUploads] = useState<TpvCorteUpload[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [savingRpt, setSavingRpt] = useState(false);
   /** Día pendiente seleccionado (ventana Master, solo incompletos). */
   const [jumpDate, setJumpDate] = useState('');
   const dateWindow = useMemo(() => adminCorteDateWindow(), []);
@@ -332,6 +478,53 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
   async function refreshExpanded() {
     await loadList();
     if (expanded) await loadDetail(expanded);
+  }
+
+  async function saveMasterRpt(day: TpvAdminReportDay, form: MasterRptFormState) {
+    setSavingRpt(true);
+    setError('');
+    setMsg('');
+    try {
+      const res = await fetch('/api/staff-corte', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: day.date,
+          wi_amount: form.wi_amount,
+          eventos_os_amount: form.eventos_os_amount,
+          eventos_extra_amount: form.eventos_extra_amount,
+          efectivo_contado: form.efectivo_contado,
+          efectivo_tombola: form.efectivo_tombola,
+          bancos_cobrado_tpv: form.bancos_cobrado_tpv,
+          bancos_propina_tpv: form.bancos_propina_tpv,
+          notes: form.notes.trim() || null,
+          admin_offline: !day.complete,
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        hint?: string;
+        blockers?: string[];
+      };
+      if (!res.ok) {
+        setError(
+          [json.error, json.hint, ...(json.blockers || [])]
+            .filter(Boolean)
+            .join(' — ') || 'No se pudo guardar el cierre'
+        );
+        return;
+      }
+      setMsg(
+        day.hasRpt
+          ? `Cierre de ${day.date} actualizado`
+          : `Cierre de ${day.date} generado`
+      );
+      await refreshExpanded();
+    } catch {
+      setError('Error de red al guardar el cierre');
+    } finally {
+      setSavingRpt(false);
+    }
   }
 
   const pendingInWindow = useMemo(() => {
@@ -711,11 +904,16 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                       : d.accounted
                         ? ` · ${d.accounted}/3`
                         : ' · sin TPV'}
+                    {d.hasRpt ? ' · con RPT' : ''}
                   </option>
                 ))
               )}
             </select>
           </label>
+          <p className="mt-2 text-[11px] text-slate-500">
+            En días sin TPV puedes generar el cierre RPT offline y editarlo aquí
+            (Master).
+          </p>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -862,6 +1060,12 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                       </p>
                     ) : (
                       <>
+                        <MasterRptForm
+                          day={day}
+                          saving={savingRpt}
+                          onSave={(form) => void saveMasterRpt(day, form)}
+                        />
+
                         {day.rpt ? (
                           <div
                             className="mb-4 rounded-xl border px-3 py-3"
@@ -874,7 +1078,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                               className="text-[10px] font-bold uppercase tracking-wide"
                               style={{ color: TEAL }}
                             >
-                              Cierre del día (staff_rpt)
+                              Cierre guardado
                             </p>
                             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
                               {(
@@ -943,28 +1147,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
                                 : ''}
                             </p>
                           </div>
-                        ) : (
-                          <p className="mb-4 text-xs text-slate-400">
-                            Sin cierre RPT guardado para este día.
-                          </p>
-                        )}
-
-                        <div className="mb-4">
-                          <Link
-                            href={`/staff/corte?date=${encodeURIComponent(day.date)}`}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-bold text-white"
-                            style={{ backgroundColor: SUITE.orange }}
-                          >
-                            {day.corteCompleto
-                              ? 'Abrir corte del día'
-                              : 'Completar / cerrar corte'}
-                          </Link>
-                          <p className="mt-1.5 text-[11px] text-slate-400">
-                            Abre el flujo Staff (fotos + WI / Eventos / tómbola)
-                            para esta fecha. Master puede días pendientes hasta
-                            7 atrás.
-                          </p>
-                        </div>
+                        ) : null}
 
                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                           {TPV_TERMINALS.map((terminal) => {

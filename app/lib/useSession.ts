@@ -10,6 +10,7 @@ export interface ClientSession {
   canEdit: boolean;
   canAccessAdmin: boolean;
   canAccessStaffCorte?: boolean;
+  canClosePendingCortes?: boolean;
   canEditHrEmployees?: boolean;
   canEditHrSchedules?: boolean;
 }
