@@ -8,7 +8,6 @@
  */
 
 import { google } from 'googleapis';
-import type { JWT, OAuth2Client } from 'google-auth-library';
 import {
   createGoogleDriveAuth,
   createGoogleDriveJwtAuth,
@@ -16,6 +15,10 @@ import {
   getGoogleDriveAuthStatus,
 } from '@/app/lib/google-drive-auth';
 import { getServiceSupabase } from '@/app/lib/users';
+
+/** googleapis duplica OAuth2Client/JWT en deps anidadas; auth se tipa laxo. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type GoogleApiAuth = any;
 
 export type EventosGlobalRow = {
   evento: string;
@@ -146,7 +149,7 @@ export function parseEventosIngestDescription(description: string): {
 
 async function findEventosSheetId(
   year: number,
-  auth: OAuth2Client | JWT
+  auth: GoogleApiAuth
 ): Promise<{ id: string; name: string } | null> {
   const drive = google.drive({ version: 'v3', auth });
   const q = `name = 'EVENTOS C50 ${year}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
@@ -162,7 +165,7 @@ async function findEventosSheetId(
 
 async function loadEventosGlobalFromSheetsWithAuth(
   year: number,
-  auth: OAuth2Client | JWT
+  auth: GoogleApiAuth
 ): Promise<EventosGlobalPayload> {
   const found = await findEventosSheetId(year, auth);
   if (!found) {
@@ -287,12 +290,12 @@ async function loadEventosGlobalFromFinancialRecords(
 
 function listAuthAttempts(): Array<{
   label: string;
-  auth: () => OAuth2Client | JWT;
+  auth: () => GoogleApiAuth;
 }> {
   const status = getGoogleDriveAuthStatus();
   const attempts: Array<{
     label: string;
-    auth: () => OAuth2Client | JWT;
+    auth: () => GoogleApiAuth;
   }> = [];
   if (status.mode === 'oauth') {
     attempts.push({ label: 'oauth', auth: () => createGoogleDriveAuth() });

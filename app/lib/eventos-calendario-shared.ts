@@ -51,12 +51,13 @@ export type CalendarPayload = {
 
 /** True si el evento ya tiene OS (PDF, digital, seed indexada, o source os). */
 export function eventHasOs(
-  ev: Partial<
-    Pick<
-      CalendarEventItem,
-      'has_os' | 'os_path' | 'digital_os_id' | 'source' | 'os_filename'
-    >
-  >
+  ev: Partial<{
+    has_os: boolean;
+    os_path: string | null;
+    digital_os_id: string | null;
+    source: string;
+    os_filename: string | null;
+  }>
 ): boolean {
   if (ev.has_os) return true;
   if (ev.os_path || ev.digital_os_id) return true;
@@ -67,7 +68,10 @@ export function eventHasOs(
 
 /** Anticipo C50 por flag o por etiqueta de fuente (p. ej. Tablero summary). */
 export function eventHasAnticipo(
-  ev: Partial<Pick<CalendarEventItem, 'has_anticipo' | 'source_label'>>
+  ev: Partial<{
+    has_anticipo: boolean;
+    source_label: string;
+  }>
 ): boolean {
   if (ev.has_anticipo) return true;
   if (
@@ -81,13 +85,16 @@ export function eventHasAnticipo(
 
 /** Anticipo registrado y aún sin OS (PDF, digital ni seed). Cancelados no alertan. */
 export function isAnticipoSinOs(
-  ev: Partial<Pick<CalendarEventItem, 'has_anticipo' | 'status' | 'source_label'>> &
-    Partial<
-      Pick<
-        CalendarEventItem,
-        'has_os' | 'os_path' | 'digital_os_id' | 'source' | 'os_filename'
-      >
-    >
+  ev: Partial<{
+    has_anticipo: boolean;
+    status: string | null;
+    source_label: string;
+    has_os: boolean;
+    os_path: string | null;
+    digital_os_id: string | null;
+    source: string;
+    os_filename: string | null;
+  }>
 ): boolean {
   if (!eventHasAnticipo(ev)) return false;
   if (ev.status === 'cancelado') return false;
@@ -99,7 +106,16 @@ export function isAnticipoSinOs(
  * solo eventos con anticipo u orden de servicio (no cotizaciones sueltas ni cancelados).
  */
 export function isEventoEnPuerta(
-  ev: Partial<CalendarEventItem>
+  ev: Partial<{
+    has_anticipo: boolean;
+    status: string | null;
+    source_label: string;
+    has_os: boolean;
+    os_path: string | null;
+    digital_os_id: string | null;
+    source: string;
+    os_filename: string | null;
+  }>
 ): boolean {
   if (ev.status === 'cancelado') return false;
   return eventHasAnticipo(ev) || eventHasOs(ev);

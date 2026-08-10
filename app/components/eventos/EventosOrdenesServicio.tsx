@@ -910,7 +910,7 @@ export function EventosOrdenesServicio() {
                       </td>
                     </tr>
                   );
-                })                })
+                })
               )}
             </tbody>
           </table>

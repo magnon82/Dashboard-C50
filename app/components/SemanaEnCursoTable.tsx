@@ -95,6 +95,7 @@ export type WeekToDateData = {
   prevTotalEventos: number;
   prevTotalVentaWi: number;
   prevTotalComensales: number;
+  prevChequePromedio?: number | null;
   changePct: number | null;
   comensalesChangePct: number | null;
   prevMondayKey?: string;
@@ -305,7 +306,7 @@ export function SemanaEnCursoTable({
                   {weekToDate.year}
                 </th>
                 <th
-                  colSpan={5}
+                  colSpan={6}
                   className="border-b border-white/15 border-l border-l-white/25 px-3 py-2 text-center"
                 >
                   {weekToDate.prevYear}
@@ -353,6 +354,7 @@ export function SemanaEnCursoTable({
                   Total
                 </th>
                 <th className="px-2 py-2 text-right font-semibold">Pers.</th>
+                <th className="px-2 py-2 text-right font-semibold">Ch. prom.</th>
                 <th className="border-l border-l-white/25 px-2 py-2 text-right font-semibold">
                   % venta
                 </th>
@@ -401,6 +403,11 @@ export function SemanaEnCursoTable({
                   {moneyCell(d.prevTotal, { muted: true, totalCol: true })}
                   <td className="px-2 py-2 text-right font-medium tabular-nums text-slate-600">
                     {(d.prevComensales ?? 0) > 0 ? pax(d.prevComensales!) : '—'}
+                  </td>
+                  <td className="px-2 py-2 text-right font-medium tabular-nums text-slate-600">
+                    {d.prevChequePromedio != null
+                      ? money(d.prevChequePromedio)
+                      : '—'}
                   </td>
                   <td
                     className={`border-l border-slate-200 px-2 py-2 text-right font-semibold tabular-nums ${varPctClass(
@@ -475,6 +482,11 @@ export function SemanaEnCursoTable({
                 <td className="px-2 py-2.5 text-right tabular-nums">
                   {weekToDate.prevTotalComensales > 0
                     ? pax(weekToDate.prevTotalComensales)
+                    : '—'}
+                </td>
+                <td className="px-2 py-2.5 text-right tabular-nums">
+                  {weekToDate.prevChequePromedio != null
+                    ? money(weekToDate.prevChequePromedio)
                     : '—'}
                 </td>
                 <td className="border-l border-white/20 px-2 py-2.5 text-right tabular-nums">

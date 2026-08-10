@@ -654,6 +654,11 @@ export interface DaySale {
   prevVentaWi?: number;
   /** Comensales mismo día de semana del año anterior; undefined si domingo cerrado <2026 */
   prevComensales?: number;
+  /**
+   * Cheque promedio mismo día año anterior (Venta Total ÷ Personas).
+   * undefined si domingo cerrado <2026; null si no hay comensales.
+   */
+  prevChequePromedio?: number | null;
   /** % vs mismo día año anterior; null si no hay base */
   changePct?: number | null;
   /** % personas vs mismo día año anterior; null si no hay base */
@@ -1096,6 +1101,8 @@ export function buildWeekToDateSales(
   prevTotalVentaWi: number;
   /** Suma personas días comparables del año anterior */
   prevTotalComensales: number;
+  /** Cheque promedio ponderado año anterior (días comparables con personas > 0) */
+  prevChequePromedio: number | null;
   prevMondayKey: string;
   prevAsOfKey: string;
   changePct: number | null;
@@ -1224,6 +1231,7 @@ export function buildWeekToDateSales(
   let prevTotalEventos = 0;
   let prevTotalVentaWi = 0;
   let prevTotalComensales = 0;
+  let prevSinPropinaConComensales = 0;
   /** Personas del año en curso solo en días comparables (para var. % semana) */
   let comparableComensales = 0;
   let prevAsOfKey = '';
@@ -1265,6 +1273,7 @@ export function buildWeekToDateSales(
     let prevDayEventos: number | undefined;
     let prevDayVentaWi: number | undefined;
     let prevDayComensales: number | undefined;
+    let prevDayCheque: number | null | undefined;
     let dayChange: number | null = null;
     let dayComensalesChange: number | null = null;
     if (prevMon) {
@@ -1278,6 +1287,7 @@ export function buildWeekToDateSales(
         prevDayEventos = undefined;
         prevDayVentaWi = undefined;
         prevDayComensales = undefined;
+        prevDayCheque = undefined;
       } else {
         prevDayTotal = prevByDate.get(prevDate) || 0;
         prevDayEventos = resolveDayEventosAmount(
@@ -1286,6 +1296,8 @@ export function buildWeekToDateSales(
         );
         prevDayVentaWi = Math.max(0, prevDayTotal - prevDayEventos);
         prevDayComensales = prevComensalesByDate.get(prevDate) || 0;
+        prevDayCheque =
+          prevDayComensales > 0 ? prevDayTotal / prevDayComensales : null;
         // Solo comparar días ya transcurridos (antes de asOf), o asOf si ya hay venta
         const comparable =
           !isFuture && !closedSunday && (key < asOf || amt > 0);
@@ -1295,6 +1307,9 @@ export function buildWeekToDateSales(
           prevTotalEventos += prevDayEventos;
           prevTotalVentaWi += prevDayVentaWi;
           prevTotalComensales += prevDayComensales;
+          if (prevDayComensales > 0) {
+            prevSinPropinaConComensales += prevDayTotal;
+          }
           comparableComensales += comensales;
           if (prevDayTotal > 0) {
             dayChange = ((amt - prevDayTotal) / prevDayTotal) * 100;
@@ -1323,6 +1338,7 @@ export function buildWeekToDateSales(
       prevEventos: prevDayEventos,
       prevVentaWi: prevDayVentaWi,
       prevComensales: prevDayComensales,
+      prevChequePromedio: prevDayCheque,
       changePct: dayChange,
       comensalesChangePct: dayComensalesChange,
     });
@@ -1341,6 +1357,10 @@ export function buildWeekToDateSales(
 
   const weekChequePromedio =
     totalComensales > 0 ? sinPropinaConComensales / totalComensales : null;
+  const prevWeekChequePromedio =
+    prevTotalComensales > 0
+      ? prevSinPropinaConComensales / prevTotalComensales
+      : null;
 
   return {
     days,
@@ -1360,6 +1380,7 @@ export function buildWeekToDateSales(
     prevTotalEventos,
     prevTotalVentaWi,
     prevTotalComensales,
+    prevChequePromedio: prevWeekChequePromedio,
     prevMondayKey,
     prevAsOfKey,
     changePct,
