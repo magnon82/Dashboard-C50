@@ -9,6 +9,7 @@ import {
 import { getTheme, SUITE } from '@/app/lib/themes';
 import {
   EFECTIVO_TOLERANCE_MXN,
+  cortePropinasBreakdown,
   expectedTombolaDeposit,
   isEventoServicioClassificationGap,
   splitEventoServicio,
@@ -119,7 +120,11 @@ function moneyField(v: number | null | undefined): string {
 }
 
 function formFromCorte(corte: NonNullable<CortePayload['corte']>): EditFormState {
-  const tip = corte.bancos_propina_tpv ?? corte.propinas;
+  // Propina TPV = solo WI (tickets). No caer a `propinas` si ya es total staff.
+  const tip =
+    corte.bancos_propina_tpv != null
+      ? Number(corte.bancos_propina_tpv)
+      : Number(corte.propinas) || 0;
   const proposed = expectedTombolaDeposit(corte.efectivo_contado, tip);
   return {
     wi_amount: moneyField(corte.wi_amount),
@@ -817,13 +822,21 @@ export function VentasCortesReportCard({
   const bancosHint =
     corte &&
     (corte.bancos_cobrado_tpv != null || corte.bancos_propina_tpv != null)
-      ? `Cobrado ${moneyOrDash(corte.bancos_cobrado_tpv)} · Propina TPV ${moneyOrDash(corte.bancos_propina_tpv)}`
+      ? `Cobrado ${moneyOrDash(corte.bancos_cobrado_tpv)} · Propina TPV (WI) ${moneyOrDash(corte.bancos_propina_tpv)}`
       : undefined;
 
   const propinaTpvForTombola =
     corte != null
-      ? Number(corte.bancos_propina_tpv ?? corte.propinas) || 0
+      ? Number(
+          corte.bancos_propina_tpv != null
+            ? corte.bancos_propina_tpv
+            : corte.propinas
+        ) || 0
       : tombola?.propinas_tpv ?? 0;
+  const tipBreakdown =
+    corte != null
+      ? cortePropinasBreakdown(propinaTpvForTombola, corte.eventos_os_amount)
+      : null;
   const tombolaFromRecibido =
     corte != null
       ? expectedTombolaDeposit(corte.efectivo_contado, propinaTpvForTombola)
@@ -833,22 +846,17 @@ export function VentasCortesReportCard({
     tombola?.amount ??
     (corte != null ? corte.efectivo_tombola : null);
 
-  const servicioAdminHint =
-    corte != null &&
-    Number(corte.eventos_os_amount) > 0
-      ? (() => {
-          const s = splitEventoServicio(Number(corte.eventos_os_amount));
-          return ` · + admin ${(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}% OS = ${moneyMx(s.adminTombola)} (cargo aparte en tómbola)`;
-        })()
-      : '';
-
   const tombolaHint =
     tombolaFromRecibido != null
-      ? `Efectivo recibido − Propina TPV (${moneyMx(propinaTpvForTombola)})${servicioAdminHint}`
+      ? `Efectivo recibido − Propina TPV WI (${moneyMx(propinaTpvForTombola)})${
+          tipBreakdown && tipBreakdown.adminTombola > 0
+            ? ` · admin ${(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}% OS = ${moneyMx(tipBreakdown.adminTombola)} (no es TPV)`
+            : ''
+        }`
       : tombola?.efectivo != null
-        ? `${tombola.source === 'infocaja' ? 'Infocaja' : 'Efectivo'} ${moneyMx(tombola.efectivo)} − propinas ${moneyMx(tombola.propinas_tpv)}${servicioAdminHint}`
+        ? `${tombola.source === 'infocaja' ? 'Infocaja' : 'Efectivo'} ${moneyMx(tombola.efectivo)} − propinas TPV ${moneyMx(tombola.propinas_tpv)}`
         : corte?.efectivo_infocaja != null
-          ? `Infocaja efectivo ${moneyMx(corte.efectivo_infocaja)}${servicioAdminHint}`
+          ? `Infocaja efectivo ${moneyMx(corte.efectivo_infocaja)}`
           : undefined;
 
   const recibidoVsInfocaja = (() => {
@@ -994,11 +1002,22 @@ export function VentasCortesReportCard({
       Number.isFinite(cob) && Number.isFinite(tip)
         ? computeNetoBanco(cob, tip)
         : null;
+    const tips = cortePropinasBreakdown(
+      Number.isFinite(tip) ? tip : 0,
+      Number.isFinite(os) ? os : 0
+    );
     const tombolaRef =
       Number.isFinite(rec) && Number.isFinite(tip)
         ? expectedTombolaDeposit(rec, tip)
         : null;
-    return { venta, neto, tombolaRef };
+    const tipIncludesServicio =
+      tips.servicioTotal > 0 &&
+      Number.isFinite(tip) &&
+      tip + 0.005 >= tips.servicioTotal;
+    const tipWiSuggested = tipIncludesServicio
+      ? Math.round((tip - tips.servicioTotal) * 100) / 100
+      : null;
+    return { venta, neto, tombolaRef, tips, tipIncludesServicio, tipWiSuggested };
   }, [editForm]);
 
   async function saveEdit() {
@@ -1332,12 +1351,13 @@ export function VentasCortesReportCard({
                       }
                     />
                     <EditMoneyField
-                      label="Propina TPV"
+                      label="Propina TPV (WI)"
                       value={editForm.bancos_propina_tpv}
                       previous={moneyOrDash(
                         editBaseline.bancos_propina_tpv ??
                           editBaseline.propinas
                       )}
+                      hint="Solo propinas WI de terminal. El servicio del evento no es TPV."
                       onChange={(v) =>
                         setEditForm((f) =>
                           f ? patchEditTombola(f, 'bancos_propina_tpv', v) : f
@@ -1345,12 +1365,69 @@ export function VentasCortesReportCard({
                       }
                     />
                     <Kpi
+                      label={`Propina eventos ${(EVENTOS_SERVICIO_STAFF_PCT * 100).toFixed(1)}%`}
+                      value={
+                        editLive?.tips
+                          ? moneyMx(editLive.tips.staffTipEventos)
+                          : '—'
+                      }
+                      hint="Sobre VENTA OS · pool staff (no cobrada con TPV)"
+                    />
+                    <Kpi
+                      label={`Admin ${(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}%`}
+                      value={
+                        editLive?.tips
+                          ? moneyMx(editLive.tips.adminTombola)
+                          : '—'
+                      }
+                      hint="Cargo administrativo · tómbola (no es propina TPV)"
+                    />
+                    <Kpi
+                      label="Total propinas"
+                      value={
+                        editLive?.tips
+                          ? moneyMx(editLive.tips.propinasTotal)
+                          : '—'
+                      }
+                      hint="Propina TPV (WI) + 12.5% eventos"
+                      highlight
+                    />
+                    <Kpi
                       label="Bancos neto TPV"
                       value={
                         editLive?.neto != null ? moneyMx(editLive.neto) : '—'
                       }
-                      hint="Cobrado + propina (calculado)"
+                      hint="Cobrado + propina TPV WI (sin eventos)"
                     />
+                    {editLive?.tipWiSuggested != null ? (
+                      <div className="sm:col-span-2 lg:col-span-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+                        <p>
+                          El monto TPV parece incluir el{' '}
+                          {(EVENTOS_SERVICIO_PCT * 100).toFixed(0)}% de servicio
+                          del evento ({moneyMx(editLive.tips.servicioTotal)}).
+                          Propina TPV (WI) sugerida:{' '}
+                          <strong>{moneyMx(editLive.tipWiSuggested)}</strong>.
+                        </p>
+                        <button
+                          type="button"
+                          className="mt-2 rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-semibold text-white"
+                          onClick={() =>
+                            setEditForm((f) =>
+                              f && editLive.tipWiSuggested != null
+                                ? patchEditTombola(
+                                    f,
+                                    'bancos_propina_tpv',
+                                    moneyField(editLive.tipWiSuggested)
+                                  )
+                                : f
+                            )
+                          }
+                        >
+                          Aplicar Propina TPV (WI) ={' '}
+                          {moneyMx(editLive.tipWiSuggested)}
+                        </button>
+                      </div>
+                    ) : null}
                     <EditMoneyField
                       label="Efectivo recibido"
                       value={editForm.efectivo_contado}
@@ -1379,7 +1456,7 @@ export function VentasCortesReportCard({
                       previous={moneyMx(editBaseline.efectivo_tombola)}
                       hint={
                         editLive?.tombolaRef != null
-                          ? `Propuesto: recibido − propina TPV = ${moneyMx(editLive.tombolaRef)}`
+                          ? `Propuesto: recibido − propina TPV WI = ${moneyMx(editLive.tombolaRef)}`
                           : undefined
                       }
                       allowNegative
@@ -1442,13 +1519,45 @@ export function VentasCortesReportCard({
                   hint={bancosHint}
                 />
                 <Kpi
-                  label="Propinas"
-                  value={moneyMx(corte.propinas)}
-                  hint={
+                  label="Propina TPV (WI)"
+                  value={moneyOrDash(
                     corte.bancos_propina_tpv != null
-                      ? `TPV ${moneyMx(corte.bancos_propina_tpv)}`
-                      : undefined
+                      ? corte.bancos_propina_tpv
+                      : tipBreakdown?.propinaTpvWi
+                  )}
+                  hint="Solo terminales · sin servicio del evento"
+                />
+                <Kpi
+                  label={`Propina eventos ${(EVENTOS_SERVICIO_STAFF_PCT * 100).toFixed(1)}%`}
+                  value={
+                    tipBreakdown
+                      ? moneyMx(tipBreakdown.staffTipEventos)
+                      : '—'
                   }
+                  hint={
+                    tipBreakdown && tipBreakdown.osVenta > 0
+                      ? `Sobre OS ${moneyMx(tipBreakdown.osVenta)} · no es TPV`
+                      : 'Sin VENTA OS'
+                  }
+                />
+                <Kpi
+                  label={`Admin ${(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}%`}
+                  value={
+                    tipBreakdown
+                      ? moneyMx(tipBreakdown.adminTombola)
+                      : '—'
+                  }
+                  hint="Cargo administrativo · tómbola"
+                />
+                <Kpi
+                  label="Total propinas"
+                  value={
+                    tipBreakdown
+                      ? moneyMx(tipBreakdown.propinasTotal)
+                      : moneyMx(corte.propinas)
+                  }
+                  hint="Propina TPV (WI) + 12.5% eventos"
+                  highlight
                 />
                 <Kpi
                   label="Efectivo recibido"
@@ -1473,7 +1582,7 @@ export function VentasCortesReportCard({
                   value={moneyMx(tombolaAmount)}
                   hint={
                     tombolaAmount != null && tombolaAmount < 0
-                      ? `${tombolaHint ?? 'Efectivo − propina'} · no alcanzó el efectivo`
+                      ? `${tombolaHint ?? 'Efectivo − propina TPV WI'} · no alcanzó el efectivo`
                       : tombolaHint
                   }
                   tone={

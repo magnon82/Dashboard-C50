@@ -338,7 +338,7 @@ function MasterRptForm({
             ['efectivo_contado', 'Efectivo recibido'],
             ['efectivo_tombola', 'Efectivo en tómbola (recibido − propinas)'],
             ['bancos_cobrado_tpv', 'Bancos cobrado'],
-            ['bancos_propina_tpv', 'Propina TPV'],
+            ['bancos_propina_tpv', 'Propina TPV (WI)'],
           ] as const
         ).map(([key, label]) => (
           <label key={key} className="block">

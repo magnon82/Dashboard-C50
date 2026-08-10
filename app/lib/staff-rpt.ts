@@ -42,6 +42,48 @@ export function splitEventoServicio(osVenta: number): EventoServicioSplit {
 }
 
 /**
+ * Desglose de propinas del corte.
+ * - Propina TPV = solo WI (tickets de terminal); el servicio del evento no es TPV.
+ * - Eventos 12.5% = pool staff sobre VENTA OS.
+ * - Admin 2.5% = cargo a tómbola (no forma parte del pool staff).
+ * - Total propinas (staff) = TPV WI + 12.5% eventos.
+ */
+export type CortePropinasBreakdown = {
+  propinaTpvWi: number;
+  staffTipEventos: number;
+  adminTombola: number;
+  servicioTotal: number;
+  propinasTotal: number;
+  osVenta: number;
+};
+
+export function cortePropinasBreakdown(
+  propinaTpv: number | null | undefined,
+  osVenta: number | null | undefined
+): CortePropinasBreakdown {
+  const propinaTpvWi =
+    Math.round(Math.max(0, Number(propinaTpv) || 0) * 100) / 100;
+  const split = splitEventoServicio(Number(osVenta) || 0);
+  return {
+    propinaTpvWi,
+    staffTipEventos: split.staffTip,
+    adminTombola: split.adminTombola,
+    servicioTotal: split.servicioTotal,
+    propinasTotal:
+      Math.round((propinaTpvWi + split.staffTip) * 100) / 100,
+    osVenta: split.osVenta,
+  };
+}
+
+/** Total de propinas staff a persistir en `propinas` (TPV WI + 12.5% OS). */
+export function totalPropinasStaff(
+  propinaTpv: number | null | undefined,
+  osVenta: number | null | undefined
+): number {
+  return cortePropinasBreakdown(propinaTpv, osVenta).propinasTotal;
+}
+
+/**
  * Infocaja suele clasificar el 15% de servicio del evento en Bancarias;
  * el TPV lo reporta en Propinas. Si Δ propinas ≈ +servicio y Δ bancarias ≈ −servicio,
  * no es diferencia operativa sino reclasificación.

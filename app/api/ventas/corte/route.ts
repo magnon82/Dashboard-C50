@@ -16,6 +16,7 @@ import {
   snapshotStaffRptValues,
   sumInfocajaDay,
   totalEventosAmount,
+  totalPropinasStaff,
   type DayTombolaResult,
   type StaffRptEditHistoryEntry,
   type StaffRptInfocajaDay,
@@ -549,7 +550,8 @@ export async function PATCH(request: Request) {
       eventos_amount: eventos,
       eventos_os_amount: eventosOs,
       eventos_extra_amount: eventosExtra,
-      propinas: propinaTpv,
+      // Total staff = Propina TPV (WI) + 12.5% eventos; admin 2.5% no entra.
+      propinas: totalPropinasStaff(propinaTpv, eventosOs),
       efectivo_tombola: tombola,
       efectivo_contado: efectivoRecibido,
       bancos_cobrado_tpv: cobrado,

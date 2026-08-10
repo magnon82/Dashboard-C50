@@ -29,10 +29,15 @@ import type {
   EfectivoInfocajaReconcile,
 } from '@/app/lib/staff-rpt';
 import {
+  cortePropinasBreakdown,
   expectedTombolaDeposit,
   parseMoneyInput,
   reconcileEfectivoRecibidoVsInfocaja,
 } from '@/app/lib/staff-rpt';
+import {
+  EVENTOS_SERVICIO_ADMIN_PCT,
+  EVENTOS_SERVICIO_STAFF_PCT,
+} from '@/app/lib/eventos';
 import { SUITE } from '@/app/lib/themes';
 import { useSession } from '@/app/lib/useSession';
 
@@ -859,10 +864,14 @@ export function StaffCorteClient() {
   const efectivoTombolaOk =
     efectivoTombolaNum != null && efectivoTombolaNum >= 0;
 
-  /** Referencia interna: recibido − propinas TPV (no bloquea; no usa Infocaja). */
+  /** Referencia interna: recibido − propinas TPV WI (no bloquea; no usa Infocaja). */
   const esperadoTombolaFromRecibido = expectedTombolaDeposit(
     efectivoRecibidoOk ? efectivoRecibidoNum : null,
     bancos?.propina ?? 0
+  );
+  const tipBreakdown = cortePropinasBreakdown(
+    bancos?.propina ?? 0,
+    eventosOsNum
   );
 
   const liveReconcile = reconcileEfectivoRecibidoVsInfocaja(
@@ -1535,7 +1544,7 @@ export function StaffCorteClient() {
             </p>
           </div>
           <div>
-            <p className="text-xs text-slate-500">Propinas</p>
+            <p className="text-xs text-slate-500">Propina TPV (WI)</p>
             <p className="font-bold" style={{ color: SUITE.navy }}>
               {moneyMx(bancos?.propina)}
             </p>
@@ -1567,9 +1576,9 @@ export function StaffCorteClient() {
         </h3>
         <p className="text-xs text-slate-500">
           WI y Eventos · captura manual de efectivo recibido y tómbola (después
-          de propinas). Infocaja se concilia cuando llegue el reporte por
-          correo. Sin cortesías (vienen de Gmail). Propinas = suma de tickets
-          TPV.
+          de propinas TPV WI). Infocaja se concilia cuando llegue el reporte por
+          correo. Sin cortesías (vienen de Gmail). Propina TPV = tickets WI;
+          el 12.5% / 2.5% del evento se calcula sobre la VENTA OS.
         </p>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -1686,13 +1695,42 @@ export function StaffCorteClient() {
           </p>
         </div>
 
-        <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm">
-          <p className="font-semibold text-slate-700">Propinas (tickets TPV)</p>
-          <p className="mt-1 text-lg font-bold" style={{ color: SUITE.navy }}>
-            {moneyMx(bancos?.propina)}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Se guarda automáticamente al cerrar · no se vuelve a pedir
+        <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm space-y-2">
+          <p className="font-semibold text-slate-700">Propinas</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div>
+              <p className="text-xs text-slate-500">TPV (WI)</p>
+              <p className="font-bold" style={{ color: SUITE.navy }}>
+                {moneyMx(tipBreakdown.propinaTpvWi)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">
+                Eventos {(EVENTOS_SERVICIO_STAFF_PCT * 100).toFixed(1)}%
+              </p>
+              <p className="font-bold" style={{ color: SUITE.navy }}>
+                {moneyMx(tipBreakdown.staffTipEventos)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">
+                Admin {(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}%
+              </p>
+              <p className="font-bold" style={{ color: SUITE.navy }}>
+                {moneyMx(tipBreakdown.adminTombola)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Total staff</p>
+              <p className="font-bold" style={{ color: SUITE.navy }}>
+                {moneyMx(tipBreakdown.propinasTotal)}
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            TPV = tickets de terminal (WI). Eventos 12.5% + admin 2.5% salen de la
+            VENTA OS y no se consideran cobrados con TPV. Total staff = TPV +
+            12.5%.
           </p>
         </div>
 
@@ -1717,8 +1755,8 @@ export function StaffCorteClient() {
             required
             hint={
               esperadoTombolaFromRecibido != null
-                ? `Propuesto: recibido − propinas TPV = ${moneyMx(esperadoTombolaFromRecibido)}. Se actualiza al capturar el recibido.`
-                : 'Se propone solo: efectivo recibido − propinas TPV.'
+                ? `Propuesto: recibido − propinas TPV WI = ${moneyMx(esperadoTombolaFromRecibido)}. Se actualiza al capturar el recibido.`
+                : 'Se propone solo: efectivo recibido − propinas TPV (WI).'
             }
           />
 

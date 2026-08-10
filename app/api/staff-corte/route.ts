@@ -25,6 +25,7 @@ import {
   reconcileEfectivoRecibidoVsInfocaja,
   sumInfocajaDay,
   totalEventosAmount,
+  totalPropinasStaff,
 } from '@/app/lib/staff-rpt';
 
 export const runtime = 'nodejs';
@@ -580,7 +581,8 @@ export async function PUT(request: Request) {
       eventos_amount: eventos,
       eventos_os_amount: eventosOs,
       eventos_extra_amount: eventosExtra,
-      propinas: propina,
+      // Total staff = Propina TPV (WI) + 12.5% OS; el 2.5% admin no entra al pool.
+      propinas: totalPropinasStaff(propina, eventosOs),
       efectivo_tombola: tombola,
       efectivo_contado: efectivoRecibido,
       efectivo_infocaja: infocaja.hasEfectivo ? infocaja.efectivo : null,
