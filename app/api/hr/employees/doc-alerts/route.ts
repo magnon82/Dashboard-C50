@@ -53,15 +53,41 @@ export async function GET(request: Request) {
   if (auth instanceof NextResponse) return auth;
 
   const url = new URL(request.url);
-  let ids = parseIds(url.searchParams.get('ids'));
+    let ids = parseIds(url.searchParams.get('ids'));
   const skipPull = url.searchParams.get('skipPull') === '1';
 
   try {
     const sb = getServiceSupabase();
 
+    /** Semilla desde plantilla (puesto/área) por si el select meta falla parcialmente. */
+    const plantillaSeed = new Map<
+      string,
+      Pick<
+        HrEmployee,
+        | 'id'
+        | 'full_name'
+        | 'notes'
+        | 'puesto'
+        | 'area'
+        | 'tipo_empleo'
+        | 'requiere_documentacion'
+      >
+    >();
+
     if (!ids.length) {
       const plantilla = await resolvePlantillaVigente(sb, { allowSeed: false });
       ids = plantilla.employees.map((e) => e.id);
+      for (const e of plantilla.employees) {
+        plantillaSeed.set(e.id, {
+          id: e.id,
+          full_name: e.full_name,
+          notes: e.notes ?? null,
+          puesto: e.puesto ?? null,
+          area: e.area ?? null,
+          tipo_empleo: e.tipo_empleo ?? null,
+          requiere_documentacion: e.requiere_documentacion ?? null,
+        });
+      }
     }
 
     const requiredMeta = HR_REQUIRED_DOC_TYPES.map((d) => ({
@@ -98,12 +124,19 @@ export async function GET(request: Request) {
 
     type EmpMeta = Pick<
       HrEmployee,
-      'id' | 'full_name' | 'notes' | 'tipo_empleo' | 'requiere_documentacion'
+      | 'id'
+      | 'full_name'
+      | 'notes'
+      | 'puesto'
+      | 'area'
+      | 'tipo_empleo'
+      | 'requiere_documentacion'
     >;
-    const empMeta = new Map<string, EmpMeta>();
+    const empMeta = new Map<string, EmpMeta>(plantillaSeed);
     {
       const EMP_META_SELECTS = [
-        'id, full_name, notes, tipo_empleo, requiere_documentacion',
+        'id, full_name, notes, puesto, area, tipo_empleo, requiere_documentacion',
+        'id, full_name, notes, puesto, area',
         'id, full_name, notes',
       ] as const;
       let metaRows: EmpMeta[] | null = null;
@@ -128,21 +161,26 @@ export async function GET(request: Request) {
               id: string;
               full_name: string;
               notes?: string | null;
+              puesto?: string | null;
+              area?: string | null;
               tipo_empleo?: string | null;
               requiere_documentacion?: boolean | null;
             };
+            const prev = empMeta.get(String(row.id));
             rows.push({
               id: String(row.id),
               full_name: String(row.full_name || ''),
-              notes: row.notes ?? null,
+              notes: row.notes ?? prev?.notes ?? null,
+              puesto: row.puesto ?? prev?.puesto ?? null,
+              area: row.area ?? prev?.area ?? null,
               tipo_empleo:
                 row.tipo_empleo === 'externo' || row.tipo_empleo === 'interno'
                   ? (row.tipo_empleo as HrTipoEmpleo)
-                  : null,
+                  : (prev?.tipo_empleo ?? null),
               requiere_documentacion:
                 typeof row.requiere_documentacion === 'boolean'
                   ? row.requiere_documentacion
-                  : null,
+                  : (prev?.requiere_documentacion ?? null),
             });
           }
         }
@@ -150,7 +188,12 @@ export async function GET(request: Request) {
           metaRows = rows;
           break;
         }
-        if (metaErr && !/tipo_empleo|requiere_documentacion|column|42703/i.test(metaErr)) {
+        if (
+          metaErr &&
+          !/tipo_empleo|requiere_documentacion|puesto|area|column|42703/i.test(
+            metaErr
+          )
+        ) {
           break;
         }
       }

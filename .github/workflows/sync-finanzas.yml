@@ -1,7 +1,7 @@
 name: Sync Finanzas Drive/Sheets
 
 # CDMX = UTC-6 year-round.
-# Fuentes que eran solo manuales: CxP histórico, presupuesto Excel, estados Excel.
+# Fuentes cloud: CxP histórico, presupuesto Excel, estados Excel, ventas_semana.
 # Dashboard Master → Fuentes de origen · última sync
 
 on:
@@ -58,7 +58,7 @@ jobs:
           check GOOGLE_OAUTH_TOKEN_JSON "$GOOGLE_OAUTH_TOKEN_JSON"
           exit $missing
 
-      - name: Sync CxP + presupuesto + estados Excel
+      - name: Sync CxP + presupuesto + estados + ventas_semana
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}

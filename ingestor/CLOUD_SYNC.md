@@ -15,7 +15,7 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 | `GOOGLE_OAUTH_CLIENT_JSON` | Contenido completo de `ingestor/credentials.json` |
 | `GOOGLE_OAUTH_TOKEN_JSON` | Contenido completo de `ingestor/token.json` (debe incluir `refresh_token`) |
 
-`GOOGLE_*` hace falta para Gmail y Saldos (Drive/Sheets). El soft-sync RH solo usa Supabase.
+`GOOGLE_*` hace falta para Gmail, Saldos y Finanzas (Drive/Sheets). El soft-sync RH solo usa Supabase.
 
 ## Workflows
 
@@ -23,10 +23,10 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 |----------|-----------------|----------|----------|
 | `sync-gmail.yml` | Diario 2:17–7:17 AM + 8:23/10:23/12:23/14:23; refuerzo Dom 7:17–11:17 PM | `17 8-13 * * *`, `23 14,16,18,20 * * *`, `17 1-5 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
 | `sync-saldos.yml` | Cada hora (:07) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
-| `sync-finanzas.yml` | Diario 6:37 AM y 6:37 PM | `37 12 * * *`, `37 0 * * *` | CxP histórico (Sheets) + presupuesto Excel (Drive TOTAL U:Z) + estados Mifel/BBVA Excel si están en Drive |
+| `sync-finanzas.yml` | Diario 6:37 AM y 6:37 PM | `37 12 * * *`, `37 0 * * *` | CxP histórico (Sheets) + presupuesto Excel (Drive) + estados Mifel/BBVA Excel + `Acumulado ventas x semana.xlsx` → `ventas_semana` |
 | `sync-hr-drive.yml` | Diario 12:00 PM | `0 18 * * *` | Soft-check `hr_*` + `hr_drive_sync_state` |
 
-Siguen **manuales a propósito**: `presupuesto_ajuste`, `saldos_bancos_manual`, `dashboard_auth`, índices PDF masivos (`estado_pdf_index`), Eventos legacy.
+Siguen **manuales a propósito**: `presupuesto_ajuste`, `saldos_bancos_manual`, `dashboard_auth`, índices PDF masivos (`estado_pdf_index` / `estado_cuenta_pdf_index`), Eventos legacy (`ingest_eventos.py`).
 
 ### Certeza del sync de ventas (no solo “confiar en el cron”)
 
@@ -85,11 +85,12 @@ Fuente: `source_file=presupuesto_ingreso` (una fila por componente con monto > 0
 
 **Ventas en efectivo** (`flujo_efectivo_mov`): conceptos `EFECTIVO SEMANA #N` / columna Ventas → `tipo: ventas`, etiqueta «Ventas efectivo · SEM n» (mismo filtro **Tipo ingreso → Ventas** que MIFEL).
 
-Tras editar el Excel, vuelve a correr `ingest_presupuesto.py` para ese mes.
-Para refrescar etiquetas de efectivo: `python ingest_saldos_flujo.py --year 2026`.
+Tras editar el Excel, vuelve a correr `ingest_presupuesto.py` para ese mes
+(o espera el sync-finanzas 6:37 AM/PM). Para refrescar etiquetas de efectivo:
+`python ingest_saldos_flujo.py --year 2026`.
 
-<!-- TODO(automate): presupuesto / ventas_semana / estados de cuenta siguen MANUAL.
-     Automatizar con Actions (cron + Drive API) cuando se priorice; no inventar jobs aún. -->
+Cloud: `python sync_finanzas_cloud.py` (o Actions → Sync Finanzas Drive/Sheets).
+Opcional: `--skip-ventas-semana` / `--skip-presupuesto` / `--skip-estados` / `--skip-cxp`.
 
 ## CLI local — Infocaja (Gmail → efectivo / tarjetas / comensales)
 
@@ -156,7 +157,8 @@ python ingest_estados_cuenta.py --index-pdfs --pdf-only
 Tras reindexar, la columna **Concepto** sale del nombre del archivo
 (`mifel-NominaMeserosSem28(26)-$4,410.56.pdf` → `Nomina Meseros Sem 28`).
 
-<!-- TODO(automate): ingest_estados_cuenta / ventas_semana — mismo backlog que presupuesto. -->
+Los Excel Mifel/BBVA del año en curso van en **sync-finanzas** (no hace falta
+correr el ingest local salvo backfill o PDFs).
 
 ## Soft-sync RR.HH. (Actions)
 

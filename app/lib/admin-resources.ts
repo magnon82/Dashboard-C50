@@ -79,25 +79,35 @@ export const SOURCE_FILE_UPDATE: Record<string, string> = {
   corte_caja:
     'Función: cancelaciones/descuentos/cortesías. Diario 2–7 AM + 8/10/12/14 CDMX · refuerzo Dom 7–11 PM (Actions)',
   eventos: 'Función: WI vs Eventos histórico. Manual (ingest_eventos.py)',
-  ventas_semana: 'Función: acumulado semanal Excel. Manual (ingest_ventas_semana.py)',
+  ventas_semana:
+    'Función: acumulado semanal Excel. Cloud 6:37 AM/PM (sync-finanzas)',
   flujo_efectivo_saldo: 'Función: saldo de caja chica. Cada hora (Actions)',
   flujo_efectivo_semana: 'Función: presupuesto efectivo por semana. Cada hora (Actions)',
   flujo_efectivo_mov: 'Función: movimientos de flujo. Cada hora (Actions)',
-  presupuesto_mensual: 'Función: marco mensual. Manual (ingest_presupuesto.py)',
-  presupuesto_saldos: 'Función: saldos presupuesto. Manual (ingest_presupuesto.py)',
-  presupuesto_rubro: 'Función: gastos por rubro. Manual (ingest_presupuesto.py)',
-  presupuesto_semana: 'Función: control semanal. Manual (ingest_presupuesto.py)',
-  presupuesto_sem_detalle: 'Función: detalle SEM. Manual (ingest_presupuesto.py)',
-  presupuesto_ingreso: 'Función: ingresos Mifel/BBVA tipados. Manual (ingest_presupuesto.py)',
+  presupuesto_mensual:
+    'Función: marco mensual. Cloud 6:37 AM/PM (sync-finanzas)',
+  presupuesto_saldos:
+    'Función: saldos presupuesto. Cloud 6:37 AM/PM (sync-finanzas)',
+  presupuesto_rubro:
+    'Función: gastos por rubro. Cloud 6:37 AM/PM (sync-finanzas)',
+  presupuesto_semana:
+    'Función: control semanal. Cloud 6:37 AM/PM (sync-finanzas)',
+  presupuesto_sem_detalle:
+    'Función: detalle SEM. Cloud 6:37 AM/PM (sync-finanzas)',
+  presupuesto_ingreso:
+    'Función: ingresos Mifel/BBVA tipados. Cloud 6:37 AM/PM (sync-finanzas)',
   presupuesto_ajuste: 'Función: ajustes admin. Solo /admin (manual)',
-  estado_mifel: 'Función: estado de cuenta Mifel. Manual / al reindexar',
-  estado_bbva: 'Función: estado de cuenta BBVA. Manual / al reindexar',
-  estado_pdf_index: 'Función: índice PDFs pagos. Manual / al reindexar',
-  estado_cuenta_pdf_index: 'Función: índice PDFs estados. Manual / al reindexar',
+  estado_mifel:
+    'Función: estado de cuenta Mifel (Excel). Cloud 6:37 AM/PM (sync-finanzas)',
+  estado_bbva:
+    'Función: estado de cuenta BBVA (Excel). Cloud 6:37 AM/PM (sync-finanzas)',
+  estado_pdf_index: 'Función: índice PDFs pagos. Manual / reindex Suite',
+  estado_cuenta_pdf_index:
+    'Función: índice PDFs estados. Manual / reindex Suite',
   saldos_bancos_manual: 'Función: saldos bancarios capturados. Solo /admin (manual)',
   cxp_por_pagar: 'Función: saldo a la fecha proveedores. Cada hora (Actions · Sheets)',
-  cxp: 'Función: líneas pagadas/retornos. Manual (ingest_cxp.py)',
-  cxp_saldos: 'Función: encabezados CxP. Manual (ingest_cxp.py)',
+  cxp: 'Función: líneas pagadas/retornos. Cloud 6:37 AM/PM (sync-finanzas)',
+  cxp_saldos: 'Función: encabezados CxP. Cloud 6:37 AM/PM (sync-finanzas)',
   factura_cfdi:
     'Función: índice CFDI → ERP (financial_records). Mismo sync-gmail (best-effort)',
   dashboard_auth: 'Función: usuarios Suite + capabilities. Solo /admin (manual)',
@@ -158,7 +168,7 @@ const SOURCE_GROUP_META: Record<
   ventas: {
     role: 'Función: alimentar /ventas (diario Infocaja/CORTE) y series WI/Eventos.',
     updateFrequency:
-      'Cloud: lun–sáb 2–7 AM + 8/10/12/14 CDMX · dom 7–11 PM · CFDI ERP; eventos/ventas_semana manual (TODO automate)',
+      'Cloud: lun–sáb 2–7 AM + 8/10/12/14 CDMX · dom 7–11 PM · CFDI ERP; ventas_semana en sync-finanzas 2×/día; eventos legacy manual',
     scripts: [
       'ingest_infocaja_gmail.py',
       'ingest_corte_gmail.py',
@@ -173,22 +183,24 @@ const SOURCE_GROUP_META: Record<
     scripts: ['ingest_saldos_flujo.py', 'sync_saldos_al_dia.py'],
     routes: ['/finanzas', '/finanzas/ingresos'],
   },
-  // TODO(automate): presupuesto / ventas_semana / estados de cuenta — manual hasta Actions dedicados.
   presupuesto: {
     role: 'Función: control presupuestal e ingresos tipados Mifel/BBVA.',
-    updateFrequency: 'Manual (ingest_presupuesto.py) · TODO automate · ajustes solo admin',
-    scripts: ['ingest_presupuesto.py'],
+    updateFrequency:
+      'Cloud 6:37 AM/PM (sync-finanzas) · ajustes solo admin',
+    scripts: ['ingest_presupuesto.py', 'sync_finanzas_cloud.py'],
     routes: ['/finanzas', '/finanzas/gastos', '/admin'],
   },
   bancos: {
     role: 'Función: conciliación bancaria e índices de comprobantes.',
-    updateFrequency: 'Manual / al reindexar · TODO automate · saldos_bancos_manual solo admin',
-    scripts: ['ingest_estados_cuenta.py'],
+    updateFrequency:
+      'Excel Mifel/BBVA cloud 6:37 AM/PM (sync-finanzas) · PDFs reindex Suite · saldos_bancos_manual solo admin',
+    scripts: ['ingest_estados_cuenta.py', 'sync_finanzas_cloud.py'],
     routes: ['/finanzas/estados-cuenta', '/finanzas/comprobantes', '/admin'],
   },
   cxp: {
     role: 'Función: cuentas por pagar (saldo vivo + historial de pagos).',
-    updateFrequency: 'Mixto · cxp_por_pagar cada hora; cxp/cxp_saldos manual',
+    updateFrequency:
+      'Mixto · cxp_por_pagar cada hora; cxp/cxp_saldos cloud sync-finanzas',
     scripts: ['ingest_cxp_por_pagar.py', 'ingest_cxp.py', 'sync_saldos_al_dia.py'],
     routes: ['/finanzas/gastos'],
   },
@@ -307,7 +319,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: 'Presupuestos (por año)',
         role: 'Excel mensual → presupuesto_* en Supabase.',
         note: 'I:\\…\\PRESUPUESTOS…',
-        updateFrequency: 'Archivos en Drive · carga a Supabase manual (ingest_presupuesto.py)',
+        updateFrequency:
+          'Archivos en Drive · cloud 6:37 AM/PM (sync-finanzas → ingest_presupuesto.py)',
         leaves: [
           {
             label: 'PRESUPUESTOS 2026 (y carpetas por año)',
@@ -333,7 +346,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         role: 'Flujo de efectivo, bancos y ventas semanales.',
         note: 'I:\\Mi unidad\\Administración',
         updateFrequency:
-          'Mixto · flujo cada hora (Actions); Bancos PDF / ventas_semana manual (TODO automate)',
+          'Mixto · flujo cada hora (Actions); ventas_semana cloud sync-finanzas; Bancos PDF reindex Suite',
         leaves: [
           {
             label: 'FLUJO EFECTIVO CARRANZA 50.xlsx',
@@ -351,7 +364,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             label: 'Controles\\Acumulado ventas x semana.xlsx',
             kind: 'file',
             note: 'ventas_semana',
-            updateFrequency: 'Manual (ingest_ventas_semana.py)',
+            updateFrequency: 'Cloud 6:37 AM/PM (sync-finanzas)',
           },
         ],
         scripts: ['ingest_saldos_flujo.py', 'ingest_ventas_semana.py'],
@@ -369,13 +382,14 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: 'Comprobantes bancarios',
         role: 'Estados Excel MIFEL/BBVA y PDFs de pagos.',
         note: 'I:\\Mi unidad\\COMPROBANTES BANCARIOS',
-        updateFrequency: 'Manual / al reindexar (ingest_estados_cuenta.py)',
+        updateFrequency:
+          'Excel Mifel/BBVA cloud 6:37 AM/PM (sync-finanzas); PDFs reindex Suite',
         leaves: [
           {
             label: '{año}\\Estado de cuenta MIFEL/BBVA.xlsx',
             kind: 'file',
             note: 'estado_mifel / estado_bbva',
-            updateFrequency: 'Manual / al reindexar',
+            updateFrequency: 'Cloud 6:37 AM/PM (sync-finanzas)',
           },
           {
             label: 'PDFs de pagos',
@@ -551,7 +565,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
         label: 'Google Sheets · CxP',
         role: 'Hoja de proveedores Cluster (sync Actions + local).',
         note: 'C X P PROVEEDORES CLUSTER…',
-        updateFrequency: 'Mixto · cxp_por_pagar cada hora; cxp/cxp_saldos manual',
+        updateFrequency:
+          'Mixto · cxp_por_pagar cada hora; cxp/cxp_saldos cloud sync-finanzas',
         leaves: [
           {
             label: 'cxp_por_pagar',
@@ -562,8 +577,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
           {
             label: 'cxp + cxp_saldos',
             kind: 'source_file',
-            note: 'ingest_cxp.py (local)',
-            updateFrequency: 'Manual (ingest_cxp.py)',
+            note: 'ingest_cxp.py vía sync-finanzas',
+            updateFrequency: 'Cloud 6:37 AM/PM (sync-finanzas)',
           },
         ],
         scripts: ['ingest_cxp_por_pagar.py', 'ingest_cxp.py', 'sync_saldos_al_dia.py'],
@@ -658,18 +673,26 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             note: 'Función: caja chica / movimientos',
             updateFrequency: 'Cada hora (vía sync-saldos)',
           },
-          { label: 'ingest_presupuesto.py', kind: 'script', updateFrequency: 'Manual' },
+          {
+            label: 'ingest_presupuesto.py',
+            kind: 'script',
+            updateFrequency: 'Cloud vía sync-finanzas 6:37 AM/PM',
+          },
           {
             label: 'ingest_estados_cuenta.py',
             kind: 'script',
-            updateFrequency: 'Manual / al reindexar',
+            updateFrequency: 'Excel cloud sync-finanzas · PDFs reindex Suite',
           },
-          { label: 'ingest_ventas_semana.py', kind: 'script', updateFrequency: 'Manual' },
+          {
+            label: 'ingest_ventas_semana.py',
+            kind: 'script',
+            updateFrequency: 'Cloud vía sync-finanzas 6:37 AM/PM',
+          },
           {
             label: 'ingest_cxp.py / ingest_cxp_por_pagar.py',
             kind: 'script',
             note: 'Función: CxP saldo vivo + historial',
-            updateFrequency: 'cxp_por_pagar cada hora; cxp manual',
+            updateFrequency: 'cxp_por_pagar cada hora; cxp/cxp_saldos sync-finanzas',
           },
           { label: 'ingest_eventos.py', kind: 'script', updateFrequency: 'Manual' },
           {

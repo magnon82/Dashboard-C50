@@ -4,10 +4,12 @@ Sync cloud de fuentes que antes eran solo manuales (Drive / Sheets):
   1) CxP histórico          → ingest_cxp.py          (Google Sheets)
   2) Presupuesto mensual    → Excel desde Drive      (TOTAL U:Z + SEM)
   3) Estados Mifel/BBVA     → Excel desde Drive      (best-effort)
+  4) Acumulado ventas semana → ingest_ventas_semana.py (legacy ≤2025)
 
 Pensado para Actions (sync-finanzas.yml). No toca:
   - saldos_bancos_manual / presupuesto_ajuste / dashboard_auth (solo Suite)
   - índices PDF masivos (siguen reindex en PC o botón admin)
+  - ingest_eventos.py (legacy puntual)
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from pathlib import Path
 
 from google_auth import (
     download_drive_file_by_id,
+    download_drive_file_by_name,
     find_drive_files_by_name_contains,
 )
 
@@ -158,12 +161,68 @@ def sync_estados_excel(dry_run: bool) -> int:
     return 0 if all(c == 0 for c in codes) else 1
 
 
+VENTAS_SEMANA_NAME = "Acumulado ventas x semana.xlsx"
+
+
+def pick_ventas_semana_file() -> dict | None:
+    """Nombre exacto preferido; fallback por contains."""
+    try:
+        # download path resolves id; here we only need meta for logging
+        found = find_drive_files_by_name_contains(
+            "Acumulado ventas", "semana", page_size=15
+        )
+    except Exception as e:
+        print(f"AVISO: búsqueda ventas_semana falló: {e}")
+        found = []
+    xlsx = [
+        f
+        for f in found
+        if str(f.get("name") or "").lower().endswith((".xlsx", ".xls"))
+    ]
+    if not xlsx:
+        return None
+
+    def score(f: dict) -> tuple:
+        name = str(f.get("name") or "")
+        exact = 0 if name.strip().lower() == VENTAS_SEMANA_NAME.lower() else 1
+        return (exact, name)
+
+    xlsx.sort(key=score)
+    return xlsx[0]
+
+
+def sync_ventas_semana(dry_run: bool) -> int:
+    tmp = Path(tempfile.mkdtemp(prefix="ventas-semana-cloud-"))
+    meta = pick_ventas_semana_file()
+    dest = tmp / VENTAS_SEMANA_NAME
+    if meta:
+        name = str(meta["name"])
+        dest = tmp / name
+        print(f"Descargando ventas_semana: {name} (id={meta['id']})")
+        download_drive_file_by_id(meta["id"], dest)
+    else:
+        print(
+            f"AVISO: búsqueda contains vacía; intento nombre exacto {VENTAS_SEMANA_NAME}"
+        )
+        try:
+            download_drive_file_by_name(VENTAS_SEMANA_NAME, dest)
+        except FileNotFoundError as e:
+            print(f"AVISO: {e} (skip ventas_semana)")
+            return 0
+
+    extra = ["--file", str(dest)]
+    if dry_run:
+        extra.append("--dry-run")
+    return run("ingest_ventas_semana.py", extra)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync finanzas Drive/Sheets → Supabase")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-cxp", action="store_true")
     parser.add_argument("--skip-presupuesto", action="store_true")
     parser.add_argument("--skip-estados", action="store_true")
+    parser.add_argument("--skip-ventas-semana", action="store_true")
     args = parser.parse_args()
 
     codes: list[int] = []
@@ -177,6 +236,9 @@ def main() -> None:
 
     if not args.skip_estados:
         codes.append(sync_estados_excel(args.dry_run))
+
+    if not args.skip_ventas_semana:
+        codes.append(sync_ventas_semana(args.dry_run))
 
     failed = [c for c in codes if c != 0]
     if failed:

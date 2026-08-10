@@ -188,10 +188,16 @@ def main() -> None:
             print("Ejemplo:", records[0])
         return
 
-    url = os.environ.get("SUPABASE_URL")
+    url = (
+        os.environ.get("SUPABASE_URL")
+        or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+    )
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
-        raise SystemExit("Faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en .env")
+        raise SystemExit(
+            "Faltan SUPABASE_URL (o NEXT_PUBLIC_SUPABASE_URL) "
+            "o SUPABASE_SERVICE_ROLE_KEY en .env / Actions"
+        )
 
     supabase = create_client(url, key)
     supabase.table("financial_records").delete().eq("source_file", SOURCE_FILE).execute()

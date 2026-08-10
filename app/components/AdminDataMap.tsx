@@ -201,7 +201,7 @@ const NODES: MapNode[] = [
       'HR_NOMINA_DRIVE_FOLDER_ID',
     ],
     detail:
-      'Finanzas: PRESUPUESTOS (manual · TODO automatizar), FLUJO → Saldos al día (cada hora Actions), estados/comprobantes (manual · TODO), ventas_semana (manual · TODO). RR.HH.: soft-sync Actions diario 12:00 PM CDMX; File Stream opcional.',
+      'Finanzas: PRESUPUESTOS + estados Excel + ventas_semana → sync-finanzas 6:37 AM/PM; FLUJO → Saldos al día (cada hora); índices PDF reindex Suite. RR.HH.: soft-sync Actions diario 12:00 PM CDMX; File Stream opcional.',
   },
   {
     id: 'sheets',
@@ -217,7 +217,7 @@ const NODES: MapNode[] = [
     sources: ['cxp_por_pagar', 'cxp', 'cxp_saldos'],
     files: ['ingest_cxp_por_pagar.py', 'ingest_cxp.py'],
     detail:
-      'Función: CxP. Saldos por pagar (Actions cada hora → cxp_por_pagar · Saldos al día) y líneas pagadas / retornos (manual → cxp + cxp_saldos).',
+      'Función: CxP. Saldos por pagar (Actions cada hora → cxp_por_pagar) y líneas pagadas / retornos (sync-finanzas → cxp + cxp_saldos).',
   },
   {
     id: 'eventos',
@@ -296,13 +296,39 @@ const NODES: MapNode[] = [
       'sync_gmail_diario.py',
       'sync_saldos_al_dia.py',
       'sync_hr_drive_cloud.py',
+      'sync_finanzas_cloud.py',
     ],
     detail: 'Scripts Python en el runner ubuntu-latest con secrets del repo.',
   },
   {
+    id: 'wf-finanzas',
+    label: 'sync-finanzas.yml',
+    sub: '6:37 AM/PM',
+    x: 600,
+    y: 488,
+    w: 176,
+    h: 78,
+    kind: 'runner',
+    icon: 'github',
+    files: [
+      '.github/workflows/sync-finanzas.yml',
+      'sync_finanzas_cloud.py',
+    ],
+    sources: [
+      'cxp',
+      'cxp_saldos',
+      'presupuesto_mensual',
+      'estado_mifel',
+      'estado_bbva',
+      'ventas_semana',
+    ],
+    detail:
+      'Cloud 6:37 AM y 6:37 PM CDMX: CxP histórico (Sheets) + presupuesto Excel + estados Mifel/BBVA Excel + Acumulado ventas x semana. Índices PDF siguen reindex Suite/PC.',
+  },
+  {
     id: 'ingest-estados',
     label: 'ingest_estados',
-    sub: 'carga manual PC',
+    sub: 'Excel cloud · PDF Suite',
     x: 388,
     y: 488,
     w: 196,
@@ -312,12 +338,12 @@ const NODES: MapNode[] = [
     sources: ['estado_mifel', 'estado_bbva', 'estado_pdf_index', 'estado_cuenta_pdf_index'],
     files: ['ingest_estados_cuenta.py'],
     detail:
-      'Estados Excel MIFEL/BBVA; índice PDFs. Manual por ahora · TODO(automate) Actions.',
+      'Excel MIFEL/BBVA vía sync-finanzas (Drive API). Índices PDF: reindex Suite o PC.',
   },
   {
     id: 'ingest-prep',
     label: 'ingest_presupuesto',
-    sub: 'carga manual',
+    sub: 'cloud 6:37 AM/PM',
     x: 388,
     y: 568,
     w: 196,
@@ -332,9 +358,9 @@ const NODES: MapNode[] = [
       'presupuesto_sem_detalle',
       'presupuesto_ingreso',
     ],
-    files: ['ingest_presupuesto.py'],
+    files: ['ingest_presupuesto.py', 'sync_finanzas_cloud.py'],
     detail:
-      'Excel PRESUPUESTOS: rubros, saldos, semanas, ingresos Mifel/BBVA. Manual · TODO(automate) Actions.',
+      'Excel PRESUPUESTOS: rubros, saldos, semanas, ingresos Mifel/BBVA. Cloud vía sync-finanzas.yml.',
   },
   {
     id: 'ingest-facturas',
@@ -354,7 +380,7 @@ const NODES: MapNode[] = [
   {
     id: 'ingest-cxp',
     label: 'ingest_cxp',
-    sub: 'líneas · local',
+    sub: 'líneas · cloud',
     x: 388,
     y: 728,
     w: 196,
@@ -362,9 +388,9 @@ const NODES: MapNode[] = [
     kind: 'runner',
     icon: 'python',
     sources: ['cxp', 'cxp_saldos'],
-    files: ['ingest_cxp.py'],
+    files: ['ingest_cxp.py', 'sync_finanzas_cloud.py'],
     detail:
-      'Pagos reales / retornos del Sheet CXP → cxp; saldos encabezado → cxp_saldos. Complementa cxp_por_pagar (Actions).',
+      'Pagos reales / retornos del Sheet CXP → cxp; saldos encabezado → cxp_saldos. Cloud vía sync-finanzas; complementa cxp_por_pagar (hora).',
   },
   {
     id: 'hr-downloads',
@@ -827,6 +853,18 @@ const EDGES: MapEdge[] = [
     labelAt: [510, 295],
   },
   {
+    id: 'e-wf-finanzas-ing',
+    from: 'wf-finanzas',
+    to: 'ingestor-cloud',
+    label: 'Python',
+    labelHover: true,
+    via: [
+      [600, 488],
+      [520, 360],
+    ],
+    labelAt: [560, 420],
+  },
+  {
     id: 'e-wf-hr-db',
     from: 'wf-hr',
     to: 'hr-db',
@@ -843,7 +881,7 @@ const EDGES: MapEdge[] = [
     id: 'e-ing-fr',
     from: 'ingestor-cloud',
     to: 'fr',
-    label: 'upsert ventas/saldos/CFDI',
+    label: 'upsert ventas/saldos/CFDI/finanzas',
     labelHover: true,
     via: [
       [640, 360],

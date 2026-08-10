@@ -1471,14 +1471,21 @@ export function syncExternoFlagInNotes(
 
 /**
  * ¿Debe alertar / exigir docs de alta (INE, acta, CURP, domicilio)?
- * Prioridad: `requiere_documentacion` → `tipo_empleo` → legado externo (notes/nombre).
+ * Prioridad: socios/`sin_vacaciones` → `requiere_documentacion` → `tipo_empleo` → legado externo.
+ * Socios no exigen expediente ni alertas de docs faltantes.
  */
 export function employeeRequiresDocumentation(
   e: Pick<
     HrEmployee,
-    'requiere_documentacion' | 'tipo_empleo' | 'full_name' | 'notes'
+    | 'requiere_documentacion'
+    | 'tipo_empleo'
+    | 'full_name'
+    | 'notes'
+    | 'puesto'
+    | 'area'
   >
 ): boolean {
+  if (isLeaveExemptEmployee(e)) return false;
   if (e.requiere_documentacion === false) return false;
   if (e.requiere_documentacion === true) return true;
   if (e.tipo_empleo === 'externo') return false;

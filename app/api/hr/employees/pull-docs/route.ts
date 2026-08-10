@@ -9,6 +9,7 @@ import {
   HR_REQUIRED_DOC_TYPES,
   isRequiredDocSatisfied,
 } from '@/app/lib/hr-employee-profile';
+import { employeeRequiresDocumentation } from '@/app/lib/hr';
 import { resolvePlantillaVigente } from '@/app/lib/hr-plantilla';
 import {
   expedientePullSourceAvailable,
@@ -93,11 +94,14 @@ export async function POST(request: Request) {
     if (plantillaOnly) {
       const plantilla = await resolvePlantillaVigente(sb, { allowSeed: false });
       // Incluye sin path: pull resuelve Altas/Bajas por nombre (matchPerson).
-      employees = plantilla.employees.map((e) => ({
-        id: e.id,
-        full_name: e.full_name,
-        drive_folder_path: e.drive_folder_path,
-      }));
+      // Socios / sin docs requeridos: no jalar expediente.
+      employees = plantilla.employees
+        .filter((e) => employeeRequiresDocumentation(e))
+        .map((e) => ({
+          id: e.id,
+          full_name: e.full_name,
+          drive_folder_path: e.drive_folder_path,
+        }));
     } else {
       const { data, error } = await sb
         .from('hr_employees')
