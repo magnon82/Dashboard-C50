@@ -9,7 +9,9 @@ import { ensureQuoteFolio } from '@/app/lib/eventos-quote-folio';
 import { createServiceOrderFromQuote } from '@/app/lib/eventos-service-order';
 import {
   buildCotizacionDocFromQuoteRow,
+  encodePerdidaLegacyNotes,
   ensureQuotePublicToken,
+  hydrateQuotePerdidaFields,
   publicQuotePath,
   regenerateQuotePublicToken,
   revokeQuotePublicToken,
@@ -326,38 +328,98 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
         )
         .single();
       if (error) {
-        const missingPerdida = /perdida_note|perdida_at|status|schema cache|column/i.test(
-          error.message
+        const missingPerdida = /perdida_note|perdida_at|status|schema cache|column|check constraint|23514|42703/i.test(
+          `${error.code || ''} ${error.message || ''}`
         );
         const missingLink = /payment_link_url|schema cache|column/i.test(
           error.message
         );
-        return NextResponse.json(
-          {
-            error: missingPerdida && body.status === 'perdida'
-              ? 'Falta migrar estado perdida. Ejecuta supabase/eventos_quote_perdida.sql'
-              : missingLink
-                ? 'Falta migrar payment_link_url. Ejecuta supabase/eventos_quote_accept.sql'
-                : error.message,
-          },
-          {
-            status:
-              (missingPerdida && body.status === 'perdida') || missingLink
-                ? 503
-                : 500,
-          }
-        );
-      }
-      quote = data;
+        // #region agent log
+        fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'826472'},body:JSON.stringify({sessionId:'826472',runId:'pre-fix',hypothesisId:'A',location:'quotes/[id]/route.ts:PATCH:error',message:'supabase update failed',data:{code:error.code||null,msg:String(error.message||'').slice(0,240),missingPerdida,statusWanted:body.status||null,hasPerdidaNote:Boolean(patch.perdida_note),hasPerdidaAt:Boolean(patch.perdida_at)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
 
-      if (body.status === 'perdida') {
-        const leadId = (data as { lead_id?: string | null }).lead_id || null;
-        if (leadId) {
-          await sb
-            .from('event_leads')
-            .update({ stage: 'perdido', updated_at: now })
-            .eq('id', leadId)
-            .neq('stage', 'ganado');
+        // Fallback: BD sin migración perdida → rechazada + marcador en notes.
+        if (missingPerdida && body.status === 'perdida') {
+          const { data: curRow } = await sb
+            .from('event_quotes')
+            .select('id, notes, lead_id')
+            .eq('id', id)
+            .maybeSingle();
+          const legacyNotes = encodePerdidaLegacyNotes(
+            now,
+            perdidaNote,
+            (curRow as { notes?: string | null } | null)?.notes
+          );
+          const { data: fbData, error: fbErr } = await sb
+            .from('event_quotes')
+            .update({
+              status: 'rechazada',
+              notes: legacyNotes,
+              updated_at: now,
+            })
+            .eq('id', id)
+            .select(
+              '*, lines:event_quote_lines(*), client:event_clients(id, company_name)'
+            )
+            .single();
+          // #region agent log
+          fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'826472'},body:JSON.stringify({sessionId:'826472',runId:'post-fix',hypothesisId:'F',location:'quotes/[id]/route.ts:PATCH:legacyFallback',message:'perdida legacy fallback',data:{ok:!fbErr&&Boolean(fbData),code:fbErr?.code||null,msg:fbErr?String(fbErr.message).slice(0,200):null},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          if (fbErr || !fbData) {
+            return NextResponse.json(
+              {
+                error:
+                  fbErr?.message ||
+                  'Falta migrar estado perdida. Ejecuta supabase/eventos_quote_perdida.sql',
+                detail: error.message,
+                code: error.code || null,
+              },
+              { status: 503 }
+            );
+          }
+          quote = hydrateQuotePerdidaFields(
+            fbData as Record<string, unknown>
+          ) as unknown as Record<string, unknown>;
+          const leadId =
+            (fbData as { lead_id?: string | null }).lead_id || null;
+          if (leadId) {
+            await sb
+              .from('event_leads')
+              .update({ stage: 'perdido', updated_at: now })
+              .eq('id', leadId)
+              .neq('stage', 'ganado');
+          }
+        } else {
+          return NextResponse.json(
+            {
+              error: missingPerdida && body.status === 'perdida'
+                ? 'Falta migrar estado perdida. Ejecuta supabase/eventos_quote_perdida.sql'
+                : missingLink
+                  ? 'Falta migrar payment_link_url. Ejecuta supabase/eventos_quote_accept.sql'
+                  : error.message,
+              detail: error.message,
+              code: error.code || null,
+            },
+            {
+              status:
+                (missingPerdida && body.status === 'perdida') || missingLink
+                  ? 503
+                  : 500,
+            }
+          );
+        }
+      } else {
+        quote = data;
+
+        if (body.status === 'perdida') {
+          const leadId = (data as { lead_id?: string | null }).lead_id || null;
+          if (leadId) {
+            await sb
+              .from('event_leads')
+              .update({ stage: 'perdido', updated_at: now })
+              .eq('id', leadId)
+              .neq('stage', 'ganado');
+          }
         }
       }
     }

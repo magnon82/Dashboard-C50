@@ -8,6 +8,96 @@ import type { CotizacionDoc } from '@/app/lib/eventos-cotizacion-doc';
 
 export type EventosSb = ReturnType<typeof getServiceSupabase>;
 
+/** Marcador en `notes` cuando el schema aún no tiene status/columnas perdida. */
+export const PERDIDA_NOTES_MARKER = '⟦PERDIDA⟧';
+
+export type PerdidaLegacyParsed = {
+  perdida_at: string;
+  perdida_note: string;
+  notesRest: string | null;
+};
+
+/** Parsea cierre perdido guardado en notes (fallback pre-migración). */
+export function parsePerdidaLegacyNotes(
+  notes: string | null | undefined
+): PerdidaLegacyParsed | null {
+  const raw = String(notes || '');
+  if (!raw.startsWith(PERDIDA_NOTES_MARKER)) return null;
+  const body = raw.slice(PERDIDA_NOTES_MARKER.length).trim();
+  const pipe = body.indexOf('|');
+  if (pipe < 0) return null;
+  const perdida_at = body.slice(0, pipe).trim();
+  const after = body.slice(pipe + 1);
+  const nl = after.indexOf('\n');
+  const perdida_note = (nl < 0 ? after : after.slice(0, nl)).trim();
+  const notesRest = (nl < 0 ? '' : after.slice(nl + 1)).trim();
+  return {
+    perdida_at,
+    perdida_note,
+    notesRest: notesRest || null,
+  };
+}
+
+export function encodePerdidaLegacyNotes(
+  perdidaAtIso: string,
+  perdidaNote: string,
+  previousNotes?: string | null
+): string {
+  const head = `${PERDIDA_NOTES_MARKER} ${perdidaAtIso} | ${perdidaNote.trim()}`;
+  const prev = String(previousNotes || '').trim();
+  // Evitar apilar marcadores si se re-guarda.
+  const cleaned = prev
+    .split('\n')
+    .filter((line) => !line.includes(PERDIDA_NOTES_MARKER))
+    .join('\n')
+    .trim();
+  return cleaned ? `${head}\n${cleaned}` : head;
+}
+
+/**
+ * Hidrata status/perdida_* desde columnas reales o desde el marcador en notes.
+ * Así la UI ve `perdida` aunque la BD aún solo tenga `rechazada` + notes.
+ */
+export function hydrateQuotePerdidaFields<T extends Record<string, unknown>>(
+  row: T
+): T & {
+  status: string;
+  perdida_note: string | null;
+  perdida_at: string | null;
+  notes: string | null;
+} {
+  const status = String(row.status || '');
+  const notes = row.notes == null ? null : String(row.notes);
+  if (status === 'perdida') {
+    return {
+      ...row,
+      status,
+      perdida_note:
+        row.perdida_note == null ? null : String(row.perdida_note),
+      perdida_at: row.perdida_at == null ? null : String(row.perdida_at),
+      notes,
+    };
+  }
+  const legacy = parsePerdidaLegacyNotes(notes);
+  if (legacy && (status === 'rechazada' || status === 'vencida' || !status)) {
+    return {
+      ...row,
+      status: 'perdida',
+      perdida_note: legacy.perdida_note || null,
+      perdida_at: legacy.perdida_at || null,
+      notes: legacy.notesRest,
+    };
+  }
+  return {
+    ...row,
+    status,
+    perdida_note:
+      row.perdida_note == null ? null : String(row.perdida_note),
+    perdida_at: row.perdida_at == null ? null : String(row.perdida_at),
+    notes,
+  };
+}
+
 /** Path público compartible (sin login). */
 export function publicQuotePath(token: string): string {
   return `/c/${encodeURIComponent(token)}`;
@@ -141,8 +231,11 @@ type QuoteRowForDoc = {
 export function buildCotizacionDocFromQuoteRow(
   data: QuoteRowForDoc
 ): CotizacionDoc {
-  const client = data.client || null;
-  const lines = (data.lines || [])
+  const hydrated = hydrateQuotePerdidaFields(
+    data as unknown as Record<string, unknown>
+  );
+  const client = (hydrated.client || null) as QuoteRowForDoc['client'];
+  const lines = ((hydrated.lines || []) as NonNullable<QuoteRowForDoc['lines']>)
     .slice()
     .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
     .map((l) => ({
@@ -153,26 +246,29 @@ export function buildCotizacionDocFromQuoteRow(
     }));
 
   return {
-    quote_number: data.quote_number || null,
-    status: data.status || null,
+    quote_number: (hydrated.quote_number as string | null) || null,
+    status: hydrated.status || null,
     client_name: client?.company_name || null,
     contact_name: client?.contact_name || null,
     phone: client?.phone || null,
     email: client?.email || null,
-    celebration: data.celebration || null,
-    event_date: data.event_date || null,
-    pax: Number(data.pax || 0),
-    notes: data.notes || null,
-    apply_servicio: data.apply_servicio !== false,
-    servicio_pct: Number(data.servicio_pct ?? EVENTOS_SERVICIO_PCT),
-    hold_until: data.hold_until || null,
+    celebration: (hydrated.celebration as string | null) || null,
+    event_date: (hydrated.event_date as string | null) || null,
+    pax: Number(hydrated.pax || 0),
+    notes: hydrated.notes || null,
+    apply_servicio: hydrated.apply_servicio !== false,
+    servicio_pct: Number(hydrated.servicio_pct ?? EVENTOS_SERVICIO_PCT),
+    hold_until: (hydrated.hold_until as string | null) || null,
     lines,
-    issued_at: data.created_at || data.updated_at || null,
-    accepted_at: data.accepted_at || null,
-    payment_method: data.payment_method || null,
-    client_accept_note: data.client_accept_note || null,
-    payment_link_url: data.payment_link_url || null,
-    perdida_note: data.perdida_note || null,
-    perdida_at: data.perdida_at || null,
+    issued_at:
+      (hydrated.created_at as string | null) ||
+      (hydrated.updated_at as string | null) ||
+      null,
+    accepted_at: (hydrated.accepted_at as string | null) || null,
+    payment_method: (hydrated.payment_method as string | null) || null,
+    client_accept_note: (hydrated.client_accept_note as string | null) || null,
+    payment_link_url: (hydrated.payment_link_url as string | null) || null,
+    perdida_note: hydrated.perdida_note || null,
+    perdida_at: hydrated.perdida_at || null,
   };
 }

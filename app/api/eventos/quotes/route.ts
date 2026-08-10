@@ -33,6 +33,7 @@ import {
 import {
   ensureQuotePublicToken,
   generateQuotePublicToken,
+  hydrateQuotePerdidaFields,
   publicQuotePath,
 } from '@/app/lib/eventos-quote-public';
 
@@ -126,7 +127,7 @@ export async function GET() {
         public_token = await ensureQuotePublicToken(sb, id, null);
       }
       enriched.push({
-        ...q,
+        ...hydrateQuotePerdidaFields(q as Record<string, unknown>),
         public_token,
         public_path: public_token ? publicQuotePath(public_token) : null,
         service_order_id: osByQuote.get(id) || null,

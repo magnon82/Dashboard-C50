@@ -1311,12 +1311,18 @@ export function EventosCotizador({
     setErr('');
     setMsg('');
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'826472'},body:JSON.stringify({sessionId:'826472',runId:'pre-fix',hypothesisId:'A',location:'EventosCotizador.tsx:confirmClosePerdida',message:'confirm perdida request',data:{quoteId:perdidaQuote.id,quoteNumber:perdidaQuote.quote_number||null,noteLen:note.length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const res = await fetch(`/api/eventos/quotes/${perdidaQuote.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'perdida', perdida_note: note }),
       });
       const json = await res.json();
+      // #region agent log
+      fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'826472'},body:JSON.stringify({sessionId:'826472',runId:'pre-fix',hypothesisId:'D',location:'EventosCotizador.tsx:confirmClosePerdida:response',message:'confirm perdida response',data:{status:res.status,ok:res.ok,error:typeof json.error==='string'?json.error.slice(0,200):null,hint:typeof json.hint==='string'?json.hint.slice(0,120):null,detail:typeof json.detail==='string'?json.detail.slice(0,200):null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (!res.ok) {
         setErr(
           [json.error, json.hint].filter(Boolean).join(' — ') ||
@@ -1331,6 +1337,9 @@ export function EventosCotizador({
       setPerdidaNote('');
       await loadQuotes();
     } catch {
+      // #region agent log
+      fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'826472'},body:JSON.stringify({sessionId:'826472',runId:'pre-fix',hypothesisId:'E',location:'EventosCotizador.tsx:confirmClosePerdida:catch',message:'network error on perdida',data:{},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setErr('Error de red al cerrar como perdida');
     } finally {
       setBusy(false);
