@@ -34,10 +34,6 @@ import {
   parseMoneyInput,
   reconcileEfectivoRecibidoVsInfocaja,
 } from '@/app/lib/staff-rpt';
-import {
-  EVENTOS_SERVICIO_ADMIN_PCT,
-  EVENTOS_SERVICIO_STAFF_PCT,
-} from '@/app/lib/eventos';
 import { SUITE } from '@/app/lib/themes';
 import { useSession } from '@/app/lib/useSession';
 
@@ -1696,42 +1692,44 @@ export function StaffCorteClient() {
         </div>
 
         <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm space-y-2">
-          <p className="font-semibold text-slate-700">Propinas</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <div>
-              <p className="text-xs text-slate-500">TPV (WI)</p>
+          <p className="font-semibold text-slate-700">Propinas · desglose</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+              <p className="text-xs text-slate-500">Propinas TPV</p>
               <p className="font-bold" style={{ color: SUITE.navy }}>
                 {moneyMx(tipBreakdown.propinaTpvWi)}
               </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">
-                Eventos {(EVENTOS_SERVICIO_STAFF_PCT * 100).toFixed(1)}%
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                Solo WI de terminal
               </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+              <p className="text-xs text-slate-500">Propina eventos</p>
               <p className="font-bold" style={{ color: SUITE.navy }}>
                 {moneyMx(tipBreakdown.staffTipEventos)}
               </p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">
-                Admin {(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}%
-              </p>
-              <p className="font-bold" style={{ color: SUITE.navy }}>
-                {moneyMx(tipBreakdown.adminTombola)}
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                12.5% OS · Admin 2.5% = {moneyMx(tipBreakdown.adminTombola)}
               </p>
             </div>
-            <div>
-              <p className="text-xs text-slate-500">Total staff</p>
+            <div
+              className="rounded-lg border-2 px-3 py-2"
+              style={{
+                borderColor: SUITE.orange,
+                background: SUITE.orangeSoft,
+              }}
+            >
+              <p className="text-xs font-semibold" style={{ color: SUITE.orangeDeep }}>
+                Total propinas
+              </p>
               <p className="font-bold" style={{ color: SUITE.navy }}>
                 {moneyMx(tipBreakdown.propinasTotal)}
               </p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Propinas TPV + Propina eventos
+              </p>
             </div>
           </div>
-          <p className="text-xs text-slate-500">
-            TPV = tickets de terminal (WI). Eventos 12.5% + admin 2.5% salen de la
-            VENTA OS y no se consideran cobrados con TPV. Total staff = TPV +
-            12.5%.
-          </p>
         </div>
 
         <div className="rounded-xl border border-slate-200 px-3 py-3 space-y-3">
