@@ -1693,7 +1693,11 @@ export function StaffCorteClient() {
 
         <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm space-y-2">
           <p className="font-semibold text-slate-700">Propinas · desglose</p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div
+            className={`grid grid-cols-1 gap-2 ${
+              tipBreakdown.osVenta > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+            }`}
+          >
             <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
               <p className="text-xs text-slate-500">Propinas TPV</p>
               <p className="font-bold" style={{ color: SUITE.navy }}>
@@ -1709,9 +1713,20 @@ export function StaffCorteClient() {
                 {moneyMx(tipBreakdown.staffTipEventos)}
               </p>
               <p className="mt-0.5 text-[11px] text-slate-400">
-                12.5% OS · Admin 2.5% = {moneyMx(tipBreakdown.adminTombola)}
+                12.5% sobre OS
               </p>
             </div>
+            {tipBreakdown.osVenta > 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs text-slate-500">Admin 2.5%</p>
+                <p className="font-bold" style={{ color: SUITE.navy }}>
+                  {moneyMx(tipBreakdown.adminTombola)}
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  Cargo a tómbola
+                </p>
+              </div>
+            ) : null}
             <div
               className="rounded-lg border-2 px-3 py-2"
               style={{

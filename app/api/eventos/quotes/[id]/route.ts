@@ -315,9 +315,6 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
         .select('perdida_note')
         .limit(1);
       perdidaSchemaReady = !probe.error;
-      // #region agent log
-      fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'826472'},body:JSON.stringify({sessionId:'826472',runId:'post-fix',hypothesisId:'A',location:'quotes/[id]/route.ts:PATCH:probe',message:'perdida schema probe',data:{ready:perdidaSchemaReady,code:probe.error?.code||null,msg:probe.error?String(probe.error.message).slice(0,160):null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (perdidaSchemaReady) {
         patch.status = 'perdida';
         patch.perdida_note = perdidaNote;
@@ -357,9 +354,6 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
           '*, lines:event_quote_lines(*), client:event_clients(id, company_name)'
         )
         .single();
-      // #region agent log
-      fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'826472'},body:JSON.stringify({sessionId:'826472',runId:'post-fix',hypothesisId:'F',location:'quotes/[id]/route.ts:PATCH:legacyDirect',message:'perdida legacy direct path',data:{ok:!fbErr&&Boolean(fbData),code:fbErr?.code||null,msg:fbErr?String(fbErr.message).slice(0,200):null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (fbErr || !fbData) {
         return NextResponse.json(
           {
@@ -397,9 +391,6 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
         const missingLink = /payment_link_url|schema cache|column/i.test(
           error.message
         );
-        // #region agent log
-        fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'826472'},body:JSON.stringify({sessionId:'826472',runId:'post-fix',hypothesisId:'A',location:'quotes/[id]/route.ts:PATCH:error',message:'supabase update failed',data:{code:error.code||null,msg:String(error.message||'').slice(0,240),missingPerdida,statusWanted:body.status||null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         return NextResponse.json(
           {
             error: missingLink

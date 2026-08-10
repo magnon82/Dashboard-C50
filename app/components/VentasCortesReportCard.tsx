@@ -23,7 +23,7 @@ import {
   EVENTOS_SERVICIO_PCT,
   EVENTOS_SERVICIO_STAFF_PCT,
 } from '@/app/lib/eventos';
-import { computeNetoBanco, moneyMx } from '@/app/lib/tpv-cortes';
+import { moneyMx } from '@/app/lib/tpv-cortes';
 
 const theme = getTheme('suite');
 
@@ -728,9 +728,6 @@ export function VentasCortesReportCard({
 }: {
   className?: string;
 }) {
-  // #region agent log
-  const DEBUG_BUILD = 'propinas-desglose-v3';
-  // #endregion
   const [dateInput, setDateInput] = useState('');
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [data, setData] = useState<CortePayload | null>(null);
@@ -744,31 +741,6 @@ export function VentasCortesReportCard({
   const [savingEdit, setSavingEdit] = useState(false);
   const [editMsg, setEditMsg] = useState<string | null>(null);
   const [editErr, setEditErr] = useState<string | null>(null);
-
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '826472',
-      },
-      body: JSON.stringify({
-        sessionId: '826472',
-        runId: 'pre-fix',
-        hypothesisId: 'A',
-        location: 'VentasCortesReportCard.tsx:mount',
-        message: 'VentasCortesReportCard mounted',
-        data: {
-          build: DEBUG_BUILD,
-          href: typeof window !== 'undefined' ? window.location.href : null,
-          path: typeof window !== 'undefined' ? window.location.pathname : null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }, []);
-  // #endregion
 
   useEffect(() => {
     setOpenPanel(null);
@@ -846,12 +818,6 @@ export function VentasCortesReportCard({
     corte != null
       ? Math.round((corte.wi_amount + corte.eventos_amount) * 100) / 100
       : null;
-
-  const bancosHint =
-    corte &&
-    (corte.bancos_cobrado_tpv != null || corte.bancos_propina_tpv != null)
-      ? `Cobrado ${moneyOrDash(corte.bancos_cobrado_tpv)} · Propina TPV (WI) ${moneyOrDash(corte.bancos_propina_tpv)}`
-      : undefined;
 
   const propinaTpvForTombola =
     corte != null
@@ -1019,16 +985,11 @@ export function VentasCortesReportCard({
     const wi = Number(editForm.wi_amount);
     const os = Number(editForm.eventos_os_amount);
     const extra = Number(editForm.eventos_extra_amount);
-    const cob = Number(editForm.bancos_cobrado_tpv);
     const tip = Number(editForm.bancos_propina_tpv);
     const rec = Number(editForm.efectivo_contado);
     const venta =
       Number.isFinite(wi) && Number.isFinite(os) && Number.isFinite(extra)
         ? Math.round((wi + os + extra) * 100) / 100
-        : null;
-    const neto =
-      Number.isFinite(cob) && Number.isFinite(tip)
-        ? computeNetoBanco(cob, tip)
         : null;
     const tips = cortePropinasBreakdown(
       Number.isFinite(tip) ? tip : 0,
@@ -1045,33 +1006,7 @@ export function VentasCortesReportCard({
     const tipWiSuggested = tipIncludesServicio
       ? Math.round((tip - tips.servicioTotal) * 100) / 100
       : null;
-    // #region agent log
-    fetch('http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '826472',
-      },
-      body: JSON.stringify({
-        sessionId: '826472',
-        runId: 'pre-fix',
-        hypothesisId: 'E',
-        location: 'VentasCortesReportCard.tsx:editLive',
-        message: 'editLive tip breakdown computed',
-        data: {
-          build: DEBUG_BUILD,
-          os,
-          tip,
-          staffTipEventos: tips.staffTipEventos,
-          adminTombola: tips.adminTombola,
-          propinasTotal: tips.propinasTotal,
-          tipWiSuggested,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-    return { venta, neto, tombolaRef, tips, tipIncludesServicio, tipWiSuggested };
+    return { venta, tombolaRef, tips, tipIncludesServicio, tipWiSuggested };
   }, [editForm]);
 
   async function saveEdit() {
@@ -1351,46 +1286,9 @@ export function VentasCortesReportCard({
               ) : null}
 
               {editing && editForm && editBaseline ? (
-                <div
-                  className="mb-4 space-y-3 rounded-[20px] border border-slate-200 bg-slate-50/80 p-4"
-                  data-debug-build={DEBUG_BUILD}
-                >
-                  {/* #region agent log */}
-                  {(() => {
-                    fetch(
-                      'http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',
-                      {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'X-Debug-Session-Id': '826472',
-                        },
-                        body: JSON.stringify({
-                          sessionId: '826472',
-                          runId: 'pre-fix',
-                          hypothesisId: 'C',
-                          location: 'VentasCortesReportCard.tsx:edit-render',
-                          message: 'Master edit form rendering',
-                          data: {
-                            build: DEBUG_BUILD,
-                            hasEditLive: Boolean(editLive),
-                            hasTips: Boolean(editLive?.tips),
-                            staffTipEventos: editLive?.tips?.staffTipEventos ?? null,
-                            os: editForm.eventos_os_amount,
-                            showPropinasSection: true,
-                          },
-                          timestamp: Date.now(),
-                        }),
-                      }
-                    ).catch(() => {});
-                    return null;
-                  })()}
-                  {/* #endregion */}
+                <div className="mb-4 space-y-3 rounded-[20px] border border-slate-200 bg-slate-50/80 p-4">
                   <p className="text-sm font-semibold" style={{ color: theme.title }}>
                     Edición Master · se conservan los valores anteriores en historial
-                    <span className="ml-2 text-[10px] font-normal text-emerald-700">
-                      [{DEBUG_BUILD}]
-                    </span>
                   </p>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <EditMoneyField
@@ -1441,59 +1339,22 @@ export function VentasCortesReportCard({
                         )
                       }
                     />
-                    <Kpi
-                      label="Bancos neto TPV"
-                      value={
-                        editLive?.neto != null ? moneyMx(editLive.neto) : '—'
-                      }
-                      hint="Cobrado + Propinas TPV (sin eventos)"
-                    />
                   </div>
 
-                  <div
-                    className="rounded-2xl border border-slate-200 bg-white p-3"
-                    data-testid="propinas-desglose"
-                    data-debug-build={DEBUG_BUILD}
-                  >
-                    {/* #region agent log */}
-                    {(() => {
-                      fetch(
-                        'http://127.0.0.1:7434/ingest/fb67463f-6333-4742-a655-4951d227854e',
-                        {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'X-Debug-Session-Id': '826472',
-                          },
-                          body: JSON.stringify({
-                            sessionId: '826472',
-                            runId: 'pre-fix',
-                            hypothesisId: 'C',
-                            location:
-                              'VentasCortesReportCard.tsx:propinas-desglose',
-                            message: 'Propinas desglose section DOM rendered',
-                            data: {
-                              build: DEBUG_BUILD,
-                              propinaTpv: editForm.bancos_propina_tpv,
-                              propinaEventos:
-                                editLive?.tips?.staffTipEventos ?? null,
-                              total: editLive?.tips?.propinasTotal ?? null,
-                              admin: editLive?.tips?.adminTombola ?? null,
-                            },
-                            timestamp: Date.now(),
-                          }),
-                        }
-                      ).catch(() => {});
-                      return null;
-                    })()}
-                    {/* #endregion */}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3">
                     <p
                       className="mb-3 text-[11px] font-semibold uppercase tracking-wide"
                       style={{ color: theme.muted }}
                     >
                       Propinas · desglose
                     </p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div
+                      className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${
+                        editLive?.tips && editLive.tips.osVenta > 0
+                          ? 'lg:grid-cols-4'
+                          : 'lg:grid-cols-3'
+                      }`}
+                    >
                       <EditMoneyField
                         label="Propinas TPV"
                         value={editForm.bancos_propina_tpv}
@@ -1517,10 +1378,17 @@ export function VentasCortesReportCard({
                         }
                         hint={
                           editLive?.tips && editLive.tips.osVenta > 0
-                            ? `12.5% sobre OS ${moneyMx(editLive.tips.osVenta)} · no es TPV · Admin 2.5% = ${moneyMx(editLive.tips.adminTombola)}`
+                            ? `12.5% sobre OS ${moneyMx(editLive.tips.osVenta)} · no es TPV`
                             : '12.5% sobre VENTA OS · no es TPV'
                         }
                       />
+                      {editLive?.tips && editLive.tips.osVenta > 0 ? (
+                        <Kpi
+                          label={`Admin ${(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}%`}
+                          value={moneyMx(editLive.tips.adminTombola)}
+                          hint={`Sobre OS ${moneyMx(editLive.tips.osVenta)} · cargo a tómbola`}
+                        />
+                      ) : null}
                       <Kpi
                         label="Total propinas"
                         value={
@@ -1650,9 +1518,13 @@ export function VentasCortesReportCard({
 
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 <Kpi
-                  label="Bancos neto TPV"
-                  value={moneyOrDash(corte.bancos_neto_tpv)}
-                  hint={bancosHint}
+                  label="Bancos cobrado TPV"
+                  value={moneyOrDash(corte.bancos_cobrado_tpv)}
+                  hint={
+                    corte.bancos_propina_tpv != null
+                      ? `Propina ${moneyMx(corte.bancos_propina_tpv)}`
+                      : undefined
+                  }
                 />
                 <Kpi
                   label="Propinas TPV"
@@ -1661,7 +1533,6 @@ export function VentasCortesReportCard({
                       ? corte.bancos_propina_tpv
                       : tipBreakdown?.propinaTpvWi
                   )}
-                  hint="Solo terminales WI · sin eventos"
                 />
                 <Kpi
                   label="Propina eventos"
@@ -1672,10 +1543,17 @@ export function VentasCortesReportCard({
                   }
                   hint={
                     tipBreakdown && tipBreakdown.osVenta > 0
-                      ? `12.5% sobre OS ${moneyMx(tipBreakdown.osVenta)} · Admin 2.5% = ${moneyMx(tipBreakdown.adminTombola)}`
+                      ? `12.5% sobre OS ${moneyMx(tipBreakdown.osVenta)} · no es TPV`
                       : '12.5% sobre VENTA OS · no es TPV'
                   }
                 />
+                {tipBreakdown && tipBreakdown.osVenta > 0 ? (
+                  <Kpi
+                    label={`Admin ${(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}%`}
+                    value={moneyMx(tipBreakdown.adminTombola)}
+                    hint={`Sobre OS ${moneyMx(tipBreakdown.osVenta)} · cargo a tómbola`}
+                  />
+                ) : null}
                 <Kpi
                   label="Total propinas"
                   value={
