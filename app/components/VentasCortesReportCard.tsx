@@ -1273,6 +1273,18 @@ export function VentasCortesReportCard({
                       label="Efectivo recibido"
                       value={editForm.efectivo_contado}
                       previous={moneyOrDash(editBaseline.efectivo_contado)}
+                      hint={(() => {
+                        const infoEfe =
+                          infocaja?.hasEfectivo && infocaja.efectivo > 0
+                            ? infocaja.efectivo
+                            : corte.efectivo_infocaja != null &&
+                                Number.isFinite(Number(corte.efectivo_infocaja))
+                              ? Number(corte.efectivo_infocaja)
+                              : null;
+                        return infoEfe != null
+                          ? `Referencia Infocaja (correo Fin de Día): ${moneyMx(infoEfe)}`
+                          : 'Sin efectivo Infocaja del correo para este día';
+                      })()}
                       onChange={(v) =>
                         setEditForm((f) =>
                           f ? { ...f, efectivo_contado: v } : f
