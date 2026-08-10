@@ -45,6 +45,8 @@ type OsItem = {
   pax?: number | null;
   total?: number | null;
   status?: string | null;
+  /** Evento cancelado en Calendario / reservas (tachado en listado). */
+  cancelled?: boolean;
   /** UUID en event_os_documents (PDF en BMS) */
   doc_id?: string | null;
   storage_path?: string | null;
@@ -60,6 +62,7 @@ type PendingOsRow = {
   has_anticipo: boolean;
   quote_id?: string | null;
   lead_id?: string | null;
+  cancelled?: boolean;
 };
 
 type WhenFilter = 'proximas' | 'pasadas' | 'todas';
@@ -67,6 +70,46 @@ type WhenFilter = 'proximas' | 'pasadas' | 'todas';
 type TableRow =
   | { kind: 'os'; item: OsItem }
   | { kind: 'pending'; item: PendingOsRow };
+
+function folioKey(folio: string | null | undefined): string {
+  return String(folio || '')
+    .trim()
+    .toLowerCase();
+}
+
+/** Marca cancelados del Calendario sobre filas OS (por OS digital, fecha+nombre o folio). */
+function markCancelledOsItems(
+  osItems: OsItem[],
+  events: CalendarEventItem[]
+): OsItem[] {
+  const byDigital = new Set<string>();
+  const byName = new Set<string>();
+  const byFolio = new Set<string>();
+  for (const ev of events) {
+    if (ev.status !== 'cancelado') continue;
+    if (ev.digital_os_id) byDigital.add(ev.digital_os_id);
+    const who = clientKey(ev.client || ev.title);
+    if (ev.event_date && who) byName.add(`${ev.event_date}|${who}`);
+    const folio = folioKey(ev.folio);
+    if (ev.event_date && folio) byFolio.add(`${ev.event_date}|${folio}`);
+  }
+  if (!byDigital.size && !byName.size && !byFolio.size) {
+    return osItems.map((it) => ({ ...it, cancelled: false }));
+  }
+  return osItems.map((it) => {
+    let cancelled = false;
+    if (it.digital_id && byDigital.has(it.digital_id)) cancelled = true;
+    if (!cancelled && it.event_date) {
+      const who = clientKey(it.matched_client_name || it.label);
+      if (who && byName.has(`${it.event_date}|${who}`)) cancelled = true;
+      const folio = folioKey(it.folio);
+      if (!cancelled && folio && byFolio.has(`${it.event_date}|${folio}`)) {
+        cancelled = true;
+      }
+    }
+    return { ...it, cancelled };
+  });
+}
 
 function openUrl(filePath: string) {
   return `/api/eventos/os?open=${encodeURIComponent(filePath)}`;
@@ -225,8 +268,7 @@ export function EventosOrdenesServicio() {
         setPending([]);
         return;
       }
-      const osItems: OsItem[] = json.items || [];
-      setItems(osItems);
+      const osItemsRaw: OsItem[] = json.items || [];
       setSource(json.source || '');
       setRootExists(Boolean(json.rootExists));
       setNote(json.note || null);
@@ -235,8 +277,9 @@ export function EventosOrdenesServicio() {
       try {
         const calJson = calRes.ok ? await calRes.json() : { events: [] };
         const events: CalendarEventItem[] = calJson.events || [];
+        setItems(markCancelledOsItems(osItemsRaw, events));
         const osKeys = new Set<string>();
-        for (const it of osItems) {
+        for (const it of osItemsRaw) {
           if (!it.event_date) continue;
           const who = clientKey(it.matched_client_name || it.label);
           if (who) osKeys.add(`${it.event_date}|${who}`);
@@ -270,10 +313,12 @@ export function EventosOrdenesServicio() {
             has_anticipo: Boolean(ev.has_anticipo),
             quote_id: ev.quote_id,
             lead_id: ev.lead_id,
+            cancelled: ev.status === 'cancelado',
           });
         }
         setPending(pendingRows);
       } catch {
+        setItems(osItemsRaw.map((it) => ({ ...it, cancelled: false })));
         setPending([]);
       }
     } catch {
@@ -579,35 +624,66 @@ export function EventosOrdenesServicio() {
                 visible.map((row) => {
                   if (row.kind === 'pending') {
                     const p = row.item;
+                    const cancelled = Boolean(p.cancelled);
                     const anticipoSinOs = isAnticipoSinOs({
                       has_anticipo: p.has_anticipo,
                       os_path: null,
                       digital_os_id: null,
-                      status: null,
+                      status: cancelled ? 'cancelado' : null,
                     });
+                    const strike = cancelled
+                      ? 'text-slate-500 line-through'
+                      : '';
                     return (
                       <tr
                         key={p.id}
                         className={`border-t border-dashed ${
-                          anticipoSinOs
-                            ? 'border-amber-200 bg-amber-50/70'
-                            : 'border-slate-200 bg-slate-50/80'
+                          cancelled
+                            ? 'border-rose-100 bg-rose-50/40'
+                            : anticipoSinOs
+                              ? 'border-amber-200 bg-amber-50/70'
+                              : 'border-slate-200 bg-slate-50/80'
                         }`}
                       >
-                        <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
+                        <td
+                          className={`whitespace-nowrap px-4 py-2.5 font-medium ${
+                            cancelled ? strike : 'text-slate-700'
+                          }`}
+                        >
                           {formatWhen(p.event_date, 0, true)}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">
+                        <td
+                          className={`whitespace-nowrap px-4 py-2.5 ${
+                            cancelled ? strike : 'text-slate-500'
+                          }`}
+                        >
                           {p.event_date.slice(0, 4)}
                         </td>
                         <td className="px-4 py-2.5 text-slate-700">
-                          <span className="font-medium">{p.title}</span>
+                          <span
+                            className={`font-medium ${
+                              cancelled ? strike : ''
+                            }`}
+                          >
+                            {p.title}
+                          </span>
                           {p.client &&
                             clientKey(p.client) !== clientKey(p.title) && (
-                              <span className="mt-0.5 block text-xs text-slate-500">
+                              <span
+                                className={`mt-0.5 block text-xs ${
+                                  cancelled
+                                    ? 'text-slate-400 line-through'
+                                    : 'text-slate-500'
+                                }`}
+                              >
                                 {p.client}
                               </span>
                             )}
+                          {cancelled && (
+                            <span className="mt-1 inline-flex items-center rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-800 no-underline">
+                              Cancelado
+                            </span>
+                          )}
                           {anticipoSinOs && (
                             <span
                               className="mt-1 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900"
@@ -621,8 +697,18 @@ export function EventosOrdenesServicio() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-2.5 text-slate-400">—</td>
-                        <td className="px-4 py-2.5 text-xs text-slate-500">
+                        <td
+                          className={`px-4 py-2.5 ${
+                            cancelled ? strike : 'text-slate-400'
+                          }`}
+                        >
+                          —
+                        </td>
+                        <td
+                          className={`px-4 py-2.5 text-xs ${
+                            cancelled ? strike : 'text-slate-500'
+                          }`}
+                        >
                           {p.source_label}
                         </td>
                         <td className="px-4 py-2.5">
@@ -630,11 +716,15 @@ export function EventosOrdenesServicio() {
                             canEdit ? (
                               <button
                                 type="button"
-                                disabled={genBusy === p.id}
+                                disabled={genBusy === p.id || cancelled}
                                 onClick={() => void generateOs(p)}
                                 className="inline-flex rounded-lg px-2 py-0.5 text-xs font-semibold text-white disabled:opacity-50"
                                 style={{ backgroundColor: SUITE.navy }}
-                                title="Crea OS digital, marca cotización aceptada y lead ganado"
+                                title={
+                                  cancelled
+                                    ? 'Evento cancelado'
+                                    : 'Crea OS digital, marca cotización aceptada y lead ganado'
+                                }
                               >
                                 {genBusy === p.id ? 'Generando…' : 'Generar OS'}
                               </button>
@@ -653,19 +743,25 @@ export function EventosOrdenesServicio() {
                           ) : (
                             <span
                               className={`inline-flex rounded-lg px-2 py-0.5 text-xs font-semibold ${
-                                anticipoSinOs
-                                  ? 'border border-amber-300 bg-amber-50 text-amber-900'
-                                  : 'bg-amber-50 text-amber-900'
+                                cancelled
+                                  ? 'bg-rose-100 text-rose-800'
+                                  : anticipoSinOs
+                                    ? 'border border-amber-300 bg-amber-50 text-amber-900'
+                                    : 'bg-amber-50 text-amber-900'
                               }`}
                               title={
-                                anticipoSinOs
-                                  ? 'Anticipo registrado; falta generar o vincular la OS'
-                                  : 'Visible en Calendario; aún no hay OS digital ni PDF'
+                                cancelled
+                                  ? 'Evento cancelado'
+                                  : anticipoSinOs
+                                    ? 'Anticipo registrado; falta generar o vincular la OS'
+                                    : 'Visible en Calendario; aún no hay OS digital ni PDF'
                               }
                             >
-                              {anticipoSinOs
-                                ? 'Anticipo sin OS'
-                                : 'Sin OS / pendiente'}
+                              {cancelled
+                                ? 'Cancelado'
+                                : anticipoSinOs
+                                  ? 'Anticipo sin OS'
+                                  : 'Sin OS / pendiente'}
                             </span>
                           )}
                         </td>
@@ -674,39 +770,80 @@ export function EventosOrdenesServicio() {
                   }
 
                   const it = row.item;
+                  const cancelled = Boolean(it.cancelled);
+                  const strike = cancelled
+                    ? 'text-slate-500 line-through'
+                    : '';
                   return (
                     <tr
                       key={it.id}
-                      className="border-t border-slate-100 hover:bg-slate-50"
+                      className={`border-t hover:bg-slate-50 ${
+                        cancelled
+                          ? 'border-rose-100 bg-rose-50/30'
+                          : 'border-slate-100'
+                      }`}
                     >
-                      <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-800">
+                      <td
+                        className={`whitespace-nowrap px-4 py-2.5 font-medium ${
+                          cancelled ? strike : 'text-slate-800'
+                        }`}
+                      >
                         {formatWhen(
                           it.event_date,
                           it.mtimeMs,
                           Boolean(it.event_date)
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                      <td
+                        className={`whitespace-nowrap px-4 py-2.5 ${
+                          cancelled ? strike : 'text-slate-600'
+                        }`}
+                      >
                         {it.year ?? '—'}
                       </td>
                       <td className="px-4 py-2.5 text-slate-800">
-                        {it.label ||
-                          (it.folio
-                            ? `OS ${it.folio}`
-                            : 'Sin nombre en archivo')}
+                        <span className={cancelled ? strike : undefined}>
+                          {it.label ||
+                            (it.folio
+                              ? `OS ${it.folio}`
+                              : 'Sin nombre en archivo')}
+                        </span>
                         {it.kind === 'digital' && it.pax != null && (
-                          <span className="mt-0.5 block text-xs text-slate-500">
+                          <span
+                            className={`mt-0.5 block text-xs ${
+                              cancelled
+                                ? 'text-slate-400 line-through'
+                                : 'text-slate-500'
+                            }`}
+                          >
                             {it.pax} pax
                             {it.celebration ? ` · ${it.celebration}` : ''}
                           </span>
                         )}
+                        {cancelled && (
+                          <span className="mt-1 inline-flex items-center rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-800 no-underline">
+                            Cancelado
+                          </span>
+                        )}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-600">
+                      <td
+                        className={`px-4 py-2.5 ${
+                          cancelled ? strike : 'text-slate-600'
+                        }`}
+                      >
                         {it.folio || '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-xs text-slate-500">
+                      <td
+                        className={`px-4 py-2.5 text-xs ${
+                          cancelled ? strike : 'text-slate-500'
+                        }`}
+                      >
                         {it.matched_client_name ? (
-                          <span className="font-semibold text-slate-700">
+                          <span
+                            className={`font-semibold ${
+                              cancelled ? '' : 'text-slate-700'
+                            }`}
+                          >
                             {it.matched_client_name}
                           </span>
                         ) : (
@@ -719,7 +856,11 @@ export function EventosOrdenesServicio() {
                             <DocChip
                               href={`/eventos/os/${it.digital_id}`}
                               label="Consultar"
-                              title="Abrir orden de servicio digital"
+                              title={
+                                cancelled
+                                  ? 'Consultar OS (evento cancelado)'
+                                  : 'Abrir orden de servicio digital'
+                              }
                             />
                             <DocChip
                               href={`/eventos/os/${it.digital_id}?print=1`}
@@ -737,10 +878,12 @@ export function EventosOrdenesServicio() {
                                   href={urls.view}
                                   label="Consultar"
                                   title={
-                                    it.storage_path
-                                      ? it.filename || 'Ver PDF (BMS Storage)'
-                                      : it.filename ||
-                                        'Ver PDF (abre desde BMS; sync si falta)'
+                                    cancelled
+                                      ? 'Consultar OS (evento cancelado)'
+                                      : it.storage_path
+                                        ? it.filename || 'Ver PDF (BMS Storage)'
+                                        : it.filename ||
+                                          'Ver PDF (abre desde BMS; sync si falta)'
                                   }
                                 />
                                 <DocChip
@@ -767,7 +910,7 @@ export function EventosOrdenesServicio() {
                       </td>
                     </tr>
                   );
-                })
+                })                })
               )}
             </tbody>
           </table>

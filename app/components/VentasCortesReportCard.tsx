@@ -10,11 +10,18 @@ import { getTheme, SUITE } from '@/app/lib/themes';
 import {
   EFECTIVO_TOLERANCE_MXN,
   expectedTombolaDeposit,
+  isEventoServicioClassificationGap,
+  splitEventoServicio,
   type EfectivoInfocajaReconcile,
   type StaffRptEditHistoryEntry,
   type StaffRptInfocajaDay,
   type StaffRptValuesSnapshot,
 } from '@/app/lib/staff-rpt';
+import {
+  EVENTOS_SERVICIO_ADMIN_PCT,
+  EVENTOS_SERVICIO_PCT,
+  EVENTOS_SERVICIO_STAFF_PCT,
+} from '@/app/lib/eventos';
 import { computeNetoBanco, moneyMx } from '@/app/lib/tpv-cortes';
 
 const theme = getTheme('suite');
@@ -212,16 +219,28 @@ function InfocajaReconcilePanel({
       ? lineDelta(bancariasDesdeTpv, infocaja.bancarias)
       : null;
 
+  const servicioGap = isEventoServicioClassificationGap({
+    osVenta: corte.eventos_os_amount,
+    propinasDelta: propinasCmp?.delta,
+    bancariasDelta: bancosCmp?.delta,
+  });
+  const servicioSplit =
+    servicioGap && corte.eventos_os_amount > 0
+      ? splitEventoServicio(corte.eventos_os_amount)
+      : null;
+
   const secondaryMismatch =
-    propinasCmp?.ok === false || bancosCmp?.ok === false;
+    !servicioGap &&
+    (propinasCmp?.ok === false || bancosCmp?.ok === false);
   const mismatch = Boolean(cashCheck?.mismatch) || secondaryMismatch;
   const match =
     Boolean(cashCheck?.match) &&
-    (propinasCmp == null || propinasCmp.ok) &&
-    (bancosCmp == null || bancosCmp.ok);
+    (propinasCmp == null || propinasCmp.ok || servicioGap) &&
+    (bancosCmp == null || bancosCmp.ok || servicioGap);
 
-  let tone: 'match' | 'mismatch' | 'pending' = 'pending';
+  let tone: 'match' | 'mismatch' | 'pending' | 'explained' = 'pending';
   if (mismatch) tone = 'mismatch';
+  else if (servicioGap && !cashCheck?.mismatch) tone = 'explained';
   else if (match) tone = 'match';
   else if (!hasInfocaja && hasRecibido) tone = 'pending';
 
@@ -233,39 +252,50 @@ function InfocajaReconcilePanel({
           title: '#065F46',
           body: '#047857',
         }
-      : tone === 'mismatch'
+      : tone === 'explained'
         ? {
-            border: '1px solid #FCA5A5',
-            bg: '#FEF2F2',
-            title: '#991B1B',
-            body: '#B91C1C',
+            border: '1px solid #93C5FD',
+            bg: '#EFF6FF',
+            title: '#1E3A8A',
+            body: '#1D4ED8',
           }
-        : {
-            border: '1px solid #FDE68A',
-            bg: '#FFFBEB',
-            title: '#92400E',
-            body: '#B45309',
-          };
+        : tone === 'mismatch'
+          ? {
+              border: '1px solid #FCA5A5',
+              bg: '#FEF2F2',
+              title: '#991B1B',
+              body: '#B91C1C',
+            }
+          : {
+              border: '1px solid #FDE68A',
+              bg: '#FFFBEB',
+              title: '#92400E',
+              body: '#B45309',
+            };
 
   const title =
     tone === 'match'
       ? 'Conciliación Infocaja · coincide'
-      : tone === 'mismatch'
-        ? 'Alerta · diferencias vs Infocaja'
-        : 'Conciliación Infocaja · pendiente';
+      : tone === 'explained'
+        ? 'Infocaja · servicio del evento (reclasificación)'
+        : tone === 'mismatch'
+          ? 'Alerta · diferencias vs Infocaja'
+          : 'Conciliación Infocaja · pendiente';
 
   const headline =
     tone === 'match'
       ? cashCheck?.message ||
         'Efectivo recibido del corte coincide con el reporte Infocaja del correo.'
-      : tone === 'mismatch'
-        ? cashCheck?.mismatch
-          ? cashCheck.message ||
-            'Efectivo del corte no coincide con Infocaja Efectivo.'
-          : 'Hay diferencias en propinas o bancos vs el reporte Infocaja del correo.'
-        : hasRecibido
-          ? 'El reporte Infocaja del correo aún no está para este día; la conciliación se hará al sincronizar Gmail.'
-          : 'Sin efectivo recibido en el corte ni reporte Infocaja para conciliar.';
+      : tone === 'explained' && servicioSplit
+        ? `La diferencia de ${moneyMx(servicioSplit.servicioTotal)} es el ${(EVENTOS_SERVICIO_PCT * 100).toFixed(0)}% de servicio sobre la VENTA OS (${moneyMx(servicioSplit.osVenta)}): Infocaja lo mete en Bancarias y el TPV en Propinas.`
+        : tone === 'mismatch'
+          ? cashCheck?.mismatch
+            ? cashCheck.message ||
+              'Efectivo del corte no coincide con Infocaja Efectivo.'
+            : 'Hay diferencias en propinas o bancos vs el reporte Infocaja del correo.'
+          : hasRecibido
+            ? 'El reporte Infocaja del correo aún no está para este día; la conciliación se hará al sincronizar Gmail.'
+            : 'Sin efectivo recibido en el corte ni reporte Infocaja para conciliar.';
 
   return (
     <div
@@ -282,6 +312,26 @@ function InfocajaReconcilePanel({
       <p className="mt-1 text-sm font-medium" style={{ color: styles.body }}>
         {headline}
       </p>
+      {servicioSplit ? (
+        <ul
+          className="mt-2 space-y-0.5 text-xs"
+          style={{ color: styles.body }}
+        >
+          <li>
+            Servicio {(EVENTOS_SERVICIO_PCT * 100).toFixed(0)}% ={' '}
+            {moneyMx(servicioSplit.servicioTotal)}
+          </li>
+          <li>
+            Staff {(EVENTOS_SERVICIO_STAFF_PCT * 100).toFixed(1)}% ={' '}
+            {moneyMx(servicioSplit.staffTip)} (propina evento)
+          </li>
+          <li>
+            Tómbola admin {(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}% ={' '}
+            {moneyMx(servicioSplit.adminTombola)} (cargo administrativo /
+            comisión TPV)
+          </li>
+        </ul>
+      ) : null}
       <dl className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
         <div className="flex justify-between gap-3 sm:block">
           <dt style={{ color: styles.body }}>Efectivo recibido (corte)</dt>
@@ -323,7 +373,9 @@ function InfocajaReconcilePanel({
                 {propinasCmp
                   ? propinasCmp.ok
                     ? ' · ok'
-                    : ` · Δ ${moneyMx(propinasCmp.delta)}`
+                    : servicioGap
+                      ? ` · servicio evento ${moneyMx(propinasCmp.delta)}`
+                      : ` · Δ ${moneyMx(propinasCmp.delta)}`
                   : ''}
               </dd>
             </div>
@@ -341,7 +393,9 @@ function InfocajaReconcilePanel({
                 {bancosCmp
                   ? bancosCmp.ok
                     ? ' · ok'
-                    : ` · Δ ${moneyMx(bancosCmp.delta)}`
+                    : servicioGap
+                      ? ` · servicio evento ${moneyMx(bancosCmp.delta)}`
+                      : ` · Δ ${moneyMx(bancosCmp.delta)}`
                   : ''}
               </dd>
               {corte.bancos_cobrado_tpv != null ? (
@@ -350,7 +404,10 @@ function InfocajaReconcilePanel({
                   {corte.bancos_propina_tpv != null
                     ? ` − propina ${moneyMx(corte.bancos_propina_tpv)}`
                     : ''}
-                  ; Infocaja Bancarias sin propina.
+                  ; Infocaja Bancarias sin propina
+                  {servicioGap
+                    ? ' (incluye el 15% servicio del evento).'
+                    : '.'}
                 </p>
               ) : null}
             </div>
@@ -358,9 +415,9 @@ function InfocajaReconcilePanel({
         ) : null}
       </dl>
       <p className="mt-2 text-[11px]" style={{ color: styles.body }}>
-        Fuente: reporte Infocaja por correo (misma sync post-cierre de
-        terminales). Bancarias = cobrado TPV − propina; Propina aparte.
-        Tolerancia ±{moneyMx(EFECTIVO_TOLERANCE_MXN)}.
+        {servicioGap
+          ? 'No es falta de dinero: misma operación, distinta etiqueta (TPV → Propinas; Infocaja → Bancarias).'
+          : `Fuente: reporte Infocaja por correo (misma sync post-cierre de terminales). Bancarias = cobrado TPV − propina; Propina aparte. Tolerancia ±${moneyMx(EFECTIVO_TOLERANCE_MXN)}.`}
       </p>
     </div>
   );
@@ -776,13 +833,22 @@ export function VentasCortesReportCard({
     tombola?.amount ??
     (corte != null ? corte.efectivo_tombola : null);
 
+  const servicioAdminHint =
+    corte != null &&
+    Number(corte.eventos_os_amount) > 0
+      ? (() => {
+          const s = splitEventoServicio(Number(corte.eventos_os_amount));
+          return ` · + admin ${(EVENTOS_SERVICIO_ADMIN_PCT * 100).toFixed(1)}% OS = ${moneyMx(s.adminTombola)} (cargo aparte en tómbola)`;
+        })()
+      : '';
+
   const tombolaHint =
     tombolaFromRecibido != null
-      ? `Efectivo recibido − Propina TPV (${moneyMx(propinaTpvForTombola)})`
+      ? `Efectivo recibido − Propina TPV (${moneyMx(propinaTpvForTombola)})${servicioAdminHint}`
       : tombola?.efectivo != null
-        ? `${tombola.source === 'infocaja' ? 'Infocaja' : 'Efectivo'} ${moneyMx(tombola.efectivo)} − propinas ${moneyMx(tombola.propinas_tpv)}`
+        ? `${tombola.source === 'infocaja' ? 'Infocaja' : 'Efectivo'} ${moneyMx(tombola.efectivo)} − propinas ${moneyMx(tombola.propinas_tpv)}${servicioAdminHint}`
         : corte?.efectivo_infocaja != null
-          ? `Infocaja efectivo ${moneyMx(corte.efectivo_infocaja)}`
+          ? `Infocaja efectivo ${moneyMx(corte.efectivo_infocaja)}${servicioAdminHint}`
           : undefined;
 
   const recibidoVsInfocaja = (() => {

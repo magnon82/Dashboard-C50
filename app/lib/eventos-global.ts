@@ -2,12 +2,20 @@
  * Pestaña Global de EVENTOS C50 {año} (Sheets) — VENTA + VENTA EXTRA.
  * Misma fuente que ingest_eventos.py; usada para control de comisiones
  * de vendedores. No reemplaza el ingest a financial_records.
+ *
+ * En producción: Sheets (OAuth o service account) → si falla, filas ya
+ * ingeridas en financial_records (source_file=eventos).
  */
 
+import { google } from 'googleapis';
+import type { JWT, OAuth2Client } from 'google-auth-library';
 import {
-  createDriveClient,
-  createSheetsClient,
+  createGoogleDriveAuth,
+  createGoogleDriveJwtAuth,
+  friendlyDriveError,
+  getGoogleDriveAuthStatus,
 } from '@/app/lib/google-drive-auth';
+import { getServiceSupabase } from '@/app/lib/users';
 
 export type EventosGlobalRow = {
   evento: string;
@@ -24,7 +32,7 @@ export type EventosGlobalPayload = {
   sheetName: string | null;
   tab: string | null;
   rows: EventosGlobalRow[];
-  source: 'sheets' | 'empty';
+  source: 'sheets' | 'financial_records' | 'empty';
   error?: string;
 };
 
@@ -70,7 +78,10 @@ function parseSpanishDate(text: unknown): string | null {
         return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       }
     }
-    for (const fmt of [/^(\d{4})-(\d{2})-(\d{2})/, /^(\d{1,2})\/(\d{1,2})\/(\d{4})/]) {
+    for (const fmt of [
+      /^(\d{4})-(\d{2})-(\d{2})/,
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})/,
+    ]) {
       const mm = fmt.exec(s);
       if (mm && fmt.source.startsWith('^(\\d{4})')) {
         return `${mm[1]}-${mm[2]}-${mm[3]}`;
@@ -80,9 +91,7 @@ function parseSpanishDate(text: unknown): string | null {
   return null;
 }
 
-export function parseEventosGlobalRows(
-  rows: unknown[][]
-): EventosGlobalRow[] {
+export function parseEventosGlobalRows(rows: unknown[][]): EventosGlobalRow[] {
   const out: EventosGlobalRow[] = [];
   let started = false;
   for (const row of rows) {
@@ -120,11 +129,26 @@ export function parseEventosGlobalRows(
   return out;
 }
 
-async function findEventosSheetId(year: number): Promise<{
-  id: string;
-  name: string;
-} | null> {
-  const drive = createDriveClient();
+/** Descripción ingest: `Nombre · EVENTOS C50 2026 · VENTA 1,234.00 + EXTRA 50.00` */
+export function parseEventosIngestDescription(description: string): {
+  evento: string;
+  venta: number;
+  ventaExtra: number;
+} {
+  const desc = String(description || '').trim();
+  const ventaMatch =
+    /VENTA\s+([\d,]+\.?\d*)\s*\+\s*EXTRA\s+([\d,]+\.?\d*)/i.exec(desc);
+  const venta = ventaMatch ? parseMoney(ventaMatch[1]) : 0;
+  const ventaExtra = ventaMatch ? parseMoney(ventaMatch[2]) : 0;
+  const evento = (desc.split(/\s·\s/)[0] || desc || 'Evento').trim();
+  return { evento, venta, ventaExtra };
+}
+
+async function findEventosSheetId(
+  year: number,
+  auth: OAuth2Client | JWT
+): Promise<{ id: string; name: string } | null> {
+  const drive = google.drive({ version: 'v3', auth });
   const q = `name = 'EVENTOS C50 ${year}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
   const res = await drive.files.list({
     q,
@@ -136,12 +160,70 @@ async function findEventosSheetId(year: number): Promise<{
   return { id: f.id, name: f.name || `EVENTOS C50 ${year}` };
 }
 
-export async function loadEventosGlobal(
+async function loadEventosGlobalFromSheetsWithAuth(
+  year: number,
+  auth: OAuth2Client | JWT
+): Promise<EventosGlobalPayload> {
+  const found = await findEventosSheetId(year, auth);
+  if (!found) {
+    return {
+      year,
+      sheetId: null,
+      sheetName: null,
+      tab: null,
+      rows: [],
+      source: 'empty',
+      error: `No se encontró el Sheet «EVENTOS C50 ${year}» en Drive.`,
+    };
+  }
+  const sheets = google.sheets({ version: 'v4', auth });
+  for (const tab of ['Global', 'GLOBAL'] as const) {
+    try {
+      const result = await sheets.spreadsheets.values.get({
+        spreadsheetId: found.id,
+        range: `'${tab}'!A1:Z500`,
+      });
+      const values = (result.data.values || []) as unknown[][];
+      if (!values.length) continue;
+      return {
+        year,
+        sheetId: found.id,
+        sheetName: found.name,
+        tab,
+        rows: parseEventosGlobalRows(values),
+        source: 'sheets',
+      };
+    } catch {
+      continue;
+    }
+  }
+  return {
+    year,
+    sheetId: found.id,
+    sheetName: found.name,
+    tab: null,
+    rows: [],
+    source: 'empty',
+    error: 'El Sheet existe pero no tiene pestaña Global.',
+  };
+}
+
+async function loadEventosGlobalFromFinancialRecords(
   year: number
 ): Promise<EventosGlobalPayload> {
   try {
-    const found = await findEventosSheetId(year);
-    if (!found) {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb
+      .from('financial_records')
+      .select('date, amount, description')
+      .eq('source_file', 'eventos')
+      .eq('category', 'Eventos')
+      .gte('date', `${year}-01-01`)
+      .lte('date', `${year}-12-31`)
+      .order('date', { ascending: true })
+      .limit(2000);
+
+    if (error) {
       return {
         year,
         sheetId: null,
@@ -149,38 +231,45 @@ export async function loadEventosGlobal(
         tab: null,
         rows: [],
         source: 'empty',
-        error: `No se encontró el Sheet «EVENTOS C50 ${year}» en Drive.`,
+        error: error.message,
       };
     }
-    const sheets = createSheetsClient();
-    for (const tab of ['Global', 'GLOBAL'] as const) {
-      try {
-        const result = await sheets.spreadsheets.values.get({
-          spreadsheetId: found.id,
-          range: `'${tab}'!A1:Z500`,
-        });
-        const values = (result.data.values || []) as unknown[][];
-        if (!values.length) continue;
-        return {
-          year,
-          sheetId: found.id,
-          sheetName: found.name,
-          tab,
-          rows: parseEventosGlobalRows(values),
-          source: 'sheets',
-        };
-      } catch {
-        continue;
+
+    const rows: EventosGlobalRow[] = [];
+    for (const raw of data || []) {
+      const amount = Number(raw.amount) || 0;
+      if (amount <= 0) continue;
+      const parsed = parseEventosIngestDescription(String(raw.description || ''));
+      let venta = parsed.venta;
+      let ventaExtra = parsed.ventaExtra;
+      const parsedTotal = Math.round((venta + ventaExtra) * 100) / 100;
+      if (parsedTotal <= 0 || Math.abs(parsedTotal - amount) > 0.05) {
+        venta = Math.round(amount * 100) / 100;
+        ventaExtra = 0;
       }
+      const total = Math.round((venta + ventaExtra) * 100) / 100;
+      const fecha =
+        typeof raw.date === 'string' ? raw.date.slice(0, 10) : null;
+      rows.push({
+        evento: parsed.evento,
+        venta,
+        ventaExtra,
+        total,
+        fecha,
+        rawFecha: fecha,
+      });
     }
+
     return {
       year,
-      sheetId: found.id,
-      sheetName: found.name,
+      sheetId: null,
+      sheetName: `financial_records · eventos ${year}`,
       tab: null,
-      rows: [],
-      source: 'empty',
-      error: 'El Sheet existe pero no tiene pestaña Global.',
+      rows,
+      source: rows.length ? 'financial_records' : 'empty',
+      error: rows.length
+        ? undefined
+        : `Sin filas de eventos ingeridas en financial_records para ${year}.`,
     };
   } catch (e) {
     return {
@@ -190,7 +279,81 @@ export async function loadEventosGlobal(
       tab: null,
       rows: [],
       source: 'empty',
-      error: e instanceof Error ? e.message : 'No se pudo leer Global',
+      error:
+        e instanceof Error ? e.message : 'No se pudo leer financial_records',
     };
   }
+}
+
+function listAuthAttempts(): Array<{
+  label: string;
+  auth: () => OAuth2Client | JWT;
+}> {
+  const status = getGoogleDriveAuthStatus();
+  const attempts: Array<{
+    label: string;
+    auth: () => OAuth2Client | JWT;
+  }> = [];
+  if (status.mode === 'oauth') {
+    attempts.push({ label: 'oauth', auth: () => createGoogleDriveAuth() });
+    if (createGoogleDriveJwtAuth()) {
+      attempts.push({
+        label: 'service_account',
+        auth: () => createGoogleDriveJwtAuth()!,
+      });
+    }
+  } else if (status.mode === 'service_account') {
+    attempts.push({
+      label: 'service_account',
+      auth: () => createGoogleDriveAuth(),
+    });
+  }
+  return attempts;
+}
+
+export async function loadEventosGlobal(
+  year: number
+): Promise<EventosGlobalPayload> {
+  const attempts = listAuthAttempts();
+  const sheetErrors: string[] = [];
+
+  for (const attempt of attempts) {
+    try {
+      const payload = await loadEventosGlobalFromSheetsWithAuth(
+        year,
+        attempt.auth()
+      );
+      if (payload.source === 'sheets') return payload;
+      if (payload.sheetId) return payload;
+      if (payload.error) sheetErrors.push(payload.error);
+    } catch (e) {
+      sheetErrors.push(friendlyDriveError(e));
+    }
+  }
+
+  const fallback = await loadEventosGlobalFromFinancialRecords(year);
+  if (fallback.rows.length) {
+    const sheetsHint =
+      sheetErrors[0] ||
+      (attempts.length
+        ? 'No se pudo leer el Sheet Global en vivo.'
+        : getGoogleDriveAuthStatus().message);
+    return {
+      ...fallback,
+      error: `${sheetsHint} Mostrando datos ingeridos (financial_records). Corre ingest_eventos.py para actualizar.`,
+    };
+  }
+
+  return {
+    year,
+    sheetId: null,
+    sheetName: null,
+    tab: null,
+    rows: [],
+    source: 'empty',
+    error:
+      sheetErrors[0] ||
+      fallback.error ||
+      'No hay Global en Sheets ni filas eventos en financial_records.',
+  };
 }

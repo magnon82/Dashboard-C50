@@ -93,40 +93,52 @@ export function createGoogleDriveAuth() {
   }
 
   if (status.mode === 'oauth') {
-    const token = parseJsonEnv(process.env.GOOGLE_OAUTH_TOKEN_JSON)!;
-    const clientInfo = parseJsonEnv(process.env.GOOGLE_OAUTH_CLIENT_JSON);
-    const installed =
-      (clientInfo?.installed as Record<string, unknown> | undefined) ||
-      (clientInfo?.web as Record<string, unknown> | undefined) ||
-      {};
-    const clientId =
-      (installed.client_id as string | undefined) ||
-      (token.client_id as string | undefined) ||
-      '';
-    const clientSecret =
-      (installed.client_secret as string | undefined) ||
-      (token.client_secret as string | undefined) ||
-      '';
-    const redirect =
-      Array.isArray(installed.redirect_uris) && installed.redirect_uris[0]
-        ? String(installed.redirect_uris[0])
-        : undefined;
-
-    const oauth2 = new google.auth.OAuth2(clientId, clientSecret, redirect);
-    oauth2.setCredentials({
-      refresh_token:
-        typeof token.refresh_token === 'string' ? token.refresh_token : undefined,
-      access_token:
-        typeof token.access_token === 'string' ? token.access_token : undefined,
-      expiry_date:
-        typeof token.expiry_date === 'number' ? token.expiry_date : undefined,
-      scope: DRIVE_SCOPES.join(' '),
-    });
-    return oauth2;
+    return createGoogleDriveOauthAuth();
   }
 
-  const clientEmail = process.env.GCAL_CLIENT_EMAIL!.trim();
+  const jwt = createGoogleDriveJwtAuth();
+  if (!jwt) throw new Error(status.message);
+  return jwt;
+}
+
+function createGoogleDriveOauthAuth() {
+  const token = parseJsonEnv(process.env.GOOGLE_OAUTH_TOKEN_JSON)!;
+  const clientInfo = parseJsonEnv(process.env.GOOGLE_OAUTH_CLIENT_JSON);
+  const installed =
+    (clientInfo?.installed as Record<string, unknown> | undefined) ||
+    (clientInfo?.web as Record<string, unknown> | undefined) ||
+    {};
+  const clientId =
+    (installed.client_id as string | undefined) ||
+    (token.client_id as string | undefined) ||
+    '';
+  const clientSecret =
+    (installed.client_secret as string | undefined) ||
+    (token.client_secret as string | undefined) ||
+    '';
+  const redirect =
+    Array.isArray(installed.redirect_uris) && installed.redirect_uris[0]
+      ? String(installed.redirect_uris[0])
+      : undefined;
+
+  const oauth2 = new google.auth.OAuth2(clientId, clientSecret, redirect);
+  oauth2.setCredentials({
+    refresh_token:
+      typeof token.refresh_token === 'string' ? token.refresh_token : undefined,
+    access_token:
+      typeof token.access_token === 'string' ? token.access_token : undefined,
+    expiry_date:
+      typeof token.expiry_date === 'number' ? token.expiry_date : undefined,
+    scope: DRIVE_SCOPES.join(' '),
+  });
+  return oauth2;
+}
+
+/** Service account JWT (sin OAuth). null si no hay GCAL_CLIENT_EMAIL + key. */
+export function createGoogleDriveJwtAuth() {
+  const clientEmail = process.env.GCAL_CLIENT_EMAIL?.trim() || '';
   const privateKey = normalizeGcalPrivateKey(process.env.GCAL_PRIVATE_KEY);
+  if (!clientEmail || !privateKey) return null;
   const subject =
     process.env.HR_DRIVE_IMPERSONATE_USER?.trim() ||
     process.env.GCAL_IMPERSONATE_USER?.trim() ||
@@ -175,9 +187,11 @@ export function friendlyDriveError(err: unknown): string {
     status === 401 ||
     lower.includes('invalid_grant') ||
     lower.includes('unauthorized') ||
-    lower.includes('invalid_client')
+    lower.includes('unauthorized_client') ||
+    lower.includes('invalid_client') ||
+    lower.includes('client is unauthorized')
   ) {
-    return 'No se pudo conectar con Drive: credenciales inválidas o token vencido. Vuelve a autorizar Google o revisa el service account.';
+    return 'No se pudo conectar con Drive/Sheets: credenciales inválidas o el cliente OAuth no puede refrescar token en el servidor (unauthorized_client). Reautoriza Google (GOOGLE_OAUTH_TOKEN_JSON + CLIENT_JSON) o usa service account con el Sheet compartido.';
   }
   if (
     status === 403 ||

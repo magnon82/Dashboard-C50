@@ -5,6 +5,11 @@ import {
   type TpvCorteUpload,
   type TpvDayCompleteness,
 } from '@/app/lib/tpv-cortes';
+import {
+  EVENTOS_SERVICIO_ADMIN_PCT,
+  EVENTOS_SERVICIO_PCT,
+  EVENTOS_SERVICIO_STAFF_PCT,
+} from '@/app/lib/eventos';
 
 export const STAFF_RPT_TABLE = 'staff_rpt_diario';
 
@@ -13,6 +18,53 @@ export const STAFF_RPT_TABLE = 'staff_rpt_diario';
  * El cierre NO depende de Infocaja (llega por correo después); la comparación es post-hoc.
  */
 export const EFECTIVO_TOLERANCE_MXN = 1;
+
+/** Desglose del 15% servicio sobre VENTA OS. */
+export type EventoServicioSplit = {
+  osVenta: number;
+  /** 15% total facturado con propina. */
+  servicioTotal: number;
+  /** 12.5% → staff. */
+  staffTip: number;
+  /** 2.5% → tómbola (cargo administrativo / comisión TPV). */
+  adminTombola: number;
+};
+
+export function splitEventoServicio(osVenta: number): EventoServicioSplit {
+  const os = Math.round(Number(osVenta) * 100) / 100;
+  const servicioTotal =
+    Math.round(os * EVENTOS_SERVICIO_PCT * 100) / 100;
+  const staffTip =
+    Math.round(os * EVENTOS_SERVICIO_STAFF_PCT * 100) / 100;
+  const adminTombola =
+    Math.round(os * EVENTOS_SERVICIO_ADMIN_PCT * 100) / 100;
+  return { osVenta: os, servicioTotal, staffTip, adminTombola };
+}
+
+/**
+ * Infocaja suele clasificar el 15% de servicio del evento en Bancarias;
+ * el TPV lo reporta en Propinas. Si Δ propinas ≈ +servicio y Δ bancarias ≈ −servicio,
+ * no es diferencia operativa sino reclasificación.
+ */
+export function isEventoServicioClassificationGap(opts: {
+  osVenta: number | null | undefined;
+  /** corte.propina − Infocaja Propina */
+  propinasDelta: number | null | undefined;
+  /** (cobrado−propina) − Infocaja Bancarias */
+  bancariasDelta: number | null | undefined;
+  tolerance?: number;
+}): boolean {
+  const os = Number(opts.osVenta);
+  if (!Number.isFinite(os) || os <= 0) return false;
+  if (opts.propinasDelta == null || opts.bancariasDelta == null) return false;
+  const { servicioTotal } = splitEventoServicio(os);
+  if (servicioTotal <= 0) return false;
+  const tol = opts.tolerance ?? EFECTIVO_TOLERANCE_MXN;
+  return (
+    Math.abs(opts.propinasDelta - servicioTotal) <= tol &&
+    Math.abs(opts.bancariasDelta + servicioTotal) <= tol
+  );
+}
 
 /** Snapshot de montos vigentes del corte (para auditoría de ediciones). */
 export type StaffRptValuesSnapshot = {

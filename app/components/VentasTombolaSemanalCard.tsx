@@ -1,9 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, Metric, Text } from '@tremor/react';
+import {
+  filterControlClass,
+  filterSelectClass,
+} from '@/app/components/SectionHeader';
 import { getTheme, SUITE } from '@/app/lib/themes';
-import { formatShort } from '@/app/lib/ventas-semana';
+import {
+  acumuladoWeekForDate,
+  formatShort,
+  sundayOfWeek,
+  todayMexicoIso,
+  toIsoLocal,
+  weekMondayIso,
+} from '@/app/lib/ventas-semana';
 import { moneyMx } from '@/app/lib/tpv-cortes';
 
 const theme = getTheme('suite');
@@ -40,14 +51,15 @@ type TombolaPayload = {
   daysWithData?: number;
   formula?: string;
   error?: string;
+  fellBackToLatest?: boolean;
 };
 
 export type VentasTombolaSemanalCardProps = {
-  /** Lunes ISO de la semana (alineado a SemanaEnCursoTable). */
-  mondayKey: string;
+  /** Lunes ISO de la semana (hint inicial; la tarjeta navega sola). */
+  mondayKey?: string;
   /** Domingo ISO de la semana. */
-  sundayKey: string;
-  /** Nº de semana Acumulado (solo UI). */
+  sundayKey?: string;
+  /** Nº de semana Acumulado (hint inicial). */
   weekNumber?: number;
   className?: string;
 };
@@ -56,7 +68,6 @@ function daySaldoEfe(d: TombolaDay): number {
   if (typeof d.saldo_efe === 'number' && Number.isFinite(d.saldo_efe)) {
     return d.saldo_efe;
   }
-  // Fallback: payload antiguo usaba `tombola` como fórmula.
   return Number(d.tombola_legacy ?? d.tombola) || 0;
 }
 
@@ -64,68 +75,170 @@ function dayTombola(d: TombolaDay): number {
   if (typeof d.saldo_efe === 'number' && Number.isFinite(d.saldo_efe)) {
     return Math.max(0, Number(d.tombola) || 0);
   }
-  // Sin recovery en payload viejo: no entregar negativos.
   return Math.max(0, Number(d.tombola) || 0);
+}
+
+function shiftWeek(
+  year: number,
+  week: number,
+  deltaWeeks: number
+): { year: number; week: number; monday: string; sunday: string } {
+  const mon = weekMondayIso(year, week);
+  const [y, m, d] = mon.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + deltaWeeks * 7);
+  const monday = toIsoLocal(dt);
+  const nextYear = Number(monday.slice(0, 4));
+  const nextWeek = acumuladoWeekForDate(monday);
+  return {
+    year: nextYear,
+    week: nextWeek > 0 ? nextWeek : 1,
+    monday: weekMondayIso(nextYear, nextWeek > 0 ? nextWeek : 1),
+    sunday: sundayOfWeek(
+      weekMondayIso(nextYear, nextWeek > 0 ? nextWeek : 1)
+    ),
+  };
 }
 
 /**
  * Saldo efe / Tómbola semanal en Ventas.
- * Saldo efe = Infocaja − propinas TPV; Tómbola = remanente tras recuperar déficits.
+ * Navegable por semana; si la actual no tiene datos, muestra la última con datos.
  */
 export function VentasTombolaSemanalCard({
   mondayKey,
-  sundayKey,
+  sundayKey: _sundayKey,
   weekNumber,
   className = 'mb-8',
 }: VentasTombolaSemanalCardProps) {
+  const today = useMemo(() => todayMexicoIso(), []);
+  const currentWeek = useMemo(() => acumuladoWeekForDate(today), [today]);
+  const currentYear = useMemo(() => Number(today.slice(0, 4)), [today]);
+
+  const initialYear =
+    mondayKey && /^\d{4}-\d{2}-\d{2}$/.test(mondayKey)
+      ? Number(mondayKey.slice(0, 4))
+      : currentYear;
+  const initialWeek =
+    weekNumber && weekNumber > 0
+      ? weekNumber
+      : mondayKey
+        ? acumuladoWeekForDate(mondayKey)
+        : currentWeek;
+
+  const [year, setYear] = useState(initialYear);
+  const [week, setWeek] = useState(initialWeek > 0 ? initialWeek : currentWeek);
+  const [userPicked, setUserPicked] = useState(false);
   const [data, setData] = useState<TombolaPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
+  const weekOptions = useMemo(() => {
+    const maxW =
+      year === currentYear ? Math.max(currentWeek, 1) : 53;
+    const opts: { week: number; label: string }[] = [];
+    for (let w = maxW; w >= 1; w -= 1) {
+      const mon = weekMondayIso(year, w);
+      const sun = sundayOfWeek(mon);
+      opts.push({
+        week: w,
+        label: `S${w} · ${formatShort(mon)} – ${formatShort(sun)}`,
+      });
+    }
+    return opts;
+  }, [year, currentYear, currentWeek]);
+
+  const yearOptions = useMemo(() => {
+    const ys = [currentYear, currentYear - 1, currentYear - 2];
+    return [...new Set(ys)].filter((y) => y >= 2024);
+  }, [currentYear]);
+
+  const canGoNext = useMemo(() => {
+    const next = shiftWeek(year, week, 1);
+    if (next.year > currentYear) return false;
+    if (next.year === currentYear && next.week > currentWeek) return false;
+    return true;
+  }, [year, week, currentYear, currentWeek]);
+
+  const canGoPrev = useMemo(() => {
+    const prev = shiftWeek(year, week, -1);
+    return prev.year >= yearOptions[yearOptions.length - 1]!;
+  }, [year, week, yearOptions]);
+
+  const load = useCallback(
+    async (opts: {
+      year: number;
+      week: number;
+      fallbackLast?: boolean;
+    }) => {
       setLoading(true);
       setError(null);
       try {
         const qs = new URLSearchParams({
-          from: mondayKey,
-          to: sundayKey,
+          year: String(opts.year),
+          week: String(opts.week),
         });
+        if (opts.fallbackLast) qs.set('fallback', 'last');
         const res = await fetch(`/api/ventas/tombola-semana?${qs}`, {
           cache: 'no-store',
         });
         const json = (await res.json()) as TombolaPayload;
-        if (cancelled) return;
         if (!res.ok && json.total == null) {
           setError(json.error || 'No se pudo cargar Saldo efe / tómbola');
           setData(json);
           return;
         }
         setData(json);
+        if (
+          json.fellBackToLatest &&
+          json.week != null &&
+          json.year != null &&
+          (json.year !== opts.year || json.week !== opts.week)
+        ) {
+          setYear(json.year);
+          setWeek(json.week);
+        }
         if (json.error && !json.ready) setError(json.error);
       } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Error de red');
-          setData(null);
-        }
+        setError(e instanceof Error ? e.message : 'Error de red');
+        setData(null);
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [mondayKey, sundayKey]);
+    },
+    []
+  );
+
+  useEffect(() => {
+    void load({
+      year,
+      week,
+      fallbackLast: !userPicked,
+    });
+  }, [year, week, userPicked, load]);
+
+  function goPrev() {
+    if (!canGoPrev) return;
+    const prev = shiftWeek(year, week, -1);
+    setUserPicked(true);
+    setYear(prev.year);
+    setWeek(prev.week);
+  }
+
+  function goNext() {
+    if (!canGoNext) return;
+    const next = shiftWeek(year, week, 1);
+    setUserPicked(true);
+    setYear(next.year);
+    setWeek(next.week);
+  }
 
   const isWtd = data != null && data.asOf < data.to;
   const rangeLabel = data
     ? `${formatShort(data.from)} – ${formatShort(isWtd ? data.asOf : data.to)}`
-    : `${formatShort(mondayKey)} – ${formatShort(sundayKey)}`;
+    : '';
 
   const weekLabel =
-    weekNumber != null && weekNumber > 0 ? ` · S${weekNumber}` : '';
+    (data?.week ?? week) > 0 ? ` · S${data?.week ?? week}` : '';
 
   const hasDays =
     data != null && (data.daysWithData ?? data.days.length) > 0;
@@ -159,6 +272,78 @@ export function VentasTombolaSemanalCard({
         borderTop: `4px solid ${SUITE.orange}`,
       }}
     >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={goPrev}
+            disabled={!canGoPrev || loading}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm disabled:opacity-40"
+            aria-label="Semana anterior"
+            title="Semana anterior"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={goNext}
+            disabled={!canGoNext || loading}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm disabled:opacity-40"
+            aria-label="Semana siguiente"
+            title="Semana siguiente"
+          >
+            ›
+          </button>
+          <label className={`${filterControlClass} bg-white shadow-sm`}>
+            <span className="shrink-0 text-slate-500">Año</span>
+            <select
+              className={`${filterSelectClass} min-w-[5rem] cursor-pointer bg-white`}
+              value={year}
+              onChange={(e) => {
+                const y = Number(e.target.value);
+                if (!Number.isFinite(y)) return;
+                setUserPicked(true);
+                setYear(y);
+                const maxW = y === currentYear ? currentWeek : 53;
+                setWeek((w) => Math.min(w, maxW));
+              }}
+              aria-label="Año de tómbola"
+            >
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={`${filterControlClass} bg-white shadow-sm`}>
+            <span className="shrink-0 text-slate-500">Semana</span>
+            <select
+              className={`${filterSelectClass} min-w-[12rem] max-w-[18rem] cursor-pointer bg-white`}
+              value={week}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (!Number.isFinite(v) || v < 1) return;
+                setUserPicked(true);
+                setWeek(v);
+              }}
+              aria-label="Consultar semana de tómbola"
+            >
+              {weekOptions.map((o) => (
+                <option key={o.week} value={o.week}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {data?.fellBackToLatest ? (
+          <Text className="text-xs text-amber-800">
+            Sin datos en la semana pedida · mostrando la última con datos
+          </Text>
+        ) : null}
+      </div>
+
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="min-w-0">
           <Text
@@ -311,6 +496,11 @@ export function VentasTombolaSemanalCard({
             </tfoot>
           </table>
         </div>
+      ) : !loading && data?.ready && !hasDays ? (
+        <p className="mt-4 text-sm text-slate-500">
+          Sin datos de efectivo / propinas TPV en esta semana. Elige otra con
+          las flechas o el selector.
+        </p>
       ) : null}
     </Card>
   );

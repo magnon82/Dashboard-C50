@@ -9,7 +9,7 @@ import {
   formatMxn,
   type LeadStage,
 } from '@/app/lib/eventos';
-import { isAnticipoSinOs } from '@/app/lib/eventos-calendario-shared';
+import { isAnticipoSinOs, isEventoEnPuerta } from '@/app/lib/eventos-calendario-shared';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 function formatPipelineCutoffLabel(iso: string): string {
@@ -139,10 +139,8 @@ export function EventosTablero({
     },
   ];
 
-  // Defensa UI: en puerta no incluye cancelados (el API ya filtra).
-  const upcoming = (summary?.upcomingEvents || []).filter(
-    (ev) => ev.status !== 'cancelado'
-  );
+  // Defensa UI: en puerta = anticipo u OS (el API ya filtra).
+  const upcoming = (summary?.upcomingEvents || []).filter(isEventoEnPuerta);
 
   return (
     <div className="space-y-5">
@@ -249,7 +247,7 @@ export function EventosTablero({
             <p className="mt-3 text-sm" style={{ color: theme.muted }}>
               {loading
                 ? 'Cargando fechas próximas…'
-                : 'Sin fechas próximas en CRM, OS ni historial. Crea un lead con fecha, cotiza un evento o regenera el seed de actividad.'}
+                : 'Sin eventos en puerta. Solo aparecen fechas con anticipo u orden de servicio.'}
             </p>
           ) : (
             <ul className="mt-3 space-y-2">

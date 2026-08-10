@@ -1,6 +1,14 @@
 /** Reglas y tipos del módulo operativo Eventos (no confundir con Ventas WI/Eventos). */
 
+/** % servicio sobre VENTA OS (factura con propina). */
 export const EVENTOS_SERVICIO_PCT = 0.15;
+/**
+ * Del 15% de servicio:
+ * - 12.5% → staff (propina evento)
+ * - 2.5% → tómbola como cargo administrativo (comisión TPV / factura con propina)
+ */
+export const EVENTOS_SERVICIO_STAFF_PCT = 0.125;
+export const EVENTOS_SERVICIO_ADMIN_PCT = 0.025;
 export const EVENTOS_HOLD_BUSINESS_HOURS = 72;
 export const EVENTOS_NO_HOLD_WITHIN_DAYS = 15;
 /** Sin cambios a cotización (líneas / guardar) si faltan ≤ N días al evento (CDMX). */

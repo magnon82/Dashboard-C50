@@ -111,7 +111,7 @@ export async function GET() {
 
     const quotesDraft = quoteRows.filter((q) => q.status === 'borrador').length;
 
-    // En puerta = Calendario sin cancelados (CRM + OS + activity + cotizaciones)
+    // En puerta = solo anticipo u OS (sin cotizaciones sueltas ni cancelados)
     const enPuerta = filterEnPuertaEvents(calendar.events || []);
     const anticipoSinOs = enPuerta.filter(isAnticipoSinOs).length;
     const upcomingEvents = enPuerta

@@ -85,7 +85,9 @@ export function EventosGlobal() {
           {data?.sheetName ? (
             <span className="text-xs text-slate-500">
               {data.sheetName}
-              {data.tab ? ` · ${data.tab}` : ''} · {rows.length} filas
+              {data.tab ? ` · ${data.tab}` : ''}
+              {data.source === 'financial_records' ? ' · ingest' : ''} ·{' '}
+              {rows.length} filas
             </span>
           ) : null}
         </div>

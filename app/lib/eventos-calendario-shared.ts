@@ -94,8 +94,19 @@ export function isAnticipoSinOs(
   return !eventHasOs(ev);
 }
 
+/**
+ * Tablero «Próximos eventos» / en puerta:
+ * solo eventos con anticipo u orden de servicio (no cotizaciones sueltas ni cancelados).
+ */
+export function isEventoEnPuerta(
+  ev: Partial<CalendarEventItem>
+): boolean {
+  if (ev.status === 'cancelado') return false;
+  return eventHasAnticipo(ev) || eventHasOs(ev);
+}
+
 export function filterEnPuertaEvents(
   events: CalendarEventItem[]
 ): CalendarEventItem[] {
-  return events.filter((e) => e.status !== 'cancelado');
+  return events.filter(isEventoEnPuerta);
 }
