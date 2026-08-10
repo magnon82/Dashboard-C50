@@ -18,6 +18,7 @@ import {
   prepareTpvPhotoForUpload,
   readTpvApiJson,
 } from '@/app/lib/tpv-upload-client';
+import { expectedTombolaDeposit } from '@/app/lib/staff-rpt';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -247,20 +248,24 @@ function formFromDayRpt(
   day: TpvAdminReportDay
 ): MasterRptFormState {
   const rpt = day.rpt;
+  const tip =
+    rpt?.bancos_propina_tpv ?? day.totals.propina ?? 0;
+  const rec = rpt?.efectivo_contado ?? null;
+  const proposedTombola = expectedTombolaDeposit(rec, tip);
   return {
     wi_amount: moneyField(rpt?.wi_amount ?? 0),
     eventos_os_amount: moneyField(
       rpt?.eventos_os_amount ?? rpt?.eventos_amount ?? 0
     ),
     eventos_extra_amount: moneyField(rpt?.eventos_extra_amount ?? 0),
-    efectivo_contado: moneyField(rpt?.efectivo_contado ?? 0),
-    efectivo_tombola: moneyField(rpt?.efectivo_tombola ?? 0),
+    efectivo_contado: moneyField(rec ?? 0),
+    efectivo_tombola: moneyField(
+      proposedTombola ?? rpt?.efectivo_tombola ?? 0
+    ),
     bancos_cobrado_tpv: moneyField(
       rpt?.bancos_cobrado_tpv ?? day.totals.cobrado ?? 0
     ),
-    bancos_propina_tpv: moneyField(
-      rpt?.bancos_propina_tpv ?? day.totals.propina ?? 0
-    ),
+    bancos_propina_tpv: moneyField(tip),
     notes: rpt?.notes ?? '',
   };
 }
@@ -283,6 +288,26 @@ function MasterRptForm({
   }, [day.date, day.hasRpt, day.rpt?.updated_by, day.totals.cobrado, day.totals.propina]);
 
   const offline = !day.complete;
+
+  function patchForm(key: keyof MasterRptFormState, value: string) {
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      if (key === 'efectivo_contado' || key === 'bancos_propina_tpv') {
+        const recRaw =
+          key === 'efectivo_contado' ? value : next.efectivo_contado;
+        const tipRaw =
+          key === 'bancos_propina_tpv' ? value : next.bancos_propina_tpv;
+        const rec = Number(String(recRaw).replace(/,/g, ''));
+        const tip = Number(String(tipRaw).replace(/,/g, ''));
+        const proposed = expectedTombolaDeposit(
+          Number.isFinite(rec) ? rec : null,
+          Number.isFinite(tip) ? tip : 0
+        );
+        if (proposed != null) next.efectivo_tombola = moneyField(proposed);
+      }
+      return next;
+    });
+  }
 
   return (
     <div
@@ -311,7 +336,7 @@ function MasterRptForm({
             ['eventos_os_amount', 'Eventos OS'],
             ['eventos_extra_amount', 'Eventos extra'],
             ['efectivo_contado', 'Efectivo recibido'],
-            ['efectivo_tombola', 'Efectivo en tómbola'],
+            ['efectivo_tombola', 'Efectivo en tómbola (recibido − propinas)'],
             ['bancos_cobrado_tpv', 'Bancos cobrado'],
             ['bancos_propina_tpv', 'Propina TPV'],
           ] as const
@@ -326,9 +351,7 @@ function MasterRptForm({
               step="0.01"
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-semibold tabular-nums text-slate-900"
               value={form[key]}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, [key]: e.target.value }))
-              }
+              onChange={(e) => patchForm(key, e.target.value)}
             />
           </label>
         ))}

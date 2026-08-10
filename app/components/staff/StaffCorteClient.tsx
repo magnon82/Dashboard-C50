@@ -128,6 +128,17 @@ function formatOsSuggestInput(amount: number): string {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
 }
 
+/** Propone tómbola = efectivo recibido − propinas TPV. */
+function proposeTombolaInput(
+  recibidoRaw: string,
+  propinasTpv: number | null | undefined
+): string {
+  const rec = parseMoneyInput(recibidoRaw);
+  const expected = expectedTombolaDeposit(rec, propinasTpv ?? 0);
+  if (expected == null) return '';
+  return formatOsSuggestInput(expected);
+}
+
 function corteStatusLabel(summary: DayWindowSummary | null | undefined): string {
   if (!summary || summary.unknown) return '—';
   if (summary.corteCompleto) return 'Cerrado';
@@ -383,11 +394,18 @@ export function StaffCorteClient() {
         setEventosOs(String(rpt.eventos_os_amount ?? rpt.eventos_amount ?? ''));
         setEventosExtra(String(rpt.eventos_extra_amount ?? '0'));
         // Legacy: filas viejas guardaban contado = tómbola (mismo monto).
-        setEfectivoRecibido(
-          rpt.efectivo_contado != null ? String(rpt.efectivo_contado) : ''
-        );
+        const recibido =
+          rpt.efectivo_contado != null ? String(rpt.efectivo_contado) : '';
+        setEfectivoRecibido(recibido);
+        const tips =
+          (data as DayPayload).bancos?.propina ??
+          rpt.bancos_propina_tpv ??
+          rpt.propinas ??
+          0;
+        const proposed = proposeTombolaInput(recibido, tips);
         setEfectivoTombola(
-          rpt.efectivo_tombola != null ? String(rpt.efectivo_tombola) : ''
+          proposed ||
+            (rpt.efectivo_tombola != null ? String(rpt.efectivo_tombola) : '')
         );
         setNotes(rpt.notes || '');
       } else {
@@ -409,6 +427,19 @@ export function StaffCorteClient() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Tómbola = recibido − propinas TPV (nuevo, atrasado o edición).
+  useEffect(() => {
+    if (efectivoRecibido.trim() === '') {
+      setEfectivoTombola('');
+      return;
+    }
+    const proposed = proposeTombolaInput(
+      efectivoRecibido,
+      payload?.bancos?.propina ?? 0
+    );
+    if (proposed !== '') setEfectivoTombola(proposed);
+  }, [efectivoRecibido, payload?.bancos?.propina]);
 
   function clearPending() {
     if (pending?.previewUrl) URL.revokeObjectURL(pending.previewUrl);
@@ -1686,8 +1717,8 @@ export function StaffCorteClient() {
             required
             hint={
               esperadoTombolaFromRecibido != null
-                ? `Obligatorio. Referencia: recibido − propinas TPV ≈ ${moneyMx(esperadoTombolaFromRecibido)} (solo guía).`
-                : 'Obligatorio. Monto que depositas en tómbola tras pagar propinas de tarjeta.'
+                ? `Propuesto: recibido − propinas TPV = ${moneyMx(esperadoTombolaFromRecibido)}. Se actualiza al capturar el recibido.`
+                : 'Se propone solo: efectivo recibido − propinas TPV.'
             }
           />
 

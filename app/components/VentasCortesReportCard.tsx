@@ -112,18 +112,34 @@ function moneyField(v: number | null | undefined): string {
 }
 
 function formFromCorte(corte: NonNullable<CortePayload['corte']>): EditFormState {
+  const tip = corte.bancos_propina_tpv ?? corte.propinas;
+  const proposed = expectedTombolaDeposit(corte.efectivo_contado, tip);
   return {
     wi_amount: moneyField(corte.wi_amount),
     eventos_os_amount: moneyField(corte.eventos_os_amount),
     eventos_extra_amount: moneyField(corte.eventos_extra_amount),
     efectivo_contado: moneyField(corte.efectivo_contado),
-    efectivo_tombola: moneyField(corte.efectivo_tombola),
+    efectivo_tombola: moneyField(proposed ?? corte.efectivo_tombola),
     bancos_cobrado_tpv: moneyField(corte.bancos_cobrado_tpv),
-    bancos_propina_tpv: moneyField(
-      corte.bancos_propina_tpv ?? corte.propinas
-    ),
+    bancos_propina_tpv: moneyField(tip),
     notes: corte.notes ?? '',
   };
+}
+
+function patchEditTombola(
+  form: EditFormState,
+  key: 'efectivo_contado' | 'bancos_propina_tpv',
+  value: string
+): EditFormState {
+  const next = { ...form, [key]: value };
+  const rec = Number(String(next.efectivo_contado).replace(/,/g, ''));
+  const tip = Number(String(next.bancos_propina_tpv).replace(/,/g, ''));
+  const proposed = expectedTombolaDeposit(
+    Number.isFinite(rec) ? rec : null,
+    Number.isFinite(tip) ? tip : 0
+  );
+  if (proposed != null) next.efectivo_tombola = moneyField(proposed);
+  return next;
 }
 
 function formatCorteDateDisplay(iso: string): string {
@@ -1258,7 +1274,7 @@ export function VentasCortesReportCard({
                       )}
                       onChange={(v) =>
                         setEditForm((f) =>
-                          f ? { ...f, bancos_propina_tpv: v } : f
+                          f ? patchEditTombola(f, 'bancos_propina_tpv', v) : f
                         )
                       }
                     />
@@ -1287,7 +1303,7 @@ export function VentasCortesReportCard({
                       })()}
                       onChange={(v) =>
                         setEditForm((f) =>
-                          f ? { ...f, efectivo_contado: v } : f
+                          f ? patchEditTombola(f, 'efectivo_contado', v) : f
                         )
                       }
                     />
@@ -1297,7 +1313,7 @@ export function VentasCortesReportCard({
                       previous={moneyMx(editBaseline.efectivo_tombola)}
                       hint={
                         editLive?.tombolaRef != null
-                          ? `Referencia: recibido − propina ≈ ${moneyMx(editLive.tombolaRef)}`
+                          ? `Propuesto: recibido − propina TPV = ${moneyMx(editLive.tombolaRef)}`
                           : undefined
                       }
                       allowNegative

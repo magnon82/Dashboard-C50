@@ -48,7 +48,7 @@ export function isTpvAdminWriter(session: SessionUser): boolean {
 
 /**
  * Staff/Ventas: día operativo CDMX o el día anterior (catch-up).
- * Master/admin: día operativo y hasta 7 días atrás (sin futuro).
+ * Master/admin o palomita `staff.corte_pendientes`: ventana 7 días (sin futuro).
  */
 export function assertWritableCorteDate(
   session: SessionUser,
@@ -58,12 +58,14 @@ export function assertWritableCorteDate(
     return NextResponse.json({ error: 'Fecha de corte inválida' }, { status: 400 });
   }
   const { opDay, prevDay } = staffCorteDateWindow();
-  if (isTpvAdminWriter(session)) {
+  if (isStaffWritableCorteDate(corteDate)) return null;
+
+  if (isTpvAdminWriter(session) || canClosePendingCortes(session)) {
     if (isAdminWritableCorteDate(corteDate)) return null;
     const { minDate, maxDate } = adminCorteDateWindow();
     return NextResponse.json(
       {
-        error: `Master solo puede cargar el día operativo (${opDay}) o hasta 7 días atrás desde el 1 de agosto (${minDate}–${maxDate}). La fecha del corte es la del día de operación (00:00–05:59 → día anterior).`,
+        error: `Solo puedes cargar el día operativo (${opDay}) o pendientes desde el 1 de agosto (${minDate}–${maxDate}). La fecha del corte es la del día de operación (00:00–05:59 → día anterior).`,
         min_date: minDate,
         max_date: maxDate,
         staff_window_date: opDay,
@@ -72,10 +74,10 @@ export function assertWritableCorteDate(
       { status: 403 }
     );
   }
-  if (isStaffWritableCorteDate(corteDate)) return null;
+
   return NextResponse.json(
     {
-      error: `Solo puedes subir o editar el corte del día operativo (${opDay}) o del día anterior (${prevDay}). De 00:00 a 05:59 el día operativo ya es el de la noche anterior.`,
+      error: `Solo puedes subir o editar el corte del día operativo (${opDay}) o del día anterior (${prevDay}). Días más atrás: permiso «Cortes pendientes» en Master.`,
       staff_window_date: opDay,
       staff_prev_date: prevDay,
     },

@@ -179,6 +179,7 @@ function legacySeedStaffCorte(session: SessionUser): boolean {
 export function canAccessCorteTpv(session: SessionUser): boolean {
   if (session.role === 'admin' || session.modules.includes('*')) return true;
   if (sessionHasCapability(session, 'staff.corte')) return true;
+  if (sessionHasCapability(session, 'staff.corte_pendientes')) return true;
   if (legacySeedStaffCorte(session)) return true;
   return canAccessModule(session, 'ventas');
 }
