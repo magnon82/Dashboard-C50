@@ -32,14 +32,12 @@ const COMPARE_YEARS = Array.from(
 );
 
 /**
- * Fuentes Balance Socios:
- * - presupuesto_semana + flujo_efectivo_semana → ingresos, efectivo, visibilidad
- * - factura_cfdi → gastos bancarios (I/E; ingest ya omite REP/pago)
+ * Fuentes Balance Socios = Resumen semanal de movimientos:
+ * presupuesto_semana + flujo_efectivo_semana.
  */
 const BALANCE_SOURCES = [
   'presupuesto_semana',
   'flujo_efectivo_semana',
-  'factura_cfdi',
 ].join(',');
 
 export default function ReportesSociosPage() {

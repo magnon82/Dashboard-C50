@@ -37,8 +37,8 @@ export type BalanceMensualSociosCardProps = {
 
 /**
  * Balance mensual 2026 para Reportes Socios.
- * Ingresos/efectivo desde presupuesto; gastos bancarios desde facturas CFDI
- * (I/E) cuando el sync cubre el mes (≥85% de suma_gasto); si no, suma_gasto.
+ * Misma fuente que Finanzas → Resumen semanal de movimientos
+ * (Σ ingresos/efectivo y Σ suma_gasto/efectivo egresos por semana).
  */
 export function BalanceMensualSociosCard({
   records,
@@ -93,8 +93,8 @@ export function BalanceMensualSociosCard({
       />
 
       <p className="mb-4 text-xs" style={{ color: theme.muted }}>
-        Totales mensuales · ingresos y efectivo desde presupuesto · gastos
-        bancarios con facturas CFDI XML (I/E; sin PDF-only/acuses ni REP) ·{' '}
+        Totales mensuales = suma del Resumen semanal de movimientos (ingresos
+        bancos + efectivo ingresos − suma gasto − efectivo egresos) ·{' '}
         {BALANCE_YEAR}. El mes aparece al cerrar el calendario; se incorpora al
         acumulado a partir del día 10 del mes siguiente.
         {lastLabel ? (

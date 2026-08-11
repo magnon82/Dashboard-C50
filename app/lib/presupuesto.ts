@@ -4,7 +4,6 @@ import {
   toIsoLocal,
   type FinancialRecord,
 } from '@/app/lib/ventas-semana';
-import { sumFacturasGastoPorMes } from '@/app/lib/facturas';
 
 export interface RubroRow {
   rubro: string;
@@ -1444,19 +1443,14 @@ export function isPresupuestoMesVisibleEnBalance(
 
 /**
  * Totales mensuales de ingresos / gastos.
- * Ingresos y efectivo: `presupuesto_semana` + `flujo_efectivo_semana`.
- * Gastos bancarios: facturas CFDI I/E del mes si hay sync; si no, `suma_gasto`.
- * Nunca REP/pago (tipo P).
+ * Misma base que «Resumen semanal de movimientos» (presupuesto + flujo efectivo).
  */
 export interface BalanceMensual {
   year: number;
   month: number;
   /** Bancos (ingresos) + efectivo ingresos */
   ingresos: number;
-  /**
-   * Gastos bancarios (facturas CFDI I/E si hay; si no suma_gasto) +
-   * efectivo egresos.
-   */
+  /** suma_gasto (bancos) + efectivo egresos */
   gastos: number;
   /** ingresos − gastos */
   balance: number;
@@ -1477,14 +1471,13 @@ export type BuildBalanceMensualOptions = {
 };
 
 /**
- * Balance por mes:
- * - Visibilidad / ingresos / efectivo ← presupuesto (+ flujo efectivo).
- * - Gastos bancarios ← facturas CFDI reales (I/E **con XML**) del mes
- *   cuando el total CFDI cubre ≥85% de `suma_gasto`; si no, roll-forward
- *   `suma_gasto` del presupuesto (evita Gmail parcial o dupes).
- * Con XML = factura (sí gasto). Sin XML (PDF/acuse) = comprobante de pago
- * (no gasto; evita doble conteo). REP/pago (tipo P) tampoco entra.
- * `sumFacturasGastoPorMes` deduplica por UUID.
+ * Balance por mes — misma base que «Resumen semanal de movimientos»:
+ * - Ingresos = Σ (ingresos bancos + efectivo ingresos) de semanas transcurridas
+ * - Gastos   = Σ (suma_gasto + efectivo egresos)
+ * - Balance  = ingresos − gastos
+ * (= Σ (ingresos − suma_gasto + efectivo_neto) por semana)
+ *
+ * No usa CFDI: el resumen semanal es la fuente de verdad operativa.
  */
 export function buildBalanceMensualPorAno(
   records: FinancialRecord[],
@@ -1508,25 +1501,11 @@ export function buildBalanceMensualPorAno(
     const weeks = buildResumenBancosSemanal(records, year, month, today);
     if (weeks.length === 0) continue;
     let ingresos = 0;
-    let sumaGastoPresupuesto = 0;
-    let efectivoEgresos = 0;
+    let gastos = 0;
     for (const w of weeks) {
       ingresos += Number(w.ingresos || 0) + Number(w.efectivo_ingresos || 0);
-      sumaGastoPresupuesto += Number(w.suma_gasto || 0);
-      efectivoEgresos += Number(w.efectivo_egresos || 0);
+      gastos += Number(w.suma_gasto || 0) + Number(w.efectivo_egresos || 0);
     }
-    const facturas = sumFacturasGastoPorMes(records, year, month);
-    // CFDI solo sustituye suma_gasto si cubre el mes de forma material.
-    // Un puñado de XML (p. ej. Gmail incompleto) no debe bajar el gasto real
-    // del presupuesto, ni meses con dupes históricos deben inflarlo a ciegas.
-    const cfdiCubrePresupuesto =
-      facturas.count > 0 &&
-      (sumaGastoPresupuesto <= 0 ||
-        facturas.total >= sumaGastoPresupuesto * 0.85);
-    const gastosBancos = cfdiCubrePresupuesto
-      ? facturas.total
-      : sumaGastoPresupuesto;
-    const gastos = gastosBancos + efectivoEgresos;
     if (ingresos === 0 && gastos === 0) continue;
     out.push({
       year,
