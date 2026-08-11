@@ -1479,10 +1479,12 @@ export type BuildBalanceMensualOptions = {
 /**
  * Balance por mes:
  * - Visibilidad / ingresos / efectivo ← presupuesto (+ flujo efectivo).
- * - Gastos bancarios ← facturas CFDI reales (I/E **con XML**) del mes;
- *   si no hay, roll-forward `suma_gasto` del presupuesto.
+ * - Gastos bancarios ← facturas CFDI reales (I/E **con XML**) del mes
+ *   cuando el total CFDI cubre ≥85% de `suma_gasto`; si no, roll-forward
+ *   `suma_gasto` del presupuesto (evita Gmail parcial o dupes).
  * Con XML = factura (sí gasto). Sin XML (PDF/acuse) = comprobante de pago
  * (no gasto; evita doble conteo). REP/pago (tipo P) tampoco entra.
+ * `sumFacturasGastoPorMes` deduplica por UUID.
  */
 export function buildBalanceMensualPorAno(
   records: FinancialRecord[],
@@ -1514,8 +1516,16 @@ export function buildBalanceMensualPorAno(
       efectivoEgresos += Number(w.efectivo_egresos || 0);
     }
     const facturas = sumFacturasGastoPorMes(records, year, month);
-    const gastosBancos =
-      facturas.count > 0 ? facturas.total : sumaGastoPresupuesto;
+    // CFDI solo sustituye suma_gasto si cubre el mes de forma material.
+    // Un puñado de XML (p. ej. Gmail incompleto) no debe bajar el gasto real
+    // del presupuesto, ni meses con dupes históricos deben inflarlo a ciegas.
+    const cfdiCubrePresupuesto =
+      facturas.count > 0 &&
+      (sumaGastoPresupuesto <= 0 ||
+        facturas.total >= sumaGastoPresupuesto * 0.85);
+    const gastosBancos = cfdiCubrePresupuesto
+      ? facturas.total
+      : sumaGastoPresupuesto;
     const gastos = gastosBancos + efectivoEgresos;
     if (ingresos === 0 && gastos === 0) continue;
     out.push({

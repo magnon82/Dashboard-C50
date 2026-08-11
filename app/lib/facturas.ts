@@ -153,6 +153,7 @@ export function parseFacturaRecord(r: FinancialRecord): FacturaItem | null {
 /**
  * Suma facturas CFDI reales (I/E **con XML**) del mes — base de gastos.
  * Excluye REP/pago (P), N/T y filas sin XML (comprobantes de pago / acuses).
+ * Dedup por UUID (el ingest Gmail a veces reinserta el mismo CFDI).
  */
 export function sumFacturasGastoPorMes(
   records: FinancialRecord[],
@@ -161,12 +162,18 @@ export function sumFacturasGastoPorMes(
 ): { total: number; count: number } {
   let total = 0;
   let count = 0;
+  const seenUuid = new Set<string>();
   for (const r of records) {
     const f = parseFacturaRecord(r);
     if (!f || isComprobantePagoFiscalSinXml(f)) continue;
     const p = parseIsoDate(f.date);
     if (!p || p.y !== year || p.m !== month) continue;
     if (!Number.isFinite(f.amount) || f.amount === 0) continue;
+    if (f.uuid) {
+      const key = f.uuid.trim().toUpperCase();
+      if (seenUuid.has(key)) continue;
+      seenUuid.add(key);
+    }
     total += f.amount;
     count += 1;
   }
@@ -187,12 +194,19 @@ function sortFacturaItems(out: FacturaItem[]): FacturaItem[] {
   return out;
 }
 
-/** Facturas CFDI con XML (I/E): sí son facturas y cuentan como gasto. */
+/** Facturas CFDI con XML (I/E): sí son facturas y cuentan como gasto. Dedup UUID. */
 export function listFacturas(records: FinancialRecord[]): FacturaItem[] {
   const out: FacturaItem[] = [];
+  const seenUuid = new Set<string>();
   for (const r of records) {
     const f = parseFacturaRecord(r);
-    if (f && !isComprobantePagoFiscalSinXml(f)) out.push(f);
+    if (!f || isComprobantePagoFiscalSinXml(f)) continue;
+    if (f.uuid) {
+      const key = f.uuid.trim().toUpperCase();
+      if (seenUuid.has(key)) continue;
+      seenUuid.add(key);
+    }
+    out.push(f);
   }
   return sortFacturaItems(out);
 }

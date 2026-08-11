@@ -1547,6 +1547,39 @@ def main() -> None:
         seen.add(key_u)
         unique.append(r)
 
+    # Gmail --newer-than trae XML con fecha de factura antigua (p. ej. julio
+    # en correo de agosto). El delete por date no los quita → reinserta dupes.
+    # Borrar filas existentes con el mismo UUID antes de insertar.
+    uuids = []
+    for r in unique:
+        try:
+            p = json.loads(r["description"])
+        except Exception:
+            continue
+        u = str(p.get("uuid") or "").strip().upper()
+        if u:
+            uuids.append(u)
+    uuids = sorted(set(uuids))
+    removed_uuid = 0
+    if uuids:
+        # description es texto JSON; match case-insensitive vía ilike del uuid
+        for i in range(0, len(uuids), 40):
+            chunk = uuids[i : i + 40]
+            # OR de ilike '%UUID%' — suficiente y simple en PostgREST
+            or_filter = ",".join(f"description.ilike.%{u}%" for u in chunk)
+            res = (
+                supabase.table("financial_records")
+                .delete()
+                .eq("source_file", SOURCE_FILE)
+                .or_(or_filter)
+                .execute()
+            )
+            removed_uuid += len(res.data or [])
+        print(
+            f"Limpieza por UUID (antes de insertar): {removed_uuid} filas "
+            f"para {len(uuids)} UUID(s)"
+        )
+
     inserted = 0
     for batch in chunked(unique, 100):
         result = supabase.table("financial_records").insert(batch).execute()

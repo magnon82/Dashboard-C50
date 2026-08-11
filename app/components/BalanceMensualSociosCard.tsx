@@ -38,7 +38,7 @@ export type BalanceMensualSociosCardProps = {
 /**
  * Balance mensual 2026 para Reportes Socios.
  * Ingresos/efectivo desde presupuesto; gastos bancarios desde facturas CFDI
- * (I/E) cuando hay sync, si no desde suma_gasto del presupuesto.
+ * (I/E) cuando el sync cubre el mes (≥85% de suma_gasto); si no, suma_gasto.
  */
 export function BalanceMensualSociosCard({
   records,
