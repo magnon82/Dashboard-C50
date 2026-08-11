@@ -101,7 +101,8 @@ export const SOURCE_FILE_UPDATE: Record<string, string> = {
     'Función: estado de cuenta Mifel (Excel). Cloud 6:37 AM/PM (sync-finanzas)',
   estado_bbva:
     'Función: estado de cuenta BBVA (Excel). Cloud 6:37 AM/PM (sync-finanzas)',
-  estado_pdf_index: 'Función: índice PDFs pagos. Manual / reindex Suite',
+  estado_pdf_index:
+    'Función: índice PDFs pagos. Cloud 6:37 AM/PM (sync-finanzas · Drive API)',
   estado_cuenta_pdf_index:
     'Función: índice PDFs estados. Manual / reindex Suite',
   saldos_bancos_manual: 'Función: saldos bancarios capturados. Solo /admin (manual)',
@@ -193,7 +194,7 @@ const SOURCE_GROUP_META: Record<
   bancos: {
     role: 'Función: conciliación bancaria e índices de comprobantes.',
     updateFrequency:
-      'Excel Mifel/BBVA cloud 6:37 AM/PM (sync-finanzas) · PDFs reindex Suite · saldos_bancos_manual solo admin',
+      'Excel Mifel/BBVA cloud 6:37 AM/PM (sync-finanzas) · PDFs pagos cloud sync-finanzas · PDFs estados reindex Suite · saldos_bancos_manual solo admin',
     scripts: ['ingest_estados_cuenta.py', 'sync_finanzas_cloud.py'],
     routes: ['/finanzas/estados-cuenta', '/finanzas/comprobantes', '/admin'],
   },

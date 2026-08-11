@@ -5,10 +5,11 @@ Sync cloud de fuentes que antes eran solo manuales (Drive / Sheets):
   2) Presupuesto mensual    → Excel desde Drive      (TOTAL U:Z + SEM)
   3) Estados Mifel/BBVA     → Excel desde Drive      (best-effort)
   4) Acumulado ventas semana → ingest_ventas_semana.py (legacy ≤2025)
+  5) Índice PDF comprobantes → ingest_estados_cuenta.py --index-pdfs-drive
 
 Pensado para Actions (sync-finanzas.yml). No toca:
   - saldos_bancos_manual / presupuesto_ajuste / dashboard_auth (solo Suite)
-  - índices PDF masivos (siguen reindex en PC o botón admin)
+  - índice PDF de estados de cuenta (Administración\\Bancos) — sigue reindex Suite/PC
   - ingest_eventos.py (legacy puntual)
 """
 
@@ -216,6 +217,22 @@ def sync_ventas_semana(dry_run: bool) -> int:
     return run("ingest_ventas_semana.py", extra)
 
 
+def sync_comprobantes_pdf_index(dry_run: bool) -> int:
+    """Lista PDFs en Drive COMPROBANTES BANCARIOS → estado_pdf_index (sin descargar)."""
+    year = date.today().year
+    # Año en curso + 2 anteriores (cubre el índice operativo sin reescaneo eterno)
+    years = ",".join(str(y) for y in range(year - 2, year + 1))
+    extra = [
+        "--index-pdfs-drive",
+        "--pdf-only",
+        "--pdf-years",
+        years,
+    ]
+    if dry_run:
+        extra.append("--dry-run")
+    return run("ingest_estados_cuenta.py", extra)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync finanzas Drive/Sheets → Supabase")
     parser.add_argument("--dry-run", action="store_true")
@@ -223,6 +240,7 @@ def main() -> None:
     parser.add_argument("--skip-presupuesto", action="store_true")
     parser.add_argument("--skip-estados", action="store_true")
     parser.add_argument("--skip-ventas-semana", action="store_true")
+    parser.add_argument("--skip-comprobantes-pdf", action="store_true")
     args = parser.parse_args()
 
     codes: list[int] = []
@@ -239,6 +257,9 @@ def main() -> None:
 
     if not args.skip_ventas_semana:
         codes.append(sync_ventas_semana(args.dry_run))
+
+    if not args.skip_comprobantes_pdf:
+        codes.append(sync_comprobantes_pdf_index(args.dry_run))
 
     failed = [c for c in codes if c != 0]
     if failed:

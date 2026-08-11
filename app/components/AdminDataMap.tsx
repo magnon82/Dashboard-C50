@@ -338,7 +338,7 @@ const NODES: MapNode[] = [
     sources: ['estado_mifel', 'estado_bbva', 'estado_pdf_index', 'estado_cuenta_pdf_index'],
     files: ['ingest_estados_cuenta.py'],
     detail:
-      'Excel MIFEL/BBVA vía sync-finanzas (Drive API). Índices PDF: reindex Suite o PC.',
+      'Excel MIFEL/BBVA vía sync-finanzas (Drive API). PDFs pagos (estado_pdf_index) también en sync-finanzas. PDFs estados: reindex Suite/PC.',
   },
   {
     id: 'ingest-prep',

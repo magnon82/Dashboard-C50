@@ -269,7 +269,7 @@ export function ComprobantesIndex({
                 <span className="font-semibold" style={{ color: SUITE.navy }}>
                   {formatTimestampCdmx(indexedAt)}
                 </span>
-                <span> · carga manual</span>
+                <span> · sync-finanzas (cloud)</span>
               </>
             ) : source === 'index' && !loading ? (
               <span> · índice: sin carga registrada · carga manual</span>

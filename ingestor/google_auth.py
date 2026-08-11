@@ -119,6 +119,81 @@ def _drive_list(q: str, page_size: int = 25) -> list[dict]:
     return list(res.get("files") or [])
 
 
+def list_drive_children(folder_id: str, page_size: int = 1000) -> list[dict]:
+    """Hijos directos de una carpeta (paginado)."""
+    drive = drive_service()
+    out: list[dict] = []
+    page_token: str | None = None
+    safe_id = folder_id.replace("'", "\\'")
+    q = f"'{safe_id}' in parents and trashed = false"
+    while True:
+        res = (
+            drive.files()
+            .list(
+                q=q,
+                spaces="drive",
+                fields="nextPageToken, files(id, name, modifiedTime, mimeType)",
+                pageSize=page_size,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        out.extend(res.get("files") or [])
+        page_token = res.get("nextPageToken")
+        if not page_token:
+            break
+    return out
+
+
+def find_drive_folder_by_name(name: str) -> dict | None:
+    """Primera carpeta con ese nombre exacto (Mi unidad + shared)."""
+    safe = name.replace("'", "\\'")
+    q = (
+        f"name = '{safe}' and trashed = false "
+        f"and mimeType = 'application/vnd.google-apps.folder'"
+    )
+    found = _drive_list(q, page_size=10)
+    return found[0] if found else None
+
+
+def list_drive_pdfs_under_folder(
+    folder_id: str, *, max_depth: int = 6
+) -> list[dict]:
+    """
+    PDFs bajo folder_id (recursivo). Cada ítem:
+      id, name, modifiedTime, parents_path (lista de nombres carpeta → archivo).
+    """
+    folder_mime = "application/vnd.google-apps.folder"
+    # stack: (folder_id, path_names)
+    stack: list[tuple[str, list[str]]] = [(folder_id, [])]
+    pdfs: list[dict] = []
+    depth = 0
+    while stack and depth <= max_depth:
+        next_stack: list[tuple[str, list[str]]] = []
+        for fid, path_names in stack:
+            for f in list_drive_children(fid):
+                name = str(f.get("name") or "")
+                mime = str(f.get("mimeType") or "")
+                if mime == folder_mime:
+                    next_stack.append((str(f["id"]), [*path_names, name]))
+                    continue
+                lower = name.lower()
+                if lower.endswith(".pdf") or mime == "application/pdf":
+                    pdfs.append(
+                        {
+                            "id": f["id"],
+                            "name": name,
+                            "modifiedTime": f.get("modifiedTime"),
+                            "parents_path": path_names,
+                        }
+                    )
+        stack = next_stack
+        depth += 1
+    return pdfs
+
+
 def download_drive_file_by_id(file_id: str, dest: Path) -> Path:
     drive = drive_service()
     data = (

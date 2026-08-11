@@ -23,10 +23,12 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 |----------|-----------------|----------|----------|
 | `sync-gmail.yml` | Diario 2:17–7:17 AM + 8:23/10:23/12:23/14:23; refuerzo Dom 7:17–11:17 PM | `17 8-13 * * *`, `23 14,16,18,20 * * *`, `17 1-5 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
 | `sync-saldos.yml` | Cada hora (:07) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
-| `sync-finanzas.yml` | Diario 6:37 AM y 6:37 PM | `37 12 * * *`, `37 0 * * *` | CxP histórico (Sheets) + presupuesto Excel (Drive) + estados Mifel/BBVA Excel + `Acumulado ventas x semana.xlsx` → `ventas_semana` |
+| `sync-finanzas.yml` | Diario 6:37 AM y 6:37 PM | `37 12 * * *`, `37 0 * * *` | CxP histórico + presupuesto Excel + estados Mifel/BBVA Excel + `ventas_semana` + índice PDF comprobantes (`estado_pdf_index` vía Drive API) |
 | `sync-hr-drive.yml` | Diario 12:00 PM | `0 18 * * *` | Soft-check `hr_*` + `hr_drive_sync_state` |
 
-Siguen **manuales a propósito**: `presupuesto_ajuste`, `saldos_bancos_manual`, `dashboard_auth`, índices PDF masivos (`estado_pdf_index` / `estado_cuenta_pdf_index`), Eventos legacy (`ingest_eventos.py`).
+Siguen **manuales a propósito**: `presupuesto_ajuste`, `saldos_bancos_manual`, `dashboard_auth`, índice PDF de estados de cuenta (`estado_cuenta_pdf_index`), Eventos legacy (`ingest_eventos.py`).
+
+Opcional: `COMPROBANTES_DRIVE_FOLDER_ID` (ID de la carpeta «COMPROBANTES BANCARIOS») si la búsqueda por nombre falla.
 
 ### Certeza del sync de ventas (no solo “confiar en el cron”)
 
@@ -151,14 +153,18 @@ Cloud: el workflow Gmail **sí** ingiere CFDI al ERP; el paso es best-effort par
 ## CLI local — comprobantes (índice PDF)
 
 ```bash
+# Local File Stream
 python ingest_estados_cuenta.py --index-pdfs --pdf-only
+
+# Cloud / Actions (Drive API, sin descargar PDF)
+python ingest_estados_cuenta.py --index-pdfs-drive --pdf-only --pdf-years 2024,2025,2026
 ```
 
 Tras reindexar, la columna **Concepto** sale del nombre del archivo
 (`mifel-NominaMeserosSem28(26)-$4,410.56.pdf` → `Nomina Meseros Sem 28`).
 
-Los Excel Mifel/BBVA del año en curso van en **sync-finanzas** (no hace falta
-correr el ingest local salvo backfill o PDFs).
+Los Excel Mifel/BBVA del año en curso y el índice de **comprobantes PDF**
+van en **sync-finanzas** (2×/día).
 
 ## Soft-sync RR.HH. (Actions)
 

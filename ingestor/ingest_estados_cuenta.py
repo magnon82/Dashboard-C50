@@ -47,6 +47,9 @@ SOURCE_BBVA = "estado_bbva"
 SOURCE_PDF_INDEX = "estado_pdf_index"
 SOURCE_ESTADO_CUENTA_PDF_INDEX = "estado_cuenta_pdf_index"
 
+# Carpeta Drive «COMPROBANTES BANCARIOS» (override: COMPROBANTES_DRIVE_FOLDER_ID).
+DEFAULT_COMPROBANTES_DRIVE_FOLDER_ID = "1P45kZomQzvo1Gdq0ywu7Zngt7HTb51lv"
+
 DEFAULT_COMPROBANTES = Path(r"I:\Mi unidad\COMPROBANTES BANCARIOS")
 DEFAULT_BANCOS = Path(r"I:\Mi unidad\Administración\Bancos")
 DEFAULT_ESTADOS_PDF = DEFAULT_BANCOS / "Mifel" / "Estados de cuenta"
@@ -505,13 +508,34 @@ def _month_year_from_parent(parent: str, year_hint: int | None) -> tuple[int | N
 
 
 def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
-    """Index payment PDFs under COMPROBANTES BANCARIOS.
+    """Index payment PDFs under COMPROBANTES BANCARIOS (local File Stream)."""
+    mtime_ms: float | None = None
+    try:
+        mtime_ms = path.stat().st_mtime * 1000.0
+    except OSError:
+        mtime_ms = None
+    return build_pdf_index_record(
+        filename=path.name,
+        parent_name=path.parent.name,
+        year_hint=year_hint,
+        rel_path=str(path),
+        mtime_ms=mtime_ms,
+    )
 
-    Standard: MIFEL|BBVA-<concepto>-$<monto>.pdf
-    Fallback: still index IMSS/impuestos/gobierno PDFs with odd names.
-    """
-    month, year = _month_year_from_parent(path.parent.name, year_hint)
-    m = PDF_NAME_RE.match(path.name)
+
+def build_pdf_index_record(
+    *,
+    filename: str,
+    parent_name: str,
+    year_hint: int | None = None,
+    rel_path: str | None = None,
+    mtime_ms: float | None = None,
+    drive_file_id: str | None = None,
+    drive_url: str | None = None,
+) -> dict | None:
+    """Index payment PDFs by filename (local o Drive). No lee el PDF."""
+    month, year = _month_year_from_parent(parent_name, year_hint)
+    m = PDF_NAME_RE.match(filename)
     if m:
         bank = m.group("bank").upper()
         body = m.group("body")
@@ -520,17 +544,16 @@ def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
             amount = float(amount_raw)
         except ValueError:
             amount = 0.0
-    elif is_gobierno_text(path.name):
-        # Odd government receipt names — keep searchable in the index
+    elif is_gobierno_text(filename):
         bank = (
             "BBVA"
-            if "bbva" in path.name.lower()
+            if "bbva" in filename.lower()
             else "MIFEL"
-            if "mifel" in path.name.lower()
+            if "mifel" in filename.lower()
             else ""
         )
-        body = path.stem
-        amount_m = re.search(r"\$?\s*([\d.,]+)\s*$", path.stem)
+        body = Path(filename).stem
+        amount_m = re.search(r"\$?\s*([\d.,]+)\s*$", body)
         try:
             amount = float(amount_m.group(1).replace(",", "")) if amount_m else 0.0
         except ValueError:
@@ -544,24 +567,17 @@ def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
     vendor = body.split("-")[0].strip() if body else ""
     concepto = concepto_from_body(body)
     matched_rubro, matched_parent, confidence = match_rubro(body.replace("-", " "))
-    if not matched_rubro and is_gobierno_text(body, path.name):
-        # Prefer IMSS when IMSS appears; otherwise Impuestos for gov institutions
-        if re.search(r"(?i)\bimss\b", f"{body} {path.name}"):
+    if not matched_rubro and is_gobierno_text(body, filename):
+        if re.search(r"(?i)\bimss\b", f"{body} {filename}"):
             matched_rubro, matched_parent, confidence = "IMSS", None, 0.9
         else:
             matched_rubro, matched_parent, confidence = "Impuestos", None, 0.85
     iso = f"{year or 2026:04d}-{month or 1:02d}-01"
 
-    mtime_ms: float | None = None
-    try:
-        mtime_ms = path.stat().st_mtime * 1000.0
-    except OSError:
-        mtime_ms = None
-
     payload = {
         "bank": bank,
-        "filename": path.name,
-        "rel_path": str(path),
+        "filename": filename,
+        "rel_path": rel_path or filename,
         "vendor": vendor,
         "body": body,
         "concepto": concepto,
@@ -572,11 +588,15 @@ def parse_pdf_filename(path: Path, year_hint: int | None = None) -> dict | None:
         "match_confidence": round(confidence, 3),
         "match_status": "matched" if matched_rubro and confidence >= 0.7 else "unmatched",
         "index_only": True,
-        "gobierno": bool(is_gobierno_text(body, path.name, concepto)),
+        "gobierno": bool(is_gobierno_text(body, filename, concepto)),
         "mtime_ms": mtime_ms,
         "month": month,
         "year": year,
     }
+    if drive_file_id:
+        payload["drive_file_id"] = drive_file_id
+    if drive_url:
+        payload["drive_url"] = drive_url
     return {
         "date": iso,
         "type": "expense",
@@ -601,6 +621,96 @@ def index_pdfs(folder: Path, years: list[int] | None = None) -> list[dict]:
         year = int(yd.name)
         for pdf in yd.rglob("*.pdf"):
             rec = parse_pdf_filename(pdf, year)
+            if rec:
+                records.append(rec)
+    return records
+
+
+def index_pdfs_from_drive(
+    years: list[int] | None = None,
+    folder_id: str | None = None,
+) -> list[dict]:
+    """
+    Índice PDF vía Drive API (sin descargar binarios).
+    Carpeta: COMPROBANTES_DRIVE_FOLDER_ID o búsqueda «COMPROBANTES BANCARIOS».
+    """
+    from google_auth import (
+        find_drive_folder_by_name,
+        list_drive_children,
+        list_drive_pdfs_under_folder,
+    )
+
+    fid = (folder_id or os.environ.get("COMPROBANTES_DRIVE_FOLDER_ID") or "").strip()
+    if not fid:
+        fid = DEFAULT_COMPROBANTES_DRIVE_FOLDER_ID
+    if not fid:
+        meta = find_drive_folder_by_name("COMPROBANTES BANCARIOS")
+        if not meta:
+            raise FileNotFoundError(
+                "No se encontró carpeta Drive «COMPROBANTES BANCARIOS». "
+                "Define COMPROBANTES_DRIVE_FOLDER_ID o comparte la carpeta con la cuenta OAuth."
+            )
+        fid = str(meta["id"])
+        print(f"Drive carpeta COMPROBANTES BANCARIOS id={fid}")
+    else:
+        print(f"Drive carpeta COMPROBANTES id={fid}")
+
+    year_set = set(years) if years else None
+    # Si hay subcarpetas 20xx, indexar solo esas; si no, todo el árbol.
+    children = list_drive_children(fid)
+    year_folders = [
+        c
+        for c in children
+        if c.get("mimeType") == "application/vnd.google-apps.folder"
+        and re.fullmatch(r"20\d{2}", str(c.get("name") or ""))
+    ]
+    records: list[dict] = []
+    targets: list[tuple[str, int | None]] = []
+    if year_folders:
+        for yf in sorted(year_folders, key=lambda x: str(x.get("name") or "")):
+            y = int(str(yf["name"]))
+            if year_set is not None and y not in year_set:
+                continue
+            targets.append((str(yf["id"]), y))
+    else:
+        targets.append((fid, None))
+
+    for sub_id, year_hint in targets:
+        pdfs = list_drive_pdfs_under_folder(sub_id)
+        print(
+            f"  Drive PDFs {year_hint or 'root'}: {len(pdfs)} archivos"
+        )
+        for pdf in pdfs:
+            parents = list(pdf.get("parents_path") or [])
+            # parent más cercano (mes) o carpeta año
+            parent_name = parents[-1] if parents else (str(year_hint) if year_hint else "")
+            # year hint: primer segmento 20xx en path, o param
+            yh = year_hint
+            for part in parents:
+                if re.fullmatch(r"20\d{2}", part):
+                    yh = int(part)
+                    break
+            mtime_ms = None
+            mt = pdf.get("modifiedTime")
+            if mt:
+                try:
+                    # 2026-08-07T20:53:00.000Z
+                    dt = datetime.fromisoformat(str(mt).replace("Z", "+00:00"))
+                    mtime_ms = dt.timestamp() * 1000.0
+                except ValueError:
+                    mtime_ms = None
+            file_id = str(pdf["id"])
+            name = str(pdf["name"])
+            rel = "/".join([*parents, name]) if parents else name
+            rec = build_pdf_index_record(
+                filename=name,
+                parent_name=parent_name or (str(yh) if yh else ""),
+                year_hint=yh,
+                rel_path=f"COMPROBANTES BANCARIOS/{rel}",
+                mtime_ms=mtime_ms,
+                drive_file_id=file_id,
+                drive_url=f"https://drive.google.com/file/d/{file_id}/view",
+            )
             if rec:
                 records.append(rec)
     return records
@@ -804,7 +914,12 @@ def main() -> None:
     parser.add_argument(
         "--index-pdfs",
         action="store_true",
-        help="Índice ligero de PDFs de pagos (COMPROBANTES BANCARIOS) por nombre",
+        help="Índice ligero de PDFs de pagos (COMPROBANTES BANCARIOS) por nombre · File Stream",
+    )
+    parser.add_argument(
+        "--index-pdfs-drive",
+        action="store_true",
+        help="Índice PDF comprobantes vía Drive API (cloud/Actions; no descarga binarios)",
     )
     parser.add_argument(
         "--index-estados-pdf",
@@ -870,9 +985,18 @@ def main() -> None:
     if args.pdf_years.strip():
         years = [int(x.strip()) for x in args.pdf_years.split(",") if x.strip()]
 
+    if args.index_pdfs and args.index_pdfs_drive:
+        raise SystemExit("Usa --index-pdfs (local) o --index-pdfs-drive (API), no ambos")
+
     if args.index_pdfs:
         pdf_rows = index_pdfs(args.folder, years)
         print(f"Índice PDF comprobantes: {len(pdf_rows)} archivos parseados por nombre")
+        all_records.extend(pdf_rows)
+        sources_touched.add(SOURCE_PDF_INDEX)
+
+    if args.index_pdfs_drive:
+        pdf_rows = index_pdfs_from_drive(years)
+        print(f"Índice PDF comprobantes (Drive): {len(pdf_rows)} archivos")
         all_records.extend(pdf_rows)
         sources_touched.add(SOURCE_PDF_INDEX)
 
