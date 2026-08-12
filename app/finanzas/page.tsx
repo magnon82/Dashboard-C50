@@ -331,8 +331,6 @@ export default function FinanzasPage() {
         records={records}
         year={year}
         month={month}
-        lastUpdatedAt={presupuestoUpdate.lastAt}
-        lastUpdatesBySource={presupuestoUpdate.bySource}
       />
     </SuiteShell>
   );
