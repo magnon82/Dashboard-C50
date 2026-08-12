@@ -125,10 +125,15 @@ const KEYWORD_RULES: Array<{
     patterns: [
       /\bcomprobante\s+de\s+domicilio\b/,
       /\bcfe\b/,
+      /\bmegacable\b/,
+      /\bmega\s*movil\b/,
+      /\bmega\b/,
       /\btelmex\b/,
       /\btotalplay\b/,
       /\bizzi\b/,
       /\bpredial\b/,
+      /\bsuscriptor\b/,
+      /\bpaga\s+en\s+centros\s+de\s+cobro\b/,
       /\brecibo\s+de\s+(agua|luz|gas|telefono)\b/,
       /\bservicio\s+de\s+(agua|luz|gas)\b/,
       /\bperiodo\s+de\s+facturacion\b/,
@@ -272,6 +277,46 @@ export function clearlyCurpConstanciaSignals(nRaw: string): boolean {
   );
 }
 
+/**
+ * Recibo / factura de servicios (CFE, MEGA, Telmex…).
+ * El titular puede ser familiar, amigo o arrendador — no se exige el nombre del empleado.
+ */
+export function clearlyDomicilioSignals(nRaw: string): boolean {
+  const n = normalizeText(nRaw);
+  if (
+    clearlyCurpConstanciaSignals(n) ||
+    clearlyIneSignals(n) ||
+    clearlyActaSignals(n)
+  ) {
+    return false;
+  }
+  return (
+    /\bcomprobante\s+de\s+domicilio\b/.test(n) ||
+    /\bmegacable\b/.test(n) ||
+    /\bmega\s*movil\b/.test(n) ||
+    (/\bmega\b/.test(n) &&
+      (/\bsuscriptor\b/.test(n) ||
+        /\bcobro\b/.test(n) ||
+        /\bfactur/.test(n) ||
+        /\btelefono\b/.test(n))) ||
+    /\bcfe\b/.test(n) ||
+    /\bluz\s+y\s+fuerza\b/.test(n) ||
+    /\btelmex\b/.test(n) ||
+    /\btotalplay\b/.test(n) ||
+    /\bizzi\b/.test(n) ||
+    /\bpredial\b/.test(n) ||
+    /\bsuscriptor\b/.test(n) ||
+    /\bpaga\s+en\s+centros\s+de\s+cobro\b/.test(n) ||
+    /\bperiodo\s+de\s+facturacion\b/.test(n) ||
+    /\brecibo\s+de\s+(agua|luz|gas|telefono)\b/.test(n) ||
+    /\bservicio\s+de\s+(agua|luz|gas|internet|telefonia)\b/.test(n)
+  );
+}
+
+function pageTextIsWeak(nRaw: string): boolean {
+  return normalizeText(nRaw).replace(/\s+/g, '').length < 12;
+}
+
 function scorePageText(text: string): Map<HrDocTypeId, number> {
   const n = normalizeText(text);
   const scores = new Map<HrDocTypeId, number>();
@@ -362,6 +407,9 @@ export function detectDocTypeFromText(text: string): HrDocTypeId | null {
   if (clearlyCurpConstanciaSignals(n) || curpConstanciaBrandSignals(n)) {
     return 'curp';
   }
+  if (clearlyDomicilioSignals(n)) {
+    return 'comprobante_domicilio';
+  }
   if (clearlyActaSignals(n) && !clearlyIneSignals(n)) {
     return 'acta_nacimiento';
   }
@@ -399,7 +447,9 @@ export function heuristicPageCounts(pageCount: number): number[] {
   if (n === 0) return [0, 0, 0, 0, 0];
   if (n === 1) return [1, 0, 0, 0, 0];
   if (n === 2) return [1, 1, 0, 0, 0];
-  if (n === 3) return [1, 1, 1, 0, 0];
+  // 3 págs: INE + acta + domicilio (la última hoja suele ser recibo; CURP
+  // se detecta por keywords/OCR si realmente está ahí).
+  if (n === 3) return [1, 1, 0, 1, 0];
   if (n === 4) return [1, 1, 1, 1, 0];
   if (n === 5) return [1, 1, 1, 1, 1];
   if (n === 6) return [2, 1, 1, 1, 1]; // INE frente+reverso
@@ -822,6 +872,21 @@ function classifyPagesFromTexts(
       clearlyIneSignals(raw)
     ) {
       labels[i] = 'ine';
+    } else if (
+      (labels[i] === 'curp' ||
+        labels[i] === 'cv' ||
+        labels[i] === 'acta_nacimiento') &&
+      clearlyDomicilioSignals(raw)
+    ) {
+      labels[i] = 'comprobante_domicilio';
+    } else if (
+      labels[i] === 'curp' &&
+      pageTextIsWeak(raw) &&
+      !clearlyCurpConstanciaSignals(raw) &&
+      !hasCurpCode(normalizeText(raw))
+    ) {
+      // Últimas hojas escaneadas (recibo MEGA/CFE) sin OCR: no forzar CURP.
+      labels[i] = 'comprobante_domicilio';
     }
   }
 
@@ -1084,9 +1149,39 @@ export async function splitPackPdf(
         (part.docType === 'curp' &&
           detected === 'acta_nacimiento' &&
           clearlyActaSignals(partText) &&
-          !curpConstanciaBrandSignals(partText))
+          !curpConstanciaBrandSignals(partText)) ||
+        ((part.docType === 'curp' ||
+          part.docType === 'cv' ||
+          part.docType === 'acta_nacimiento') &&
+          detected === 'comprobante_domicilio' &&
+          clearlyDomicilioSignals(partText)) ||
+        (part.docType === 'curp' &&
+          clearlyDomicilioSignals(partText))
       ) {
-        for (const p of part.pages) fixedLabels[p] = detected;
+        for (const p of part.pages) {
+          fixedLabels[p] = clearlyDomicilioSignals(partText)
+            ? 'comprobante_domicilio'
+            : detected;
+        }
+        changed = true;
+      }
+    }
+
+    // Última hoja del paquete marcada CURP sin señales CURP → domicilio
+    // (recibo escaneado; titular puede no ser el empleado).
+    const lastIdx = pageCount - 1;
+    if (
+      lastIdx >= 0 &&
+      fixedLabels[lastIdx] === 'curp' &&
+      !clearlyCurpConstanciaSignals(texts![lastIdx] || '') &&
+      !hasCurpCode(normalizeText(texts![lastIdx] || ''))
+    ) {
+      const lastText = texts![lastIdx] || '';
+      if (
+        clearlyDomicilioSignals(lastText) ||
+        pageTextIsWeak(lastText)
+      ) {
+        fixedLabels[lastIdx] = 'comprobante_domicilio';
         changed = true;
       }
     }

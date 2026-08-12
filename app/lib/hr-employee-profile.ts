@@ -51,7 +51,7 @@ export const HR_DOC_TYPES: HrDocTypeDef[] = [
     id: 'comprobante_domicilio',
     title: 'Comprobante de domicilio',
     required: true,
-    hint: '≤ 3 meses · agua, luz, gas o teléfono fijo · escaneo',
+    hint: '≤ 3 meses · agua, luz, gas, internet o teléfono · titular puede ser familiar, amigo o arrendador',
   },
   {
     id: 'cv',

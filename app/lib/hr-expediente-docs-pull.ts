@@ -249,7 +249,7 @@ export function classifyExpedienteFile(
 
   // Domicilio antes del filtro amplio (recibo_cfe / 3meses no son “recibo” genérico).
   if (
-    /comp\.?\s*domicilio|comprobante[.\s_-]*domicilio|actualizacion[.\s_-]*de[.\s_-]*domicilio|\bdomicilio\b|recibo[.\s_-]*cfe|\bcfe\b|comprobante[.\s_-]*(luz|agua|gas|telefono)|recibo[.\s_-]*(luz|agua|gas|cfe|telefono)|\b3\s*meses\b|luz\s*y\s*fuerza|telmex|izzi|totalplay/.test(
+    /comp\.?\s*domicilio|comprobante[.\s_-]*domicilio|actualizacion[.\s_-]*de[.\s_-]*domicilio|\bdomicilio\b|recibo[.\s_-]*cfe|\bcfe\b|megacable|\bmega\b|comprobante[.\s_-]*(luz|agua|gas|telefono)|recibo[.\s_-]*(luz|agua|gas|cfe|telefono)|\b3\s*meses\b|luz\s*y\s*fuerza|telmex|izzi|totalplay/.test(
       n
     )
   ) {
