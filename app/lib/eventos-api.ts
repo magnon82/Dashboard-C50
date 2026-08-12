@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import {
   SESSION_COOKIE,
+  canEditEventos,
   verifySessionToken,
   type SessionUser,
 } from '@/app/lib/auth';
@@ -29,7 +30,7 @@ export async function requireEventosSession(): Promise<SessionUser | NextRespons
 export function requireEventosWrite(
   session: SessionUser
 ): NextResponse | null {
-  if (!session.canEdit && session.role !== 'admin') {
+  if (!canEditEventos(session)) {
     return NextResponse.json(
       { error: 'Sin permiso de edición en Eventos' },
       { status: 403 }

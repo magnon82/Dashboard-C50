@@ -11,7 +11,7 @@ import {
   SERVICE_ORDER_STATUSES,
   type ServiceOrderRow,
 } from '@/app/lib/eventos-service-order-shared';
-import { useSession } from '@/app/lib/useSession';
+import { canEditEventos, useSession } from '@/app/lib/useSession';
 import { SUITE } from '@/app/lib/themes';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -25,7 +25,7 @@ export default function OrdenServicioByIdPage() {
   const params = useParams();
   const id = String(params?.id || '');
   const { user } = useSession();
-  const canEdit = !!user?.canEdit;
+  const canEdit = canEditEventos(user);
   const [doc, setDoc] = useState<OrdenServicioDoc | null>(null);
   const [order, setOrder] = useState<ServiceOrderRow | null>(null);
   const [quoteId, setQuoteId] = useState<string | null>(null);

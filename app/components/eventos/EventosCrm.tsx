@@ -22,7 +22,7 @@ import {
   EventosLeadFollowUpChecklist,
 } from '@/app/components/eventos/EventosFollowUpPanel';
 import { getTheme, SUITE } from '@/app/lib/themes';
-import { useSession } from '@/app/lib/useSession';
+import { canEditEventos, useSession } from '@/app/lib/useSession';
 
 const theme = getTheme('suite');
 
@@ -66,7 +66,7 @@ export function EventosCrm({
   dbReady?: boolean;
 }) {
   const { user } = useSession();
-  const canEdit = !!user?.canEdit;
+  const canEdit = canEditEventos(user);
   const [q, setQ] = useState('');
   const [view, setView] = useState<'pipeline' | 'clientes' | 'historial'>(
     'pipeline'

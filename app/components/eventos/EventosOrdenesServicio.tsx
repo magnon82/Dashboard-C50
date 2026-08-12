@@ -9,7 +9,7 @@ import {
 import type { CalendarEventItem } from '@/app/lib/eventos-calendario-shared';
 import { isAnticipoSinOs } from '@/app/lib/eventos-calendario-shared';
 import { mexicoTodayIso } from '@/app/lib/eventos';
-import { useSession } from '@/app/lib/useSession';
+import { canEditEventos, useSession } from '@/app/lib/useSession';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 function clientKey(s: string | null | undefined): string {
@@ -203,7 +203,7 @@ function formatWhen(iso: string | null, mtimeMs: number, hasEventDate: boolean) 
 
 export function EventosOrdenesServicio() {
   const { user } = useSession();
-  const canEdit = !!user?.canEdit;
+  const canEdit = canEditEventos(user);
   const [year, setYear] = useState<number | 'all'>('all');
   const [when, setWhen] = useState<WhenFilter>('proximas');
   const [query, setQuery] = useState('');

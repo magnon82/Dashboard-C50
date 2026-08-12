@@ -9,14 +9,14 @@ import {
   browserPublicQuoteUrl,
   type QuotePaymentMethod,
 } from '@/app/lib/eventos-quote-payment';
-import { useSession } from '@/app/lib/useSession';
+import { canEditEventos, useSession } from '@/app/lib/useSession';
 import { SUITE } from '@/app/lib/themes';
 
 export default function CotizacionByIdPage() {
   const params = useParams();
   const id = String(params?.id || '');
   const { user } = useSession();
-  const canEdit = !!user?.canEdit;
+  const canEdit = canEditEventos(user);
   const [doc, setDoc] = useState<CotizacionDoc | null>(null);
   const [serviceOrderId, setServiceOrderId] = useState<string | null>(null);
   const [publicShareUrl, setPublicShareUrl] = useState<string | null>(null);

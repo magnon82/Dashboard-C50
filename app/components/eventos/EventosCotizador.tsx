@@ -65,7 +65,7 @@ import {
   clampLinePax,
 } from '@/app/components/eventos/EventosPaxCounter';
 import { getTheme, SUITE } from '@/app/lib/themes';
-import { useSession } from '@/app/lib/useSession';
+import { canEditEventos, useSession } from '@/app/lib/useSession';
 
 const theme = getTheme('suite');
 
@@ -157,7 +157,7 @@ export function EventosCotizador({
   listResetKey?: number;
 }) {
   const { user } = useSession();
-  const canEdit = !!user?.canEdit;
+  const canEdit = canEditEventos(user);
   /** list = listado Cotizaciones; compose = armar cotización nueva. */
   const [view, setView] = useState<'list' | 'compose'>('list');
   const [menuId, setMenuId] = useState(() => {
@@ -1346,10 +1346,6 @@ export function EventosCotizador({
               <h3 className="text-base font-bold" style={{ color: theme.title }}>
                 Cotizaciones
               </h3>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Listado de cotizaciones guardadas. Usa «Cotizar» para armar una
-                nueva. Cada enlace público es único y no requiere login.
-              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button

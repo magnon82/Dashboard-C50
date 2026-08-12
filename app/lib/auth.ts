@@ -236,3 +236,13 @@ export function canEditHrSchedules(session: SessionUser): boolean {
   if (canAccessModule(session, 'rrhh')) return true;
   return sessionHasCapability(session, 'rrhh.schedules_edit');
 }
+
+/**
+ * Operar Eventos (cotizar, CRM, OS, etc.).
+ * Acceso al módulo `eventos` implica escritura; no depende del flag global canEdit (solo admin).
+ */
+export function canEditEventos(session: SessionUser): boolean {
+  if (session.role === 'admin' || session.modules.includes('*')) return true;
+  if (session.canEdit) return true;
+  return canAccessModule(session, 'eventos');
+}

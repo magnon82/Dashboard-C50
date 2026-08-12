@@ -18,12 +18,12 @@ import {
   type CotizacionDoc,
   type CotizacionDraftSavePayload,
 } from '@/app/lib/eventos-cotizacion-doc';
-import { useSession } from '@/app/lib/useSession';
+import { canEditEventos, useSession } from '@/app/lib/useSession';
 import { SUITE } from '@/app/lib/themes';
 
 export default function CotizacionPreviewPage() {
   const { user } = useSession();
-  const canEdit = !!user?.canEdit;
+  const canEdit = canEditEventos(user);
   const [doc, setDoc] = useState<CotizacionDoc | null>(null);
   const [savePayload, setSavePayload] =
     useState<CotizacionDraftSavePayload | null>(null);

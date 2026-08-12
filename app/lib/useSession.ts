@@ -65,3 +65,11 @@ export function canEditSchedules(user: ClientSession | null): boolean {
   if (user.modules.includes('rrhh')) return true;
   return (user.capabilities || []).includes('rrhh.schedules_edit');
 }
+
+/** Cotizar / operar Eventos: basta con tener el módulo `eventos` (o admin). */
+export function canEditEventos(user: ClientSession | null): boolean {
+  if (!user) return false;
+  if (user.role === 'admin' || user.modules.includes('*')) return true;
+  if (user.canEdit) return true;
+  return user.modules.includes('eventos');
+}
