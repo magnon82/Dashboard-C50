@@ -285,3 +285,80 @@ export function EventosLinePaxControl({
     </div>
   );
 }
+
+/**
+ * Cantidad libre (bebidas / piezas): sin máximo, permite borrar y teclear a mano.
+ * El mínimo solo se aplica al salir del campo (blur) o Enter.
+ */
+export function EventosFreeQtyInput({
+  value,
+  onChange,
+  onEnter,
+  disabled = false,
+  min = 1,
+  className = 'mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50',
+  'aria-label': ariaLabel = 'Cantidad',
+  title,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  onEnter?: (qty: number) => void;
+  disabled?: boolean;
+  min?: number;
+  className?: string;
+  'aria-label'?: string;
+  title?: string;
+}) {
+  const floor = Math.max(0, Math.floor(min));
+  const [text, setText] = useState(() =>
+    Number.isFinite(value) && value > 0 ? String(Math.floor(value)) : ''
+  );
+
+  useEffect(() => {
+    if (!Number.isFinite(value) || value <= 0) {
+      setText('');
+      return;
+    }
+    setText(String(Math.floor(value)));
+  }, [value]);
+
+  function commit(raw: string): number {
+    const digits = digitsOnly(raw);
+    const next =
+      digits === ''
+        ? floor
+        : Math.max(floor, Math.floor(Number(digits) || floor));
+    setText(String(next));
+    onChange(next);
+    return next;
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      autoComplete="off"
+      aria-label={ariaLabel}
+      title={title}
+      disabled={disabled}
+      value={text}
+      onChange={(e: ChangeEvent<HTMLInputElement>) => {
+        const digits = digitsOnly(e.target.value);
+        setText(digits);
+        if (digits === '') return;
+        const n = Number(digits);
+        if (!Number.isFinite(n) || n < floor) return;
+        onChange(Math.floor(n));
+      }}
+      onBlur={() => commit(text)}
+      onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const next = commit(text);
+        onEnter?.(next);
+      }}
+      className={className}
+    />
+  );
+}

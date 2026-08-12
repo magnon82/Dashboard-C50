@@ -60,12 +60,13 @@ import {
   type QuotePaymentMethod,
 } from '@/app/lib/eventos-quote-payment';
 import {
+  EventosFreeQtyInput,
   EventosLinePaxControl,
   EventosPaxCounter,
   clampLinePax,
 } from '@/app/components/eventos/EventosPaxCounter';
 import { getTheme, SUITE } from '@/app/lib/themes';
-import { canEditEventos, useSession } from '@/app/lib/useSession';
+import { canEditEventos, canSeeAdmin, useSession } from '@/app/lib/useSession';
 
 const theme = getTheme('suite');
 
@@ -158,6 +159,8 @@ export function EventosCotizador({
 }) {
   const { user } = useSession();
   const canEdit = canEditEventos(user);
+  /** Solo Master (admin suite) puede alterar precios unitarios en la cotización. */
+  const canEditPrices = canSeeAdmin(user);
   /** list = listado Cotizaciones; compose = armar cotización nueva. */
   const [view, setView] = useState<'list' | 'compose'>('list');
   const [menuId, setMenuId] = useState(() => {
@@ -443,6 +446,7 @@ export function EventosCotizador({
   }, [pax, quoteLocked]);
 
   // Al cambiar pax / líneas / ítem: sugerir cantidad = pax restantes (menús alimentos).
+  // Bebidas (pieza): siempre 1. Barra libre persona: pax completo.
   // Deps por id (no objetos): si selectedItem/selectedMenu cambian de identidad en cada
   // render del padre, el efecto pisaba lineQty y el círculo quedaba “congelado” en remaining.
   useEffect(() => {
@@ -461,12 +465,12 @@ export function EventosCotizador({
       isBarraLibrePersonaLine({
         unit: selectedItem.unit || 'persona',
         category: selectedMenu.category,
-      }) ||
-      selectedItem.unit === 'persona'
+      })
     ) {
       setLineQty(Math.max(1, pax));
       return;
     }
+    // Bebidas / extras / hora: unitario al agregar
     setLineQty(1);
     // selectedItem/selectedMenu solo se leen; identidad inestable — usar ids
     // eslint-disable-next-line react-hooks/exhaustive-deps -- itemId/menuId estabilizan
@@ -817,10 +821,8 @@ export function EventosCotizador({
     const firstItem = next.items?.[0];
     setItemId(firstItem?.id || '');
     setChoices({});
-    // Bebidas por pieza/hora: no arrastrar el pax de alimentos como cantidad
-    if (firstItem && firstItem.unit !== 'persona') {
-      setLineQty(1);
-    }
+    // Bebidas por pieza/hora: cantidad unitaria (1); barra libre se fija al pax al agregar
+    setLineQty(1);
     setDrinksCtaPulse(false);
     const nItems = next.items?.length || 0;
     setMsg(
@@ -2251,7 +2253,10 @@ export function EventosCotizador({
             ) : null}
             {/* Cantidad / Agregar solo si no hay choice_groups (desayunos, bebidas…). */}
             {choiceGroups.length === 0 &&
-              (nextLineIsAlloc || selectedItem?.unit === 'persona') && (
+              (nextLineIsAlloc ||
+                nextLineIsBarraLibrePersona ||
+                selectedItem?.unit === 'persona' ||
+                isDrinkMenu) && (
                 <label className="text-sm">
                   <span className="font-semibold" style={{ color: SUITE.navy }}>
                     {nextLineIsAlloc
@@ -2269,28 +2274,22 @@ export function EventosCotizador({
                       onChange={setLineQty}
                       onEnter={(qty) => addLine(qty)}
                     />
-                  ) : (
+                  ) : nextLineIsBarraLibrePersona ? (
                     <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      max={EVENTOS_MAX_PAX}
-                      value={lineQty}
-                      disabled={quoteLocked || nextLineIsBarraLibrePersona}
-                      onChange={(e) => {
-                        const raw = Math.max(
-                          0,
-                          Math.floor(Number(e.target.value) || 0)
-                        );
-                        setLineQty(Math.min(EVENTOS_MAX_PAX, raw));
-                      }}
-                      onKeyDown={tryAddLineOnEnter}
+                      type="text"
+                      inputMode="numeric"
+                      value={String(Math.max(1, pax))}
+                      disabled
                       className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm disabled:bg-slate-50"
-                      title={
-                        nextLineIsBarraLibrePersona
-                          ? 'Barra libre aplica a todos los pax del evento'
-                          : undefined
-                      }
+                      title="Barra libre aplica a todos los pax del evento"
+                    />
+                  ) : (
+                    <EventosFreeQtyInput
+                      value={lineQty}
+                      disabled={quoteLocked}
+                      onChange={setLineQty}
+                      onEnter={(qty) => addLine(qty)}
+                      aria-label="Cantidad de la línea"
                     />
                   )}
                   {nextLineIsBarraLibrePersona ? (
@@ -2299,6 +2298,13 @@ export function EventosCotizador({
                       style={{ color: SUITE.muted }}
                     >
                       Barra libre = grupo completo ({pax} pax)
+                    </p>
+                  ) : !nextLineIsAlloc ? (
+                    <p
+                      className="mt-1 text-xs font-medium"
+                      style={{ color: SUITE.muted }}
+                    >
+                      Sin máximo · escribe la cantidad
                     </p>
                   ) : null}
                 </label>
@@ -2512,77 +2518,88 @@ export function EventosCotizador({
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={isPaxAllocationLine(l) ? 1 : 0.01}
-                          max={isPaxAllocationLine(l) ? EVENTOS_MAX_PAX : undefined}
-                          step={isPaxAllocationLine(l) ? 1 : 0.01}
-                          value={l.quantity}
-                          disabled={
-                            quoteLocked || isBarraLibrePersonaLine(l)
-                          }
-                          onChange={(e) =>
-                            setLines((prev) =>
-                              prev.map((x) => {
-                                if (x.key !== l.key) return x;
-                                if (isBarraLibrePersonaLine(x)) {
+                        {isBarraLibrePersonaLine(l) ? (
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={String(l.quantity)}
+                            disabled
+                            className="w-20 rounded border border-slate-200 px-2 py-1 disabled:bg-slate-50"
+                            title="Barra libre aplica a todos los pax del evento"
+                          />
+                        ) : isPaxAllocationLine(l) ? (
+                          <input
+                            type="number"
+                            min={1}
+                            max={EVENTOS_MAX_PAX}
+                            step={1}
+                            value={l.quantity}
+                            disabled={quoteLocked}
+                            onChange={(e) =>
+                              setLines((prev) =>
+                                prev.map((x) => {
+                                  if (x.key !== l.key) return x;
                                   return {
                                     ...x,
-                                    quantity: Math.max(
-                                      1,
-                                      Math.floor(Number(pax) || 0)
+                                    quantity: Math.min(
+                                      EVENTOS_MAX_PAX,
+                                      Math.max(
+                                        0,
+                                        Math.floor(Number(e.target.value) || 0)
+                                      )
                                     ),
                                   };
-                                }
-                                return {
-                                  ...x,
-                                  quantity: isPaxAllocationLine(x)
-                                    ? Math.min(
-                                        EVENTOS_MAX_PAX,
-                                        Math.max(
-                                          0,
-                                          Math.floor(
-                                            Number(e.target.value) || 0
-                                          )
-                                        )
-                                      )
-                                    : Number(e.target.value) || 0,
-                                };
-                              })
-                            )
-                          }
-                          className="w-20 rounded border border-slate-200 px-2 py-1 disabled:bg-slate-50"
-                          title={
-                            isBarraLibrePersonaLine(l)
-                              ? 'Barra libre aplica a todos los pax del evento'
-                              : isPaxAllocationLine(l)
-                                ? 'Personas con este menú'
-                                : undefined
-                          }
-                        />
+                                })
+                              )
+                            }
+                            className="w-20 rounded border border-slate-200 px-2 py-1 disabled:bg-slate-50"
+                            title="Personas con este menú"
+                          />
+                        ) : (
+                          <EventosFreeQtyInput
+                            value={l.quantity}
+                            disabled={quoteLocked}
+                            aria-label={`Cantidad ${l.description}`}
+                            className="w-24 rounded border border-slate-200 px-2 py-1 text-sm disabled:bg-slate-50"
+                            onChange={(next) =>
+                              setLines((prev) =>
+                                prev.map((x) =>
+                                  x.key === l.key
+                                    ? { ...x, quantity: next }
+                                    : x
+                                )
+                              )
+                            }
+                          />
+                        )}
                       </td>
                       <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={l.unit_price}
-                          disabled={quoteLocked}
-                          onChange={(e) =>
-                            setLines((prev) =>
-                              prev.map((x) =>
-                                x.key === l.key
-                                  ? {
-                                      ...x,
-                                      unit_price: Number(e.target.value) || 0,
-                                    }
-                                  : x
+                        {canEditPrices && !quoteLocked ? (
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={l.unit_price}
+                            onChange={(e) =>
+                              setLines((prev) =>
+                                prev.map((x) =>
+                                  x.key === l.key
+                                    ? {
+                                        ...x,
+                                        unit_price: Number(e.target.value) || 0,
+                                      }
+                                    : x
+                                )
                               )
-                            )
-                          }
-                          className="w-28 rounded border border-slate-200 px-2 py-1 disabled:bg-slate-50"
-                          title="Editar precio (útil en bebidas a la carta)"
-                        />
+                            }
+                            className="w-28 rounded border border-slate-200 px-2 py-1"
+                            title="Editar precio (solo admin)"
+                          />
+                        ) : (
+                          <span className="tabular-nums text-slate-800">
+                            {formatMxn(l.unit_price)}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 font-semibold">
                         {formatMxn(l.quantity * l.unit_price)}
@@ -2792,27 +2809,23 @@ export function EventosCotizador({
                           ? 'Cantidad (grupo)'
                           : 'Cantidad'}
                       </span>
-                      <input
-                        type="number"
-                        min={1}
-                        step={1}
-                        max={EVENTOS_MAX_PAX}
-                        value={lineQty}
-                        disabled={nextLineIsBarraLibrePersona}
-                        onChange={(e) => {
-                          const raw = Math.max(
-                            1,
-                            Math.floor(Number(e.target.value) || 1)
-                          );
-                          setLineQty(Math.min(EVENTOS_MAX_PAX, raw));
-                        }}
-                        className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
-                        title={
-                          nextLineIsBarraLibrePersona
-                            ? 'Barra libre aplica a todos los pax del evento'
-                            : undefined
-                        }
-                      />
+                      {nextLineIsBarraLibrePersona ? (
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={String(Math.max(1, pax))}
+                          disabled
+                          className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-50"
+                          title="Barra libre aplica a todos los pax del evento"
+                        />
+                      ) : (
+                        <EventosFreeQtyInput
+                          value={lineQty}
+                          onChange={setLineQty}
+                          onEnter={(qty) => addLine(qty)}
+                          aria-label="Cantidad de bebida"
+                        />
+                      )}
                       {nextLineIsBarraLibrePersona ? (
                         <p
                           className="mt-1 text-[11px] font-medium leading-snug"
@@ -2820,7 +2833,14 @@ export function EventosCotizador({
                         >
                           Grupo completo
                         </p>
-                      ) : null}
+                      ) : (
+                        <p
+                          className="mt-1 text-[11px] font-medium leading-snug"
+                          style={{ color: SUITE.muted }}
+                        >
+                          Sin máximo
+                        </p>
+                      )}
                     </label>
                     <button
                       type="button"
