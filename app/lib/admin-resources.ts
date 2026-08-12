@@ -81,9 +81,9 @@ export const SOURCE_FILE_UPDATE: Record<string, string> = {
   eventos: 'Función: WI vs Eventos histórico. Manual (ingest_eventos.py)',
   ventas_semana:
     'Función: acumulado semanal Excel. Cloud 6:37 AM/PM (sync-finanzas)',
-  flujo_efectivo_saldo: 'Función: saldo de caja chica. Cada hora (Actions)',
-  flujo_efectivo_semana: 'Función: presupuesto efectivo por semana. Cada hora (Actions)',
-  flujo_efectivo_mov: 'Función: movimientos de flujo. Cada hora (Actions)',
+  flujo_efectivo_saldo: 'Función: saldo de caja chica. Cada hora · :07 CDMX (best-effort)',
+  flujo_efectivo_semana: 'Función: presupuesto efectivo por semana. Cada hora · :07 CDMX (best-effort)',
+  flujo_efectivo_mov: 'Función: movimientos de flujo. Cada hora · :07 CDMX (best-effort)',
   presupuesto_mensual:
     'Función: marco mensual. Cloud 6:37 AM/PM (sync-finanzas)',
   presupuesto_saldos:
@@ -106,7 +106,7 @@ export const SOURCE_FILE_UPDATE: Record<string, string> = {
   estado_cuenta_pdf_index:
     'Función: índice PDFs estados. Manual / reindex Suite',
   saldos_bancos_manual: 'Función: saldos bancarios capturados. Solo /admin (manual)',
-  cxp_por_pagar: 'Función: saldo a la fecha proveedores. Cada hora (Actions · Sheets)',
+  cxp_por_pagar: 'Función: saldo a la fecha proveedores. Cada hora · :07 CDMX (best-effort · Sheets)',
   cxp: 'Función: líneas pagadas/retornos. Cloud 6:37 AM/PM (sync-finanzas)',
   cxp_saldos: 'Función: encabezados CxP. Cloud 6:37 AM/PM (sync-finanzas)',
   factura_cfdi:
@@ -180,7 +180,8 @@ const SOURCE_GROUP_META: Record<
   },
   flujo: {
     role: 'Función: Saldos al día (caja chica / movimientos de efectivo).',
-    updateFrequency: 'Cada hora (Actions · sync-saldos.yml)',
+    updateFrequency:
+      'Cada hora · objetivo :07 CDMX (Actions · sync-saldos.yml; GitHub best-effort)',
     scripts: ['ingest_saldos_flujo.py', 'sync_saldos_al_dia.py'],
     routes: ['/finanzas', '/finanzas/ingresos'],
   },
@@ -353,7 +354,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             label: 'FLUJO EFECTIVO CARRANZA 50.xlsx',
             kind: 'file',
             note: 'Función: Saldos al día (caja chica) · flujo_efectivo_saldo / semana / mov',
-            updateFrequency: 'Cada hora (Actions · sync-saldos.yml)',
+            updateFrequency:
+              'Cada hora · objetivo :07 CDMX (best-effort · sync-saldos.yml)',
           },
           {
             label: 'Bancos\\…\\Estados de cuenta',
@@ -573,7 +575,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             label: 'cxp_por_pagar',
             kind: 'source_file',
             note: 'Función: saldo a la fecha proveedores · Actions',
-            updateFrequency: 'Cada hora (Actions · sync-saldos.yml)',
+            updateFrequency:
+              'Cada hora · objetivo :07 CDMX (best-effort · sync-saldos.yml)',
           },
           {
             label: 'cxp + cxp_saldos',
@@ -648,7 +651,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             label: 'sync_saldos_al_dia.py',
             kind: 'script',
             note: 'Función: flujo efectivo + cxp_por_pagar → Saldos al día',
-            updateFrequency: 'Cada hora · cron 7 * * * * (:07 CDMX)',
+            updateFrequency:
+              'Cada hora · objetivo :07 CDMX (cron 7 * * * *; best-effort)',
           },
           {
             label: 'ingest_infocaja_gmail.py',
@@ -672,7 +676,7 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             label: 'ingest_saldos_flujo.py',
             kind: 'script',
             note: 'Función: caja chica / movimientos',
-            updateFrequency: 'Cada hora (vía sync-saldos)',
+            updateFrequency: 'Cada hora · vía sync-saldos (:07 CDMX; best-effort)',
           },
           {
             label: 'ingest_presupuesto.py',
@@ -773,7 +777,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             label: 'sync-saldos.yml',
             kind: 'workflow',
             note: 'Función: Saldos al día (flujo Drive + cxp_por_pagar Sheets)',
-            updateFrequency: 'Cada hora · cron 7 * * * * (:07 CDMX)',
+            updateFrequency:
+              'Cada hora · objetivo :07 CDMX (cron 7 * * * *; best-effort)',
           },
           {
             label: 'sync-hr-drive.yml',

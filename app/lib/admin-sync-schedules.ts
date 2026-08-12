@@ -74,7 +74,7 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
     label: 'Saldos al día · Flujo + CxP vivo',
     feeds: 'flujo_efectivo_* + cxp_por_pagar (Sheets)',
     mode: 'cloud',
-    schedule: 'Cada hora a :07 CDMX',
+    schedule: 'Cada hora · objetivo :07 CDMX (GitHub puede retrasar o saltar)',
     cronUtc: '7 * * * *',
     areaId: 'flujo',
     sourceFiles: [
@@ -86,7 +86,8 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
     workflow: 'saldos',
     canDispatch: true,
     actionsUrl: actionsUrlFor('saldos'),
-    note: 'Última sync de área usa el más reciente entre flujo y cxp_por_pagar.',
+    note:
+      'Objetivo :07 CDMX; GitHub Actions es best-effort (a menudo +10–40 min o un hueco de 1–3 h). Última sync = max(created_at) flujo/cxp_por_pagar. Rescate: Run workflow o botón admin.',
   },
   {
     id: 'sync-hr',
@@ -414,7 +415,7 @@ export const MODULE_SYNC_SOURCES: ModuleSyncSourceDef[] = [
     moduleId: 'finanzas',
     moduleLabel: 'Finanzas',
     label: 'Saldos al día / flujo',
-    channel: 'Actions · cada hora :07 CDMX',
+    channel: 'Actions · cada hora :07 CDMX (best-effort)',
     detail: 'flujo_efectivo_saldo / semana / mov',
     sourceFiles: [
       'flujo_efectivo_saldo',

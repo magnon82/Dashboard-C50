@@ -130,15 +130,18 @@ export function SaldosAlDia({ data, loading }: Props) {
             >
               {data.cxpTotal != null ? money(data.cxpTotal) : '—'}
             </p>
+            <p className="mt-1 text-[11px] font-medium" style={{ color: theme.muted }}>
+              Saldo total a pagar
+            </p>
             <p className="mt-2 text-xs" style={{ color: theme.muted }}>
               {data.cxpTotal != null ? (
                 <>
-                  Programados{' '}
+                  De ese total, programados{' '}
                   <span className="font-semibold" style={{ color: SUITE.orange }}>
                     {data.cxpProgramado != null ? money(data.cxpProgramado) : '—'}
                   </span>
                   <span className="mx-1.5 text-slate-300">·</span>
-                  Saldo x pagar{' '}
+                  sin programar{' '}
                   <span className="font-semibold" style={{ color: SUITE.orangeDeep }}>
                     {data.cxpSaldo != null ? money(data.cxpSaldo) : '—'}
                   </span>

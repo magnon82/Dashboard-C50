@@ -1,6 +1,6 @@
 # Sync en la nube (GitHub Actions)
 
-Las ventas (Gmail), **Facturas CFDI** (mismo workflow), los **Saldos al día** (cada hora)
+Las ventas (Gmail), **Facturas CFDI** (mismo workflow), los **Saldos al día** (cada hora · objetivo `:07` CDMX; GitHub puede retrasar o saltar)
 y el **soft-sync RR.HH.** (diario 12:00 PM CDMX) corren en GitHub Actions.
 Ya no dependen de que tu PC esté encendido ni abren ventanas de PowerShell.
 
@@ -22,9 +22,11 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 | Workflow | Cadencia (CDMX) | Cron UTC | Qué hace |
 |----------|-----------------|----------|----------|
 | `sync-gmail.yml` | Diario 2:17–7:17 AM + 8:23/10:23/12:23/14:23; refuerzo Dom 7:17–11:17 PM | `17 8-13 * * *`, `23 14,16,18,20 * * *`, `17 1-5 * * 1` | Infocaja + CORTE; luego CFDI → `financial_records` (best-effort) |
-| `sync-saldos.yml` | Cada hora (:07) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
+| `sync-saldos.yml` | Cada hora · objetivo :07 (best-effort) | `7 * * * *` | Flujo efectivo + `cxp_por_pagar` |
 | `sync-finanzas.yml` | Diario 6:37 AM y 6:37 PM | `37 12 * * *`, `37 0 * * *` | CxP histórico + presupuesto Excel + estados Mifel/BBVA Excel + `ventas_semana` + índice PDF comprobantes (`estado_pdf_index` vía Drive API) |
 | `sync-hr-drive.yml` | Diario 12:00 PM | `0 18 * * *` | Soft-check `hr_*` + `hr_drive_sync_state` |
+
+**Saldos (cada hora):** el cron apunta a `:07` CDMX, pero GitHub **no garantiza** ese minuto — a menudo llega tarde (p. ej. `:24`) o **salta** una hora. Si el Master muestra «última sync» atrasada, abre [Actions → Sync Saldos](https://github.com/magnon82/Dashboard-C50/actions/workflows/sync-saldos.yml) o **Run workflow**.
 
 Siguen **manuales a propósito**: `presupuesto_ajuste`, `saldos_bancos_manual`, `dashboard_auth`, índice PDF de estados de cuenta (`estado_cuenta_pdf_index`), Eventos legacy (`ingest_eventos.py`).
 
