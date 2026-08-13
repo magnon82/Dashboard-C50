@@ -575,10 +575,13 @@ export function RrhhEmployeeProfile({
       });
       const json = await res.json();
       if (!res.ok) {
-        setToast(
-          [json.error, json.hint].filter(Boolean).join(' — ') ||
-            'No se pudo guardar'
-        );
+        const raw = String(json.error || '');
+        // No mostrar errores técnicos de schema cache al usuario.
+        const friendly =
+          /areas|schema cache|Could not find the/i.test(raw)
+            ? 'No se pudo guardar. Intenta de nuevo en unos segundos.'
+            : raw || json.hint || 'No se pudo guardar';
+        setToast(friendly);
         return;
       }
       setToast('Datos actualizados');

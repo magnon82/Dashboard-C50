@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import { canAccessAdmin, canEditHrEmployees } from '@/app/lib/auth';
 import {
+  hrMissingColumnError,
   requireMasterAdmin,
   requireRrhhSession,
   requireRrhhEmployeesWrite,
@@ -719,7 +720,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
   // que falta sueldo_diario. Luego releemos con la cascada de loadEmployeeRow.
   let working = { ...patch };
   let upErr: { message: string } | null = null;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     const res = await sb.from('hr_employees').update(working).eq('id', id);
     if (!res.error) {
       upErr = null;
@@ -727,9 +728,14 @@ export async function PATCH(request: Request, ctx: Ctx) {
     }
     upErr = res.error;
     const msg = res.error.message || '';
-    if (!/column .* does not exist|42703/i.test(msg)) break;
+    // PostgREST suele devolver "Could not find the 'X' column … schema cache"
+    // (no "column X does not exist"); sin esto el PATCH abortaba y no guardaba.
+    if (!hrMissingColumnError(msg)) break;
 
-    if (/puestos_secundarios/i.test(msg) && working.puestos_secundarios !== undefined) {
+    if (
+      hrMissingColumnError(msg, 'puestos_secundarios') &&
+      working.puestos_secundarios !== undefined
+    ) {
       return NextResponse.json(
         {
           error: 'Falta columna puestos_secundarios en hr_employees.',
@@ -738,7 +744,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
         { status: 503 }
       );
     }
-    if (/sueldo_diario_secundario/i.test(msg) && sueldo2.set) {
+    if (
+      hrMissingColumnError(msg, 'sueldo_diario_secundario') &&
+      sueldo2.set
+    ) {
       return NextResponse.json(
         {
           error: 'Falta columna sueldo_diario_secundario en hr_employees.',
@@ -747,7 +756,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
         { status: 503 }
       );
     }
-    if (/sueldo_diario/i.test(msg) && sueldo.set) {
+    if (hrMissingColumnError(msg, 'sueldo_diario') && sueldo.set) {
       return NextResponse.json(
         {
           error: 'Falta columna sueldo_diario en hr_employees.',
@@ -756,13 +765,16 @@ export async function PATCH(request: Request, ctx: Ctx) {
         { status: 503 }
       );
     }
-    if (/fecha_nacimiento/i.test(msg) && working.fecha_nacimiento !== undefined) {
+    if (
+      hrMissingColumnError(msg, 'fecha_nacimiento') &&
+      working.fecha_nacimiento !== undefined
+    ) {
       const { fecha_nacimiento: _fn, ...rest } = working;
       void _fn;
       working = rest;
       continue;
     }
-    if (/domicilio/i.test(msg) && working.domicilio !== undefined) {
+    if (hrMissingColumnError(msg, 'domicilio') && working.domicilio !== undefined) {
       return NextResponse.json(
         {
           error: 'Falta columna domicilio en hr_employees.',
@@ -771,25 +783,26 @@ export async function PATCH(request: Request, ctx: Ctx) {
         { status: 503 }
       );
     }
-    if (/puestos_secundarios/i.test(msg)) {
-      const { puestos_secundarios: _ps, ...rest } = working;
-      void _ps;
-      working = rest;
-      continue;
-    }
-    if (/\bareas\b/i.test(msg) && working.areas !== undefined) {
+    if (hrMissingColumnError(msg, 'areas') && working.areas !== undefined) {
+      // Persistimos en `area` (text legado); `areas[]` requiere hr_employee_areas.sql
       const { areas: _ar, ...rest } = working;
       void _ar;
       working = rest;
       continue;
     }
-    if (/sueldo_diario_secundario/i.test(msg)) {
+    if (
+      hrMissingColumnError(msg, 'sueldo_diario_secundario') &&
+      working.sueldo_diario_secundario !== undefined
+    ) {
       const { sueldo_diario_secundario: _sd2, ...rest } = working;
       void _sd2;
       working = rest;
       continue;
     }
-    if (/sueldo_diario/i.test(msg)) {
+    if (
+      hrMissingColumnError(msg, 'sueldo_diario') &&
+      working.sueldo_diario !== undefined
+    ) {
       const { sueldo_diario: _sd, ...rest } = working;
       void _sd;
       working = rest;
@@ -802,9 +815,6 @@ export async function PATCH(request: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error: upErr.message,
-        hint: /fecha_nacimiento|column/i.test(upErr.message)
-          ? 'Revisa columnas en hr_employees (nacimiento / documentos)'
-          : undefined,
       },
       { status: 400 }
     );

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/app/lib/users';
 import {
+  hrMissingColumnError,
   hrSchemaMissing,
   requireRrhhSession,
   requireRrhhEmployeesWrite,
@@ -986,7 +987,7 @@ export async function PATCH(request: Request) {
 
     if (
       error &&
-      /\bareas\b|column .* does not exist|42703/i.test(error.message) &&
+      hrMissingColumnError(error.message, 'areas') &&
       patch.areas !== undefined
     ) {
       const { areas: _ar, ...withoutAreas } = patch;

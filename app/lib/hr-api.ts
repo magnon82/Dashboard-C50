@@ -185,3 +185,24 @@ export function hrSchemaMissing(message: string | undefined | null): boolean {
   if (!message) return false;
   return /does not exist|schema cache|42P01/i.test(message);
 }
+
+/**
+ * Columna ausente en Postgres o en el schema cache de PostgREST.
+ * Cubre: `column X does not exist`, 42703, PGRST204,
+ * `Could not find the 'X' column of 'table' in the schema cache`.
+ */
+export function hrMissingColumnError(
+  message: string | undefined | null,
+  column?: string
+): boolean {
+  if (!message) return false;
+  const generic =
+    /42703|PGRST204|schema cache|column .* does not exist|Could not find the ['"]?\w+['"]? column/i.test(
+      message
+    );
+  if (!generic) return false;
+  if (!column) return true;
+  return new RegExp(`\\b${column.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(
+    message
+  );
+}
