@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AdminHrPuestosMap } from '@/app/components/AdminHrPuestosMap';
+import { AdminSubgroup } from '@/app/components/AdminSubgroup';
 import {
   ADMIN_STORAGE_PLATFORMS,
   ALL_SOURCE_FILES,
@@ -827,32 +828,12 @@ export function AdminAlmacenamientoRecursos() {
   }, [detectionReady, detectedMap, documentedSet, storageStats, undocumentedSources.length]);
 
   return (
-    <section
-      className="mb-8 overflow-hidden rounded-[20px] bg-white"
-      style={{ boxShadow: SUITE.shadow, borderTop: `4px solid ${SUITE.orange}` }}
+    <AdminSubgroup
+      title="Inventario de datos"
+      description="Dónde vive cada dato: metadatos curados + detección en vivo (Supabase source_file y carpetas Drive). El mapa de arriba es arquitectura; aquí consultas, estados y copias."
+      open={open}
+      onOpenChange={setOpen}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 px-5 pb-3 pt-5">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-bold" style={{ color: theme.title }}>
-            Inventario de datos
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm" style={{ color: theme.muted }}>
-            Dónde vive cada dato: metadatos curados + detección en vivo (Supabase source_file y
-            carpetas Drive). El mapa de arriba es arquitectura; aquí consultas, estados y copias.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded-lg px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ backgroundColor: SUITE.navy }}
-        >
-          {open ? 'Ocultar' : 'Mostrar'}
-        </button>
-      </div>
-
-      {open ? (
-        <div className="space-y-4 border-t border-slate-100 px-5 py-4">
           {/* Search */}
           <div className="relative">
             <svg
@@ -1067,8 +1048,6 @@ export function AdminAlmacenamientoRecursos() {
             {' '}(DISTINCT source_file + Drive). El mapa de orígenes sigue siendo manual; este
             inventario fusiona documentado + detectado. Haz clic en un chip para copiar.
           </p>
-        </div>
-      ) : null}
-    </section>
+    </AdminSubgroup>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AdminSubgroup } from '@/app/components/AdminSubgroup';
 import {
   ADMIN_EDITABLE_BUDGETS,
   adminBudgetKey,
@@ -237,42 +238,27 @@ export function AdminPresupuestoAjustes() {
   }
 
   return (
-    <section
-      className="mb-8 rounded-[24px] border border-slate-100 bg-white p-5"
-      style={{ boxShadow: SUITE.shadow, borderTop: `4px solid ${SUITE.orange}` }}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold" style={{ color: theme.title }}>
-            Ajustes de presupuesto
-          </h2>
-          <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-            Afecta:{' '}
-            <span className="font-semibold text-slate-700">
-              {AFECTA_DASHBOARDS.join(', ')}
-            </span>
-            . Solo el administrador puede modificar montos.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded-lg px-4 py-2 text-sm font-semibold text-white"
-          style={{ backgroundColor: SUITE.navy }}
-        >
-          {open ? 'Ocultar' : 'Mostrar'}
-        </button>
-      </div>
-
-      {open && (
+    <AdminSubgroup
+      title="Ajustes de presupuesto"
+      description={
         <>
-          <p className="mt-3 text-sm" style={{ color: theme.muted }}>
+          Afecta:{' '}
+          <span className="font-semibold text-slate-700">
+            {AFECTA_DASHBOARDS.join(', ')}
+          </span>
+          . Solo el administrador puede modificar montos.
+        </>
+      }
+      open={open}
+      onOpenChange={setOpen}
+    >
+          <p className="text-sm" style={{ color: theme.muted }}>
             Se guarda como{' '}
             <code className="text-xs">presupuesto_ajuste</code> (total del mes)
             y reemplaza la fórmula o el Excel en Finanzas para el mes elegido.
           </p>
 
-          <div className="mt-4 flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm font-semibold text-slate-700">
               Año
               <select
@@ -506,8 +492,6 @@ export function AdminPresupuestoAjustes() {
               ))}
             </div>
           )}
-        </>
-      )}
-    </section>
+    </AdminSubgroup>
   );
 }

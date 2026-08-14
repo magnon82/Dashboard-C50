@@ -271,6 +271,22 @@ export default function FinanzasPage() {
           >
             Facturas
           </button>
+          <button
+            type="button"
+            className="inline-flex h-11 items-center gap-2 rounded-2xl px-5 text-sm font-semibold text-white transition-opacity hover:opacity-95"
+            style={{
+              backgroundColor: '#0F172A',
+              boxShadow: SUITE.shadow,
+            }}
+            onClick={() =>
+              openConsultaWindow(
+                '/finanzas/match-ventas-corte',
+                'finanzas-match-ventas-corte'
+              )
+            }
+          >
+            Match ventas vs corte
+          </button>
         </div>
         <p className="mt-2 text-xs" style={{ color: theme.muted }}>
           Se abren en una ventana independiente con búsqueda y filtros.

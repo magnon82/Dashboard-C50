@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { AdminSubgroup } from '@/app/components/AdminSubgroup';
 import { todayCdmxIso } from '@/app/lib/saldos';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
@@ -102,41 +103,25 @@ export function AdminSaldosBancos() {
   }
 
   return (
-    <section
-      className="mb-8 rounded-[24px] border border-slate-100 bg-white p-5"
-      style={{ boxShadow: SUITE.shadow, borderTop: `4px solid ${SUITE.orange}` }}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-lg font-bold" style={{ color: theme.title }}>
-            Saldos bancarios
-          </h2>
-          <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-            Actualiza Mifel y BBVA tras revisar la banca en línea. El valor manual reemplaza el
-            Excel en Finanzas → Saldos al día (
-            <code className="text-xs">saldos_bancos_manual</code>).
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded-lg px-4 py-2 text-sm font-semibold text-white"
-          style={{ backgroundColor: SUITE.navy }}
-          aria-expanded={open}
-        >
-          {open ? 'Ocultar' : 'Mostrar'}
-        </button>
-      </div>
-
-      {open ? (
+    <AdminSubgroup
+      title="Saldos bancarios"
+      description={
         <>
+          Actualiza Mifel y BBVA tras revisar la banca en línea. El valor manual reemplaza el Excel
+          en Finanzas → Saldos al día (
+          <code className="text-xs">saldos_bancos_manual</code>).
+        </>
+      }
+      open={open}
+      onOpenChange={setOpen}
+    >
           {error && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
           )}
           {okMsg && (
-            <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
               {okMsg}
             </div>
           )}
@@ -228,9 +213,7 @@ export function AdminSaldosBancos() {
               </form>
             </>
           )}
-        </>
-      ) : null}
-    </section>
+    </AdminSubgroup>
   );
 }
 

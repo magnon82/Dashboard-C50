@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="es-MX">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Propuestas de ícono · C50 Suite</title>
+    <style>
+      :root {
+        --navy: #1b2a4a;
+        --muted: #64748b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 28px 24px 40px;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #f1f5f9;
+        color: var(--navy);
+      }
+      h1 { margin: 0 0 4px; font-size: 22px; }
+      p.sub { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 16px;
+      }
+      @media (max-width: 900px) {
+        .grid { grid-template-columns: repeat(2, 1fr); }
+      }
+      .card {
+        background: #fff;
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0 10px 30px rgba(27, 42, 74, 0.08);
+        text-align: center;
+      }
+      .card img {
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        border-radius: 22%;
+        display: block;
+      }
+      .n {
+        display: inline-block;
+        margin-top: 10px;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .name { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+      .row-small {
+        margin-top: 28px;
+        padding: 16px;
+        background: var(--navy);
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        flex-wrap: wrap;
+      }
+      .row-small img { width: 48px; height: 48px; border-radius: 22%; }
+      .row-small span {
+        color: #cbd5e1;
+        font-size: 12px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Propuestas de ícono · C50 Suite</h1>
+    <p class="sub">Paleta de marca navy #0B1F3A / dorado #E8A317</p>
+
+    <h2 style="font-size: 16px; margin: 0 0 12px">
+      Firma caligráfica con el 50 — variantes
+    </h2>
+    <div class="grid" style="grid-template-columns: repeat(3, minmax(0, 1fr))">
+      <figure class="card">
+        <img src="icono-5a-c50-dentro.png" alt="C con 50 dentro" />
+        <span class="n">5A</span>
+        <p class="name">50 dentro de la C</p>
+      </figure>
+      <figure class="card">
+        <img src="icono-5b-c-sobre-50.png" alt="C sobre 50" />
+        <span class="n">5B</span>
+        <p class="name">C sobre 50</p>
+      </figure>
+      <figure class="card">
+        <img src="icono-5c-c50-horizontal.png" alt="C50 horizontal" />
+        <span class="n">5C</span>
+        <p class="name">C50 horizontal</p>
+      </figure>
+    </div>
+
+    <div class="row-small" style="margin-bottom: 34px">
+      <span>A 48px (tamaño real):</span>
+      <img src="icono-5a-c50-dentro.png" alt="5A pequeño" />
+      <img src="icono-5b-c-sobre-50.png" alt="5B pequeño" />
+      <img src="icono-5c-c50-horizontal.png" alt="5C pequeño" />
+      <img src="icono-5-firma-caligrafica.png" alt="5 original pequeño" />
+      <span>(la última, sin 50)</span>
+    </div>
+
+    <h2 style="font-size: 16px; margin: 0 0 12px">Propuestas originales</h2>
+    <div class="grid">
+      <figure class="card">
+        <img src="icono-1-monograma-c50.png" alt="Monograma C50" />
+        <span class="n">1</span>
+        <p class="name">Monograma C50</p>
+      </figure>
+      <figure class="card">
+        <img src="icono-2-brasas.png" alt="Brasas" />
+        <span class="n">2</span>
+        <p class="name">Brasas</p>
+      </figure>
+      <figure class="card">
+        <img src="icono-3-arco-terraza.png" alt="Arco terraza" />
+        <span class="n">3</span>
+        <p class="name">Arco terraza</p>
+      </figure>
+      <figure class="card">
+        <img src="icono-4-suite-datos.png" alt="Barras + C" />
+        <span class="n">4</span>
+        <p class="name">Barras + C</p>
+      </figure>
+      <figure class="card">
+        <img src="icono-5-firma-caligrafica.png" alt="Firma caligráfica" />
+        <span class="n">5</span>
+        <p class="name">Firma caligráfica</p>
+      </figure>
+    </div>
+
+    <div class="row-small">
+      <span>Tamaño real en el celular (48px):</span>
+      <img src="icono-1-monograma-c50.png" alt="1 pequeño" />
+      <img src="icono-2-brasas.png" alt="2 pequeño" />
+      <img src="icono-3-arco-terraza.png" alt="3 pequeño" />
+      <img src="icono-4-suite-datos.png" alt="4 pequeño" />
+      <img src="icono-5-firma-caligrafica.png" alt="5 pequeño" />
+    </div>
+  </body>
+</html>

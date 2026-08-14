@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AdminHrPuestosMap } from '@/app/components/AdminHrPuestosMap';
+import { AdminSubgroup } from '@/app/components/AdminSubgroup';
 import { ALL_SOURCE_FILES } from '@/app/lib/admin-resources';
 import {
   lastUpdateForMapNode,
@@ -1677,40 +1678,26 @@ export function AdminDataMap() {
   };
 
   return (
-    <section
-      className="mb-8 overflow-hidden rounded-[20px] bg-white"
-      style={{ boxShadow: SUITE.shadow }}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 pb-3 pt-5">
-        <div>
-          <p
-            className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em]"
-            style={{ color: theme.muted }}
-          >
-            Mapa de orígenes de datos
-          </p>
-          <p className="text-sm" style={{ color: theme.muted }}>
+    <AdminSubgroup
+      title="Mapa de orígenes de datos"
+      description={
+        <>
+          <p>
             Topología de plataformas, scripts y APIs: Google → GitHub Actions / PC → Supabase →
             Vercel → módulos. Haz clic en un nodo o en una conexión para resaltar el flujo.
           </p>
-          <p className="mt-1.5 text-[11px]" style={{ color: theme.muted }}>
+          <p className="mt-1.5 text-[11px]">
             Mapa curado en código (
             <code className="text-[10px]">app/lib/admin-resources.ts</code>
             ); el inventario debajo fusiona detección en vivo.
           </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded-lg px-4 py-2 text-sm font-semibold text-white"
-          style={{ backgroundColor: SUITE.navy }}
-        >
-          {open ? 'Ocultar' : 'Mostrar'}
-        </button>
-      </div>
-
-      {open && (
-      <div className="relative">
+        </>
+      }
+      open={open}
+      onOpenChange={setOpen}
+      flushBody
+    >
+      <div className="relative border-t border-slate-100">
         <div
           className="overflow-x-auto overflow-y-hidden"
           style={{
@@ -1964,7 +1951,6 @@ export function AdminDataMap() {
           )}
         </div>
       </div>
-      )}
-    </section>
+    </AdminSubgroup>
   );
 }
