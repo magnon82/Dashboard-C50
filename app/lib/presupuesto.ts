@@ -1150,10 +1150,14 @@ export function buildResumenBancosSemanal(
     number,
     { ingresos: number; egresos: number; neto: number }
   >();
+  let nextMonthSem1: { ingresos: number; egresos: number; neto: number } | null =
+    null;
+  const nextY = month === 12 ? year + 1 : year;
+  const nextM = month === 12 ? 1 : month + 1;
   for (const r of records) {
     if (r.source_file !== 'flujo_efectivo_semana') continue;
     const p = parseIsoDate(r.date);
-    if (!p || p.y !== year || p.m !== month) continue;
+    if (!p) continue;
     const data = parseJson<EfectivoSemanaPayload>(r.description);
     if (!data || data.week == null || Number(data.week) < 1) continue;
     const w = Number(data.week);
@@ -1161,12 +1165,27 @@ export function buildResumenBancosSemanal(
     const egresos = Number(data.efectivo_egresos || 0);
     const neto =
       data.efectivo_neto != null ? Number(data.efectivo_neto) : ingresos - egresos;
-    const prev = efectivoByWeek.get(w) || { ingresos: 0, egresos: 0, neto: 0 };
-    efectivoByWeek.set(w, {
-      ingresos: prev.ingresos + ingresos,
-      egresos: prev.egresos + egresos,
-      neto: prev.neto + neto,
-    });
+    if (p.y === year && p.m === month) {
+      const prev = efectivoByWeek.get(w) || { ingresos: 0, egresos: 0, neto: 0 };
+      efectivoByWeek.set(w, {
+        ingresos: prev.ingresos + ingresos,
+        egresos: prev.egresos + egresos,
+        neto: prev.neto + neto,
+      });
+      continue;
+    }
+    // SEM 5 del mes puede derramar al lun 1 del mes siguiente (= SEM 1 allí).
+    if (p.y === nextY && p.m === nextM && w === 1) {
+      nextMonthSem1 = {
+        ingresos: (nextMonthSem1?.ingresos || 0) + ingresos,
+        egresos: (nextMonthSem1?.egresos || 0) + egresos,
+        neto: (nextMonthSem1?.neto || 0) + neto,
+      };
+    }
+  }
+  // Solo reutilizar SEM 1 del mes siguiente si falta SEM 5 del mes actual.
+  if (nextMonthSem1 && !efectivoByWeek.has(5)) {
+    efectivoByWeek.set(5, nextMonthSem1);
   }
 
   const weeks: SemanaBancos[] = [];

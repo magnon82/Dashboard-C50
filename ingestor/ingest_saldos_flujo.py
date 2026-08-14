@@ -249,6 +249,40 @@ def month_sem_for_annual_week(year: int, week: int) -> tuple[int, int, int] | No
     return y, m, idx
 
 
+def prev_month_sem5_alias(
+    y: int, m: int, w: int
+) -> tuple[int, int, int] | None:
+    """
+    Si (y,m,w) es SEM 1 del mes y ese lunes es también SEM 5 del mes
+    anterior (presupuesto con 5 semanas que derrama al mes siguiente),
+    devuelve (año, mes, 5) del mes previo.
+
+    Ej. 2026-08 SEM1 (lun 3 ago) == 2026-07 SEM5.
+    """
+    if w != 1:
+        return None
+    mon = first_monday_on_or_after(y, m, 1)
+    if m == 1:
+        py, pm = y - 1, 12
+    else:
+        py, pm = y, m - 1
+    pstart = first_monday_on_or_after(py, pm, 1)
+    if (mon - pstart).days // 7 + 1 == 5:
+        return py, pm, 5
+    return None
+
+
+def month_sem_keys_for_bucket(
+    y: int, m: int, w: int
+) -> list[tuple[int, int, int]]:
+    """Claves de agregación: mes canónico + alias SEM5 del mes anterior si aplica."""
+    keys = [(y, m, w)]
+    alias = prev_month_sem5_alias(y, m, w)
+    if alias and alias not in keys:
+        keys.append(alias)
+    return keys
+
+
 def parse_concepto_week(
     concepto: str, fecha: date, sheet_year: int
 ) -> tuple[int, int, int, str]:
@@ -385,13 +419,13 @@ def extract_semana_efectivo(path: Path, year: int) -> list[dict]:
             continue
 
         y, m, w, src = parse_concepto_week(concepto, fecha, year)
-        key = (y, m, w)
-        buckets[key]["ingresos"] += ingresos
-        buckets[key]["egresos"] += egresos
-        if src.startswith("concepto"):
-            buckets[key]["from_concepto"] += 1
-        else:
-            buckets[key]["from_fecha"] += 1
+        for key in month_sem_keys_for_bucket(y, m, w):
+            buckets[key]["ingresos"] += ingresos
+            buckets[key]["egresos"] += egresos
+            if src.startswith("concepto"):
+                buckets[key]["from_concepto"] += 1
+            else:
+                buckets[key]["from_fecha"] += 1
 
     wb.close()
 
