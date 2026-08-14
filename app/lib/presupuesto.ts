@@ -1146,12 +1146,10 @@ export function buildResumenBancosSemanal(
   const today = todayIso || toIsoLocal(new Date());
 
   // Efectivo semanal (FLUJO EFECTIVO · semana desde Concepto)
-  const efectivoByWeek = new Map<
-    number,
-    { ingresos: number; egresos: number; neto: number }
-  >();
-  let nextMonthSem1: { ingresos: number; egresos: number; neto: number } | null =
-    null;
+  type EfeWeek = { ingresos: number; egresos: number; neto: number };
+  const emptyEfeWeek = (): EfeWeek => ({ ingresos: 0, egresos: 0, neto: 0 });
+  const efectivoByWeek = new Map<number, EfeWeek>();
+  let nextMonthSem1: EfeWeek | null = null;
   const nextY = month === 12 ? year + 1 : year;
   const nextM = month === 12 ? 1 : month + 1;
   for (const r of records) {
@@ -1166,7 +1164,7 @@ export function buildResumenBancosSemanal(
     const neto =
       data.efectivo_neto != null ? Number(data.efectivo_neto) : ingresos - egresos;
     if (p.y === year && p.m === month) {
-      const prev = efectivoByWeek.get(w) || { ingresos: 0, egresos: 0, neto: 0 };
+      const prev = efectivoByWeek.get(w) || emptyEfeWeek();
       efectivoByWeek.set(w, {
         ingresos: prev.ingresos + ingresos,
         egresos: prev.egresos + egresos,
@@ -1176,10 +1174,11 @@ export function buildResumenBancosSemanal(
     }
     // SEM 5 del mes puede derramar al lun 1 del mes siguiente (= SEM 1 allí).
     if (p.y === nextY && p.m === nextM && w === 1) {
+      const prev: EfeWeek = nextMonthSem1 ?? emptyEfeWeek();
       nextMonthSem1 = {
-        ingresos: (nextMonthSem1?.ingresos || 0) + ingresos,
-        egresos: (nextMonthSem1?.egresos || 0) + egresos,
-        neto: (nextMonthSem1?.neto || 0) + neto,
+        ingresos: prev.ingresos + ingresos,
+        egresos: prev.egresos + egresos,
+        neto: prev.neto + neto,
       };
     }
   }
