@@ -16,6 +16,10 @@ import {
 } from '@/app/lib/admin-sync-schedules';
 import { buildAreaLastUpdates } from '@/app/lib/admin-last-updates';
 import {
+  GITHUB_ACTIONS_HUB_URL,
+  getGithubDispatchToken,
+} from '@/app/lib/github-dispatch';
+import {
   fetchDetectedSourceFiles,
   fetchHrLastUpdate,
 } from '@/app/lib/storage-stats';
@@ -24,6 +28,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const REPO = 'magnon82/Dashboard-C50';
+
+const ALL_WORKFLOWS: SyncWorkflowKey[] = ['gmail', 'saldos', 'hr', 'finanzas'];
 
 async function requireAdmin(): Promise<SessionUser | NextResponse> {
   const jar = await cookies();
@@ -44,14 +50,8 @@ async function requireAdmin(): Promise<SessionUser | NextResponse> {
   return session;
 }
 
-function hasDispatchToken(): boolean {
-  return Boolean(
-    process.env.GH_WORKFLOW_DISPATCH_TOKEN?.trim() ||
-      process.env.GITHUB_TOKEN?.trim(),
-  );
-}
-
-function resolveWorkflow(raw: unknown): SyncWorkflowKey | null {
+function resolveWorkflow(raw: unknown): SyncWorkflowKey | 'all' | null {
+  if (raw === 'all') return 'all';
   if (
     raw === 'gmail' ||
     raw === 'saldos' ||
@@ -61,6 +61,47 @@ function resolveWorkflow(raw: unknown): SyncWorkflowKey | null {
     return raw;
   }
   return null;
+}
+
+async function dispatchOne(
+  token: string,
+  workflow: SyncWorkflowKey,
+): Promise<{
+  workflow: SyncWorkflowKey;
+  ok: boolean;
+  status: number;
+  detail?: string;
+  actionsUrl: string;
+}> {
+  const file = SYNC_WORKFLOW_FILES[workflow];
+  const res = await fetch(
+    `https://api.github.com/repos/${REPO}/actions/workflows/${file}/dispatches`,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify({ ref: 'main' }),
+    },
+  );
+  if (!res.ok) {
+    const detail = (await res.text()).slice(0, 400);
+    return {
+      workflow,
+      ok: false,
+      status: res.status,
+      detail,
+      actionsUrl: actionsUrlFor(workflow),
+    };
+  }
+  return {
+    workflow,
+    ok: true,
+    status: res.status,
+    actionsUrl: actionsUrlFor(workflow),
+  };
 }
 
 /**
@@ -77,7 +118,7 @@ export async function GET() {
   const areas = buildAreaLastUpdates(detected.detectedSourceFiles, hr);
   const byArea = new Map(areas.map((a) => [a.id, a]));
 
-  const canDispatch = hasDispatchToken();
+  const canDispatch = Boolean(getGithubDispatchToken());
 
   const schedules = ADMIN_SYNC_SCHEDULES.map((s) => {
     let last = s.areaId ? byArea.get(s.areaId) ?? null : null;
@@ -133,6 +174,7 @@ export async function GET() {
     fetchedAt: new Date().toISOString(),
     timezone: 'America/Mexico_City',
     canDispatch,
+    actionsHubUrl: GITHUB_ACTIONS_HUB_URL,
     schedules,
     moduleRows,
     sourceReport,
@@ -142,7 +184,7 @@ export async function GET() {
 }
 
 /**
- * POST /api/admin/sync-schedules — { workflow: 'gmail'|'saldos'|'hr'|'finanzas' }
+ * POST /api/admin/sync-schedules — { workflow: 'gmail'|'saldos'|'hr'|'finanzas'|'all' }
  * Dispara workflow_dispatch (mismo token que ventas-sync-status).
  */
 export async function POST(req: Request) {
@@ -162,54 +204,59 @@ export async function POST(req: Request) {
   );
   if (!workflow) {
     return NextResponse.json(
-      { error: 'workflow debe ser gmail | saldos | hr | finanzas' },
+      { error: 'workflow debe ser gmail | saldos | hr | finanzas | all' },
       { status: 400 },
     );
   }
 
-  const token =
-    process.env.GH_WORKFLOW_DISPATCH_TOKEN?.trim() ||
-    process.env.GITHUB_TOKEN?.trim();
+  const token = getGithubDispatchToken();
   if (!token) {
     return NextResponse.json(
       {
         error:
-          'Falta GH_WORKFLOW_DISPATCH_TOKEN en Vercel. Mientras tanto: Actions → Run workflow.',
-        actionsUrl: actionsUrlFor(workflow),
+          'Falta GH_WORKFLOW_DISPATCH_TOKEN en Vercel (PAT con actions:write). Mientras tanto: Actions → Run workflow.',
+        actionsUrl:
+          workflow === 'all'
+            ? GITHUB_ACTIONS_HUB_URL
+            : actionsUrlFor(workflow),
+        actionsHubUrl: GITHUB_ACTIONS_HUB_URL,
       },
       { status: 503 },
     );
   }
 
-  const file = SYNC_WORKFLOW_FILES[workflow];
-  const res = await fetch(
-    `https://api.github.com/repos/${REPO}/actions/workflows/${file}/dispatches`,
-    {
-      method: 'POST',
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${token}`,
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-      body: JSON.stringify({ ref: 'main' }),
-    },
+  const targets = workflow === 'all' ? ALL_WORKFLOWS : [workflow];
+  const results = await Promise.all(
+    targets.map((w) => dispatchOne(token, w)),
   );
+  const ok = results.filter((r) => r.ok);
+  const failed = results.filter((r) => !r.ok);
 
-  if (!res.ok) {
-    const detail = (await res.text()).slice(0, 400);
+  if (ok.length === 0) {
     return NextResponse.json(
       {
-        error: `GitHub no aceptó el disparo (${res.status})`,
-        detail,
-        actionsUrl: actionsUrlFor(workflow),
+        error: `GitHub no aceptó el disparo (${failed[0]?.status ?? '?'})`,
+        detail: failed[0]?.detail,
+        results,
+        actionsUrl: failed[0]?.actionsUrl ?? GITHUB_ACTIONS_HUB_URL,
+        actionsHubUrl: GITHUB_ACTIONS_HUB_URL,
       },
       { status: 502 },
     );
   }
 
+  const names = ok.map((r) => r.workflow).join(', ');
   return NextResponse.json({
     ok: true,
-    message: `Sync ${workflow} encolado. En 1–3 min debería aparecer en Actions.`,
-    actionsUrl: actionsUrlFor(workflow),
+    message:
+      failed.length === 0
+        ? `Sync encolado (${names}). En 1–3 min debería aparecer en Actions.`
+        : `Encolados: ${names}. Fallaron: ${failed.map((r) => r.workflow).join(', ')}.`,
+    results,
+    actionsHubUrl: GITHUB_ACTIONS_HUB_URL,
+    actionsUrl:
+      workflow === 'all'
+        ? GITHUB_ACTIONS_HUB_URL
+        : actionsUrlFor(workflow),
   });
 }

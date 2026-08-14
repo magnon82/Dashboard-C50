@@ -16,6 +16,7 @@ import {
   evaluateInfocajaSyncHealth,
   formatInfocajaSyncHubAlert,
 } from '@/app/lib/infocaja-sync-health';
+import { getGithubDispatchToken } from '@/app/lib/github-dispatch';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -115,12 +116,7 @@ export async function GET() {
       lastDay,
       hubAlert,
       hubAlertSync,
-      canDispatch:
-        canAccessAdmin(auth) &&
-        Boolean(
-          process.env.GH_WORKFLOW_DISPATCH_TOKEN?.trim() ||
-            process.env.GITHUB_TOKEN?.trim()
-        ),
+      canDispatch: canAccessAdmin(auth) && Boolean(getGithubDispatchToken()),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -150,14 +146,12 @@ export async function POST() {
     );
   }
 
-  const token =
-    process.env.GH_WORKFLOW_DISPATCH_TOKEN?.trim() ||
-    process.env.GITHUB_TOKEN?.trim();
+  const token = getGithubDispatchToken();
   if (!token) {
     return NextResponse.json(
       {
         error:
-          'Falta GH_WORKFLOW_DISPATCH_TOKEN en Vercel. Mientras tanto usa Actions → Sync Gmail diario → Run workflow.',
+          'Falta GH_WORKFLOW_DISPATCH_TOKEN en Vercel (PAT con actions:write). Mientras tanto usa Actions → Sync Gmail diario → Run workflow.',
         actionsUrl: `https://github.com/${REPO}/actions/workflows/${WORKFLOW_FILE}`,
       },
       { status: 503 }

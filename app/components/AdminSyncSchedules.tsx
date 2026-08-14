@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AdminSubgroup } from '@/app/components/AdminSubgroup';
 import { SuiteCard } from '@/app/components/SuiteShell';
 import {
   formatTimestampCdmx,
@@ -17,6 +18,9 @@ import {
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
+
+const ACTIONS_HUB =
+  'https://github.com/magnon82/Dashboard-C50/actions';
 
 type SourceDetail = {
   sourceFile: string;
@@ -75,6 +79,26 @@ function modeBadgeStyle(mode: SyncScheduleMode): { background: string; color: st
     case 'mixed':
       return { background: '#FFF3E0', color: '#B45309' };
   }
+}
+
+function snapshotLastAt(rows: ModuleSyncRow[]): Map<string, string | null> {
+  return new Map(rows.map((r) => [r.id, r.lastAt]));
+}
+
+function diffUpdated(
+  before: Map<string, string | null>,
+  after: ModuleSyncRow[],
+): { ids: Set<string>; codes: string[] } {
+  const ids = new Set<string>();
+  const codes: string[] = [];
+  for (const row of after) {
+    const prev = before.get(row.id);
+    if (row.lastAt && row.lastAt !== prev) {
+      ids.add(row.id);
+      codes.push(row.sourceCode);
+    }
+  }
+  return { ids, codes };
 }
 
 function Chevron({ open }: { open: boolean }) {
@@ -178,7 +202,7 @@ function ScheduleCard({
               title={
                 row.canDispatchNow
                   ? 'Disparar workflow_dispatch ahora'
-                  : 'Falta GH_WORKFLOW_DISPATCH_TOKEN · usa Ver Actions → Run workflow'
+                  : 'Falta token · usa Ver Actions → Run workflow'
               }
               onClick={() => onDispatch(row.workflow!)}
               className="inline-flex min-h-9 items-center rounded-lg px-3 text-xs font-bold text-white transition-opacity disabled:opacity-45"
@@ -265,14 +289,40 @@ export function AdminSyncSchedules() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [canDispatch, setCanDispatch] = useState(false);
+  const [actionsHubUrl, setActionsHubUrl] = useState(ACTIONS_HUB);
   const [busyWorkflow, setBusyWorkflow] = useState<SyncWorkflowKey | null>(null);
   const [dispatchMsg, setDispatchMsg] = useState<string | null>(null);
   const [msgWorkflow, setMsgWorkflow] = useState<SyncWorkflowKey | null>(null);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [pipelinesOpen, setPipelinesOpen] = useState(false);
+  const [justUpdatedIds, setJustUpdatedIds] = useState<Set<string>>(new Set());
+  const [updatedCodesLabel, setUpdatedCodesLabel] = useState<string | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
   const fetchedRef = useRef(false);
+  const pollTimersRef = useRef<number[]>([]);
+  const snapshotRef = useRef<Map<string, string | null>>(new Map());
 
-  const load = useCallback(async () => {
+  const applyPayload = useCallback((data: {
+    schedules?: unknown;
+    moduleRows?: unknown;
+    canDispatch?: unknown;
+    fetchedAt?: unknown;
+    actionsHubUrl?: unknown;
+  }) => {
+    const nextModules = Array.isArray(data.moduleRows)
+      ? (data.moduleRows as ModuleSyncRow[])
+      : [];
+    setRows(Array.isArray(data.schedules) ? (data.schedules as ScheduleRow[]) : []);
+    setModuleRows(nextModules);
+    setCanDispatch(Boolean(data.canDispatch));
+    setFetchedAt(typeof data.fetchedAt === 'string' ? data.fetchedAt : null);
+    if (typeof data.actionsHubUrl === 'string' && data.actionsHubUrl) {
+      setActionsHubUrl(data.actionsHubUrl);
+    }
+    return nextModules;
+  }, []);
+
+  const load = useCallback(async (): Promise<ModuleSyncRow[]> => {
     setLoading(true);
     setError(null);
     try {
@@ -281,30 +331,118 @@ export function AdminSyncSchedules() {
       if (!res.ok) {
         throw new Error(typeof data?.error === 'string' ? data.error : `Error ${res.status}`);
       }
-      setRows(Array.isArray(data.schedules) ? (data.schedules as ScheduleRow[]) : []);
-      setModuleRows(
-        Array.isArray(data.moduleRows) ? (data.moduleRows as ModuleSyncRow[]) : [],
-      );
-      setCanDispatch(Boolean(data.canDispatch));
-      setFetchedAt(typeof data.fetchedAt === 'string' ? data.fetchedAt : null);
+      return applyPayload(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar la programación');
       fetchedRef.current = false;
+      return [];
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyPayload]);
 
   useEffect(() => {
     if (!open || fetchedRef.current) return;
     fetchedRef.current = true;
-    void load();
+    void load().then((mods) => {
+      snapshotRef.current = snapshotLastAt(mods);
+    });
   }, [open, load]);
+
+  useEffect(() => {
+    return () => {
+      for (const t of pollTimersRef.current) window.clearTimeout(t);
+      pollTimersRef.current = [];
+    };
+  }, []);
+
+  function clearPollTimers() {
+    for (const t of pollTimersRef.current) window.clearTimeout(t);
+    pollTimersRef.current = [];
+  }
+
+  function applyDiff(before: Map<string, string | null>, after: ModuleSyncRow[]) {
+    const { ids, codes } = diffUpdated(before, after);
+    setJustUpdatedIds(ids);
+    setUpdatedCodesLabel(codes.length ? codes.join(', ') : null);
+    snapshotRef.current = snapshotLastAt(after);
+    return codes;
+  }
+
+  async function refreshAndMaybeDispatch() {
+    setRefreshBusy(true);
+    setDispatchMsg(null);
+    setMsgWorkflow(null);
+    clearPollTimers();
+
+    const before =
+      moduleRows.length > 0
+        ? snapshotLastAt(moduleRows)
+        : new Map(snapshotRef.current);
+
+    let queued = false;
+    if (canDispatch) {
+      try {
+        const res = await fetch('/api/admin/sync-schedules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workflow: 'all' }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok) {
+          queued = true;
+          setDispatchMsg(String(json.message || 'Workflows encolados'));
+        } else if (res.status === 503) {
+          setDispatchMsg(
+            String(json.error || 'Sin token de dispatch') +
+              ' · abre Actions → Run workflow',
+          );
+          if (typeof json.actionsHubUrl === 'string') {
+            setActionsHubUrl(json.actionsHubUrl);
+          }
+        } else {
+          setDispatchMsg(String(json.error || 'No se pudo encolar sync'));
+        }
+      } catch (e) {
+        setDispatchMsg(e instanceof Error ? e.message : 'Error de red al encolar');
+      }
+    }
+
+    const after = await load();
+    const immediate = applyDiff(before, after);
+
+    if (queued) {
+      const poll = (delayMs: number) => {
+        const id = window.setTimeout(async () => {
+          const next = await load();
+          applyDiff(before, next);
+        }, delayMs);
+        pollTimersRef.current.push(id);
+      };
+      poll(45_000);
+      poll(90_000);
+      if (immediate.length === 0) {
+        setUpdatedCodesLabel(null);
+        setDispatchMsg((prev) =>
+          prev
+            ? `${prev} · timestamps se refrescan en ~1–2 min`
+            : 'Sync encolado · timestamps se refrescan en ~1–2 min',
+        );
+      }
+    } else if (!canDispatch) {
+      setDispatchMsg(
+        'Solo refresco de estado. Para disparar sync: define GH_WORKFLOW_DISPATCH_TOKEN en Vercel o usa Actions.',
+      );
+    }
+
+    setRefreshBusy(false);
+  }
 
   async function dispatch(workflow: SyncWorkflowKey) {
     setBusyWorkflow(workflow);
     setMsgWorkflow(workflow);
     setDispatchMsg(null);
+    const before = snapshotLastAt(moduleRows);
     try {
       const res = await fetch('/api/admin/sync-schedules', {
         method: 'POST',
@@ -317,7 +455,12 @@ export function AdminSyncSchedules() {
         return;
       }
       setDispatchMsg(String(json.message || 'Sync encolado'));
-      window.setTimeout(() => void load(), 90_000);
+      clearPollTimers();
+      const id = window.setTimeout(async () => {
+        const next = await load();
+        applyDiff(before, next);
+      }, 90_000);
+      pollTimersRef.current.push(id);
     } catch (e) {
       setDispatchMsg(e instanceof Error ? e.message : 'Error de red');
     } finally {
@@ -335,42 +478,33 @@ export function AdminSyncSchedules() {
     return [...map.entries()];
   }, [moduleRows]);
 
+  const busyAll = loading || refreshBusy;
+
   return (
-    <section className="mb-8">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-xl font-bold" style={{ color: SUITE.navy }}>
-            Sincronizaciones
-          </h2>
-          <p className="mt-1 text-sm" style={{ color: SUITE.muted }}>
-            Actualizaciones por módulo y fuente de datos (F1–F7 · V1–V2 · H1 · A1) · hora CDMX
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {open ? (
-            <button
-              type="button"
-              onClick={() => void load()}
-              disabled={loading}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-opacity disabled:opacity-50"
-              style={{ background: '#059669' }}
-            >
-              {loading ? 'Actualizando…' : 'Actualizar'}
-            </button>
-          ) : null}
+    <AdminSubgroup
+      title="Sincronizaciones"
+      description="Actualizaciones por módulo y fuente de datos (F1–F7 · V1–V2 · H1 · A1) · hora CDMX"
+      open={open}
+      onOpenChange={setOpen}
+      actions={
+        open ? (
           <button
             type="button"
-            onClick={() => setOpen((v) => !v)}
-            className="rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-slate-50"
-            style={{ borderColor: SUITE.border, color: SUITE.navy }}
+            onClick={() => void refreshAndMaybeDispatch()}
+            disabled={busyAll}
+            title={
+              canDispatch
+                ? 'Encola sync-gmail, sync-saldos, sync-hr-drive y sync-finanzas; luego refresca timestamps'
+                : 'Refresca timestamps. Sin token: usa Actions → Run workflow'
+            }
+            className="rounded-lg px-4 py-2 text-sm font-semibold text-white transition-opacity disabled:opacity-50"
+            style={{ backgroundColor: SUITE.navySoft }}
           >
-            {open ? 'Ocultar' : 'Mostrar'}
+            {busyAll ? 'Actualizando…' : 'Actualizar'}
           </button>
-        </div>
-      </div>
-
-      {open ? (
-        <div className="space-y-4">
+        ) : null
+      }
+    >
           {error ? (
             <p className="text-sm" style={{ color: '#B45309' }}>
               {error}
@@ -380,15 +514,31 @@ export function AdminSyncSchedules() {
           {fetchedAt ? (
             <p className="text-xs" style={{ color: SUITE.muted }}>
               Consulta: {formatAt(fetchedAt)}
-              {!canDispatch && !loading ? (
+              {!canDispatch && !busyAll ? (
                 <span className="ml-2" style={{ color: '#B45309' }}>
-                  · Sin GH_WORKFLOW_DISPATCH_TOKEN (usa Actions → Run workflow)
+                  · Sin token de dispatch —{' '}
+                  <a
+                    href={actionsHubUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold underline-offset-2 hover:underline"
+                    style={{ color: SUITE.navy }}
+                  >
+                    Actions → Run workflow
+                  </a>
+                  {' '}(Vercel: <code className="text-[10px]">GH_WORKFLOW_DISPATCH_TOKEN</code>)
                 </span>
               ) : null}
             </p>
           ) : loading && moduleRows.length === 0 ? (
             <p className="text-xs" style={{ color: SUITE.muted }}>
               Cargando sincronizaciones…
+            </p>
+          ) : null}
+
+          {updatedCodesLabel ? (
+            <p className="text-xs font-semibold" style={{ color: '#065F46' }}>
+              Actualizado ahora: {updatedCodesLabel}
             </p>
           ) : null}
 
@@ -433,11 +583,17 @@ export function AdminSyncSchedules() {
                           row.canDispatch &&
                           (row.actionLabel === 'Sincronizar' ||
                             row.moduleId === 'rrhh');
+                        const justUpdated = justUpdatedIds.has(row.id);
                         return (
                           <tr
                             key={row.id}
                             className="border-b align-top"
-                            style={{ borderColor: 'rgba(15,23,42,0.06)' }}
+                            style={{
+                              borderColor: 'rgba(15,23,42,0.06)',
+                              background: justUpdated
+                                ? 'rgba(16, 185, 129, 0.08)'
+                                : undefined,
+                            }}
                           >
                             <td className="px-4 py-3 pr-2">
                               <p className="font-semibold" style={{ color: SUITE.text }}>
@@ -457,7 +613,17 @@ export function AdminSyncSchedules() {
                               {row.channel}
                             </td>
                             <td className="whitespace-nowrap py-3 pr-2 font-medium">
-                              {formatAt(row.lastAt)}
+                              <div className="flex flex-col gap-0.5">
+                                <span>{formatAt(row.lastAt)}</span>
+                                {justUpdated ? (
+                                  <span
+                                    className="text-[10px] font-bold uppercase tracking-wide"
+                                    style={{ color: '#065F46' }}
+                                  >
+                                    Actualizado ahora
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                             <td className="py-3 pr-2 tabular-nums">
                               {row.records != null
@@ -502,6 +668,20 @@ export function AdminSyncSchedules() {
                                   >
                                     Abrir módulo
                                   </Link>
+                                ) : null}
+                                {!canDispatch && row.workflow ? (
+                                  <a
+                                    href={
+                                      rows.find((s) => s.workflow === row.workflow)
+                                        ?.actionsUrl || actionsHubUrl
+                                    }
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-[11px] font-medium underline-offset-2 hover:underline"
+                                    style={{ color: SUITE.muted }}
+                                  >
+                                    Actions
+                                  </a>
                                 ) : null}
                               </div>
                             </td>
@@ -552,8 +732,6 @@ export function AdminSyncSchedules() {
               </div>
             ) : null}
           </div>
-        </div>
-      ) : null}
-    </section>
+    </AdminSubgroup>
   );
 }

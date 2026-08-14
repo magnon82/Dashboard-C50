@@ -41,7 +41,7 @@ Para **saber** que está bien (y no depender de pedirlo a mano):
 1. **Secrets Actions** (repo → Settings → Secrets): `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_OAUTH_CLIENT_JSON`, `GOOGLE_OAUTH_TOKEN_JSON`.
 2. **Notificaciones**: GitHub → Settings → Notifications → Actions → avisar si el workflow falla.
 3. **Suite**: hub / Socios / Ventas muestran alerta si el último día Infocaja está atrasado (`/api/ventas-sync-status`).
-4. **Rescate**: Actions → Sync Gmail diario → **Run workflow** (o botón admin si configuras `GH_WORKFLOW_DISPATCH_TOKEN` en Vercel).
+4. **Rescate**: Actions → Sync Gmail diario → **Run workflow** (o botón **Actualizar** / Sincronizar en `/admin` si configuras `GH_WORKFLOW_DISPATCH_TOKEN` en Vercel — PAT con `actions:write`; también acepta `GITHUB_TOKEN` en local).
 5. Tras cambiar secrets o el YAML, corre **Run workflow** una vez y confirma en el log `OK YYYY-MM-DD: Venta Total=…`.
 
 Tras agregar o cambiar secrets, dispara **Run workflow** una vez en Actions (el cron de GitHub es best-effort y puede saltarse el primer día).
