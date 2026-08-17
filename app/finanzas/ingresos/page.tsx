@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { SuiteShell } from '@/app/components/SuiteShell';
 import { EstadosCuenta } from '@/app/components/EstadosCuenta';
+import { CristaleriaConciliacionCard } from '@/app/components/CristaleriaConciliacionCard';
 import { buildPresupuestoRubros } from '@/app/lib/presupuesto';
 import { SUITE } from '@/app/lib/themes';
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
@@ -87,6 +88,8 @@ export default function IngresosConsultaPage() {
           <p className="mt-1">{error}</p>
         </div>
       )}
+
+      <CristaleriaConciliacionCard year={year} />
 
       <EstadosCuenta
         records={records}

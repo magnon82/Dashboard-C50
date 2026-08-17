@@ -1470,8 +1470,30 @@ export function syncExternoFlagInNotes(
 }
 
 /**
+ * Socios/colaboradores sin expediente de alta (confirmado operación C50).
+ * Complementa isLeaveExemptEmployee / isPlantillaExterno cuando DB aún no tiene
+ * requiere_documentacion.
+ */
+export function isDocumentationExemptEmployee(
+  e: Pick<HrEmployee, 'full_name'>
+): boolean {
+  const t = foldNameTokenSet(e.full_name);
+  if (t.has('david') && t.has('campos')) return true;
+  if (t.has('diego') && t.has('olvera')) return true;
+  if (t.has('juan') && t.has('manuel')) return true;
+  if (
+    t.has('sergio') &&
+    (t.has('manon') || t.has('namon') || t.has('manion')) &&
+    !t.has('loera')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * ¿Debe alertar / exigir docs de alta (INE, acta, CURP, domicilio)?
- * Prioridad: socios/`sin_vacaciones` → `requiere_documentacion` → `tipo_empleo` → legado externo.
+ * Prioridad: socios/`sin_vacaciones` → exentos por nombre → `requiere_documentacion` → `tipo_empleo` → legado externo.
  * Socios no exigen expediente ni alertas de docs faltantes.
  */
 export function employeeRequiresDocumentation(
@@ -1485,6 +1507,7 @@ export function employeeRequiresDocumentation(
     | 'area'
   >
 ): boolean {
+  if (isDocumentationExemptEmployee(e)) return false;
   if (isLeaveExemptEmployee(e)) return false;
   if (e.requiere_documentacion === false) return false;
   if (e.requiere_documentacion === true) return true;

@@ -20,7 +20,8 @@
     "hr:pull-docs": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-pull-expediente-docs.mjs",
     "hr:fill-identity": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-fill-identity.mjs",
     "hr:fill-contrato": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-fill-from-contrato-xlsx.mjs",
-    "hr:repair-docs": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-repair-doc-slots.mjs"
+    "hr:repair-docs": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-repair-doc-slots.mjs",
+    "finanzas:cristaleria": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/cristaleria-conciliacion.mjs"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
