@@ -6,6 +6,7 @@ import {
   canAccessAdmin,
   canAccessCorteTpv,
   canAccessStaffCorte,
+  canEditHrSchedules,
   isCorteTpvPath,
   isStaffCortePath,
   verifySessionToken,
@@ -93,8 +94,17 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Staff Corte: requiere palomita staff.corte (además de módulo staff)
-  if (isStaffCortePath(pathname)) {
+  // Staff horario: consulta (módulo staff) o edición (rrhh / rrhh.schedules_edit)
+  if (pathname === '/staff/horario' || pathname.startsWith('/staff/horario/')) {
+    const ok =
+      canAccessModule(session, 'staff') ||
+      canEditHrSchedules(session) ||
+      canAccessAdmin(session);
+    if (!ok) {
+      const home = homePathForModules(session.modules);
+      return NextResponse.redirect(new URL(home, request.url));
+    }
+  } else if (isStaffCortePath(pathname)) {
     if (!canAccessModule(session, 'staff') && !canAccessAdmin(session)) {
       const home = homePathForModules(session.modules);
       return NextResponse.redirect(new URL(home, request.url));

@@ -1,19 +1,19 @@
 /**
- * Conciliación INGRESO CRISTALERIA (flujo efectivo) vs 2% venta Infocaja.
+ * Conciliación INGRESO CRISTALERIA (flujo efectivo) vs 0.2% venta Infocaja.
  * Base: Venta Total diaria (efectivo + bancos, sin propina), agregada por semana Acumulado.
  */
 
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
 import { acumuladoWeekForDate, parseIsoDate } from '@/app/lib/ventas-semana';
 
-/** Regla operativa confirmada C50. */
-export const CRISTALERIA_INGRESO_PCT = 0.02;
+/** Regla operativa C50: 0.2% de venta (= (venta÷1,000)×$2 en flujo Excel). */
+export const CRISTALERIA_INGRESO_PCT = 0.002;
 export const CRISTALERIA_TOLERANCE_MXN = 5;
-/** Tolerancia en puntos porcentuales (0.5 pp). */
-export const CRISTALERIA_TOLERANCE_PP = 0.005;
+/** Tolerancia en puntos porcentuales (0.05 pp sobre 0.2%). */
+export const CRISTALERIA_TOLERANCE_PP = 0.0005;
 
-/** Fórmula errónea observada en FLUJO EFECTIVO Excel: (venta/1000)×$2 = 0.2%. */
-export const CRISTALERIA_EXCEL_WRONG_FACTOR = 2 / 1000;
+/** Equivalente Excel flujo: (venta/1000)×$2. */
+export const CRISTALERIA_FLUJO_FACTOR = 2 / 1000;
 
 export type CristaleriaWeekStatus =
   | 'ok'
@@ -28,11 +28,17 @@ export type CristaleriaWeekRow = {
   label: string;
   ventaTotal: number;
   abonoFlujo: number;
+  /** Abono debido = venta × 0.002 (0.2% — regla C50 / Excel flujo). */
   esperado2pct: number;
-  /** Lo que hoy registra la fórmula Excel (venta/1000×2). */
+  /** Fórmula Excel (venta/1000×2); coincide con debido al 0.2%. */
   excelActual: number;
+  /** abonoFlujo − debido (negativo = falta depositar). */
   delta: number;
+  /** Faltante = esperado2pct − abonoFlujo (positivo = por cobrar). */
+  faltante: number;
   pctReal: number | null;
+  /** abonoFlujo / esperado2pct cuando esperado > 0. */
+  pctCobrado: number | null;
   status: CristaleriaWeekStatus;
   abonoFecha: string | null;
   concepto: string | null;
@@ -123,7 +129,7 @@ function classifyWeek(opts: {
 }
 
 /**
- * Cruza abonos flujo «INGRESO CRISTALERIA» vs 2% de Venta Total Infocaja por semana.
+ * Cruza abonos flujo «INGRESO CRISTALERIA» vs 0.2% de Venta Total Infocaja por semana.
  */
 export function buildCristaleriaConciliacion(
   records: FinancialRecord[],
@@ -175,9 +181,12 @@ export function buildCristaleriaConciliacion(
       const meta = abonoByWeek.get(k);
       const abonoFlujo = meta?.amount || 0;
       const esperado2pct = ventaTotal * CRISTALERIA_INGRESO_PCT;
-      const excelActual = (ventaTotal / 1000) * 2;
+      const excelActual = ventaTotal * CRISTALERIA_FLUJO_FACTOR;
       const delta = abonoFlujo - esperado2pct;
+      const faltante = esperado2pct - abonoFlujo;
       const pctReal = ventaTotal > 0 ? abonoFlujo / ventaTotal : null;
+      const pctCobrado =
+        esperado2pct > 0 ? abonoFlujo / esperado2pct : null;
       return {
         year: y,
         week: w,
@@ -187,7 +196,9 @@ export function buildCristaleriaConciliacion(
         esperado2pct,
         excelActual,
         delta,
+        faltante,
         pctReal,
+        pctCobrado,
         status: classifyWeek({ venta: ventaTotal, abono: abonoFlujo, esperado: esperado2pct }),
         abonoFecha: meta?.date ?? null,
         concepto: meta?.concepto ?? null,
@@ -227,5 +238,44 @@ export function buildCristaleriaConciliacion(
 }
 
 export const CRISTALERIA_FORMULA_BLURB =
-  'Regla C50: abono semanal = 2% × suma Venta Total Infocaja (efectivo + bancos, sin propina). ' +
-  'El Excel de flujo hoy aplica (venta÷1,000)×$2 ≈ 0.2% — un décimo de lo debido.';
+  'Regla C50: abono semanal = 0.2% de Venta Total Infocaja (efectivo + bancos, sin propina). ' +
+  'En flujo Excel: (venta÷1,000)×$2.';
+
+/** Pagina financial_records (Supabase limita a 1 000 filas por defecto). */
+export async function fetchRecordsForCristaleriaConciliacion(
+  sb: {
+    from: (table: string) => {
+      select: (cols: string) => {
+        gte: (col: string, val: string) => {
+          lte: (col: string, val: string) => {
+            in: (col: string, vals: string[]) => {
+              range: (
+                from: number,
+                to: number
+              ) => PromiseLike<{ data: FinancialRecord[] | null; error: { message: string } | null }>;
+            };
+          };
+        };
+      };
+    };
+  },
+  year: number
+): Promise<FinancialRecord[]> {
+  const pageSize = 1000;
+  const out: FinancialRecord[] = [];
+  const base = sb
+    .from('financial_records')
+    .select('id, date, type, category, amount, description, source_file')
+    .gte('date', `${year - 1}-12-01`)
+    .lte('date', `${year}-12-31`)
+    .in('source_file', ['infocaja', 'flujo_efectivo_mov']);
+
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await base.range(offset, offset + pageSize - 1);
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+    out.push(...data);
+    if (data.length < pageSize) break;
+  }
+  return out;
+}

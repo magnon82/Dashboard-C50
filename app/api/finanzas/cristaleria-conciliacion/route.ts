@@ -10,6 +10,7 @@ import {
 import {
   CRISTALERIA_FORMULA_BLURB,
   buildCristaleriaConciliacion,
+  fetchRecordsForCristaleriaConciliacion,
 } from '@/app/lib/cristaleria-conciliacion';
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
 import { getServiceSupabase } from '@/app/lib/users';
@@ -52,20 +53,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const sb = getServiceSupabase();
-    const { data, error } = await sb
-      .from('financial_records')
-      .select('id, date, type, category, amount, description, source_file')
-      .gte('date', `${year - 1}-12-01`)
-      .lte('date', `${year}-12-31`)
-      .in('source_file', ['infocaja', 'flujo_efectivo_mov']);
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    const summary = buildCristaleriaConciliacion(
-      (data || []) as FinancialRecord[],
-      year
-    );
+    const records = await fetchRecordsForCristaleriaConciliacion(sb, year);
+    const summary = buildCristaleriaConciliacion(records as FinancialRecord[], year);
 
     return NextResponse.json({
       ...summary,

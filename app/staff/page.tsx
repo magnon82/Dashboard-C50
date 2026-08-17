@@ -134,7 +134,7 @@ export default function StaffPage() {
                   color: SUITE.navy,
                 }}
               >
-                {canEditHorarios ? 'Consulta + editar' : 'En curso + próxima'}
+                {canEditHorarios ? 'Gestionar' : 'En curso + próxima'}
               </span>
             </div>
             <p
@@ -142,14 +142,14 @@ export default function StaffPage() {
               style={{ color: SUITE.muted }}
             >
               {canEditHorarios
-                ? 'Horario publicado del equipo; Crear o Editar abre las mismas herramientas que RR.HH.'
+                ? 'Crear, editar y publicar semanas desde Staff (sin entrar a RR.HH.).'
                 : 'Semana de horario en curso y la próxima si RH ya la publicó'}
             </p>
             <p
               className="mt-5 text-sm font-bold"
               style={{ color: SUITE.orangeDeep }}
             >
-              Ver horario →
+              {canEditHorarios ? 'Gestionar horarios →' : 'Ver horario →'}
             </p>
           </SuiteCard>
         </Link>

@@ -1,5 +1,5 @@
 /**
- * CLI: conciliación INGRESO CRISTALERIA vs 2% venta Infocaja.
+ * CLI: conciliación INGRESO CRISTALERIA vs 0.2% venta Infocaja.
  *   node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/cristaleria-conciliacion.mjs 2026
  */
 import { readFileSync } from 'fs';
@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   CRISTALERIA_FORMULA_BLURB,
   buildCristaleriaConciliacion,
+  fetchRecordsForCristaleriaConciliacion,
 } from '../app/lib/cristaleria-conciliacion.ts';
 
 function loadEnv() {
@@ -35,22 +36,14 @@ async function main() {
   const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   });
-  const { data, error } = await sb
-    .from('financial_records')
-    .select('id, date, type, category, amount, description, source_file')
-    .gte('date', `${year - 1}-12-01`)
-    .lte('date', `${year}-12-31`)
-    .in('source_file', ['infocaja', 'flujo_efectivo_mov']);
-  if (error) throw error;
-
-  const s = buildCristaleriaConciliacion(data || [], year);
+  const records = await fetchRecordsForCristaleriaConciliacion(sb, year);
+  const s = buildCristaleriaConciliacion(records || [], year);
   console.log(CRISTALERIA_FORMULA_BLURB);
   console.log('');
   console.log(`Venta ${year}: ${money(s.totals.ventaTotal)}`);
-  console.log(`Abonos flujo: ${money(s.totals.abonoFlujo)} (${((s.totals.pctReal || 0) * 100).toFixed(3)}%)`);
-  console.log(`Esperado 2%: ${money(s.totals.esperado2pct)}`);
-  console.log(`Faltante: ${money(s.totals.deltaVs2pct)}`);
-  console.log(`Excel (venta/1000×2): ${money(s.totals.excelActual)}`);
+  console.log(`Debido 0.2% (x0.002): ${money(s.totals.esperado2pct)}`);
+  console.log(`Abonos registrados: ${money(s.totals.abonoFlujo)} (${((s.totals.pctReal || 0) * 100).toFixed(3)}% venta)`);
+  console.log(`Faltante total: ${money(s.totals.esperado2pct - s.totals.abonoFlujo)}`);
   console.log(`Semanas: OK ${s.counts.ok} · bajo ${s.counts.bajo} · sin abono ${s.counts.falta_abono}`);
 }
 

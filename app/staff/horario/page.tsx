@@ -13,7 +13,7 @@ const theme = getTheme('suite');
 
 function StaffHorarioPageInner() {
   const searchParams = useSearchParams();
-  const editMode = searchParams.get('edit') === '1';
+  const viewOnly = searchParams.get('view') === '1';
   const { user, loading } = useSession();
   const canEdit = canEditSchedules(user);
 
@@ -27,11 +27,11 @@ function StaffHorarioPageInner() {
     );
   }
 
-  if (canEdit && editMode) {
+  if (canEdit && !viewOnly) {
     return (
       <SuiteShell
         title="Horarios"
-        subtitle="Edición · mismas herramientas que RR.HH. (datos sincronizados)"
+        subtitle="Staff · edición (mismas herramientas que RR.HH., datos sincronizados)"
       >
         <p className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
           <Link
@@ -42,11 +42,11 @@ function StaffHorarioPageInner() {
             ← Volver a Staff
           </Link>
           <Link
-            href="/staff/horario"
+            href="/staff/horario?view=1"
             className="text-sm font-semibold"
             style={{ color: SUITE.navy }}
           >
-            Ver horario
+            Vista consulta (equipo)
           </Link>
         </p>
         <RrhhHorarios />

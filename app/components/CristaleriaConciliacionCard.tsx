@@ -19,8 +19,8 @@ function pct(n: number | null) {
 
 const STATUS_LABEL: Record<string, string> = {
   ok: 'OK',
-  bajo: 'Bajo 2%',
-  sobre: 'Sobre 2%',
+  bajo: 'Bajo 0.2%',
+  sobre: 'Sobre 0.2%',
   falta_abono: 'Sin abono',
   abono_sin_venta: 'Abono sin venta',
 };
@@ -86,7 +86,7 @@ export function CristaleriaConciliacionCard({ year }: { year: number }) {
     <section className="mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-5 py-4">
         <h2 className="text-base font-semibold text-slate-900">
-          Ingreso cristalería vs 2% venta
+          Ingreso cristalería vs 0.2% venta
         </h2>
         <p className="mt-1 text-xs text-slate-600">{formula}</p>
       </div>
@@ -107,26 +107,24 @@ export function CristaleriaConciliacionCard({ year }: { year: number }) {
         </div>
         <div className="rounded-xl bg-slate-50 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-            Esperado 2%
+            Debido 0.2%
           </p>
           <p className="text-lg font-semibold tabular-nums">{money(totals.esperado2pct)}</p>
+          <p className="text-[11px] text-slate-500">(venta÷1,000)×$2</p>
         </div>
         <div
           className="rounded-xl px-3 py-2"
           style={{ backgroundColor: `${SUITE.navy}12` }}
         >
           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-            Faltante vs 2%
+            Faltante (debido − abono)
           </p>
           <p
             className={`text-lg font-semibold tabular-nums ${
-              totals.deltaVs2pct < -100 ? 'text-red-700' : 'text-slate-900'
+              totals.esperado2pct - totals.abonoFlujo > 50 ? 'text-red-700' : 'text-slate-900'
             }`}
           >
-            {money(totals.deltaVs2pct)}
-          </p>
-          <p className="text-[11px] text-slate-500">
-            Excel hoy ≈ {money(totals.excelActual)} (0.2%)
+            {money(totals.esperado2pct - totals.abonoFlujo)}
           </p>
         </div>
       </div>
@@ -151,8 +149,8 @@ export function CristaleriaConciliacionCard({ year }: { year: number }) {
                 <th className="px-4 py-2">Semana</th>
                 <th className="px-4 py-2 text-right">Venta</th>
                 <th className="px-4 py-2 text-right">Abono</th>
-                <th className="px-4 py-2 text-right">2% esp.</th>
-                <th className="px-4 py-2 text-right">Δ</th>
+                <th className="px-4 py-2 text-right">0.2% deb.</th>
+                <th className="px-4 py-2 text-right">Faltante</th>
                 <th className="px-4 py-2">Estado</th>
               </tr>
             </thead>
@@ -163,7 +161,7 @@ export function CristaleriaConciliacionCard({ year }: { year: number }) {
                   <td className="px-4 py-2 text-right tabular-nums">{money(w.ventaTotal)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{money(w.abonoFlujo)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{money(w.esperado2pct)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{money(w.delta)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{money(w.faltante)}</td>
                   <td className="px-4 py-2">
                     <span
                       className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold ${STATUS_STYLE[w.status] || ''}`}

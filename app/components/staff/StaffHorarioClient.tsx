@@ -388,28 +388,16 @@ export function StaffHorarioClient({
           ← Volver a Staff
         </Link>
         {canEdit ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/staff/horario?edit=1"
-              className="rounded-lg px-3 py-1.5 text-sm font-bold"
-              style={{
-                backgroundColor: SUITE.navy,
-                color: '#fff',
-              }}
-            >
-              Crear
-            </Link>
-            <Link
-              href="/staff/horario?edit=1"
-              className="rounded-lg px-3 py-1.5 text-sm font-bold"
-              style={{
-                backgroundColor: SUITE.orange,
-                color: SUITE.navy,
-              }}
-            >
-              Editar
-            </Link>
-          </div>
+          <Link
+            href="/staff/horario"
+            className="rounded-lg px-3 py-1.5 text-sm font-bold"
+            style={{
+              backgroundColor: SUITE.navy,
+              color: '#fff',
+            }}
+          >
+            Gestionar horarios
+          </Link>
         ) : null}
       </div>
 
