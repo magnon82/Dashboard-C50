@@ -43,6 +43,7 @@ export function useSession() {
 export function canSeeModule(user: ClientSession | null, moduleId: string): boolean {
   if (!user) return false;
   if (user.role === 'admin' || user.modules.includes('*')) return true;
+  if (moduleId === 'cortes' && user.modules.includes('ventas')) return true;
   return user.modules.includes(moduleId);
 }
 

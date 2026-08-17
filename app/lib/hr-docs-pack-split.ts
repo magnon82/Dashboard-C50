@@ -85,6 +85,7 @@ const KEYWORD_RULES: Array<{
       /\bconstancia\s+de\s+la\s+clave\s+unica\b/,
       /\bconstancia\s+de\s+(?:la\s+)?curp\b/,
       /\bclave\s+unica\s+de\s+registro\s+(?:de\s+)?poblacion\b/,
+      /\bcurp\s+certificada\b/,
       /\brenapo\b/,
       /\bsegob\b/,
       /\bsecretaria\s+de\s+gobernacion\b/,
@@ -103,9 +104,9 @@ const KEYWORD_RULES: Array<{
     patterns: [
       /\bacta\s+de\s+nacimiento\b/,
       /\bcertificado\s+de\s+nacimiento\b/,
-      /\bestados\s+unidos\s+mexicanos\b/,
+      // No usar «Estados Unidos Mexicanos» ni «entidad de registro»:
+      // la constancia CURP trae ambos en el encabezado.
       /\bidentificador\s+electronico\b/,
-      /\bregistro\s+civil\b/,
       /\boficialia\b/,
       /\bnacido\s+en\b/,
       /\bfoja\b/,
@@ -113,7 +114,6 @@ const KEYWORD_RULES: Array<{
       /\bdatos\s+de\s+la\s+acta\b/,
       /\bdatos\s+de\s+la\s+persona\s+registrada\b/,
       /\bdatos\s+de\s+filiacion\b/,
-      /\bentidad\s+de\s+registro\b/,
       /\bmunicipio\s+de\s+registro\b/,
       /\bnumero\s+de\s+acta\b/,
       /\bfecha\s+de\s+registro\b/,
@@ -161,6 +161,22 @@ function normalizeText(raw: string): string {
     .toLowerCase();
 }
 
+function usableLetterCount(text: string): number {
+  return (normalizeText(text).match(/[a-z0-9]/g) || []).length;
+}
+
+/** Streams Flate mal interpretados como texto: no deben bloquear el OCR. */
+function textLooksLikeGarbage(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  const letters = usableLetterCount(text);
+  if (letters < 40) return true;
+  const controls = (text.match(/[\x00-\x08\x0e-\x1f]/g) || []).length;
+  if (controls > 20) return true;
+  if (/JFIF|Exif|Adobe|stream/i.test(text.slice(0, 200))) return true;
+  if (compact.length > 80 && letters / compact.length < 0.35) return true;
+  return false;
+}
+
 function hasCurpCode(n: string): boolean {
   return (
     /\b[a-z]{4}\s*\d{6}\s*[hm]\s*[a-z]/.test(n) ||
@@ -187,6 +203,10 @@ export function curpConstanciaBrandSignals(nRaw: string): boolean {
         hasCurpCode(n))) ||
     (/\bcurp\b/.test(n) &&
       /\bregistro\s+(nacional\s+de\s+)?poblacion\b/.test(n) &&
+      !/\bacta\s+de\s+nacimiento\b/.test(n)) ||
+    /\bcurp\s+certificada\b/.test(n) ||
+    (/\bconstancia\b/.test(n) &&
+      /\bclave\s+unica\b/.test(n) &&
       !/\bacta\s+de\s+nacimiento\b/.test(n))
   );
 }
@@ -203,7 +223,6 @@ function hasActaLayout(n: string): boolean {
   return (
     /\bdatos\s+de\s+la\s+persona\s+registrada\b/.test(n) ||
     /\bdatos\s+de\s+filiacion\b/.test(n) ||
-    /\bentidad\s+de\s+registro\b/.test(n) ||
     /\bmunicipio\s+de\s+registro\b/.test(n) ||
     /\boficialia\b/.test(n) ||
     /\bfoja\b/.test(n) ||
@@ -319,11 +338,21 @@ function pageTextIsWeak(nRaw: string): boolean {
 
 function scorePageText(text: string): Map<HrDocTypeId, number> {
   const n = normalizeText(text);
+  // La constancia CURP cita «verificada con el Registro Civil»; no puntuar como acta.
+  const nActa = n.replace(/\bverificada\s+con\s+el\s+registro\s+civil\b/g, ' ');
   const scores = new Map<HrDocTypeId, number>();
   for (const rule of KEYWORD_RULES) {
+    const haystack = rule.docType === 'acta_nacimiento' ? nActa : n;
     let s = 0;
     for (const re of rule.patterns) {
-      if (re.test(n)) s += rule.weight;
+      if (re.test(haystack)) s += rule.weight;
+    }
+    if (
+      rule.docType === 'acta_nacimiento' &&
+      /\bregistro\s+civil\b/.test(nActa) &&
+      !/\bverificada\s+con\s+el\s+registro\s+civil\b/.test(n)
+    ) {
+      s += rule.weight;
     }
     if (s > 0) scores.set(rule.docType, s);
   }
@@ -360,8 +389,10 @@ function scorePageText(text: string): Map<HrDocTypeId, number> {
       scores.set('ine', Math.max(ine, 12));
     }
   } else if (curp > 0 && acta > 0) {
-    // Empate débil: preferir título de acta sobre folio CURP suelto.
-    if (hasActaTitle(n) || hasActaLayout(n)) {
+    // Empate débil: título de acta gana al folio CURP del acta moderna.
+    // Layout suelto (sin título) no basta: la constancia CURP comparte
+    // encabezado nacional.
+    if (hasActaTitle(n)) {
       scores.set('acta_nacimiento', Math.max(acta, 10));
       scores.set('curp', Math.min(curp, 2));
     } else if (
@@ -854,7 +885,7 @@ function classifyPagesFromTexts(
     const detected = detectDocTypeFromText(raw);
     if (!detected) continue;
     if (
-      labels[i] === 'acta_nacimiento' &&
+      (labels[i] === 'acta_nacimiento' || labels[i] === 'ine') &&
       detected === 'curp' &&
       (clearlyCurpConstanciaSignals(raw) || curpConstanciaBrandSignals(raw))
     ) {
@@ -960,10 +991,10 @@ export async function classifyPdfBuffer(
   if (pdftotextPages?.length) {
     text = pdftotextPages.join('\n');
   }
-  if (normalizeText(text).replace(/\s+/g, '').length < 12) {
+  if (usableLetterCount(text) < 12) {
     text = extractTextFromPdfBytes(buf);
   }
-  if (normalizeText(text).replace(/\s+/g, '').length < 12) {
+  if (usableLetterCount(text) < 12) {
     try {
       const src = await PDFDocument.load(buf, { ignoreEncryption: true });
       const n = src.getPageCount();
@@ -974,13 +1005,13 @@ export async function classifyPdfBuffer(
     }
   }
 
-  // Escaneos: OCR de JPEG embebido (sin pdftotext/pdftoppm).
-  if (normalizeText(text).replace(/\s+/g, '').length < 24) {
+  // Escaneos: OCR si no hay capa útil o la capa es basura comprimida.
+  if (usableLetterCount(text) < 24 || textLooksLikeGarbage(text)) {
     try {
       const jpegs = extractEmbeddedJpegs(buf);
       if (jpegs.length) {
         const ocrText = await ocrImageBuffers(jpegs);
-        if (normalizeText(ocrText).replace(/\s+/g, '').length >= 12) {
+        if (usableLetterCount(ocrText) >= 12) {
           text = ocrText;
           usedOcr = true;
         }
@@ -989,7 +1020,7 @@ export async function classifyPdfBuffer(
         const ocrPages = await tryOcrPerPage(buf, src.getPageCount());
         if (ocrPages?.length) {
           const ocrText = ocrPages.join('\n');
-          if (normalizeText(ocrText).replace(/\s+/g, '').length >= 12) {
+          if (usableLetterCount(ocrText) >= 12) {
             text = ocrText;
             usedOcr = true;
           }
@@ -1006,11 +1037,11 @@ export async function classifyPdfBuffer(
 
   const docType = detectDocTypeFromText(text);
 
-  const hasText = normalizeText(text).replace(/\s+/g, '').length >= 12;
+  const hasText = usableLetterCount(text) >= 12;
   return {
     docType,
     scores,
-    textSample: text.slice(0, 240),
+    textSample: text.slice(0, 4000),
     method: !hasText ? 'empty' : usedOcr ? 'ocr' : 'keywords',
   };
 }
@@ -1025,11 +1056,8 @@ export async function extractPdfTextWithOcr(
 ): Promise<{ text: string; method: 'streams' | 'ocr' | 'empty' }> {
   const buf = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
   let text = extractTextFromPdfBytes(buf);
-  const letterCount = (normalizeText(text).match(/[a-z0-9]/gi) || []).length;
-  const looksLikeGarbage =
-    letterCount < 40 ||
-    /JFIF|Exif|Adobe|stream/i.test(text.slice(0, 200)) ||
-    (text.match(/[\x00-\x08\x0e-\x1f]/g) || []).length > 20;
+  const letterCount = usableLetterCount(text);
+  const looksLikeGarbage = textLooksLikeGarbage(text);
 
   if (!opts?.forceOcr && letterCount >= 40 && !looksLikeGarbage) {
     return { text, method: 'streams' };
@@ -1135,7 +1163,7 @@ export async function splitPackPdf(
       const detected = detectDocTypeFromText(partText);
       if (!detected || detected === part.docType) continue;
       if (
-        (part.docType === 'acta_nacimiento' &&
+        ((part.docType === 'acta_nacimiento' || part.docType === 'ine') &&
           detected === 'curp' &&
           (clearlyCurpConstanciaSignals(partText) ||
             curpConstanciaBrandSignals(partText))) ||

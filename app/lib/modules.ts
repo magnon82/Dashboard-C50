@@ -1,5 +1,6 @@
 export type ModuleId =
   | 'hub'
+  | 'cortes'
   | 'staff'
   | 'ventas'
   | 'finanzas'
@@ -22,6 +23,15 @@ export interface AppModule {
 
 export const APP_MODULES: AppModule[] = [
   {
+    id: 'cortes',
+    href: '/cortes',
+    label: 'Cortes y operación',
+    short: 'Cortes',
+    description:
+      'Cortes diarios, tómbola a entregar, cancelaciones y descuentos',
+    status: 'activo',
+  },
+  {
     id: 'reportes-socios',
     href: '/reportes-socios',
     label: 'Reportes Socios',
@@ -43,7 +53,7 @@ export const APP_MODULES: AppModule[] = [
     href: '/ventas',
     label: 'Ventas',
     short: 'Ventas',
-    description: 'Ventas diarias, comparativos, pagos y cancelaciones · Carranza 50',
+    description: 'Ventas diarias, comparativos y mix de pagos · Carranza 50',
     status: 'activo',
   },
   {

@@ -19,7 +19,8 @@
     "hr:reimport-sueldo": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-reimport-sueldo-diario.mjs",
     "hr:pull-docs": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-pull-expediente-docs.mjs",
     "hr:fill-identity": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-fill-identity.mjs",
-    "hr:fill-contrato": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-fill-from-contrato-xlsx.mjs"
+    "hr:fill-contrato": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-fill-from-contrato-xlsx.mjs",
+    "hr:repair-docs": "node --import ./scripts/register-ts-alias.mjs --experimental-strip-types scripts/hr-repair-doc-slots.mjs"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

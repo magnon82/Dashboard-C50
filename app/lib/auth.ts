@@ -149,6 +149,7 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
 
 export function canAccessModule(session: SessionUser, moduleId: string): boolean {
   if (session.role === 'admin' || session.modules.includes('*')) return true;
+  if (moduleId === 'cortes' && session.modules.includes('ventas')) return true;
   return session.modules.includes(moduleId);
 }
 

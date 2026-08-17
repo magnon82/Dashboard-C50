@@ -490,10 +490,20 @@ async function linkSplitPackParts(opts: {
 
   const produced = new Set<HrDocTypeId>();
   for (const part of split.parts) {
-    produced.add(part.docType);
+    const partBuf = Buffer.from(part.bytes);
+    let docType = part.docType;
+    try {
+      docType = await resolveIdentityDocTypeFromPdf(part.docType, partBuf);
+    } catch {
+      docType = part.docType;
+    }
+    if (produced.has(docType)) {
+      skipped += 1;
+      continue;
+    }
 
-    const isShared = opts.sharedTypes.has(part.docType);
-    const hasOwn = opts.skipTypes.has(part.docType);
+    const isShared = opts.sharedTypes.has(docType);
+    const hasOwn = opts.skipTypes.has(docType);
 
     // Archivo propio distinto del paquete: no pisar salvo force.
     if (hasOwn && !isShared && !opts.force) {
@@ -504,7 +514,7 @@ async function linkSplitPackParts(opts: {
     try {
       const res = await uploadAndLink({
         employeeId: opts.employeeId,
-        docType: part.docType,
+        docType,
         localPath: '',
         fileName: opts.packFileName,
         buf: part.bytes,
@@ -515,7 +525,10 @@ async function linkSplitPackParts(opts: {
         notes: `Desde expediente (paquete ${part.pageLabel}, ${split.method}): ${opts.packFileName}`,
       });
       if (res === 'skipped') skipped += 1;
-      else imported += 1;
+      else {
+        imported += 1;
+        produced.add(docType);
+      }
     } catch {
       skipped += 1;
     }
@@ -1766,12 +1779,24 @@ export async function shouldRepairSharedPack(
   }
 }
 
-/** Marca de soft-check con heurística acta↔curp actual (invalida “contenido verificado” viejo). */
-const ACTA_CURP_CONTENT_OK = 'contenido verificado acta-curp-2026-08';
+/** Marca de soft-check con heurística identidad actual (invalida marcas viejas). */
+const IDENTITY_CONTENT_OK = 'contenido verificado identidad-2026-08-17';
+
+const IDENTITY_REPAIR_TYPES: HrDocTypeId[] = [
+  'ine',
+  'acta_nacimiento',
+  'curp',
+  'comprobante_domicilio',
+];
+
+function notesAlreadyIdentityChecked(notes: string): boolean {
+  const low = notes.toLowerCase();
+  return low.includes(IDENTITY_CONTENT_OK);
+}
 
 /**
  * ¿Conviene re-clasificar PDFs del pack ya separados?
- * (p. ej. CURP en acta, o Acta guardada como INE tras heurística de orden).
+ * (p. ej. CURP en acta o en INE tras heurística de orden del paquete).
  */
 export async function shouldRepairMislabeledPack(
   employeeId: string
@@ -1783,23 +1808,34 @@ export async function shouldRepairMislabeledPack(
       .select('doc_type, storage_path, status, notes')
       .eq('employee_id', employeeId);
     if (error) return false;
-    return (data || []).some((r) => {
+    const rows = data || [];
+    const uploadedIdentity = rows.filter(
+      (r) =>
+        IDENTITY_REPAIR_TYPES.includes(String(r.doc_type) as HrDocTypeId) &&
+        r.storage_path &&
+        (r.status === 'uploaded' || r.status === 'verified')
+    );
+    const missingIdentity = IDENTITY_REPAIR_TYPES.filter(
+      (dt) =>
+        dt !== 'comprobante_domicilio' &&
+        !uploadedIdentity.some((r) => String(r.doc_type) === dt)
+    );
+    // CURP/acta/INE vacío con otro PDF de identidad: casi seguro slot cruzado.
+    if (missingIdentity.length > 0 && uploadedIdentity.length > 0) {
+      return uploadedIdentity.some(
+        (r) =>
+          r.status === 'uploaded' &&
+          !notesAlreadyIdentityChecked(String(r.notes || ''))
+      );
+    }
+    return rows.some((r) => {
       const dt = String(r.doc_type);
-      if (!REQUIRED_FROM_PACK.includes(dt as HrDocTypeId)) return false;
+      if (!IDENTITY_REPAIR_TYPES.includes(dt as HrDocTypeId)) return false;
       if (!r.storage_path || r.status !== 'uploaded') return false;
-      const notes = String(r.notes || '').toLowerCase();
-      if (notes.includes('reclasificado por contenido')) return false;
-      // Acta/CURP: re-checar si aún no pasaron la heurística nueva (slots cruzados).
-      if (dt === 'acta_nacimiento' || dt === 'curp') {
-        if (notes.includes(ACTA_CURP_CONTENT_OK)) return false;
-        return (
-          notesSuggestPackSplit(r.notes) ||
-          /(?:^|\/)(?:acta_nacimiento|curp|ine)-exp-\d+\./i.test(r.storage_path)
-        );
-      }
-      if (notes.includes('contenido verificado')) return false;
-      if (notesSuggestPackSplit(r.notes)) return true;
-      return /(?:^|\/)(?:ine|acta_nacimiento|curp|comprobante_domicilio|cv)-exp-\d+\./i.test(
+      const notes = String(r.notes || '');
+      if (notesAlreadyIdentityChecked(notes)) return false;
+      if (notesSuggestPackSplit(notes)) return true;
+      return /(?:^|\/)(?:ine|acta_nacimiento|curp|comprobante_domicilio)-exp-\d+\./i.test(
         r.storage_path
       );
     });
@@ -1812,7 +1848,7 @@ export async function shouldRepairMislabeledPack(
  * Si el PDF tiene señal fuerte de otro tipo, corrige el slot del nombre Drive.
  * Prioridad: marca constancia CURP > título acta > INE > clasificador.
  */
-async function resolveIdentityDocTypeFromPdf(
+export async function resolveIdentityDocTypeFromPdf(
   filenameKind: HrDocTypeId,
   buf: Buffer
 ): Promise<HrDocTypeId> {
@@ -1824,6 +1860,7 @@ async function resolveIdentityDocTypeFromPdf(
     const classification = await classifyPdfBuffer(buf);
     const sample = classification.textSample || '';
     if (
+      classification.docType === 'curp' ||
       curpConstanciaBrandSignals(sample) ||
       clearlyCurpConstanciaSignals(sample)
     ) {
@@ -1953,10 +1990,11 @@ export async function repairMislabeledPackFromStorage(opts: {
 
   const candidates: Cand[] = [];
   let skipped = 0;
-  // Soft (perfil): solo Acta/CURP — evita OCR pesado y falsos positivos en INE/CV.
+  // Identidad del pack: INE/acta/CURP/domicilio (la heurística de orden
+  // a menudo deja la constancia CURP en el slot INE o acta).
   const focusTypes: HrDocTypeId[] = force
     ? [...REQUIRED_FROM_PACK]
-    : ['acta_nacimiento', 'curp'];
+    : [...IDENTITY_REPAIR_TYPES];
 
   for (const row of rows) {
     const slot = String(row.doc_type) as HrDocTypeId;
@@ -2013,34 +2051,19 @@ export async function repairMislabeledPackFromStorage(opts: {
       const row = rows.find((r) => String(r.id) === c.id);
       const notes = String(row?.notes || '');
       const low = notes.toLowerCase();
-      if (
-        low.includes(ACTA_CURP_CONTENT_OK) ||
-        low.includes('reclasificado por contenido')
-      ) {
+      if (notesAlreadyIdentityChecked(notes) || low.includes(IDENTITY_CONTENT_OK)) {
         continue;
       }
       if (
-        c.slot !== 'acta_nacimiento' &&
-        c.slot !== 'curp' &&
-        (low.includes('contenido verificado') ||
-          (!notesSuggestPackSplit(notes) &&
-            !/(?:^|\/)(?:ine|acta_nacimiento|curp|comprobante_domicilio|cv)-exp-\d+\./i.test(
-              c.path
-            )))
-      ) {
-        continue;
-      }
-      if (
-        (c.slot === 'acta_nacimiento' || c.slot === 'curp') &&
+        IDENTITY_REPAIR_TYPES.includes(c.slot) &&
         !notesSuggestPackSplit(notes) &&
-        !/(?:^|\/)(?:acta_nacimiento|curp|ine)-exp-\d+\./i.test(c.path)
+        !/(?:^|\/)(?:ine|acta_nacimiento|curp|comprobante_domicilio)-exp-\d+\./i.test(
+          c.path
+        )
       ) {
         continue;
       }
-      const mark =
-        c.slot === 'acta_nacimiento' || c.slot === 'curp'
-          ? ACTA_CURP_CONTENT_OK
-          : 'contenido verificado';
+      const mark = IDENTITY_CONTENT_OK;
       try {
         await sb
           .from('hr_employee_documents')

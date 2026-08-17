@@ -21,6 +21,7 @@ interface Props {
 
 const NAV_ICONS: Record<string, string> = {
   home: '⌂',
+  cortes: '▤',
   staff: '☷',
   ventas: '◈',
   finanzas: '＄',

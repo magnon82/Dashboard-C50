@@ -14,6 +14,7 @@ import { homePathForModules } from '@/app/lib/modules';
 
 const MODULE_PREFIXES = [
   '/staff',
+  '/cortes',
   '/ventas',
   '/finanzas',
   '/rrhh',

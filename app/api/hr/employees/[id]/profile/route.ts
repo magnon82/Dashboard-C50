@@ -16,6 +16,7 @@ import {
   isRequiredDocSatisfied,
   placeholderDocuments,
   type HrDocStatus,
+  type HrDocTypeId,
   type HrEmployeeDocument,
   type HrEmployeeExam,
   type HrMedicalJustification,
@@ -32,6 +33,7 @@ import {
   profileSoftPullPending,
   repairMislabeledPackFromStorage,
   repairSharedPackFromStorage,
+  resolveIdentityDocTypeFromPdf,
 } from '@/app/lib/hr-expediente-docs-pull';
 import {
   contractsFromDocumentRows,
@@ -1083,10 +1085,16 @@ export async function POST(request: Request, ctx: Ctx) {
           : 'jpg';
 
   if (kind === 'document' || kind === 'photo') {
-    const docType =
-      kind === 'photo'
-        ? 'foto_perfil'
-        : String(form.get('doc_type') || '').trim();
+    const requestedType = String(form.get('doc_type') || '').trim() as HrDocTypeId;
+    let docType: HrDocTypeId =
+      kind === 'photo' ? 'foto_perfil' : requestedType;
+    if (kind !== 'photo' && ext === 'pdf') {
+      try {
+        docType = await resolveIdentityDocTypeFromPdf(docType, buf);
+      } catch {
+        /* slot elegido en el formulario */
+      }
+    }
     const def = docTypeDef(docType);
     if (!def) {
       return NextResponse.json({ error: 'doc_type inválido' }, { status: 400 });
