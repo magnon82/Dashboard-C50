@@ -1,7 +1,9 @@
 """
 Suma Cuentas por Pagar desde Google Sheet CXP:
-  - Total = suma SALDO A LA FECHA (col I) en PROVEEDORES + SERVICIOS
-  - Pagos programados = misma columna en filas con fondo amarillo
+  - Total = celda oficial del encabezado (suma de saldos por proveedor/servicio
+    en col I: Proveedores L2, Servicios K2). No es la suma de cada factura:
+    varias filas sin fecha son subtotales o el saldo vivo del proveedor.
+  - Pagos programados = SALDO A LA FECHA en filas con fondo amarillo
     (incluye amarillas con FECHA vacía; omite subtotales blancos sin fecha)
   - Saldo x pagar = Total - Programados (dashboard)
 
@@ -28,6 +30,8 @@ SOURCE_FILE = "cxp_por_pagar"
 ALLOWED_TABS = ("proveedor", "servicio")
 COL_SALDO = 8  # I = SALDO A LA FECHA
 DATE_RE = re.compile(r"^\d{1,2}[-/][A-Za-zÁÉÍÓÚáéíóú]{3,}[-/]\d{2,4}$", re.I)
+# Encabezado: =I47+I84+… (saldo vivo por proveedor). Ignora =G6-H6 y =L2-K3.
+HEADER_I_REF_RE = re.compile(r"I\d+", re.I)
 
 
 def is_yellow_bg(bg: dict | None) -> bool:
@@ -92,6 +96,25 @@ def cell_text(values: list[dict], idx: int) -> str:
     return str((values[idx].get("formattedValue") or "")).strip()
 
 
+def header_official_saldo(row_data: list) -> float | None:
+    """Lee el total del encabezado (suma de celdas I de cada proveedor)."""
+    best: float | None = None
+    best_refs = 0
+    for row in row_data[:5]:
+        for cell in row.get("values") or []:
+            formula = str((cell.get("userEnteredValue") or {}).get("formulaValue") or "")
+            refs = HEADER_I_REF_RE.findall(formula)
+            if len(refs) < 3:
+                continue
+            n = cell_number(cell)
+            if n is None or n <= 0:
+                continue
+            if len(refs) > best_refs:
+                best_refs = len(refs)
+                best = n
+    return best
+
+
 def should_count_row(values: list[dict], saldo: float, yellow: bool) -> bool:
     """
     Cuenta filas con SALDO > 0 si:
@@ -119,7 +142,8 @@ def sum_tab_with_colors(service, spreadsheet_id: str, title: str) -> tuple[float
             includeGridData=True,
             fields=(
                 "sheets(data(rowData(values("
-                "formattedValue,effectiveValue,effectiveFormat/backgroundColor"
+                "formattedValue,effectiveValue,userEnteredValue,"
+                "effectiveFormat/backgroundColor"
                 "))))"
             ),
         )
@@ -146,7 +170,10 @@ def sum_tab_with_colors(service, spreadsheet_id: str, title: str) -> tuple[float
         if yellow:
             programados += saldo
 
-    return total, programados
+    official = header_official_saldo(row_data)
+    if official is not None:
+        total = official
+    return total, min(programados, total)
 
 
 def main() -> None:
@@ -187,7 +214,7 @@ def main() -> None:
         programados += tab_prog
         print(
             f"  {title}: SALDO A LA FECHA=${tab_total:,.2f} "
-            f"programados(amarillo)=${tab_prog:,.2f}"
+            f"(oficial encabezado) programados(amarillo)=${tab_prog:,.2f}"
         )
 
     saldo = max(0.0, total - programados)
