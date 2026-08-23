@@ -30,7 +30,7 @@ import {
   enrichEmployeesFromBaseDatos,
   replacePeriodLines,
 } from '@/app/lib/hr-payroll-sync';
-import { matchEmployeeId } from '@/app/lib/hr-person-match';
+import { matchEmployeeId, collapsePeopleByMatch } from '@/app/lib/hr-person-match';
 
 export { formatAntiguedad };
 
@@ -635,9 +635,9 @@ function mergePlantillaEmployees(
           : prev.plantilla_origen || 'horario',
     });
   }
-  return [...byId.values()].sort((a, b) =>
-    a.full_name.localeCompare(b.full_name, 'es')
-  );
+  // Una persona = una ficha (variantes de nombre del import no deben
+  // aparecer dos veces en plantilla ni sembrarse en horarios futuros).
+  return collapsePeopleByMatch([...byId.values()]);
 }
 
 function pickSource(

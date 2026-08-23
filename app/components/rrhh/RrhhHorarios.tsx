@@ -195,7 +195,13 @@ export function RrhhHorarios() {
 
   const employeesNotInGrid = useMemo(() => {
     const ids = new Set(rows.map((r) => r.employee_id));
-    return employees.filter((e) => !ids.has(e.id));
+    const named = rows.map((r) => ({
+      id: r.employee_id,
+      full_name: r.full_name,
+    }));
+    return employees.filter(
+      (e) => !ids.has(e.id) && !personAlreadyPresent(e.full_name, named)
+    );
   }, [employees, rows]);
 
   const refreshEmployees = useCallback(async () => {

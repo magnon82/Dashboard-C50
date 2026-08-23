@@ -8,6 +8,7 @@ import {
   isGenericPisoArea,
   isPlantillaExterno,
   isVacationScheduleShift,
+  mergedIntoEmployeeId,
   meseroWithinFamilyRank,
   plantillaPositionKey,
   scheduleSectionFromPosition,
@@ -21,6 +22,7 @@ import {
   isServicioPuesto,
   timeRangesOverlap,
 } from '@/app/lib/hr-puestos';
+import { personAlreadyPresent } from '@/app/lib/hr-person-match';
 import { sumShiftHours } from '@/app/lib/hr-schedule-propose';
 
 export const DAY_HEADERS = [
@@ -356,6 +358,40 @@ function makeDualRow(
   };
 }
 
+
+/** Remapea turnos de cáscaras fusionadas al survivor canónico. */
+function resolveShiftEmployeeId(shift: HrScheduleShift): string {
+  return mergedIntoEmployeeId(shift.employee_notes) || shift.employee_id;
+}
+
+function workedDayCount(row: PersonRow): number {
+  return row.days.reduce((n, d) => n + (d && !d.off ? 1 : 0), 0);
+}
+
+/**
+ * Una persona = una fila (salvo dual limpieza+servicio).
+ * Preferir la fila con más turnos trabajados.
+ */
+function collapseDuplicateNameRows(rows: PersonRow[]): PersonRow[] {
+  const duals = rows.filter((r) => r.dualTrack);
+  const plain = rows.filter((r) => !r.dualTrack);
+  const ranked = [...plain].sort((a, b) => {
+    const d = workedDayCount(b) - workedDayCount(a);
+    if (d !== 0) return d;
+    return a.full_name.localeCompare(b.full_name, 'es');
+  });
+  const kept: PersonRow[] = [];
+  for (const r of ranked) {
+    const named = kept.map((k) => ({
+      id: k.employee_id,
+      full_name: k.full_name,
+    }));
+    if (personAlreadyPresent(r.full_name, named)) continue;
+    kept.push(r);
+  }
+  return [...kept, ...duals];
+}
+
 export function buildRowsFromShifts(
   employees: HrEmployee[],
   shifts: HrScheduleShift[],
@@ -372,38 +408,39 @@ export function buildRowsFromShifts(
   const seedPlantilla = opts?.seedPlantilla === true;
 
   for (const s of shifts) {
-    const emp = empById.get(s.employee_id);
+    const empId = resolveShiftEmployeeId(s);
+    const emp = empById.get(empId) || empById.get(s.employee_id);
     const dual = hasDualLimpiezaServicio(
       dualMetaFromEmployeeAndShift(emp, s)
     );
 
-    const areas = shiftAreasByEmp.get(s.employee_id) || [];
+    const areas = shiftAreasByEmp.get(empId) || [];
     if (s.area) areas.push(s.area);
     else if (s.employee_area) areas.push(s.employee_area);
-    shiftAreasByEmp.set(s.employee_id, areas);
+    shiftAreasByEmp.set(empId, areas);
 
-    const roles = shiftRolesByEmp.get(s.employee_id) || [];
+    const roles = shiftRolesByEmp.get(empId) || [];
     if (s.role_label) roles.push(s.role_label);
     else if (s.employee_puesto) roles.push(s.employee_puesto);
-    shiftRolesByEmp.set(s.employee_id, roles);
+    shiftRolesByEmp.set(empId, roles);
 
     const track: DualRoleTrack | null = dual
       ? isVacationScheduleShift(s)
         ? null // se aplica a ambas pistas abajo
         : dualShiftTrack(s)
       : null;
-    if (dual) dualSeen.add(s.employee_id);
+    if (dual) dualSeen.add(empId);
 
     if (dual && isVacationScheduleShift(s)) {
       const di = dates.indexOf(s.shift_date);
       if (di < 0) continue;
       const name =
-        emp?.full_name || s.employee_name || s.employee_id.slice(0, 8);
+        emp?.full_name || s.employee_name || empId.slice(0, 8);
       for (const t of ['servicio', 'limpieza'] as DualRoleTrack[]) {
-        const key = personRowKey(s.employee_id, t);
+        const key = personRowKey(empId, t);
         let row = byKey.get(key);
         if (!row) {
-          row = makeDualRow(emp, s.employee_id, name, t, dates);
+          row = makeDualRow(emp, empId, name, t, dates);
           byKey.set(key, row);
         }
         row.days[di] = vacationDay();
@@ -411,14 +448,12 @@ export function buildRowsFromShifts(
       continue;
     }
 
-    const key = personRowKey(s.employee_id, track);
+    const key = personRowKey(empId, track);
     let row = byKey.get(key);
     if (!row) {
       if (dual && track) {
-        row = makeDualRow(
-          emp,
-          s.employee_id,
-          emp?.full_name || s.employee_name || s.employee_id.slice(0, 8),
+        row = makeDualRow(emp, empId,
+          emp?.full_name || s.employee_name || empId.slice(0, 8),
           track,
           dates
         );
@@ -431,9 +466,9 @@ export function buildRowsFromShifts(
         );
         row = {
           rowKey: key,
-          employee_id: s.employee_id,
+          employee_id: empId,
           full_name:
-            emp?.full_name || s.employee_name || s.employee_id.slice(0, 8),
+            emp?.full_name || s.employee_name || empId.slice(0, 8),
           area: section,
           puesto,
           dualLimpiezaServicio: false,
@@ -515,6 +550,12 @@ export function buildRowsFromShifts(
 
   if (seedPlantilla) {
     for (const e of employees) {
+      const existingNamed = [...byKey.values()].map((r) => ({
+        id: r.employee_id,
+        full_name: r.full_name,
+      }));
+      // No sembrar si ya hay fila del mismo id o la misma persona (variante de nombre).
+      if (personAlreadyPresent(e.full_name, existingNamed)) continue;
       if (hasDualLimpiezaServicio(e)) {
         for (const track of ['servicio', 'limpieza'] as DualRoleTrack[]) {
           const key = personRowKey(e.id, track);
@@ -538,7 +579,7 @@ export function buildRowsFromShifts(
     }
   }
 
-  return [...byKey.values()].sort(comparePersonRows);
+  return collapseDuplicateNameRows([...byKey.values()]).sort(comparePersonRows);
 }
 
 export function rowsToShifts(

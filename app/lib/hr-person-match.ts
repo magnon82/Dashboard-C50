@@ -1102,6 +1102,82 @@ export function matchEmployeeId(
   return result.autoLink ? result.employeeId : null;
 }
 
+type CollapsiblePerson = NamedPerson & {
+  drive_folder_path?: string | null;
+  fecha_ingreso?: string | null;
+  suite_username?: string | null;
+  force_include?: boolean;
+};
+
+function personRichness(e: CollapsiblePerson): number {
+  let n = 0;
+  if (e.drive_folder_path) n += 8;
+  if (e.fecha_ingreso) n += 4;
+  if (e.suite_username) n += 2;
+  if (e.force_include) n += 1;
+  n += significantTokenCount(e.full_name);
+  n += Math.min(e.full_name.replace(/\s+/g, '').length / 20, 2);
+  return n;
+}
+
+/**
+ * Una persona → una ficha. Colapsa variantes de nombre (Paula Villar /
+ * Ana Paula Villar) conservando la ficha más rica / nombre canónico.
+ */
+export function collapsePeopleByMatch<T extends CollapsiblePerson>(
+  people: T[]
+): T[] {
+  if (people.length <= 1) return people;
+
+  const ranked = [...people].sort((a, b) => {
+    const d = personRichness(b) - personRichness(a);
+    if (d !== 0) return d;
+    return a.full_name.localeCompare(b.full_name, 'es');
+  });
+
+  const kept: T[] = [];
+  for (const e of ranked) {
+    const namedKept: NamedPerson[] = kept.map((k) => ({
+      id: k.id,
+      full_name: k.full_name,
+    }));
+    const hit = matchPerson(e.full_name, namedKept);
+    if (hit.autoLink && hit.employeeId) {
+      const idx = kept.findIndex((k) => k.id === hit.employeeId);
+      if (idx >= 0) {
+        const prev = kept[idx]!;
+        kept[idx] = {
+          ...prev,
+          full_name: preferCanonicalFullName(prev.full_name, e.full_name),
+          drive_folder_path:
+            prev.drive_folder_path || e.drive_folder_path || null,
+          fecha_ingreso: prev.fecha_ingreso || e.fecha_ingreso || null,
+          suite_username: prev.suite_username || e.suite_username || null,
+          force_include: Boolean(prev.force_include || e.force_include),
+        } as T;
+      }
+      continue;
+    }
+    kept.push(e);
+  }
+
+  return kept.sort((a, b) => a.full_name.localeCompare(b.full_name, 'es'));
+}
+
+/** ¿Ya hay alguien en `existing` que sea la misma persona que `name`? */
+export function personAlreadyPresent(
+  name: string,
+  existing: NamedPerson[]
+): boolean {
+  if (!name.trim() || existing.length === 0) return false;
+  const key = normalizePersonKey(name);
+  if (existing.some((e) => normalizePersonKey(e.full_name) === key)) {
+    return true;
+  }
+  const hit = matchPerson(name, existing);
+  return Boolean(hit.autoLink && hit.employeeId);
+}
+
 /** Estado de vínculo para UI. */
 export type PersonLinkStatus = 'linked' | 'ambiguous' | 'unlinked';
 

@@ -333,13 +333,21 @@ async function main() {
 
   const { data: empRows, error: empErr } = await sb
     .from('hr_employees')
-    .select('id, full_name, area, status');
+    .select('id, full_name, area, status, force_exclude, notes');
   if (empErr) {
     console.error('FAIL hr_employees:', empErr.message);
     process.exit(1);
   }
 
-  const employees = empRows || [];
+  // No matchear cáscaras fusionadas / bajas: si no, el Excel vuelve a
+  // colgar turnos en el duplicado y la plantilla siembra al canónico = fila doble.
+  const employees = (empRows || []).filter(
+    (e) =>
+      e.status !== 'baja' &&
+      !e.force_exclude &&
+      !String(e.notes || '').includes('duplicado_fusionado') &&
+      !/merged_into\s*:/i.test(String(e.notes || ''))
+  );
   const byKey = new Map(employees.map((e) => [normalizeName(e.full_name), e]));
   const nameToId = new Map();
   let createdEmployees = 0;

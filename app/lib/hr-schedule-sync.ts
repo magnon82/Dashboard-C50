@@ -4,7 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { mondayOfIsoWeek, todayIsoCdmx } from '@/app/lib/hr';
+import {mondayOfIsoWeek, todayIsoCdmx, isMergedDuplicateShell } from '@/app/lib/hr';
 import { normalizePersonName } from '@/app/lib/hr-payroll';
 import {
   folderBasenameFromPath,
@@ -100,19 +100,24 @@ async function resolveNameMap(
 }> {
   const withPath = await sb
     .from('hr_employees')
-    .select('id, full_name, area, puesto, status, drive_folder_path');
+    .select('id, full_name, area, puesto, status, drive_folder_path, force_exclude, notes');
   const { data: empRows, error: empErr } =
     withPath.error && /drive_folder_path|column/i.test(withPath.error.message)
       ? await sb
           .from('hr_employees')
-          .select('id, full_name, area, puesto, status')
+          .select('id, full_name, area, puesto, status, force_exclude, notes')
       : withPath;
 
   if (empErr) {
     throw new Error(empErr.message);
   }
 
-  const employees = (empRows || []) as Emp[];
+  const employees = ((empRows || []) as Emp[]).filter(
+    (e) =>
+      e.status !== 'baja' &&
+      !(e as { force_exclude?: boolean }).force_exclude &&
+      !isMergedDuplicateShell((e as { notes?: string | null }).notes)
+  );
   const byKey = new Map<string, Emp>();
   const namedForMatch: NamedPerson[] = employees.map((e) => {
     const base = folderBasenameFromPath(e.drive_folder_path);

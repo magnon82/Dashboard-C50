@@ -14,6 +14,24 @@ export function isMergedDuplicateShell(
 }
 
 /**
+ * Id del survivor si `notes` es cáscara fusionada
+ * (`duplicado_fusionado→uuid` o `merged_into: uuid`).
+ */
+export function mergedIntoEmployeeId(
+  notes: string | null | undefined
+): string | null {
+  const n = String(notes || '');
+  const arrow = n.match(
+    /duplicado_fusionado\s*→\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+  );
+  if (arrow?.[1]) return arrow[1].toLowerCase();
+  const colon = n.match(
+    /merged_into\s*:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+  );
+  return colon?.[1]?.toLowerCase() ?? null;
+}
+
+/**
  * Fallback cuando `fecha_baja` aún no existe en DB o viene null:
  * lee «dejó de laborar YYYY-MM-DD» desde notes (archivo Gmail / scripts).
  */
