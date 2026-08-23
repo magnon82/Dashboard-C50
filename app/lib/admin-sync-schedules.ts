@@ -60,8 +60,8 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
     feeds: 'infocaja, corte_caja, factura_cfdi → financial_records',
     mode: 'cloud',
     schedule:
-      'Diario 2:17–7:17 AM cada hora + 8:23 / 10:23 / 12:23 / 14:23 · refuerzo Dom 7:17–11:17 PM (CDMX)',
-    cronUtc: '17 8-13 * * * · 23 14,16,18,20 * * * · 17 1-5 * * 1',
+      'Diario 1:17–6:17 AM cada hora (CDMX) — Fin de Día del día anterior',
+    cronUtc: '17 7-12 * * *',
     areaId: 'ventas',
     sourceFiles: ['infocaja', 'corte_caja', 'factura_cfdi'],
     workflow: 'gmail',

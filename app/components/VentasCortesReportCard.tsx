@@ -262,7 +262,7 @@ function InfocajaReconcilePanel({
   let tone: 'match' | 'mismatch' | 'pending' | 'explained' = 'pending';
   if (mismatch) tone = 'mismatch';
   else if (servicioGap && !cashCheck?.mismatch) tone = 'explained';
-  else if (match) tone = 'match';
+  else if (match || (cashCheck?.match && !secondaryMismatch)) tone = 'match';
   else if (!hasInfocaja && hasRecibido) tone = 'pending';
 
   const styles =
@@ -876,6 +876,9 @@ export function VentasCortesReportCard({
         kind: 'mismatch' as const,
         message: `vs Infocaja ${moneyOrDash(cashCheck.infocaja)} · Δ ${moneyMx(cashCheck.delta ?? 0)}`,
       };
+    }
+    if (cashCheck?.match) {
+      return { kind: 'match' as const, message: 'Coincide con Infocaja' };
     }
     const resolvedInfo =
       cashCheck?.infocaja ??

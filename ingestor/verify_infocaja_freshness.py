@@ -38,8 +38,7 @@ def hour_cdmx(now: datetime | None = None) -> int:
 
 
 def expected_min(today_iso: str, hour: int) -> str:
-    if hour >= 22:
-        return today_iso
+    # Fin de Día del día D se sincroniza en madrugada de D+1 (1–6 AM CDMX).
     y, m, d = map(int, today_iso.split("-"))
     prev = datetime(y, m, d, tzinfo=timezone.utc) - timedelta(days=1)
     return prev.date().isoformat()

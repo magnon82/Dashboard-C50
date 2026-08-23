@@ -44,14 +44,14 @@ export function isoMinusDays(iso: string, days: number): string {
 }
 
 /**
- * Tras 10:00 CDMX exigimos al menos el día de ayer.
- * Tras 22:00 CDMX exigimos también el día de hoy (Fin de Día nocturno).
+ * Día mínimo esperado en BD según calendario CDMX.
+ * El Fin de Día del día D llega por correo en la madrugada de D+1; el sync corre 1–6 AM.
+ * No exigir el día calendario «hoy» por la noche: hasta el sync de madrugada basta con ayer.
  */
 export function expectedMinInfocajaDate(
   todayIso: string,
-  hourCdmx: number
+  _hourCdmx: number
 ): string {
-  if (hourCdmx >= 22) return todayIso;
   return isoMinusDays(todayIso, 1);
 }
 
