@@ -23,6 +23,7 @@ import {
   buildStaffCorteStatus,
   parseMoneyInput,
   reconcileEfectivoRecibidoVsInfocaja,
+  resolveInfocajaEfectivo,
   sumInfocajaDay,
   totalEventosAmount,
   totalPropinasStaff,
@@ -326,7 +327,7 @@ export async function GET(request: Request) {
     // Conciliación post-hoc: efectivo recibido (corte) vs Infocaja Efectivo.
     const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
       rpt?.efectivo_contado ?? null,
-      infocaja.hasEfectivo ? infocaja.efectivo : null
+      resolveInfocajaEfectivo(infocaja)
     );
 
     const canPending = canClosePendingCortes(auth);
@@ -571,7 +572,7 @@ export async function PUT(request: Request) {
     // Informativo: no bloquea el cierre si Infocaja falta o no coincide.
     const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
       efectivoRecibido,
-      infocaja.hasEfectivo ? infocaja.efectivo : null
+      resolveInfocajaEfectivo(infocaja)
     );
 
     const now = new Date().toISOString();
@@ -585,7 +586,7 @@ export async function PUT(request: Request) {
       propinas: totalPropinasStaff(propina, eventosOs),
       efectivo_tombola: tombola,
       efectivo_contado: efectivoRecibido,
-      efectivo_infocaja: infocaja.hasEfectivo ? infocaja.efectivo : null,
+      efectivo_infocaja: resolveInfocajaEfectivo(infocaja),
       bancos_neto_tpv: neto,
       bancos_cobrado_tpv: cobrado,
       bancos_propina_tpv: propina,

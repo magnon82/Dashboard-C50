@@ -420,6 +420,29 @@ export function sumInfocajaDay(
 }
 
 /**
+ * Efectivo Infocaja usable en conciliación.
+ * - Fila explícita en DB (incluye $0).
+ * - Día 100% tarjeta sin línea Efectivo en correos viejos: inferir $0.
+ */
+export function resolveInfocajaEfectivo(
+  infocaja: StaffRptInfocajaDay | null | undefined
+): number | null {
+  if (!infocaja) return null;
+  if (infocaja.hasEfectivo) {
+    return Math.round(infocaja.efectivo * 100) / 100;
+  }
+  if (
+    infocaja.hasAny &&
+    infocaja.bancarias > 0 &&
+    infocaja.ventaTotal > 0 &&
+    Math.abs(infocaja.bancarias - infocaja.ventaTotal) <= EFECTIVO_TOLERANCE_MXN
+  ) {
+    return 0;
+  }
+  return null;
+}
+
+/**
  * Saldo efe = efectivo recibido − propinas de terminales (TPV).
  * Las propinas de tarjeta se cubren con efectivo de caja; el saldo puede ser
  * **negativo** si el efectivo no alcanzó (no se recorta a 0).

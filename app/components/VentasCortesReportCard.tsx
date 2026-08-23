@@ -12,6 +12,7 @@ import {
   cortePropinasBreakdown,
   expectedTombolaDeposit,
   isEventoServicioClassificationGap,
+  resolveInfocajaEfectivo,
   splitEventoServicio,
   type EfectivoInfocajaReconcile,
   type StaffRptEditHistoryEntry,
@@ -197,10 +198,24 @@ function InfocajaReconcilePanel({
   corte: NonNullable<CortePayload['corte']>;
 }) {
   const hasRecibido = cashCheck?.hasRecibido ?? corte.efectivo_contado != null;
+  const resolvedInfocajaEfectivo =
+    cashCheck?.infocaja ??
+    resolveInfocajaEfectivo(infocaja) ??
+    corte.efectivo_infocaja;
   const hasInfocaja =
     cashCheck?.hasInfocaja ??
-    Boolean(infocaja?.hasEfectivo || corte.efectivo_infocaja != null);
+    Boolean(
+      resolvedInfocajaEfectivo != null &&
+        Number.isFinite(Number(resolvedInfocajaEfectivo))
+    );
   const infocajaPartial = Boolean(infocaja?.hasAny && !hasInfocaja);
+  const resolvedRecibido =
+    cashCheck?.recibido ?? corte.efectivo_contado ?? null;
+  const efectivoLineOk =
+    resolvedRecibido != null &&
+    resolvedInfocajaEfectivo != null &&
+    Math.abs(resolvedRecibido - resolvedInfocajaEfectivo) <=
+      EFECTIVO_TOLERANCE_MXN;
 
   // Solo comparar líneas Infocaja que vienen con monto (>0) para evitar falsas alertas.
   const propinasCmp =
@@ -240,7 +255,7 @@ function InfocajaReconcilePanel({
     (propinasCmp?.ok === false || bancosCmp?.ok === false);
   const mismatch = Boolean(cashCheck?.mismatch) || secondaryMismatch;
   const match =
-    Boolean(cashCheck?.match) &&
+    (Boolean(cashCheck?.match) || efectivoLineOk) &&
     (propinasCmp == null || propinasCmp.ok || servicioGap) &&
     (bancosCmp == null || bancosCmp.ok || servicioGap);
 
@@ -346,17 +361,13 @@ function InfocajaReconcilePanel({
         <div className="flex justify-between gap-3 sm:block">
           <dt style={{ color: styles.body }}>Efectivo recibido (corte)</dt>
           <dd className="font-semibold tabular-nums" style={{ color: styles.title }}>
-            {moneyOrDash(cashCheck?.recibido ?? corte.efectivo_contado)}
+            {moneyOrDash(resolvedRecibido)}
           </dd>
         </div>
         <div className="flex justify-between gap-3 sm:block">
           <dt style={{ color: styles.body }}>Infocaja Efectivo (correo)</dt>
           <dd className="font-semibold tabular-nums" style={{ color: styles.title }}>
-            {moneyOrDash(
-              cashCheck?.infocaja ??
-                infocaja?.efectivo ??
-                corte.efectivo_infocaja
-            )}
+            {moneyOrDash(resolvedInfocajaEfectivo)}
           </dd>
         </div>
         {cashCheck?.delta != null && !cashCheck.match ? (
@@ -866,10 +877,19 @@ export function VentasCortesReportCard({
         message: `vs Infocaja ${moneyOrDash(cashCheck.infocaja)} · Δ ${moneyMx(cashCheck.delta ?? 0)}`,
       };
     }
-    if (cashCheck?.match) {
+    const resolvedInfo =
+      cashCheck?.infocaja ??
+      resolveInfocajaEfectivo(infocaja) ??
+      corte.efectivo_infocaja;
+    const r = cashCheck?.recibido ?? corte.efectivo_contado;
+    if (
+      r != null &&
+      resolvedInfo != null &&
+      Math.abs(r - resolvedInfo) <= EFECTIVO_TOLERANCE_MXN
+    ) {
       return { kind: 'match' as const, message: 'Coincide con Infocaja' };
     }
-    if (cashCheck?.hasRecibido && !cashCheck.hasInfocaja) {
+    if (cashCheck?.hasRecibido && !cashCheck.hasInfocaja && resolvedInfo == null) {
       const partial = Boolean(infocaja?.hasAny);
       return {
         kind: 'pending' as const,
@@ -878,8 +898,7 @@ export function VentasCortesReportCard({
           : 'Infocaja pendiente de conciliar',
       };
     }
-    const r = corte.efectivo_contado;
-    const i = corte.efectivo_infocaja;
+    const i = resolvedInfo;
     if (r == null || i == null) {
       if (r != null && i == null) {
         return {

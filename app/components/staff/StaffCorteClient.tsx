@@ -33,6 +33,7 @@ import {
   expectedTombolaDeposit,
   parseMoneyInput,
   reconcileEfectivoRecibidoVsInfocaja,
+  resolveInfocajaEfectivo,
 } from '@/app/lib/staff-rpt';
 import { SUITE } from '@/app/lib/themes';
 import { useSession } from '@/app/lib/useSession';
@@ -872,7 +873,7 @@ export function StaffCorteClient() {
 
   const liveReconcile = reconcileEfectivoRecibidoVsInfocaja(
     efectivoRecibidoOk ? efectivoRecibidoNum : null,
-    infocaja != null && infocaja.hasEfectivo ? infocaja.efectivo : null
+    resolveInfocajaEfectivo(infocaja)
   );
   const savedReconcile = payload?.cashCheck ?? null;
   const reconcile =

@@ -13,6 +13,7 @@ import {
   parseMoneyInput,
   reconcileEfectivoRecibidoVsInfocaja,
   resolveDayTombola,
+  resolveInfocajaEfectivo,
   snapshotStaffRptValues,
   sumInfocajaDay,
   totalEventosAmount,
@@ -303,7 +304,7 @@ export async function GET(req: NextRequest) {
       try {
         const infocaja = await loadInfocajaForDate(statsDate);
         liveInfocaja = infocaja.hasAny ? infocaja : null;
-        liveInfocajaEfectivo = infocaja.hasEfectivo ? infocaja.efectivo : null;
+        liveInfocajaEfectivo = resolveInfocajaEfectivo(infocaja);
         tombola = resolveDayTombola({ rpt, infocaja });
         cashCheck = reconcileEfectivoRecibidoVsInfocaja(
           rpt?.efectivo_contado ?? null,
@@ -620,7 +621,7 @@ export async function PATCH(request: Request) {
     }
     const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
       rpt.efectivo_contado,
-      liveInfocaja?.hasEfectivo ? liveInfocaja.efectivo : rpt.efectivo_infocaja
+      resolveInfocajaEfectivo(liveInfocaja) ?? rpt.efectivo_infocaja
     );
 
     return NextResponse.json({
@@ -630,8 +631,7 @@ export async function PATCH(request: Request) {
       corte: {
         ...summarizeRpt(rpt),
         efectivo_infocaja:
-          (liveInfocaja?.hasEfectivo ? liveInfocaja.efectivo : null) ??
-          rpt.efectivo_infocaja,
+          resolveInfocajaEfectivo(liveInfocaja) ?? rpt.efectivo_infocaja,
       },
       previous: historyEntry.previous,
       cashCheck,
