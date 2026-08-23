@@ -5,6 +5,7 @@
 
 import type { FinancialRecord } from '@/app/lib/ventas-semana';
 import { acumuladoWeekForDate, parseIsoDate } from '@/app/lib/ventas-semana';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 /** Regla operativa C50: 0.2% de venta (= (venta÷1,000)×$2 en flujo Excel). */
 export const CRISTALERIA_INGRESO_PCT = 0.002;
@@ -243,22 +244,7 @@ export const CRISTALERIA_FORMULA_BLURB =
 
 /** Pagina financial_records (Supabase limita a 1 000 filas por defecto). */
 export async function fetchRecordsForCristaleriaConciliacion(
-  sb: {
-    from: (table: string) => {
-      select: (cols: string) => {
-        gte: (col: string, val: string) => {
-          lte: (col: string, val: string) => {
-            in: (col: string, vals: string[]) => {
-              range: (
-                from: number,
-                to: number
-              ) => PromiseLike<{ data: FinancialRecord[] | null; error: { message: string } | null }>;
-            };
-          };
-        };
-      };
-    };
-  },
+  sb: SupabaseClient,
   year: number
 ): Promise<FinancialRecord[]> {
   const pageSize = 1000;
