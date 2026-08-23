@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env.local")
 
 SOURCE_FILE = "infocaja"
 DEFAULT_EML = Path(
@@ -106,7 +107,12 @@ def parse_eml(path: Path) -> dict:
 
 def to_records(parsed: dict) -> list[dict]:
     fecha = parsed["date"]
-    fields = parsed["fields"]
+    fields = dict(parsed["fields"])
+    # Fin de Día sin línea «Efectivo» (p. ej. 100% tarjeta): guardar $0 explícito.
+    if "Efectivo" not in fields and (
+        "Bancarias" in fields or fields.get("Venta Total", 0) > 0
+    ):
+        fields["Efectivo"] = 0.0
     records = [
         {
             "date": fecha,
@@ -179,10 +185,12 @@ def main() -> None:
         print("Dry-run:", records)
         return
 
-    url = os.environ.get("SUPABASE_URL")
+    url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
-        raise SystemExit("Faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en .env")
+        raise SystemExit(
+            "Faltan SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en .env"
+        )
 
     supabase = create_client(url, key)
     n = upsert_day(supabase, parsed)
