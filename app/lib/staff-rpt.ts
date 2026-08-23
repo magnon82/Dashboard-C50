@@ -442,6 +442,48 @@ export function resolveInfocajaEfectivo(
   return null;
 }
 
+/** Día 100% tarjeta: Infocaja Efectivo $0 y bancarias ≈ venta total. */
+export function isCashlessInfocajaDay(
+  infocaja: StaffRptInfocajaDay | null | undefined
+): boolean {
+  if (!infocaja?.hasAny) return false;
+  if (resolveInfocajaEfectivo(infocaja) !== 0) return false;
+  return (
+    infocaja.bancarias > 0 &&
+    infocaja.ventaTotal > 0 &&
+    Math.abs(infocaja.bancarias - infocaja.ventaTotal) <= EFECTIVO_TOLERANCE_MXN
+  );
+}
+
+/**
+ * Efectivo recibido del corte para conciliar.
+ * Si no se capturó pero Infocaja confirma día sin efectivo, inferir $0.
+ */
+export function resolveCorteEfectivoRecibido(
+  recibido: number | null | undefined,
+  infocaja: StaffRptInfocajaDay | null | undefined
+): number | null {
+  if (
+    recibido != null &&
+    Number.isFinite(Number(recibido)) &&
+    Number(recibido) >= 0
+  ) {
+    return Math.round(Number(recibido) * 100) / 100;
+  }
+  return isCashlessInfocajaDay(infocaja) ? 0 : null;
+}
+
+/** Conciliación corte ↔ Infocaja con inferencia de día sin efectivo. */
+export function buildInfocajaReconcileCheck(
+  recibido: number | null | undefined,
+  infocaja: StaffRptInfocajaDay | null | undefined
+): EfectivoInfocajaReconcile {
+  return reconcileEfectivoRecibidoVsInfocaja(
+    resolveCorteEfectivoRecibido(recibido, infocaja),
+    resolveInfocajaEfectivo(infocaja)
+  );
+}
+
 /**
  * Saldo efe = efectivo recibido − propinas de terminales (TPV).
  * Las propinas de tarjeta se cubren con efectivo de caja; el saldo puede ser

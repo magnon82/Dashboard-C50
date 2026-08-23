@@ -34,6 +34,7 @@ import {
   parseMoneyInput,
   reconcileEfectivoRecibidoVsInfocaja,
   resolveInfocajaEfectivo,
+  buildInfocajaReconcileCheck,
 } from '@/app/lib/staff-rpt';
 import { SUITE } from '@/app/lib/themes';
 import { useSession } from '@/app/lib/useSession';
@@ -871,9 +872,9 @@ export function StaffCorteClient() {
     eventosOsNum
   );
 
-  const liveReconcile = reconcileEfectivoRecibidoVsInfocaja(
+  const liveReconcile = buildInfocajaReconcileCheck(
     efectivoRecibidoOk ? efectivoRecibidoNum : null,
-    resolveInfocajaEfectivo(infocaja)
+    infocaja
   );
   const savedReconcile = payload?.cashCheck ?? null;
   const reconcile =

@@ -24,6 +24,7 @@ import {
   parseMoneyInput,
   reconcileEfectivoRecibidoVsInfocaja,
   resolveInfocajaEfectivo,
+  buildInfocajaReconcileCheck,
   sumInfocajaDay,
   totalEventosAmount,
   totalPropinasStaff,
@@ -325,9 +326,9 @@ export async function GET(request: Request) {
     }
 
     // Conciliación post-hoc: efectivo recibido (corte) vs Infocaja Efectivo.
-    const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
+    const cashCheck = buildInfocajaReconcileCheck(
       rpt?.efectivo_contado ?? null,
-      resolveInfocajaEfectivo(infocaja)
+      infocaja
     );
 
     const canPending = canClosePendingCortes(auth);
@@ -570,10 +571,7 @@ export async function PUT(request: Request) {
 
     const { infocaja } = await loadInfocajaDay(sb, date);
     // Informativo: no bloquea el cierre si Infocaja falta o no coincide.
-    const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
-      efectivoRecibido,
-      resolveInfocajaEfectivo(infocaja)
-    );
+    const cashCheck = buildInfocajaReconcileCheck(efectivoRecibido, infocaja);
 
     const now = new Date().toISOString();
     const row = {

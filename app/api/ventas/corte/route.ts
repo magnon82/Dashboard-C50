@@ -14,6 +14,7 @@ import {
   reconcileEfectivoRecibidoVsInfocaja,
   resolveDayTombola,
   resolveInfocajaEfectivo,
+  buildInfocajaReconcileCheck,
   snapshotStaffRptValues,
   sumInfocajaDay,
   totalEventosAmount,
@@ -306,9 +307,9 @@ export async function GET(req: NextRequest) {
         liveInfocaja = infocaja.hasAny ? infocaja : null;
         liveInfocajaEfectivo = resolveInfocajaEfectivo(infocaja);
         tombola = resolveDayTombola({ rpt, infocaja });
-        cashCheck = reconcileEfectivoRecibidoVsInfocaja(
+        cashCheck = buildInfocajaReconcileCheck(
           rpt?.efectivo_contado ?? null,
-          liveInfocajaEfectivo
+          infocaja
         );
       } catch {
         tombola = rpt ? resolveDayTombola({ rpt, infocaja: null }) : null;
@@ -619,9 +620,9 @@ export async function PATCH(request: Request) {
     } catch {
       liveInfocaja = null;
     }
-    const cashCheck = reconcileEfectivoRecibidoVsInfocaja(
+    const cashCheck = buildInfocajaReconcileCheck(
       rpt.efectivo_contado,
-      resolveInfocajaEfectivo(liveInfocaja) ?? rpt.efectivo_infocaja
+      liveInfocaja
     );
 
     return NextResponse.json({

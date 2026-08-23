@@ -12,7 +12,9 @@ import {
   cortePropinasBreakdown,
   expectedTombolaDeposit,
   isEventoServicioClassificationGap,
+  resolveCorteEfectivoRecibido,
   resolveInfocajaEfectivo,
+  isCashlessInfocajaDay,
   splitEventoServicio,
   type EfectivoInfocajaReconcile,
   type StaffRptEditHistoryEntry,
@@ -197,20 +199,22 @@ function InfocajaReconcilePanel({
   infocaja: StaffRptInfocajaDay | null | undefined;
   corte: NonNullable<CortePayload['corte']>;
 }) {
-  const hasRecibido = cashCheck?.hasRecibido ?? corte.efectivo_contado != null;
   const resolvedInfocajaEfectivo =
     cashCheck?.infocaja ??
     resolveInfocajaEfectivo(infocaja) ??
     corte.efectivo_infocaja;
-  const hasInfocaja =
-    cashCheck?.hasInfocaja ??
-    Boolean(
-      resolvedInfocajaEfectivo != null &&
-        Number.isFinite(Number(resolvedInfocajaEfectivo))
-    );
-  const infocajaPartial = Boolean(infocaja?.hasAny && !hasInfocaja);
   const resolvedRecibido =
-    cashCheck?.recibido ?? corte.efectivo_contado ?? null;
+    cashCheck?.recibido ??
+    resolveCorteEfectivoRecibido(corte.efectivo_contado, infocaja);
+  const hasInfocaja = Boolean(
+    cashCheck?.hasInfocaja ||
+      (resolvedInfocajaEfectivo != null &&
+        Number.isFinite(Number(resolvedInfocajaEfectivo)))
+  );
+  const hasRecibido = Boolean(
+    cashCheck?.hasRecibido || resolvedRecibido != null
+  );
+  const infocajaPartial = Boolean(infocaja?.hasAny && !hasInfocaja);
   const efectivoLineOk =
     resolvedRecibido != null &&
     resolvedInfocajaEfectivo != null &&
@@ -255,9 +259,12 @@ function InfocajaReconcilePanel({
     (propinasCmp?.ok === false || bancosCmp?.ok === false);
   const mismatch = Boolean(cashCheck?.mismatch) || secondaryMismatch;
   const match =
-    (Boolean(cashCheck?.match) || efectivoLineOk) &&
-    (propinasCmp == null || propinasCmp.ok || servicioGap) &&
-    (bancosCmp == null || bancosCmp.ok || servicioGap);
+    (isCashlessInfocajaDay(infocaja) &&
+      (propinasCmp == null || propinasCmp.ok || servicioGap) &&
+      (bancosCmp == null || bancosCmp.ok || servicioGap)) ||
+    ((Boolean(cashCheck?.match) || efectivoLineOk) &&
+      (propinasCmp == null || propinasCmp.ok || servicioGap) &&
+      (bancosCmp == null || bancosCmp.ok || servicioGap));
 
   let tone: 'match' | 'mismatch' | 'pending' | 'explained' = 'pending';
   if (mismatch) tone = 'mismatch';
@@ -884,7 +891,9 @@ export function VentasCortesReportCard({
       cashCheck?.infocaja ??
       resolveInfocajaEfectivo(infocaja) ??
       corte.efectivo_infocaja;
-    const r = cashCheck?.recibido ?? corte.efectivo_contado;
+    const r =
+      cashCheck?.recibido ??
+      resolveCorteEfectivoRecibido(corte.efectivo_contado, infocaja);
     if (
       r != null &&
       resolvedInfo != null &&
@@ -892,7 +901,12 @@ export function VentasCortesReportCard({
     ) {
       return { kind: 'match' as const, message: 'Coincide con Infocaja' };
     }
-    if (cashCheck?.hasRecibido && !cashCheck.hasInfocaja && resolvedInfo == null) {
+    if (
+      cashCheck?.hasRecibido &&
+      !cashCheck.hasInfocaja &&
+      resolvedInfo == null &&
+      resolveInfocajaEfectivo(infocaja) == null
+    ) {
       const partial = Boolean(infocaja?.hasAny);
       return {
         kind: 'pending' as const,
