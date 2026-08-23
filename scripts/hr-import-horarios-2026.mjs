@@ -248,12 +248,38 @@ function parseAll(buffer) {
 }
 
 function normalizeName(n) {
-  return n
+  return String(n || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function nameTokens(n) {
+  return normalizeName(n).split(' ').filter((t) => t.length >= 2);
+}
+
+/** Prefiere ficha canónica (nombre más largo) si el Excel trae un alias corto. */
+function softMatchEmployee(name, employees) {
+  const q = nameTokens(name);
+  if (q.length < 2) return null;
+  let best = null;
+  let bestLen = -1;
+  for (const e of employees) {
+    const toks = nameTokens(e.full_name);
+    if (toks.length < 2) continue;
+    const qInE = q.every((t) => toks.some((x) => x === t || x.startsWith(t) || t.startsWith(x)));
+    const eInQ = toks.every((t) => q.some((x) => x === t || x.startsWith(t) || t.startsWith(x)));
+    if (!qInE && !eInQ) continue;
+    const len = String(e.full_name).replace(/\s+/g, '').length;
+    if (len > bestLen) {
+      best = e;
+      bestLen = len;
+    }
+  }
+  return best;
 }
 
 async function main() {
@@ -361,6 +387,12 @@ async function main() {
       nameToId.set(name, hit.id);
       continue;
     }
+    const soft = softMatchEmployee(name, employees);
+    if (soft) {
+      nameToId.set(name, soft.id);
+      byKey.set(normalizeName(name), soft);
+      continue;
+    }
     let area = null;
     for (const w of weeks) {
       const s = w.shifts.find((x) => x.employee_name === name && x.area);
@@ -385,6 +417,7 @@ async function main() {
     }
     nameToId.set(name, created.id);
     byKey.set(normalizeName(name), created);
+    employees.push(created);
     createdEmployees += 1;
   }
 

@@ -761,6 +761,8 @@ export function stripPersonName(raw: string): string {
   return String(raw || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    // RobertoRamirez → Roberto Ramirez (homólogos pegados del Excel)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[^a-zA-Z0-9\s]/g, ' ')
     .toLowerCase()
     .trim()
