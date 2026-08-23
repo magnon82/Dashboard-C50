@@ -200,6 +200,7 @@ function InfocajaReconcilePanel({
   const hasInfocaja =
     cashCheck?.hasInfocaja ??
     Boolean(infocaja?.hasEfectivo || corte.efectivo_infocaja != null);
+  const infocajaPartial = Boolean(infocaja?.hasAny && !hasInfocaja);
 
   // Solo comparar líneas Infocaja que vienen con monto (>0) para evitar falsas alertas.
   const propinasCmp =
@@ -285,7 +286,9 @@ function InfocajaReconcilePanel({
         ? 'Infocaja · servicio del evento (reclasificación)'
         : tone === 'mismatch'
           ? 'Alerta · diferencias vs Infocaja'
-          : 'Conciliación Infocaja · pendiente';
+          : infocajaPartial
+            ? 'Conciliación Infocaja · parcial'
+            : 'Conciliación Infocaja · pendiente';
 
   const headline =
     tone === 'match'
@@ -299,7 +302,9 @@ function InfocajaReconcilePanel({
               'Efectivo del corte no coincide con Infocaja Efectivo.'
             : 'Hay diferencias en propinas o bancos vs el reporte Infocaja del correo.'
           : hasRecibido
-            ? 'El reporte Infocaja del correo aún no está para este día; la conciliación se hará al sincronizar Gmail.'
+            ? infocajaPartial
+              ? 'Infocaja parcial: ya hay venta/bancarias/propinas del Fin de Día, pero falta la línea Efectivo en base de datos. Vuelve a sincronizar Gmail o re-ingesta el correo de ese día.'
+              : 'El reporte Infocaja del correo aún no está para este día; la conciliación se hará al sincronizar Gmail.'
             : 'Sin efectivo recibido en el corte ni reporte Infocaja para conciliar.';
 
   return (
@@ -865,9 +870,12 @@ export function VentasCortesReportCard({
       return { kind: 'match' as const, message: 'Coincide con Infocaja' };
     }
     if (cashCheck?.hasRecibido && !cashCheck.hasInfocaja) {
+      const partial = Boolean(infocaja?.hasAny);
       return {
         kind: 'pending' as const,
-        message: 'Infocaja pendiente de conciliar',
+        message: partial
+          ? 'Falta línea Efectivo Infocaja'
+          : 'Infocaja pendiente de conciliar',
       };
     }
     const r = corte.efectivo_contado;
@@ -876,7 +884,9 @@ export function VentasCortesReportCard({
       if (r != null && i == null) {
         return {
           kind: 'pending' as const,
-          message: 'Infocaja pendiente de conciliar',
+          message: infocaja?.hasAny
+            ? 'Falta línea Efectivo Infocaja'
+            : 'Infocaja pendiente de conciliar',
         };
       }
       return null;

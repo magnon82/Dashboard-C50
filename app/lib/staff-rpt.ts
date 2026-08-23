@@ -397,11 +397,14 @@ export function sumInfocajaDay(
   let bancarias = 0;
   let propina = 0;
   let ventaTotal = 0;
+  let hasEfectivoRow = false;
   for (const r of rows) {
     const amt = Number(r.amount) || 0;
     const cat = String(r.category || '');
-    if (cat === 'Infocaja Efectivo') efectivo += amt;
-    else if (cat === 'Infocaja Bancarias') bancarias += amt;
+    if (cat === 'Infocaja Efectivo') {
+      hasEfectivoRow = true;
+      efectivo += amt;
+    } else if (cat === 'Infocaja Bancarias') bancarias += amt;
     else if (cat === 'Infocaja Propina') propina += amt;
     else if (isInfocajaVentaTotalCategory(cat)) ventaTotal += amt;
   }
@@ -410,8 +413,9 @@ export function sumInfocajaDay(
     bancarias: Math.round(bancarias * 100) / 100,
     propina: Math.round(propina * 100) / 100,
     ventaTotal: Math.round(ventaTotal * 100) / 100,
-    hasEfectivo: efectivo > 0,
-    hasAny: efectivo > 0 || bancarias > 0 || propina > 0 || ventaTotal > 0,
+    /** true si el correo Infocaja trajo la línea Efectivo (incluye $0). */
+    hasEfectivo: hasEfectivoRow,
+    hasAny: hasEfectivoRow || bancarias > 0 || propina > 0 || ventaTotal > 0,
   };
 }
 
