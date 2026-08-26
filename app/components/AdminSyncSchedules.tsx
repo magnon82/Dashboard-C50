@@ -53,7 +53,10 @@ function formatAt(iso: string | null): string {
   return formatTimestampCdmx(iso) || formatTimestampCdmxShort(iso) || iso;
 }
 
-function statusStyle(status: SyncStatusKind): {
+function statusStyle(
+  status: SyncStatusKind,
+  staleAfterMs?: number | null,
+): {
   bg: string;
   color: string;
   label: string;
@@ -62,7 +65,14 @@ function statusStyle(status: SyncStatusKind): {
     case 'ok':
       return { bg: '#ECFDF5', color: '#065F46', label: 'Al día' };
     case 'stale':
-      return { bg: '#FFF7ED', color: '#9A3412', label: '> 7 días' };
+      return {
+        bg: '#FFF7ED',
+        color: '#9A3412',
+        label:
+          staleAfterMs != null && staleAfterMs < 24 * 60 * 60 * 1000
+            ? '> 1 h'
+            : '> 7 días',
+      };
     case 'manual':
       return { bg: '#F1F5F9', color: '#334155', label: 'Manual / fijo' };
     default:
@@ -350,6 +360,14 @@ export function AdminSyncSchedules() {
   }, [open, load]);
 
   useEffect(() => {
+    if (!open) return;
+    const id = window.setInterval(() => {
+      void load();
+    }, 90_000);
+    return () => window.clearInterval(id);
+  }, [open, load]);
+
+  useEffect(() => {
     return () => {
       for (const t of pollTimersRef.current) window.clearTimeout(t);
       pollTimersRef.current = [];
@@ -575,7 +593,7 @@ export function AdminSyncSchedules() {
                     </thead>
                     <tbody>
                       {moduleList.map((row) => {
-                        const st = statusStyle(row.status);
+                        const st = statusStyle(row.status, row.staleAfterMs);
                         const busy =
                           row.workflow != null && busyWorkflow === row.workflow;
                         const showDispatch =

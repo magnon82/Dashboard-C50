@@ -308,6 +308,8 @@ export type ModuleSyncSourceDef = {
   workflow?: SyncWorkflowKey;
   actionHref?: string;
   actionLabel?: string;
+  /** Umbral «stale» distinto al default 7 días (p.ej. filas «cada hora»). */
+  staleAfterMs?: number;
 };
 
 export type ModuleSyncRow = {
@@ -325,9 +327,12 @@ export type ModuleSyncRow = {
   canDispatch?: boolean;
   actionHref?: string;
   actionLabel?: string;
+  staleAfterMs?: number;
 };
 
 const STALE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Best-effort horario (:07 CDMX): marcar atrasado tras ~90 min sin sync. */
+export const HOURLY_STALE_MS = 90 * 60 * 1000;
 
 function maxIso(...vals: Array<string | null | undefined>): string | null {
   const ok = vals.filter((v): v is string => Boolean(v));
@@ -338,10 +343,11 @@ function maxIso(...vals: Array<string | null | undefined>): string | null {
 function statusFromAt(
   at: string | null,
   neverAs: SyncStatusKind = 'never',
+  staleAfterMs: number = STALE_MS,
 ): SyncStatusKind {
   if (!at) return neverAs;
   const age = Date.now() - Date.parse(at);
-  if (Number.isNaN(age) || age > STALE_MS) return 'stale';
+  if (Number.isNaN(age) || age > staleAfterMs) return 'stale';
   return 'ok';
 }
 
@@ -360,6 +366,7 @@ export const MODULE_SYNC_SOURCES: ModuleSyncSourceDef[] = [
     detail: 'cxp_por_pagar (hora) · cxp / cxp_saldos (sync-finanzas)',
     sourceFiles: ['cxp_por_pagar', 'cxp', 'cxp_saldos'],
     workflow: 'saldos',
+    staleAfterMs: HOURLY_STALE_MS,
     actionHref: '/finanzas/gastos',
     actionLabel: 'Ver CxP',
   },
@@ -423,6 +430,7 @@ export const MODULE_SYNC_SOURCES: ModuleSyncSourceDef[] = [
       'flujo_efectivo_mov',
     ],
     workflow: 'saldos',
+    staleAfterMs: HOURLY_STALE_MS,
     actionHref: '/finanzas',
     actionLabel: 'Saldos',
   },
@@ -514,10 +522,12 @@ export const MODULE_SYNC_SOURCES: ModuleSyncSourceDef[] = [
 /**
  * Filas Master por módulo: agrega lastAt/regs desde detected + sonda RH.
  */
+export type FinanzasSyncProbe = { lastAt: string | null; source: string };
+
 export function buildModuleSyncRows(
   detected: DetectedSourceFile[],
   hr: HrLastUpdateProbe,
-  opts?: { canDispatch?: boolean },
+  opts?: { canDispatch?: boolean; finanzas?: FinanzasSyncProbe | null },
 ): ModuleSyncRow[] {
   const bySource = new Map(detected.map((d) => [d.sourceFile, d] as const));
   const canDispatch = Boolean(opts?.canDispatch);
@@ -541,10 +551,15 @@ export function buildModuleSyncRows(
       lastAt = maxIso(lastAt, hr.lastAt);
     }
 
+    if (def.workflow === 'saldos' && opts?.finanzas?.lastAt) {
+      lastAt = maxIso(lastAt, opts.finanzas.lastAt);
+    }
+
+    const staleAfterMs = def.staleAfterMs ?? STALE_MS;
     const neverAs: SyncStatusKind = def.fixedManual ? 'manual' : 'never';
     const status: SyncStatusKind = def.forceManualStatus
       ? 'manual'
-      : statusFromAt(lastAt, neverAs);
+      : statusFromAt(lastAt, neverAs, staleAfterMs);
 
     const detail =
       parts.length > 0
@@ -572,6 +587,7 @@ export function buildModuleSyncRows(
       canDispatch: Boolean(def.workflow && canDispatch),
       actionHref: def.actionHref,
       actionLabel: def.actionLabel,
+      staleAfterMs: def.staleAfterMs,
     };
   });
 }

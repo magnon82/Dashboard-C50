@@ -359,8 +359,8 @@ export function RrhhEmployeeProfile({
       const mode: HrCaptureMode = target.mode || 'file';
       let prepared = file;
       if (target.kind === 'document') {
-        // Docs de alta: siempre pipeline de escaneo (incluso desde Archivo).
-        prepared = await prepareHrCapture(file, 'scan');
+        const prepMode: HrCaptureMode = mode === 'photo' ? 'photo' : 'scan';
+        prepared = await prepareHrCapture(file, prepMode);
       } else if (
         target.kind === 'justification' ||
         target.kind === 'reimbursement'
@@ -679,9 +679,14 @@ export function RrhhEmployeeProfile({
         <header className="flex items-start gap-3 border-b border-slate-100 px-4 py-4">
           <button
             type="button"
-            onClick={() => pickFile('photo')}
-            className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"
-            title="Subir foto (opcional)"
+            onClick={() => canEdit && pickFile('photo', 'foto_perfil', 'photo')}
+            disabled={!canEdit || busy || schemaBlocked}
+            className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            title={
+              canEdit
+                ? 'Tomar o subir foto de perfil'
+                : 'Sin permiso de edición de empleados'
+            }
           >
             {data?.photoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -932,6 +937,12 @@ export function RrhhEmployeeProfile({
 
           {!loading && tab === 'docs' ? (
             <div className="space-y-3">
+            {!canEdit ? (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Solo lectura. Para escanear o reemplazar documentos necesitas el
+                permiso «Edición de empleados» en Master (o usuario admin).
+              </p>
+            ) : null}
             {contracts.length > 0 ? (
               <section
                 className="rounded-xl border border-teal-100 bg-teal-50/40 p-3"
@@ -1020,6 +1031,8 @@ export function RrhhEmployeeProfile({
                           Ver
                         </button>
                       ) : null}
+                      {canEdit ? (
+                        <>
                       <button
                         type="button"
                         disabled={busy || schemaBlocked}
@@ -1046,6 +1059,25 @@ export function RrhhEmployeeProfile({
                         title={
                           schemaBlocked
                             ? 'Primero ejecuta hr_employee_documents.sql en Supabase'
+                            : 'Cámara · fotografía del documento'
+                        }
+                        className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
+                        onClick={() =>
+                          pickFile(
+                            d.doc_type === 'foto_perfil' ? 'photo' : 'document',
+                            d.doc_type,
+                            'photo'
+                          )
+                        }
+                      >
+                        Foto
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || schemaBlocked}
+                        title={
+                          schemaBlocked
+                            ? 'Primero ejecuta hr_employee_documents.sql en Supabase'
                             : 'Galería o PDF'
                         }
                         className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
@@ -1059,6 +1091,8 @@ export function RrhhEmployeeProfile({
                       >
                         {d.storage_path ? 'Reemplazar' : 'Archivo'}
                       </button>
+                        </>
+                      ) : null}
                       {data?.canVerify &&
                       !schemaBlocked &&
                       d.status === 'uploaded' ? (
@@ -1199,6 +1233,7 @@ export function RrhhEmployeeProfile({
                   <h3 className="text-sm font-bold" style={{ color: SUITE.navy }}>
                     Justificantes médicos
                   </h3>
+                  {canEdit ? (
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       type="button"
@@ -1232,6 +1267,7 @@ export function RrhhEmployeeProfile({
                       Archivo
                     </button>
                   </div>
+                  ) : null}
                 </div>
                 <p className="mb-2 text-[11px] text-slate-500">
                   Sustento de falta · se liga a nómina al aceptar (pago de
@@ -1323,6 +1359,7 @@ export function RrhhEmployeeProfile({
                   <h3 className="text-sm font-bold" style={{ color: SUITE.navy }}>
                     Reembolsos médicos
                   </h3>
+                  {canEdit ? (
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       type="button"
@@ -1360,6 +1397,7 @@ export function RrhhEmployeeProfile({
                       Archivo
                     </button>
                   </div>
+                  ) : null}
                 </div>
                 <ul className="space-y-2">
                   {(() => {

@@ -33,7 +33,8 @@ export const APP_CAPABILITIES: AppCapability[] = [
   {
     id: 'rrhh.employees_edit',
     label: 'Edición de empleados',
-    hint: 'RR.HH. · Alta, baja y editar ficha / perfil de colaboradores',
+    hint:
+      'RR.HH. · Alta, baja, editar ficha y subir/reemplazar documentos del expediente (cámara o archivo)',
   },
   {
     id: 'rrhh.schedules_edit',

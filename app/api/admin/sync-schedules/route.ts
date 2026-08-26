@@ -21,6 +21,7 @@ import {
 } from '@/app/lib/github-dispatch';
 import {
   fetchDetectedSourceFiles,
+  fetchFinanzasSyncState,
   fetchHrLastUpdate,
 } from '@/app/lib/storage-stats';
 
@@ -111,9 +112,10 @@ export async function GET() {
   const auth = await requireAdmin();
   if (auth instanceof NextResponse) return auth;
 
-  const [detected, hr] = await Promise.all([
+  const [detected, hr, finanzas] = await Promise.all([
     fetchDetectedSourceFiles(),
     fetchHrLastUpdate(),
+    fetchFinanzasSyncState(),
   ]);
   const areas = buildAreaLastUpdates(detected.detectedSourceFiles, hr);
   const byArea = new Map(areas.map((a) => [a.id, a]));
@@ -168,6 +170,7 @@ export async function GET() {
   const sourceReport = buildSourceSyncReport(detected.detectedSourceFiles, hr);
   const moduleRows = buildModuleSyncRows(detected.detectedSourceFiles, hr, {
     canDispatch,
+    finanzas,
   });
 
   return NextResponse.json({

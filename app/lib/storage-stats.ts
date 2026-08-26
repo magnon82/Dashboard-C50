@@ -384,6 +384,29 @@ async function fetchPerSourceStats(): Promise<{ rows: DetectedSourceFile[] }> {
   return { rows };
 }
 
+export type FinanzasSyncProbe = { lastAt: string | null; source: string };
+
+/** Heartbeat de sync-saldos (GitHub Actions / local). */
+export async function fetchFinanzasSyncState(): Promise<FinanzasSyncProbe> {
+  try {
+    const sb = getServiceSupabase();
+    const { data, error } = await sb
+      .from('finanzas_sync_state')
+      .select('last_synced_at')
+      .eq('content_type', 'saldos')
+      .maybeSingle();
+    if (error || !data?.last_synced_at) {
+      return { lastAt: null, source: 'none' };
+    }
+    return {
+      lastAt: String(data.last_synced_at),
+      source: 'finanzas_sync_state',
+    };
+  } catch {
+    return { lastAt: null, source: 'none' };
+  }
+}
+
 /** Última sync / mutación RR.HH. para el mapa e inventario. */
 export async function fetchHrLastUpdate(): Promise<HrLastUpdateProbe> {
   try {
