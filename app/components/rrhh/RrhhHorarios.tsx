@@ -16,7 +16,7 @@ import {
   type HrScheduleStatus,
   type HrScheduleWeek,
 } from '@/app/lib/hr';
-import { formatHrListName } from '@/app/lib/hr-person-match';
+import { formatHrListName, personAlreadyPresent } from '@/app/lib/hr-person-match';
 import {
   findLimpiezaServicioConflicts,
   hasDualLimpiezaServicio,
@@ -48,6 +48,15 @@ import {
   type DualRoleTrack,
   type PersonRow,
 } from '@/app/lib/hr-schedule-grid';
+import {
+  applyCellNotesToRows,
+  type HrScheduleCellNote,
+} from '@/app/lib/hr-schedule-cell-notes';
+import {
+  HrScheduleCellNoteButton,
+  HrScheduleCellNoteEditor,
+  HrScheduleNotesAlert,
+} from '@/app/components/rrhh/HrScheduleNotesPanel';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
 const theme = getTheme('suite');
@@ -136,6 +145,13 @@ export function RrhhHorarios() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [addEmpId, setAddEmpId] = useState('');
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
+  const [cellNotes, setCellNotes] = useState<HrScheduleCellNote[]>([]);
+  const [notesSeenAt, setNotesSeenAt] = useState<string | null>(null);
+  const [noteEditor, setNoteEditor] = useState<{
+    rowKey: string;
+    dayIndex: number;
+  } | null>(null);
+  const [noteBusy, setNoteBusy] = useState(false);
 
   const dates = useMemo(
     () =>
@@ -192,6 +208,115 @@ export function RrhhHorarios() {
     );
     return keys.map((area) => ({ area, people: map.get(area)! }));
   }, [rows]);
+
+  const employeeNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of rows) m.set(r.employee_id, r.full_name);
+    for (const e of employees) m.set(e.id, e.full_name);
+    return m;
+  }, [rows, employees]);
+
+  const noteEditorRow = noteEditor
+    ? rows.find((r) => r.rowKey === noteEditor.rowKey)
+    : null;
+  const noteEditorDay =
+    noteEditor && noteEditorRow
+      ? noteEditorRow.days[noteEditor.dayIndex]
+      : null;
+
+  async function refreshCellNotes(weekId: string) {
+    try {
+      const res = await fetch(
+        `/api/hr/schedules/${weekId}/cell-notes?panel=rrhh`,
+        { cache: 'no-store' }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      setCellNotes(Array.isArray(json.notes) ? json.notes : []);
+      setNotesSeenAt(
+        typeof json.notesSeenAt === 'string' ? json.notesSeenAt : null
+      );
+      return {
+        notes: Array.isArray(json.notes) ? json.notes : [],
+        notesSeenAt:
+          typeof json.notesSeenAt === 'string' ? json.notesSeenAt : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async function saveCellNote(text: string) {
+    if (!weekDetail || !noteEditor || !noteEditorRow) return;
+    const shiftDate = dates[noteEditor.dayIndex]?.slice(0, 10);
+    if (!shiftDate) return;
+    setNoteBusy(true);
+    try {
+      const res = await fetch(
+        `/api/hr/schedules/${weekDetail.id}/cell-notes`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employee_id: noteEditorRow.employee_id,
+            shift_date: shiftDate,
+            dual_track: noteEditorRow.dualTrack ?? null,
+            note: text,
+          }),
+        }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast(json.error || json.hint || 'No se pudo guardar la nota');
+        return;
+      }
+      setToast(json.message || 'Nota guardada');
+      setNoteEditor(null);
+      const meta = await refreshCellNotes(weekDetail.id);
+      if (meta?.notes) {
+        setRows((prev) =>
+          applyCellNotesToRows(prev, dates, meta.notes as HrScheduleCellNote[])
+        );
+      }
+    } finally {
+      setNoteBusy(false);
+    }
+  }
+
+  async function deleteCellNote() {
+    if (!weekDetail || !noteEditor || !noteEditorRow) return;
+    const shiftDate = dates[noteEditor.dayIndex]?.slice(0, 10);
+    if (!shiftDate) return;
+    setNoteBusy(true);
+    try {
+      const res = await fetch(
+        `/api/hr/schedules/${weekDetail.id}/cell-notes`,
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employee_id: noteEditorRow.employee_id,
+            shift_date: shiftDate,
+            dual_track: noteEditorRow.dualTrack ?? null,
+          }),
+        }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast(json.error || 'No se pudo eliminar');
+        return;
+      }
+      setNoteEditor(null);
+      const meta = await refreshCellNotes(weekDetail.id);
+      if (meta?.notes) {
+        setRows((prev) =>
+          applyCellNotesToRows(prev, dates, meta.notes as HrScheduleCellNote[])
+        );
+      }
+    } finally {
+      setNoteBusy(false);
+    }
+  }
 
   const employeesNotInGrid = useMemo(() => {
     const ids = new Set(rows.map((r) => r.employee_id));
@@ -334,22 +459,27 @@ export function RrhhHorarios() {
   );
 
   const applyLoadedWeek = useCallback(
-    (week: HrScheduleWeek, shifts: HrScheduleShift[], emps: HrEmployee[]) => {
+    (
+      week: HrScheduleWeek,
+      shifts: HrScheduleShift[],
+      emps: HrEmployee[],
+      notes: HrScheduleCellNote[] = []
+    ) => {
       setWeekDetail(week);
       setSelectedId(week.id);
-      // Solo sembrar plantilla vigente en semanas futuras (nueva planificación).
-      // Histórico / en curso: filas = quienes tienen turnos esa semana.
+      const weekDates = weekDateList(week.week_start);
       const seedPlantilla =
         !isPastScheduleWeek(week.week_end || addIsoDays(week.week_start, 6)) &&
         !isCurrentScheduleWeek(week.week_start);
-      const next = buildRowsFromShifts(
-        emps,
-        shifts,
-        weekDateList(week.week_start),
-        { seedPlantilla }
-      );
+      let next = buildRowsFromShifts(emps, shifts, weekDates, {
+        seedPlantilla,
+      });
+      if (notes.length) {
+        next = applyCellNotesToRows(next, weekDates, notes);
+      }
       setRows(next);
       setSavedSnapshot(serializeGrid(next));
+      setCellNotes(notes);
       const y = Number(week.week_start.slice(0, 4));
       if (Number.isFinite(y) && y !== year) setYear(y);
     },
@@ -389,7 +519,16 @@ export function RrhhHorarios() {
           return;
         }
         const staff = opts?.emps ?? employees;
-        applyLoadedWeek(json.week, json.shifts || [], staff);
+        const notesMeta = await refreshCellNotes(id);
+        applyLoadedWeek(
+          json.week,
+          json.shifts || [],
+          staff,
+          notesMeta?.notes || []
+        );
+        if (notesMeta?.notesSeenAt !== undefined) {
+          setNotesSeenAt(notesMeta.notesSeenAt);
+        }
       } catch {
         setToast('Error de red');
         clearWorkspace();
@@ -1241,6 +1380,18 @@ export function RrhhHorarios() {
                 </div>
               )}
 
+              {weekDetail ? (
+                <HrScheduleNotesAlert
+                  weekId={weekDetail.id}
+                  panel="rrhh"
+                  notes={cellNotes}
+                  notesSeenAt={notesSeenAt}
+                  dates={dates}
+                  employeeNames={employeeNames}
+                  onSeen={setNotesSeenAt}
+                />
+              ) : null}
+
               {/* Editor táctil (celular): un día o una persona a la vez */}
               <RrhhHorariosMobile
                 key={weekDetail.id}
@@ -1320,6 +1471,9 @@ export function RrhhHorarios() {
                           onCell={updateCell}
                           onToggleOff={toggleOff}
                           onSetVacation={setVacation}
+                          onOpenNote={(rowKey, dayIndex) =>
+                            setNoteEditor({ rowKey, dayIndex })
+                          }
                         />
                       ))
                     )}
@@ -1411,6 +1565,30 @@ export function RrhhHorarios() {
           )}
         </main>
       </div>
+
+      <HrScheduleCellNoteEditor
+        open={Boolean(noteEditor && noteEditorRow && noteEditorDay)}
+        title={
+          noteEditorRow && noteEditor
+            ? `${formatHrListName(noteEditorRow.full_name)} · ${
+                DAY_HEADERS[noteEditor.dayIndex] ?? ''
+              } ${dates[noteEditor.dayIndex]?.slice(5) ?? ''}`
+            : 'Nota'
+        }
+        subtitle="Visible para todo el equipo con acceso a Horarios."
+        initialNote={noteEditorDay?.staffNote}
+        canEdit={
+          !pastLocked &&
+          noteEditor != null &&
+          !dayLocked[noteEditor.dayIndex]
+        }
+        busy={noteBusy}
+        onClose={() => setNoteEditor(null)}
+        onSave={saveCellNote}
+        onDelete={
+          noteEditorDay?.staffNote ? () => void deleteCellNote() : undefined
+        }
+      />
     </div>
   );
 }
@@ -1484,6 +1662,7 @@ function AreaFragment({
   onCell,
   onToggleOff,
   onSetVacation,
+  onOpenNote,
 }: {
   area: string;
   people: PersonRow[];
@@ -1494,6 +1673,7 @@ function AreaFragment({
   onCell: (rowKey: string, day: number, patch: Partial<DayCell>) => void;
   onToggleOff: (rowKey: string, day: number) => void;
   onSetVacation: (rowKey: string, day: number) => void;
+  onOpenNote: (rowKey: string, dayIndex: number) => void;
 }) {
   return (
     <>
@@ -1559,6 +1739,7 @@ function AreaFragment({
                     cellLocked && !readOnly ? ' bg-slate-50/70' : ''
                   }`}
                 >
+                  <div className="flex flex-col items-stretch gap-0.5">
                   {cellLocked ? (
                     <span
                       className="inline-block w-full rounded px-1 py-1.5 text-[11px] font-bold uppercase tracking-wide opacity-80"
@@ -1578,6 +1759,21 @@ function AreaFragment({
                       {barLabel}
                     </button>
                   )}
+                  <div className="flex justify-center">
+                    <HrScheduleCellNoteButton
+                      hasNote={Boolean(d.staffNote?.trim())}
+                      onClick={() => onOpenNote(p.rowKey, di)}
+                    />
+                  </div>
+                  {d.staffNote ? (
+                    <p
+                      className="line-clamp-2 px-0.5 text-left text-[9px] leading-tight text-violet-900"
+                      title={d.staffNote}
+                    >
+                      {d.staffNote}
+                    </p>
+                  ) : null}
+                  </div>
                 </td>
               );
             }
@@ -1663,9 +1859,22 @@ function AreaFragment({
                         >
                           V
                         </button>
+                        <HrScheduleCellNoteButton
+                          hasNote={Boolean(d.staffNote?.trim())}
+                          disabled={cellLocked && readOnly}
+                          onClick={() => onOpenNote(p.rowKey, di)}
+                        />
                       </>
                     )}
                   </div>
+                  {d.staffNote ? (
+                    <p
+                      className="mt-0.5 line-clamp-2 text-[9px] leading-tight text-violet-900"
+                      title={d.staffNote}
+                    >
+                      {d.staffNote}
+                    </p>
+                  ) : null}
                 </td>
               </Fragment>
             );

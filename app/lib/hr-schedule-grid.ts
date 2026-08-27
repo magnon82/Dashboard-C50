@@ -69,6 +69,10 @@ export type DayCell = {
   role?: string | null;
   /** Turnos adicionales el mismo día (p. ej. mañana+cena); cuentan en «h». */
   extra?: DaySegment[];
+  /** Nota operativa visible (hr_schedule_cell_notes). */
+  staffNote?: string | null;
+  staffNoteAt?: string | null;
+  staffNoteBy?: string | null;
 };
 
 export type PersonRow = {

@@ -19,6 +19,11 @@ import {
   type PersonRow,
 } from '@/app/lib/hr-schedule-grid';
 import {
+  applyCellNotesToRows,
+  type HrScheduleCellNote,
+} from '@/app/lib/hr-schedule-cell-notes';
+import { HrScheduleNotesAlert } from '@/app/components/rrhh/HrScheduleNotesPanel';
+import {
   mondayOfWeek,
   sundayOfWeek,
   weekDateList,
@@ -60,9 +65,11 @@ type Payload = {
 function TeamScheduleTable({
   weekStart,
   shifts,
+  cellNotes = [],
 }: {
   weekStart: string;
   shifts: HrScheduleShift[];
+  cellNotes?: HrScheduleCellNote[];
 }) {
   const dates = useMemo(() => weekDateList(weekStart), [weekStart]);
   /** Índice Lun–Dom del día civil de hoy (CDMX); -1 si la semana mostrada no lo incluye. */
@@ -93,10 +100,13 @@ function TeamScheduleTable({
     }
     return [...byId.values()];
   }, [shifts]);
-  const rows = useMemo(
-    () => buildRowsFromShifts(shiftEmployees, shifts, dates),
-    [shiftEmployees, shifts, dates]
-  );
+  const rows = useMemo(() => {
+    let built = buildRowsFromShifts(shiftEmployees, shifts, dates);
+    if (cellNotes.length) {
+      built = applyCellNotesToRows(built, dates, cellNotes);
+    }
+    return built;
+  }, [shiftEmployees, shifts, dates, cellNotes]);
   const grouped = useMemo(() => {
     const map = new Map<string, PersonRow[]>();
     for (const r of rows) {
@@ -273,6 +283,14 @@ function TeamScheduleTable({
                           >
                             {d.vacation ? 'VACACIONES' : 'DESCANSO'}
                           </span>
+                          {d.staffNote ? (
+                            <p
+                              className="mt-1 line-clamp-3 px-0.5 text-left text-[9px] leading-tight text-violet-900"
+                              title={d.staffNote}
+                            >
+                              {d.staffNote}
+                            </p>
+                          ) : null}
                         </td>
                       ) : (
                         <Fragment key={`${p.rowKey}-${di}`}>
@@ -298,6 +316,14 @@ function TeamScheduleTable({
                                 </span>
                               ) : null}
                             </span>
+                            {d.staffNote ? (
+                              <p
+                                className="mt-0.5 line-clamp-2 text-[9px] leading-tight text-violet-900"
+                                title={d.staffNote}
+                              >
+                                {d.staffNote}
+                              </p>
+                            ) : null}
                           </td>
                         </Fragment>
                       );
@@ -327,6 +353,8 @@ export function StaffHorarioClient({
 
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [cellNotes, setCellNotes] = useState<HrScheduleCellNote[]>([]);
+  const [notesSeenAt, setNotesSeenAt] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -357,6 +385,39 @@ export function StaffHorarioClient({
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const weekId = data?.week?.id;
+    if (!weekId) {
+      setCellNotes([]);
+      setNotesSeenAt(null);
+      return;
+    }
+    void fetch(`/api/hr/schedules/${weekId}/cell-notes?panel=staff`, {
+      cache: 'no-store',
+    })
+      .then((r) => r.json())
+      .then((json) => {
+        setCellNotes(Array.isArray(json.notes) ? json.notes : []);
+        setNotesSeenAt(
+          typeof json.notesSeenAt === 'string' ? json.notesSeenAt : null
+        );
+      })
+      .catch(() => {
+        setCellNotes([]);
+        setNotesSeenAt(null);
+      });
+  }, [data?.week?.id]);
+
+  const employeeNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const n of cellNotes) {
+      if (n.employee_id && n.employee_name) {
+        m.set(n.employee_id, n.employee_name);
+      }
+    }
+    return m;
+  }, [cellNotes]);
 
   const includeNextWeek = data?.includeNextWeek ?? clientIncludeNext;
   const shifts = data?.shifts || [];
@@ -465,10 +526,23 @@ export function StaffHorarioClient({
               </SuiteCard>
             )}
 
+            {data?.week ? (
+              <HrScheduleNotesAlert
+                weekId={data.week.id}
+                panel="staff"
+                notes={cellNotes}
+                notesSeenAt={notesSeenAt}
+                dates={weekDateList(data.weekStart || weekStart)}
+                employeeNames={employeeNames}
+                onSeen={setNotesSeenAt}
+              />
+            ) : null}
+
             {showTable && (
               <TeamScheduleTable
                 weekStart={data!.weekStart || weekStart}
                 shifts={shifts}
+                cellNotes={cellNotes}
               />
             )}
           </div>
