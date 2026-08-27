@@ -47,6 +47,11 @@ export function RrhhTablero({
       border: '#0f766e',
     },
     {
+      label: 'Salen en ≤2 días hábiles',
+      value: k?.leaveUpcoming ?? '—',
+      border: '#c2410c',
+    },
+    {
       label: 'Resguardos pendientes',
       value: k?.resguardoPending ?? '—',
       border: '#be185d',
@@ -82,6 +87,7 @@ export function RrhhTablero({
         vacaciones: onGoVacaciones,
         expedientes: onGoExpedientes || onGoPlantilla,
         resguardos: onGoResguardos || onGoExpedientes || onGoPlantilla,
+        asistencia: onGoHorarios,
       };
     map[go]?.();
   };
@@ -89,6 +95,7 @@ export function RrhhTablero({
   const goLabel = (go: HrSummaryAlert['go']): string | null => {
     if (go === 'vacaciones') return 'Ir a Vacaciones';
     if (go === 'horarios') return 'Ir a Horarios';
+    if (go === 'asistencia') return 'Ir a Asistencia';
     if (go === 'expedientes' || go === 'plantilla') return 'Ir a Plantilla';
     if (go === 'resguardos') return 'Ver resguardos';
     return null;
@@ -173,7 +180,7 @@ export function RrhhTablero({
       {!loading && summary?.ready && alerts.length === 0 && (
         <SuiteCard className="max-w-3xl">
           <p className="text-sm" style={{ color: theme.muted }}>
-            Sin alertas: vacaciones y resguardos al día
+            Sin alertas: vacaciones, salidas próximas y resguardos al día
             {k?.currentWeekPublished
               ? '; horario de la semana publicado'
               : ''}

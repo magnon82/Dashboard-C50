@@ -1483,7 +1483,8 @@ export function RrhhEmployeeProfile({
               </section>
 
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-                Más adelante: reloj biométrico contrastará asistencia vs horario;
+                Más adelante: conexión IP al reloj. Mientras tanto usa
+                RR.HH. → Asistencia para subir el xlsx y cotejar vs horario.
                 estos justificantes serán el sustento de faltas pagadas.
               </p>
             </div>

@@ -23,6 +23,11 @@ import {
   normalizeCapabilities,
   type CapabilityId,
 } from '@/app/lib/capabilities';
+import {
+  ALERT_PREF_IDS,
+  normalizeAlertPrefs,
+  type AlertPrefId,
+} from '@/app/lib/alert-prefs';
 
 export const runtime = 'nodejs';
 
@@ -109,6 +114,7 @@ export async function GET() {
           role: pub.role,
           modules: r.modules || [],
           capabilities: pub.capabilities,
+          alertPrefs: pub.alertPrefs,
           active: pub.active,
           canEdit: pub.canEdit,
           createdAt: r.created_at,
@@ -137,6 +143,7 @@ export async function POST(request: Request) {
     role?: UserRole;
     modules?: string[];
     capabilities?: string[];
+    alertPrefs?: string[];
     active?: boolean;
   };
   try {
@@ -155,6 +162,9 @@ export async function POST(request: Request) {
   const capabilities = normalizeCapabilities(
     (body.capabilities || []).filter((c) => CAPABILITY_IDS.has(c))
   ) as CapabilityId[];
+  const alertPrefs = normalizeAlertPrefs(
+    (body.alertPrefs || []).filter((p) => ALERT_PREF_IDS.has(p))
+  ) as AlertPrefId[];
 
   if (!username || username.length < 2) {
     return NextResponse.json({ error: 'Usuario inválido' }, { status: 400 });
@@ -181,6 +191,7 @@ export async function POST(request: Request) {
       role,
       modules,
       capabilities,
+      alertPrefs,
       active: body.active !== false,
     });
     const pub = toPublicUser(user);
@@ -192,6 +203,7 @@ export async function POST(request: Request) {
         role: pub.role,
         modules: user.modules || [],
         capabilities: pub.capabilities,
+        alertPrefs: pub.alertPrefs,
         active: pub.active,
         canEdit: pub.canEdit,
         password: user.password,

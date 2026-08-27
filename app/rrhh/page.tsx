@@ -2,15 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { SuiteShell } from '@/app/components/SuiteShell';
-import {
-  RrhhSectionNav,
-  type RrhhSection,
-} from '@/app/components/rrhh/RrhhSectionNav';
+import { RrhhSectionNav, type RrhhSection } from '@/app/components/rrhh/RrhhSectionNav';
+import { RrhhAlertsBanner } from '@/app/components/rrhh/RrhhAlertsBanner';
 import { RrhhPlantilla } from '@/app/components/rrhh/RrhhPlantilla';
 import { RrhhBiblioteca } from '@/app/components/rrhh/RrhhBiblioteca';
 import { RrhhVacaciones } from '@/app/components/rrhh/RrhhVacaciones';
 import { RrhhCumpleanos } from '@/app/components/rrhh/RrhhCumpleanos';
 import { RrhhHorarios } from '@/app/components/rrhh/RrhhHorarios';
+import { RrhhAsistencia } from '@/app/components/rrhh/RrhhAsistencia';
 import { RrhhNomina } from '@/app/components/rrhh/RrhhNomina';
 import type { HrEmployee, HrDocLink } from '@/app/lib/hr';
 
@@ -83,6 +82,12 @@ export default function RrhhPage() {
 
   return (
     <SuiteShell title="Recursos Humanos" subtitle={`Gestión de equipo · ${hoy}`}>
+      <RrhhAlertsBanner
+        onGoHorarios={() => setSection('horarios')}
+        onGoVacaciones={() => setSection('vacaciones')}
+        onGoPlantilla={() => setSection('plantilla')}
+        onGoAsistencia={() => setSection('asistencia')}
+      />
       <RrhhSectionNav active={section} onChange={setSection} />
 
       {section === 'plantilla' && (
@@ -95,6 +100,8 @@ export default function RrhhPage() {
       )}
 
       {section === 'horarios' && <RrhhHorarios />}
+
+      {section === 'asistencia' && <RrhhAsistencia />}
 
       {section === 'nomina' && <RrhhNomina onChanged={refresh} />}
 

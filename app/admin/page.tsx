@@ -9,6 +9,7 @@ import { AdminPresupuestoAjustes } from '@/app/components/AdminPresupuestoAjuste
 import { AdminSaldosBancos } from '@/app/components/AdminSaldosBancos';
 import { AdminSyncSchedules } from '@/app/components/AdminSyncSchedules';
 import { APP_CAPABILITIES } from '@/app/lib/capabilities';
+import { APP_ALERT_PREFS } from '@/app/lib/alert-prefs';
 import { APP_MODULES } from '@/app/lib/modules';
 import { getTheme, SUITE } from '@/app/lib/themes';
 
@@ -21,6 +22,7 @@ interface AdminUser {
   role: 'admin' | 'viewer';
   modules: string[];
   capabilities: string[];
+  alertPrefs: string[];
   active: boolean;
   canEdit: boolean;
   createdAt?: string;
@@ -48,6 +50,7 @@ const emptyForm = {
   role: 'viewer' as 'admin' | 'viewer',
   modules: ['ventas'] as string[],
   capabilities: [] as string[],
+  alertPrefs: [] as string[],
 };
 
 /** Contraseña legible en cliente (sin caracteres ambiguos). */
@@ -226,6 +229,7 @@ export default function AdminPage() {
   const [editUsername, setEditUsername] = useState('');
   const [editDisplayName, setEditDisplayName] = useState('');
   const [editCapabilities, setEditCapabilities] = useState<string[]>([]);
+  const [editAlertPrefs, setEditAlertPrefs] = useState<string[]>([]);
   const [editEmployeeId, setEditEmployeeId] = useState<string>('');
   const [hrEmployees, setHrEmployees] = useState<HrLinkOption[]>([]);
   const [editSaving, setEditSaving] = useState(false);
@@ -319,8 +323,23 @@ export default function AdminPage() {
     }));
   }
 
+  function toggleAlertPref(id: string) {
+    setForm((f) => ({
+      ...f,
+      alertPrefs: f.alertPrefs.includes(id)
+        ? f.alertPrefs.filter((c) => c !== id)
+        : [...f.alertPrefs, id],
+    }));
+  }
+
   function toggleEditCapability(id: string) {
     setEditCapabilities((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    );
+  }
+
+  function toggleEditAlertPref(id: string) {
+    setEditAlertPrefs((prev) =>
       prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
     );
   }
@@ -348,6 +367,7 @@ export default function AdminPage() {
     setEditDisplayName(u.displayName || '');
     setEditModules((u.modules || []).filter((m) => m !== '*'));
     setEditCapabilities(u.capabilities || []);
+    setEditAlertPrefs(u.alertPrefs || []);
     setEditEmployeeId(u.linkedEmployee?.id || '');
     setOkMsg('');
     setError('');
@@ -376,6 +396,7 @@ export default function AdminPage() {
         body.role = 'viewer';
         body.modules = editModules;
         body.capabilities = editCapabilities;
+        body.alertPrefs = editAlertPrefs;
       }
       if (editPassword.trim()) body.password = editPassword.trim();
 
@@ -571,7 +592,7 @@ export default function AdminPage() {
       {/* 4. Usuarios */}
       <AdminSection
         title="Usuarios"
-        description="Cada cuenta del ERP tiene módulos (qué ve) y funciones (palomitas, p. ej. corte). Al instalar la app en el celular, el usuario entra con su sesión y solo ve lo asignado aquí."
+        description="Cada cuenta del ERP tiene módulos (qué ve), funciones (palomitas) y alertas (qué avisos recibe). Al instalar la app en el celular, el usuario entra con su sesión y solo ve lo asignado aquí."
       >
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -712,6 +733,36 @@ export default function AdminPage() {
                       <span className="font-medium">{c.label}</span>
                       <span className="mt-0.5 block text-xs text-slate-500">
                         {c.hint}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="mt-4">
+              <legend className="text-sm font-semibold text-slate-700">
+                Alertas que recibe
+              </legend>
+              <p className="mt-1 text-xs text-slate-500">
+                Al abrir la app (y push más adelante). Admin recibe todas.
+              </p>
+              <div className="mt-2 space-y-2">
+                {APP_ALERT_PREFS.map((p) => (
+                  <label
+                    key={p.id}
+                    className="flex items-start gap-2 text-sm text-slate-700"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={form.alertPrefs.includes(p.id)}
+                      onChange={() => toggleAlertPref(p.id)}
+                    />
+                    <span>
+                      <span className="font-medium">{p.label}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        {p.hint}
                       </span>
                     </span>
                   </label>
@@ -1024,6 +1075,32 @@ export default function AdminPage() {
                               <span className="font-medium">{c.label}</span>
                               <span className="mt-0.5 block text-xs text-slate-500">
                                 {c.hint}
+                              </span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <fieldset className="mt-3">
+                      <legend className="text-sm font-semibold text-slate-700">
+                        Alertas que recibe
+                      </legend>
+                      <div className="mt-2 space-y-2">
+                        {APP_ALERT_PREFS.map((p) => (
+                          <label
+                            key={p.id}
+                            className="flex items-start gap-2 text-sm text-slate-700"
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              checked={editAlertPrefs.includes(p.id)}
+                              onChange={() => toggleEditAlertPref(p.id)}
+                            />
+                            <span>
+                              <span className="font-medium">{p.label}</span>
+                              <span className="mt-0.5 block text-xs text-slate-500">
+                                {p.hint}
                               </span>
                             </span>
                           </label>

@@ -6,11 +6,10 @@ import { formatHrListName } from '@/app/lib/hr-person-match';
 import {
   DAY_HEADERS,
   areaSortKey,
-  formatRowHours,
   frequentShiftPresets,
   isVacationDay,
   rowDayHasOverlapConflict,
-  rowHours,
+  rowHoursTone,
   type DayCell,
   type DaySegment,
   type PersonRow,
@@ -299,9 +298,22 @@ export function RrhhHorariosMobile({
             <p className="text-sm font-bold" style={{ color: theme.title }}>
               {formatHrListName(selectedPerson.full_name)}
             </p>
-            <p className="text-xs" style={{ color: theme.muted }}>
-              {formatHrPuesto(selectedPerson.area)} ·{' '}
-              {formatRowHours(rowHours(selectedPerson))} h en la semana
+            {(() => {
+              const tone = rowHoursTone(selectedPerson);
+              return (
+                <p
+                  className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-bold tabular-nums"
+                  style={tone.style}
+                  title={tone.title}
+                >
+                  {tone.label === '—'
+                    ? 'Sin horas'
+                    : `${tone.label} h en la semana`}
+                </p>
+              );
+            })()}
+            <p className="mt-0.5 text-xs" style={{ color: theme.muted }}>
+              {formatHrPuesto(selectedPerson.area)}
             </p>
           </div>
           <ul className="space-y-1.5">
@@ -365,6 +377,7 @@ export function RrhhHorariosMobile({
                   const turnos = p.days.filter(
                     (d) => !d.off && d.start && d.end
                   ).length;
+                  const tone = rowHoursTone(p);
                   return (
                     <li
                       key={p.rowKey}
@@ -385,7 +398,15 @@ export function RrhhHorariosMobile({
                           className="shrink-0 text-xs tabular-nums"
                           style={{ color: theme.muted }}
                         >
-                          {turnos} turnos · {formatRowHours(rowHours(p))} h ›
+                          {turnos} turnos ·{' '}
+                          <span
+                            className="rounded px-1 font-bold tabular-nums"
+                            style={tone.style}
+                            title={tone.title}
+                          >
+                            {tone.label} h
+                          </span>{' '}
+                          ›
                         </span>
                       </button>
                     </li>

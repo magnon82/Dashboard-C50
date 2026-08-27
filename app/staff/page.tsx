@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
+import { PersonalAlertsBanner } from '@/app/components/PersonalAlertsBanner';
 import { canEditSchedules, useSession } from '@/app/lib/useSession';
 import { SUITE, getTheme } from '@/app/lib/themes';
 
@@ -55,6 +56,8 @@ export default function StaffPage() {
         Herramientas de piso: cierre diario, propinas, horario, resguardos y
         cumpleaños del equipo.
       </p>
+
+      {!loading && user ? <PersonalAlertsBanner /> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 max-w-3xl">
         {!loading && showCorte ? (

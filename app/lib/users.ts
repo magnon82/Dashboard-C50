@@ -4,6 +4,11 @@ import {
   normalizeCapabilities,
   type CapabilityId,
 } from '@/app/lib/capabilities';
+import {
+  HR_NEXT_WEEK_SCHEDULE_ALERT_SEED_USERNAMES,
+  normalizeAlertPrefs,
+  type AlertPrefId,
+} from '@/app/lib/alert-prefs';
 
 export type UserRole = 'admin' | 'viewer';
 
@@ -22,6 +27,8 @@ export interface DashboardUserRow {
   modules: string[];
   /** Permisos granulares (p. ej. staff.corte). Admin implícito = todos. */
   capabilities: CapabilityId[];
+  /** Alertas push/in-app suscritas. Admin implícito = todas. */
+  alert_prefs: AlertPrefId[];
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -34,6 +41,7 @@ export interface PublicUser {
   role: UserRole;
   modules: string[];
   capabilities: CapabilityId[];
+  alertPrefs: AlertPrefId[];
   active: boolean;
   canEdit: boolean;
 }
@@ -48,6 +56,8 @@ interface UserPayload {
   modules: string[];
   /** Opcional en filas antiguas → []. */
   capabilities?: string[];
+  /** Opcional en filas antiguas → []. */
+  alert_prefs?: string[];
   active: boolean;
   updated_at: string;
 }
@@ -76,6 +86,7 @@ export function toPublicUser(row: DashboardUserRow): PublicUser {
     role: row.role,
     modules: row.role === 'admin' ? ['*'] : row.modules || [],
     capabilities: row.role === 'admin' ? [] : row.capabilities || [],
+    alertPrefs: row.role === 'admin' ? [] : row.alert_prefs || [],
     active: row.active,
     canEdit,
   };
@@ -107,6 +118,7 @@ function recordToUser(r: {
     role: p.role === 'admin' ? 'admin' : 'viewer',
     modules: Array.isArray(p.modules) ? p.modules : [],
     capabilities: normalizeCapabilities(p.capabilities),
+    alert_prefs: normalizeAlertPrefs(p.alert_prefs),
     active: p.active !== false,
     created_at: r.date || p.updated_at,
     updated_at: p.updated_at || r.date || new Date().toISOString(),
@@ -155,6 +167,7 @@ export async function createUser(input: {
   role: UserRole;
   modules: string[];
   capabilities?: CapabilityId[];
+  alertPrefs?: AlertPrefId[];
   active?: boolean;
 }): Promise<DashboardUserRow> {
   const username = input.username.trim().toLowerCase();
@@ -167,6 +180,8 @@ export async function createUser(input: {
     input.role === 'admin'
       ? []
       : normalizeCapabilities(input.capabilities ?? []);
+  const alert_prefs =
+    input.role === 'admin' ? [] : normalizeAlertPrefs(input.alertPrefs ?? []);
   const payload: UserPayload = {
     username,
     display_name: input.displayName?.trim() || null,
@@ -175,6 +190,7 @@ export async function createUser(input: {
     role: input.role,
     modules: input.role === 'admin' ? ['*'] : input.modules,
     capabilities,
+    alert_prefs,
     active: input.active !== false,
     updated_at: now,
   };
@@ -209,6 +225,7 @@ export async function updateUser(
     role?: UserRole;
     modules?: string[];
     capabilities?: CapabilityId[];
+    alertPrefs?: AlertPrefId[];
     active?: boolean;
   }
 ): Promise<DashboardUserRow> {
@@ -259,6 +276,13 @@ export async function updateUser(
         ? normalizeCapabilities(patch.capabilities)
         : current.capabilities;
 
+  const alert_prefs =
+    role === 'admin'
+      ? []
+      : patch.alertPrefs !== undefined
+        ? normalizeAlertPrefs(patch.alertPrefs)
+        : current.alert_prefs;
+
   const plain =
     patch.password !== undefined
       ? patch.password.trim() || undefined
@@ -275,6 +299,7 @@ export async function updateUser(
     role,
     modules,
     capabilities,
+    alert_prefs,
     active: patch.active !== undefined ? patch.active : current.active,
     updated_at: new Date().toISOString(),
   };
@@ -307,6 +332,7 @@ export async function findUserById(id: string): Promise<DashboardUserRow | null>
 /**
  * Migración suave: marca staff.corte en roman/roberto y vincula
  * hr_employees.suite_username si aún está vacío. Idempotente.
+ * También siembra alerta de horario próxima semana en roman/roberto/juan/david.
  */
 export async function ensureStaffCorteCapabilitySeed(): Promise<void> {
   const users = await listUsers();
@@ -316,6 +342,18 @@ export async function ensureStaffCorteCapabilitySeed(): Promise<void> {
     if (!row.capabilities.includes('staff.corte')) {
       await updateUser(row.id, {
         capabilities: [...row.capabilities, 'staff.corte'],
+      });
+    }
+  }
+
+  // Releer: el seed de alertas no debe pisar capabilities recién escritas.
+  const usersForAlerts = await listUsers();
+  for (const uname of HR_NEXT_WEEK_SCHEDULE_ALERT_SEED_USERNAMES) {
+    const row = usersForAlerts.find((u) => u.username === uname);
+    if (!row || row.role === 'admin') continue;
+    if (!row.alert_prefs.includes('hr.next_week_schedule')) {
+      await updateUser(row.id, {
+        alertPrefs: [...row.alert_prefs, 'hr.next_week_schedule'],
       });
     }
   }

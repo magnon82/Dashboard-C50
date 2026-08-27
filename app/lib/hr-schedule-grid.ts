@@ -23,7 +23,74 @@ import {
   timeRangesOverlap,
 } from '@/app/lib/hr-puestos';
 import { personAlreadyPresent } from '@/app/lib/hr-person-match';
-import { sumShiftHours } from '@/app/lib/hr-schedule-propose';
+import {
+  sumShiftHours,
+  TARGET_WEEKLY_HOURS,
+} from '@/app/lib/hr-schedule-propose';
+
+/** Meta semanal (MX jornada): exactamente 48.0 h = OK; ≠48 alerta. */
+export { TARGET_WEEKLY_HOURS };
+
+export type RowHoursStatus = 'empty' | 'ok' | 'under' | 'over';
+
+export type RowHoursTone = {
+  status: RowHoursStatus;
+  /** Horas redondeadas a 1 decimal (misma regla que formatRowHours). */
+  hours: number;
+  label: string;
+  /** Clases / estilos para resaltar la celda `h`. */
+  className: string;
+  style: { color: string; backgroundColor?: string };
+  title: string;
+};
+
+/**
+ * Clasifica horas de la fila vs 48 h.
+ * empty (0 / —) no alerta; 48.0 = ok; &lt;48 under; &gt;48 over (extras).
+ */
+export function classifyRowHours(hours: number): RowHoursTone {
+  const rounded = Math.round(hours * 10) / 10;
+  if (rounded <= 0) {
+    return {
+      status: 'empty',
+      hours: 0,
+      label: '—',
+      className: 'text-xs font-semibold tabular-nums',
+      style: { color: '#64748b' },
+      title: 'Sin horas asignadas',
+    };
+  }
+  if (rounded === TARGET_WEEKLY_HOURS) {
+    return {
+      status: 'ok',
+      hours: rounded,
+      label: rounded.toFixed(1),
+      className: 'text-xs font-bold tabular-nums',
+      style: { color: '#065f46', backgroundColor: '#ecfdf5' },
+      title: `${rounded.toFixed(1)} h · jornada completa (${TARGET_WEEKLY_HOURS} h)`,
+    };
+  }
+  if (rounded < TARGET_WEEKLY_HOURS) {
+    const deficit = Math.round((TARGET_WEEKLY_HOURS - rounded) * 10) / 10;
+    return {
+      status: 'under',
+      hours: rounded,
+      label: rounded.toFixed(1),
+      className: 'text-xs font-bold tabular-nums',
+      style: { color: '#9a3412', backgroundColor: '#ffedd5' },
+      title: `${rounded.toFixed(1)} h · faltan ${deficit} h para ${TARGET_WEEKLY_HOURS} h`,
+    };
+  }
+  const extra = Math.round((rounded - TARGET_WEEKLY_HOURS) * 10) / 10;
+  return {
+    status: 'over',
+    hours: rounded,
+    label: rounded.toFixed(1),
+    className: 'text-xs font-bold tabular-nums',
+    style: { color: '#9f1239', backgroundColor: '#ffe4e6' },
+    title: `${rounded.toFixed(1)} h · ${extra} h extras (excede ${TARGET_WEEKLY_HOURS} h)`,
+  };
+}
 
 export const DAY_HEADERS = [
   'Lun',
@@ -730,6 +797,11 @@ export function rowHours(row: PersonRow): number {
 
 export function formatRowHours(hours: number): string {
   return hours > 0 ? hours.toFixed(1) : '—';
+}
+
+/** Tonos de la columna `h` a partir de la fila (edición y consulta). */
+export function rowHoursTone(row: PersonRow): RowHoursTone {
+  return classifyRowHours(rowHours(row));
 }
 
 export function rowHasDualShifts(row: PersonRow): boolean {

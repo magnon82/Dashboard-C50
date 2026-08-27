@@ -5,6 +5,7 @@ import { SUITE } from '@/app/lib/themes';
 export type RrhhSection =
   | 'plantilla'
   | 'horarios'
+  | 'asistencia'
   | 'nomina'
   | 'vacaciones'
   | 'cumpleanos'
@@ -13,6 +14,7 @@ export type RrhhSection =
 const SECTIONS: { id: RrhhSection; label: string }[] = [
   { id: 'plantilla', label: 'Plantilla' },
   { id: 'horarios', label: 'Horarios' },
+  { id: 'asistencia', label: 'Asistencia' },
   { id: 'nomina', label: 'Nómina' },
   { id: 'vacaciones', label: 'Vacaciones' },
   { id: 'cumpleanos', label: 'Cumpleaños' },

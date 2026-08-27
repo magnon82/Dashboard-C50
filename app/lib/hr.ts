@@ -148,6 +148,8 @@ export type HrSummaryKpis = {
   /** Empleados con days_remaining ≤ umbral (año en curso). */
   leaveLowBalance: number;
   leaveLowThreshold: number;
+  /** Vacaciones (pendiente/aprobada) que inician en ≤2 días hábiles. */
+  leaveUpcoming: number;
 };
 
 /** Alertas accionables del Tablero RR.HH. */
@@ -155,7 +157,13 @@ export type HrSummaryAlert = {
   id: string;
   severity: 'warn' | 'info';
   message: string;
-  go?: 'vacaciones' | 'horarios' | 'expedientes' | 'resguardos' | 'plantilla';
+  go?:
+    | 'vacaciones'
+    | 'horarios'
+    | 'expedientes'
+    | 'resguardos'
+    | 'plantilla'
+    | 'asistencia';
 };
 
 export type HrAvailabilityKind =

@@ -23,6 +23,11 @@ import {
   normalizeCapabilities,
   type CapabilityId,
 } from '@/app/lib/capabilities';
+import {
+  ALERT_PREF_IDS,
+  normalizeAlertPrefs,
+  type AlertPrefId,
+} from '@/app/lib/alert-prefs';
 
 export const runtime = 'nodejs';
 
@@ -55,6 +60,7 @@ export async function PATCH(
     role?: UserRole;
     modules?: string[];
     capabilities?: string[];
+    alertPrefs?: string[];
     active?: boolean;
     /** Vincular a hr_employees.id; null limpia el enlace. */
     employeeId?: string | null;
@@ -122,6 +128,13 @@ export async function PATCH(
         )
       : undefined;
 
+  const alertPrefs: AlertPrefId[] | undefined =
+    body.alertPrefs !== undefined
+      ? normalizeAlertPrefs(
+          body.alertPrefs.filter((p) => ALERT_PREF_IDS.has(p))
+        )
+      : undefined;
+
   try {
     const before = await findUserById(id);
     if (!before) {
@@ -137,6 +150,7 @@ export async function PATCH(
       role,
       modules,
       capabilities,
+      alertPrefs,
       active: body.active,
     });
     const finalUsername = user.username.trim().toLowerCase();
@@ -272,6 +286,7 @@ export async function PATCH(
         role: pub.role,
         modules: user.modules || [],
         capabilities: pub.capabilities,
+        alertPrefs: pub.alertPrefs,
         active: pub.active,
         canEdit: pub.canEdit,
         password: user.password,

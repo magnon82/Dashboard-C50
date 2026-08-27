@@ -34,15 +34,17 @@ import {
   comparePersonRows,
   cycleDayAbsence,
   emptyDay,
-  formatRowHours,
+  classifyRowHours,
   isVacationDay,
   personRowKey,
   resolveRowSection,
   rowDayHasOverlapConflict,
   rowHasDualShifts,
   rowHours,
+  rowHoursTone,
   rowsToShifts,
   serializeGrid,
+  TARGET_WEEKLY_HOURS,
   vacationDay,
   type DayCell,
   type DualRoleTrack,
@@ -181,6 +183,17 @@ export function RrhhHorarios() {
       ) / 10,
     [rows]
   );
+
+  const hoursAlerts = useMemo(() => {
+    let under = 0;
+    let over = 0;
+    for (const r of rows) {
+      const s = classifyRowHours(rowHours(r)).status;
+      if (s === 'under') under += 1;
+      if (s === 'over') over += 1;
+    }
+    return { under, over };
+  }, [rows]);
 
   const shiftCount = useMemo(
     () =>
@@ -1329,6 +1342,8 @@ export function RrhhHorarios() {
                   {' · '}
                   {shiftCount} turnos ·{' '}
                   {totalHours > 0 ? `${totalHours} h` : '0 h'}
+                  {' · '}
+                  meta {TARGET_WEEKLY_HOURS} h/persona
                 </span>
                 {pastLocked && (
                   <span className="text-xs font-semibold text-slate-600">
@@ -1405,6 +1420,35 @@ export function RrhhHorarios() {
               />
 
               {/* Grilla Excel (escritorio) */}
+              {(hoursAlerts.under > 0 || hoursAlerts.over > 0) && (
+                <div
+                  className="rounded-xl border px-3 py-2 text-sm"
+                  style={{
+                    borderColor: '#fdba74',
+                    backgroundColor: '#fff7ed',
+                    color: '#9a3412',
+                  }}
+                  role="status"
+                >
+                  <span className="font-semibold">Horas ≠ {TARGET_WEEKLY_HOURS}: </span>
+                  {hoursAlerts.under > 0 && (
+                    <span>
+                      {hoursAlerts.under} bajo jornada
+                      {hoursAlerts.over > 0 ? ' · ' : ''}
+                    </span>
+                  )}
+                  {hoursAlerts.over > 0 && (
+                    <span>
+                      {hoursAlerts.over} con extras (excedente = horas extras)
+                    </span>
+                  )}
+                  <span className="block text-xs mt-0.5 opacity-90">
+                    Columna h: verde = {TARGET_WEEKLY_HOURS}.0 · naranja = menos ·
+                    rosa = más (edición y consulta).
+                  </span>
+                </div>
+              )}
+
               <div
                 className="hidden overflow-x-auto rounded-xl bg-white lg:block"
                 style={{ boxShadow: SUITE.shadow }}
@@ -1432,7 +1476,7 @@ export function RrhhHorarios() {
                       ))}
                       <th
                         className="border-l border-white/20 px-2 py-2 text-center text-xs font-bold"
-                        title="Horas asignadas = suma de Ent/Sal de la semana (solo lectura / fórmula)"
+                        title={`Horas Lun–Dom vs meta ${TARGET_WEEKLY_HOURS} h (≠ alerta; &gt;${TARGET_WEEKLY_HOURS} = extras)`}
                       >
                         h
                       </th>
@@ -1518,8 +1562,8 @@ export function RrhhHorarios() {
 
               <p className="text-xs" style={{ color: theme.muted }}>
                 {pastLocked
-                  ? 'Semana pasada: solo consulta. No se pueden editar Ent./Sal. La columna h suma las horas de los turnos.'
-                  : 'Hoy y días futuros editables (CDMX). D = descanso · V = vacaciones · ciclo en la barra D→V→turno. Columna h = horas (nocturnos cruzan medianoche). Guardar aparece con cambios; en curso publica al guardar.'}
+                  ? `Semana pasada: solo consulta. Columna h = horas Lun–Dom (verde ${TARGET_WEEKLY_HOURS}.0 · naranja menos · rosa extras).`
+                  : `Hoy y días futuros editables (CDMX). D = descanso · V = vacaciones · ciclo en la barra D→V→turno. Columna h = horas vs ${TARGET_WEEKLY_HOURS} h (nocturnos cruzan medianoche). Guardar aparece con cambios; en curso publica al guardar.`}
               </p>
 
               {/* Acciones fijas en celular: siempre al alcance del pulgar */}
@@ -1879,18 +1923,24 @@ function AreaFragment({
               </Fragment>
             );
           })}
-          <td
-            className="border-l border-slate-100 px-2 py-1 text-center text-xs font-semibold tabular-nums select-none"
-            style={{ color: theme.muted }}
-            aria-readonly="true"
-            title={
-              rowHasDualShifts(p)
-                ? 'Horas asignadas (fórmula: suma Ent/Sal, incl. turnos duales del mismo día)'
-                : 'Horas asignadas (fórmula: suma Ent/Sal de la semana)'
-            }
-          >
-            {formatRowHours(rowHours(p))}
-          </td>
+          {(() => {
+            const tone = rowHoursTone(p);
+            const dualHint = rowHasDualShifts(p)
+              ? ' · incl. turnos duales del mismo día'
+              : '';
+            return (
+              <td
+                className={`border-l border-slate-100 px-1.5 py-1 text-center select-none ${tone.className}`}
+                style={tone.style}
+                aria-readonly="true"
+                title={`${tone.title}${dualHint}`}
+              >
+                <span className="inline-block min-w-[2.5rem] rounded-md px-1.5 py-0.5">
+                  {tone.label}
+                </span>
+              </td>
+            );
+          })()}
         </tr>
       ))}
     </>

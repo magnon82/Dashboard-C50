@@ -9,6 +9,14 @@ import {
   type HrSummaryKpis,
 } from '@/app/lib/hr';
 import { listLeaveRenewalAlerts } from '@/app/lib/hr-leave-accrual';
+import {
+  buildLeaveUpcomingSummaryAlerts,
+  listLeaveUpcomingAlerts,
+} from '@/app/lib/hr-leave-upcoming-alerts';
+import {
+  buildNextWeekScheduleSummaryAlerts,
+  evaluateNextWeekScheduleAlert,
+} from '@/app/lib/hr-next-week-schedule-alert';
 import { mondayOfWeek } from '@/app/lib/hr-schedule-propose';
 import { resolvePlantillaVigente } from '@/app/lib/hr-plantilla';
 
@@ -29,6 +37,7 @@ const emptyKpis: HrSummaryKpis = {
   currentWeekPublished: false,
   leaveLowBalance: 0,
   leaveLowThreshold: HR_LEAVE_LOW_THRESHOLD,
+  leaveUpcoming: 0,
 };
 
 /**
@@ -180,6 +189,7 @@ export async function GET() {
       currentWeekPublished,
       leaveLowBalance: leaveLowCount,
       leaveLowThreshold: HR_LEAVE_LOW_THRESHOLD,
+      leaveUpcoming: 0,
     };
 
     const alerts: HrSummaryAlert[] = [];
@@ -190,6 +200,16 @@ export async function GET() {
         message: `${leavePendingCount} solicitud(es) de vacaciones por aprobar`,
         go: 'vacaciones',
       });
+    }
+
+    try {
+      const upcoming = await listLeaveUpcomingAlerts(sb, { limit: 40 });
+      if (!upcoming.schemaMissing && upcoming.rows.length > 0) {
+        kpis.leaveUpcoming = upcoming.rows.length;
+        alerts.push(...buildLeaveUpcomingSummaryAlerts(upcoming.rows));
+      }
+    } catch {
+      // Soft: no bloquear tablero
     }
     if (resguardoCount > 0) {
       alerts.push({
@@ -207,6 +227,37 @@ export async function GET() {
         go: 'horarios',
       });
     }
+
+    try {
+      const nextWeek = await evaluateNextWeekScheduleAlert(sb);
+      alerts.push(...buildNextWeekScheduleSummaryAlerts(nextWeek));
+    } catch {
+      // Soft
+    }
+
+    try {
+      const { data: lastAtt } = await sb
+        .from('hr_attendance_reports')
+        .select('id, week_start, week_number, punch_count, created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastAtt?.id) {
+        const weekLabel =
+          lastAtt.week_number != null
+            ? `sem ${lastAtt.week_number}`
+            : String(lastAtt.week_start).slice(0, 10);
+        alerts.push({
+          id: 'attendance-latest',
+          severity: 'info',
+          message: `Último reporte biométrico: ${weekLabel} (${lastAtt.punch_count} checadas)`,
+          go: 'asistencia',
+        });
+      }
+    } catch {
+      // Schema opcional hr_attendance.sql
+    }
+
     if (draftWeeks > 0) {
       alerts.push({
         id: 'schedule-draft',

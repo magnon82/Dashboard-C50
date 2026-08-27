@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
 import { InstallAppPrompt } from '@/app/components/InstallAppPrompt';
+import { PersonalAlertsBanner } from '@/app/components/PersonalAlertsBanner';
 import {
   calmNoAlert,
   formatEventosHubAlert,
@@ -227,6 +228,8 @@ export default function HubPage() {
       <p className="mb-6 max-w-2xl text-sm" style={{ color: theme.muted }}>
         Elige un módulo.
       </p>
+
+      {!loading && user ? <PersonalAlertsBanner /> : null}
 
       {loading ? (
         <p style={{ color: theme.muted }}>Cargando módulos…</p>
