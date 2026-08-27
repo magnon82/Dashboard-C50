@@ -1,5 +1,19 @@
 -- Notas operativas por día/colaborador en horarios (+ alertas en /rrhh y /staff/horario).
--- Ejecutar en Supabase SQL Editor si aún no existen las tablas.
+-- Requiere que ya existan hr_schedule_weeks y hr_employees (supabase/hr_module.sql).
+-- Si falla con «relation does not exist»: confirma que el SQL Editor está en el
+-- mismo proyecto Supabase que usa Vercel (NEXT_PUBLIC_SUPABASE_URL).
+
+do $$
+begin
+  if to_regclass('public.hr_schedule_weeks') is null then
+    raise exception
+      'Falta public.hr_schedule_weeks. Ejecuta primero supabase/hr_module.sql en ESTE proyecto, o cambia al proyecto donde ya funcionan los Horarios.';
+  end if;
+  if to_regclass('public.hr_employees') is null then
+    raise exception
+      'Falta public.hr_employees. Ejecuta primero supabase/hr_module.sql en ESTE proyecto.';
+  end if;
+end $$;
 
 create table if not exists public.hr_schedule_cell_notes (
   id uuid primary key default gen_random_uuid(),
