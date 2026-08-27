@@ -1,5 +1,5 @@
 /* C50 Suite service worker — offline + Web Push (ícono C50). */
-const CACHE = 'c50-suite-offline-v2';
+const CACHE = 'c50-suite-offline-v3';
 const OFFLINE_URL = '/offline.html';
 const ICON = '/icons/icon-192.png';
 
@@ -21,6 +21,12 @@ self.addEventListener('activate', (event) => {
       )
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', (event) => {
