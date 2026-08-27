@@ -745,7 +745,7 @@ export default function AdminPage() {
                 Alertas que recibe
               </legend>
               <p className="mt-1 text-xs text-slate-500">
-                Al abrir la app (y push más adelante). Admin recibe todas.
+                Al abrir la app (y push con ícono C50). Admin recibe todas.
               </p>
               <div className="mt-2 space-y-2">
                 {APP_ALERT_PREFS.map((p) => (

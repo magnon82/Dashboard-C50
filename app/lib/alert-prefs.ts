@@ -4,7 +4,7 @@
  * Admin recibe todas; viewers solo las marcadas.
  */
 
-export type AlertPrefId = 'hr.next_week_schedule';
+export type AlertPrefId = 'hr.next_week_schedule' | 'hr.leave_upcoming';
 
 export type AppAlertPref = {
   id: AlertPrefId;
@@ -19,8 +19,15 @@ export const APP_ALERT_PREFS: AppAlertPref[] = [
     id: 'hr.next_week_schedule',
     label: 'Horario próxima semana (viernes)',
     hint:
-      'Vie–dom CDMX: avisa si la semana siguiente no existe o está en borrador (crear / publicar).',
+      'Vie–dom CDMX: avisa si la semana siguiente no existe o está en borrador (crear / publicar). Push + banner al abrir la app.',
     moduleHint: 'rrhh / staff',
+  },
+  {
+    id: 'hr.leave_upcoming',
+    label: 'Vacaciones en ≤2 días hábiles',
+    hint:
+      'Avisa cuando alguien (pendiente o aprobada) inicia vacaciones pronto. Ideal para RH.',
+    moduleHint: 'rrhh',
   },
 ];
 

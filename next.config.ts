@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // tesseract.js / sharp usan binarios nativos — no bundlear en el server chunk
-  serverExternalPackages: ["tesseract.js", "sharp"],
+  serverExternalPackages: ["tesseract.js", "sharp", "web-push"],
   // tesseract.js arranca su worker con `new Worker(<ruta>)`: el tracer copia ese
   // archivo de entrada pero no sigue sus require(), así que en Vercel el worker
   // moría con MODULE_NOT_FOUND. Sin listener de 'error' (tesseract.js usa

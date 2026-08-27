@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { BrandLogo } from '@/app/components/BrandLogo';
 import { InstallAppPrompt } from '@/app/components/InstallAppPrompt';
+import { PushPermissionPrompt } from '@/app/components/PushPermissionPrompt';
 import { APP_MODULES, isSingleSharedModule } from '@/app/lib/modules';
 import { PRODUCT_CLUSTER } from '@/app/lib/product';
 import { canSeeModule, canSeeAdmin, useSession } from '@/app/lib/useSession';
@@ -197,6 +198,8 @@ export function SuiteShell({ title, subtitle, children, actions }: Props) {
           </header>
 
           <div className="flex-1">{children}</div>
+
+          <PushPermissionPrompt />
 
           {/* Usuarios de un solo tablero no ven el hub; CTA de instalar app al pie */}
           {!loading && user && isSingleSharedModule(user.modules) ? (

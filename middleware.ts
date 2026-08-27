@@ -46,7 +46,10 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/api/eventos/quotes/public/') ||
     pathname === '/reservar' ||
     pathname.startsWith('/reservar/') ||
-    pathname.startsWith('/api/reservas')
+    pathname.startsWith('/api/reservas') ||
+    // Cron Vercel → Bearer CRON_SECRET (auth en la ruta)
+    pathname === '/api/push/dispatch' ||
+    pathname.startsWith('/api/push/dispatch/')
   ) {
     return NextResponse.next();
   }
