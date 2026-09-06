@@ -8,10 +8,15 @@ import {
 } from '@/app/lib/hr';
 import {
   docAlertSummary,
+  HR_CONTRACT_ALERT,
   HR_REQUIRED_DOC_TYPES,
   missingRequiredDocs,
   type HrDocAlertSummary,
 } from '@/app/lib/hr-employee-profile';
+import {
+  CONTRACT_DOC_TYPE_PREFIX,
+  isContractDocType,
+} from '@/app/lib/hr-employee-contracts';
 import { resolvePlantillaVigente } from '@/app/lib/hr-plantilla';
 import {
   expedientePullSourceAvailable,
@@ -352,6 +357,41 @@ export async function GET(request: Request) {
       else byEmp.set(r.employee_id, [r]);
     }
 
+    /** Empleados con al menos un contrato (tabla o docs contrato__*). */
+    const hasContract = new Set<string>();
+    {
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        const { data: contracts, error: cErr } = await sb
+          .from('hr_employee_contracts')
+          .select('employee_id, storage_path')
+          .in('employee_id', chunk);
+        if (!cErr && contracts) {
+          for (const row of contracts) {
+            const eid = String(
+              (row as { employee_id: string }).employee_id || ''
+            );
+            const path = (row as { storage_path?: string | null }).storage_path;
+            if (eid && path) hasContract.add(eid);
+          }
+        }
+        const { data: docContracts } = await sb
+          .from('hr_employee_documents')
+          .select('employee_id, doc_type, status, storage_path')
+          .in('employee_id', chunk)
+          .or(
+            `doc_type.eq.contrato,doc_type.like.${CONTRACT_DOC_TYPE_PREFIX}%`
+          );
+        for (const row of docContracts || []) {
+          const r = row as DocRow;
+          if (!isContractDocType(r.doc_type)) continue;
+          if (r.storage_path && r.status !== 'rejected') {
+            hasContract.add(r.employee_id);
+          }
+        }
+      }
+    }
+
     const alerts: Record<string, HrDocAlertSummary> = {};
     let withMissing = 0;
     for (const id of ids) {
@@ -362,13 +402,21 @@ export async function GET(request: Request) {
       const summary = byEmp.has(id)
         ? docAlertSummary(byEmp.get(id))
         : emptyAlert();
+      if (!hasContract.has(id)) {
+        summary.missing = [...summary.missing, HR_CONTRACT_ALERT];
+        summary.missingCount = summary.missing.length;
+        summary.requiredTotal += 1;
+      }
       alerts[id] = summary;
       if (summary.missingCount > 0) withMissing += 1;
     }
 
     return NextResponse.json({
       ready: true,
-      requiredTypes: requiredMeta,
+      requiredTypes: [
+        ...requiredMeta,
+        { id: HR_CONTRACT_ALERT.id, title: HR_CONTRACT_ALERT.title },
+      ],
       alerts,
       count: ids.length,
       withMissing,

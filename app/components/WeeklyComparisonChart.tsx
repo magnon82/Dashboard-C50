@@ -17,7 +17,6 @@ export const YEAR_HEX: Record<number, string> = {
   2024: '#0F9F9C', // teal
   2023: '#D64545', // coral
   2022: '#6B5CE7', // violeta
-  2021: '#5B7C99', // azul grisáceo
 };
 
 export function colorForYear(year: number): string {

@@ -698,7 +698,7 @@ export function compareEstadoVsPresupuesto(
 }
 
 /** Floor for presupuesto / flujo years present in the suite. */
-export const MIN_ESTADO_YEAR = 2020;
+export const MIN_ESTADO_YEAR = 2022;
 
 /** Allow current calendar year + 1 (enero corte); reject ingest bugs like week 325 → 2029. */
 export function maxEstadoYear(now = new Date()): number {

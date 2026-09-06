@@ -221,9 +221,32 @@ export function getMenusVigentesRoot(): string {
   return path.join(getEventosRoot(), 'Menús', 'Menús eventos vigentes');
 }
 
+/** PDFs en el repo (Vercel / sin Drive File Stream). Stem normalizado → archivo. */
+const REPO_PDF_BY_STEM: Record<string, string> = {
+  'menu 3 tiempos 2025': 'menu-3-tiempos-2025.pdf',
+  'menu desayunos 2025': 'menu-desayunos-2025.pdf',
+  'barra libre eventos 2025': 'barra-libre-eventos-2025.pdf',
+  'menu c50 esp': 'menu-c50-esp.pdf',
+};
+
+/** Carpeta de menús empaquetados en el deploy (`docs/eventos-menus`). */
+export function getBibliotecaRepoMenusDir(): string {
+  return path.join(process.cwd(), 'docs', 'eventos-menus');
+}
+
+/** Si hay copia en repo para este filename de Drive, devuelve la ruta absoluta. */
+export function resolveBibliotecaRepoPdf(filename: string): string | null {
+  const repoName = REPO_PDF_BY_STEM[normalizeBibliotecaStem(filename)];
+  if (!repoName) return null;
+  const full = path.join(getBibliotecaRepoMenusDir(), repoName);
+  return existsSync(full) ? full : null;
+}
+
 /** Raíces permitidas para listar / abrir. */
 export function getBibliotecaAllowedRoots(): string[] {
-  return [getEventosRoot(), getMenuC50Root()].filter(Boolean);
+  return [getEventosRoot(), getMenuC50Root(), getBibliotecaRepoMenusDir()].filter(
+    Boolean
+  );
 }
 
 export function isUnderBibliotecaRoots(filePath: string): boolean {
@@ -428,7 +451,7 @@ async function collectFromDir(
   return items;
 }
 
-/** Catálogo conocido cuando Drive no está montado (sin Abrir). */
+/** Catálogo conocido cuando Drive no está montado (Abrir vía PDFs del repo si existen). */
 export function bibliotecaSeedItems(): BibliotecaItem[] {
   const eventos = getEventosRoot();
   const vigentes = getMenusVigentesRoot();
@@ -460,7 +483,8 @@ export function bibliotecaSeedItems(): BibliotecaItem[] {
   return rows
     .filter((r) => !isExcludedBibliotecaStem(r.filename))
     .map((r) => {
-      const full = path.join(r.dir, r.filename);
+      const repoPdf = resolveBibliotecaRepoPdf(r.filename);
+      const full = repoPdf || path.join(r.dir, r.filename);
       const category = classifyByPath(full, r.filename, eventos);
       return toItem({
         filename: r.filename,
@@ -468,7 +492,7 @@ export function bibliotecaSeedItems(): BibliotecaItem[] {
         eventosRoot: eventos,
         category,
         mtimeMs: 0,
-        openable: false,
+        openable: Boolean(repoPdf),
         source: 'seed',
       });
     });

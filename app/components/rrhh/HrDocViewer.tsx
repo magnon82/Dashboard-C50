@@ -265,15 +265,17 @@ export function HrDocViewer({
           ) : null}
           {canDownload ? (
             <>
-              <a
-                href={openUrl(current.path, false)}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg px-2.5 py-1.5 text-xs font-bold text-white"
-                style={{ backgroundColor: SUITE.orangeDeep }}
-              >
-                Abrir
-              </a>
+              {!isPdf ? (
+                <a
+                  href={openUrl(current.path, false)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg px-2.5 py-1.5 text-xs font-bold text-white"
+                  style={{ backgroundColor: SUITE.orangeDeep }}
+                >
+                  Abrir
+                </a>
+              ) : null}
               <a
                 href={openUrl(current.path, true)}
                 className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"

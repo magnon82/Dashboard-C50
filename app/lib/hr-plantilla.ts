@@ -3,8 +3,9 @@
  * 1) Última nómina conciliada (pagado → cerrado) con líneas → empleados
  * 2) Personas con turnos reales (no solo DESCANSO) en la última semana de
  *    horarios (último `publicado`, si no la última semana completada con turnos)
- * 3) Vista SQL hr_plantilla_vigente (mismo criterio de nómina) + (2)
- * 4) Seed local NOMINA C50 2026 (opcional, allowSeed / scripts) + (2)
+ * 3) Altas manuales (`force_include`) aunque aún no estén en nómina ni horarios
+ * 4) Vista SQL hr_plantilla_vigente (mismo criterio de nómina) + (2)+(3)
+ * 5) Seed local NOMINA C50 2026 (opcional, allowSeed / scripts) + (2)+(3)
  *
  * Match de horarios: `hr_schedule_shifts.employee_id` (creados/matcheados por
  * nombre en el import via `matchEmployeeId`); si hace falta, `ensureEmployeesFromNames`.
@@ -854,12 +855,21 @@ async function resolvePlantillaVigenteUncached(
 
   const scheduleEmployees = await scheduleBuildP;
 
+  // Altas (`force_include`) siempre entran, aunque la fuente sea solo horarios
+  // o aún no haya nómina (sin esto la alta no llega a plantilla ni a filas).
+  const forceIncludeRaw = await selectEmployees(sb, { forceIncludeOnly: true });
+  const forceInclude = forceIncludeRaw.map((e) =>
+    e.plantilla_origen
+      ? e
+      : { ...e, plantilla_origen: 'force_include' as const }
+  );
+
   const employees = mergePlantillaEmployees(
-    nominaEmployees,
+    mergePlantillaEmployees(nominaEmployees, forceInclude),
     scheduleEmployees
   );
 
-  const hasNomina = nominaEmployees.length > 0;
+  const hasNomina = nominaEmployees.length > 0 || forceInclude.length > 0;
   const hasSchedule = scheduleEmployees.length > 0;
   const source = pickSource(hasNomina, hasSchedule, nominaKind);
 

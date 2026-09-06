@@ -11,6 +11,8 @@ Uso:
   python sync_hr_drive_cloud.py --dry-run
 
 Secrets: NEXT_PUBLIC_SUPABASE_URL (o SUPABASE_URL) + SUPABASE_SERVICE_ROLE_KEY.
+
+Requisito SQL (una vez): supabase/hr_drive_sync.sql → tabla hr_drive_sync_state.
 """
 
 from __future__ import annotations
@@ -37,6 +39,11 @@ CONTENT_DEFS: list[tuple[str, str, str]] = [
     ("base_datos_personal", "BASE DATOS PERSONAL C50.xlsx", "hr_employees"),
 ]
 
+SCHEMA_HINT = (
+    "Ejecuta en SQL Editor de Supabase el archivo supabase/hr_drive_sync.sql "
+    "(crea public.hr_drive_sync_state)."
+)
+
 
 def _client():
     url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL")
@@ -48,12 +55,21 @@ def _client():
     return create_client(url, key)
 
 
+def _is_missing_sync_table(err: object) -> bool:
+    text = str(err).lower()
+    return "hr_drive_sync_state" in text and (
+        "pgrst205" in text
+        or "could not find the table" in text
+        or "schema cache" in text
+        or "does not exist" in text
+    )
+
+
 def _count(sb, table: str, content_type: str) -> tuple[int | None, str]:
     """Return (count, message)."""
     try:
         q = sb.table(table).select("id", count="exact")
         if content_type == "expedientes":
-            # Índices con path Drive vinculados
             q = q.not_.is_("drive_folder_path", "null")
         elif content_type == "biblioteca":
             q = q.eq("active", True)
@@ -76,12 +92,15 @@ def main() -> None:
         "Nota: sin File Stream. Full refresh de carpetas/xlsx = PC admin o /api/hr/sync."
     )
 
-    failed = 0
+    count_failed = 0
+    upsert_failed = 0
+    schema_missing = False
+
     for content_type, label, table in CONTENT_DEFS:
         count, message = _count(sb, table, content_type)
         status = "ok" if count is not None else "error"
         if count is None:
-            failed += 1
+            count_failed += 1
         print(f"  [{status}] {content_type}: {message}")
         if args.dry_run:
             continue
@@ -100,14 +119,31 @@ def main() -> None:
                 row, on_conflict="content_type"
             ).execute()
         except Exception as e:  # noqa: BLE001
-            failed += 1
+            upsert_failed += 1
             print(f"  !! upsert {content_type}: {e}")
-            print(
-                "     ¿Ejecutaste supabase/hr_drive_sync.sql en el proyecto?"
-            )
+            if _is_missing_sync_table(e):
+                schema_missing = True
+            print(f"     {SCHEMA_HINT}")
 
-    if failed:
-        raise SystemExit(f"RH soft-sync: {failed} error(es)")
+    if schema_missing:
+        # Inventario hr_* ya se verificó; el fallo es solo el heartbeat.
+        # No marcar el job rojo cada día (email spam) — aviso Action + exit 0.
+        print(f"\n::warning::{SCHEMA_HINT}")
+        if count_failed == 0:
+            print(
+                "Inventario RH OK; heartbeat omitido hasta crear hr_drive_sync_state."
+            )
+            print("RH Drive soft-sync completo (sin heartbeat).")
+            return
+        raise SystemExit(
+            f"RH soft-sync: {count_failed} error(es) de inventario + tabla sync ausente"
+        )
+
+    if count_failed or upsert_failed:
+        raise SystemExit(
+            f"RH soft-sync: {count_failed + upsert_failed} error(es) "
+            f"(inventario={count_failed}, upsert={upsert_failed})"
+        )
     print("\nRH Drive soft-sync completo.")
 
 

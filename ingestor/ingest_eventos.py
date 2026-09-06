@@ -145,7 +145,7 @@ def extract_from_xlsx(path: Path) -> list[dict]:
 def find_eventos_sheets(years: list[int] | None) -> list[tuple[int, str]]:
     drive = drive_service()
     found: list[tuple[int, str]] = []
-    target_years = years or list(range(2021, datetime.now().year + 2))
+    target_years = years or list(range(2022, datetime.now().year + 2))
 
     for year in target_years:
         q = (

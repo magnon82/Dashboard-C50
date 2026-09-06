@@ -123,7 +123,9 @@ export default function FinanzasPage() {
     ]);
     ys.add(CURRENT_YEAR);
     if (ys.size === 0) ys.add(year);
-    return Array.from(ys).sort((a, b) => b - a);
+    return Array.from(ys)
+      .filter((y) => y >= 2022)
+      .sort((a, b) => b - a);
   }, [monthsAvailable, monthsWithSemanas, year]);
 
   const monthsWithData = useMemo(() => {

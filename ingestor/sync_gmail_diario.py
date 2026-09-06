@@ -20,9 +20,10 @@ Requiere ingestor/credentials.json + token.json (OAuth Gmail).
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
+
+from retry_run import run_with_retries
 
 BASE = Path(__file__).resolve().parent
 
@@ -31,9 +32,7 @@ DEFAULT_NEWER_THAN_DAYS = 90
 
 
 def run(script: str, extra: list[str]) -> int:
-    cmd = [sys.executable, str(BASE / script), *extra]
-    print(f"\n>>> {' '.join(cmd)}")
-    return subprocess.call(cmd, cwd=str(BASE))
+    return run_with_retries(script, extra, attempts=3, delay_sec=25.0)
 
 
 def main() -> None:

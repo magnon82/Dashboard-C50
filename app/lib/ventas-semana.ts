@@ -306,7 +306,7 @@ export function buildWeeklySalesByYear(
     const eventosByWeek = weeklyEventosFromRecords(records, y, fallback);
 
     if (y < INFOCAJA_YEAR_FROM) {
-      // 2021–2025: solo Acumulado ventas x semana
+      // 2022–2025: solo Acumulado ventas x semana
       ventasSemana.forEach((row) => {
         if (row.year !== y) return;
         const ev = eventosByWeek.get(row.week) ?? row.eventos;
@@ -780,7 +780,7 @@ function chequePctChange(
 }
 
 /**
- * Tabla mensual Personas / Cheque promedio para años seleccionados (2021+).
+ * Tabla mensual Personas / Cheque promedio para años seleccionados (2022+).
  * Filas ene–mesAsOf; YTD por año hasta el mismo mes de corte.
  * Var. % = primer año seleccionado (más reciente) vs el segundo.
  */
@@ -1115,7 +1115,7 @@ export function buildWeekToDateSales(
   const currentWeekNumber = acumuladoWeekForDate(today);
   // Año futuro o omitido → año en curso (semana actual WTD)
   const year =
-    opts?.year != null && opts.year >= 2021 && opts.year <= currentYear
+    opts?.year != null && opts.year >= 2022 && opts.year <= currentYear
       ? opts.year
       : currentYear;
   const prevYear = year - 1;

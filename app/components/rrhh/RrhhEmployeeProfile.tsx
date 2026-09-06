@@ -840,6 +840,8 @@ export function RrhhEmployeeProfile({
                               <a
                                 href={selectedContract.viewUrl}
                                 download
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
                               >
                                 Descargar

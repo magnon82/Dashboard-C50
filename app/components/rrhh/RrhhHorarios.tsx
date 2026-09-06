@@ -481,9 +481,11 @@ export function RrhhHorarios() {
       setWeekDetail(week);
       setSelectedId(week.id);
       const weekDates = weekDateList(week.week_start);
-      const seedPlantilla =
-        !isPastScheduleWeek(week.week_end || addIsoDays(week.week_start, 6)) &&
-        !isCurrentScheduleWeek(week.week_start);
+      // Sembrar plantilla en semanas editables (en curso + futuras) para que
+      // un alta reciente aparezca como fila con su puesto; pasadas = solo turnos.
+      const seedPlantilla = !isPastScheduleWeek(
+        week.week_end || addIsoDays(week.week_start, 6)
+      );
       let next = buildRowsFromShifts(emps, shifts, weekDates, {
         seedPlantilla,
       });
@@ -734,10 +736,9 @@ export function RrhhHorarios() {
         return;
       }
       if (json.week) setWeekDetail(json.week);
-      const seedPlantilla =
-        !isPastScheduleWeek(
-          weekDetail.week_end || addIsoDays(weekDetail.week_start, 6)
-        ) && !isCurrentScheduleWeek(weekDetail.week_start);
+      const seedPlantilla = !isPastScheduleWeek(
+        weekDetail.week_end || addIsoDays(weekDetail.week_start, 6)
+      );
       const next = buildRowsFromShifts(
         employees,
         json.shifts || shifts,

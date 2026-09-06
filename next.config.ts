@@ -25,6 +25,7 @@ const nextConfig: NextConfig = {
       "./node_modules/is-url/**",
       "./tessdata/spa.traineddata",
     ],
+    "/api/eventos/biblioteca": ["./docs/eventos-menus/**/*.pdf"],
   },
   async headers() {
     return [

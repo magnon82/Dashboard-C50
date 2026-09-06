@@ -6,6 +6,7 @@ import {
   filterControlClass,
   filterSelectClass,
 } from '@/app/components/SectionHeader';
+import { EventosManualSeguimiento } from '@/app/components/eventos/EventosManualSeguimiento';
 import { EventosPoliticaModal } from '@/app/components/eventos/EventosPoliticaModal';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import {
@@ -62,11 +63,173 @@ function isFeaturedDoc(it: BibliotecaItem) {
   );
 }
 
-/** Página in-app del Manual de seguimiento (no el .docx crudo). */
+/** Página dedicada del Manual (opcional; en biblioteca se consulta en modal). */
 export const MANUAL_SEGUIMIENTO_HREF = '/eventos/manual-seguimiento';
 
-function openUrl(filePath: string) {
-  return `/api/eventos/biblioteca?open=${encodeURIComponent(filePath)}`;
+function openUrl(filePath: string, download = false) {
+  const q = new URLSearchParams({ open: filePath });
+  if (download) q.set('download', '1');
+  return `/api/eventos/biblioteca?${q}`;
+}
+
+/** Modal de consulta PDF: iframe in-app, sin salir del módulo. */
+function EventosPdfConsultModal({
+  title,
+  path,
+  onClose,
+}: {
+  title: string;
+  path: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="eventos-pdf-title"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-900/45"
+        aria-label="Cerrar"
+        onClick={onClose}
+      />
+      <div
+        className="relative z-10 flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-[24px] bg-white sm:rounded-[24px]"
+        style={{ boxShadow: SUITE.shadow }}
+      >
+        <div
+          className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"
+          style={{ backgroundColor: '#F8FAFC' }}
+        >
+          <div className="min-w-0">
+            <p
+              className="text-[11px] font-bold uppercase tracking-[0.14em]"
+              style={{ color: theme.muted }}
+            >
+              Consulta en pantalla
+            </p>
+            <h2
+              id="eventos-pdf-title"
+              className="mt-1 text-lg font-bold leading-snug"
+              style={{ color: theme.title }}
+            >
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-xl px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-200/70"
+          >
+            Cerrar
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-2.5">
+          <a
+            href={openUrl(path, true)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Descargar
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto rounded-lg px-3 py-1.5 text-xs font-bold text-white"
+            style={{ backgroundColor: SUITE.navy }}
+          >
+            Listo
+          </button>
+        </div>
+        <iframe
+          title={title}
+          src={openUrl(path)}
+          className="min-h-[70vh] w-full flex-1 bg-slate-50"
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Manual de seguimiento embebido (sin navegar a otra ruta). */
+function EventosManualConsultModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="eventos-manual-title"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-900/45"
+        aria-label="Cerrar"
+        onClick={onClose}
+      />
+      <div
+        className="relative z-10 flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-[24px] bg-white sm:rounded-[24px]"
+        style={{ boxShadow: SUITE.shadow }}
+      >
+        <div
+          className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"
+          style={{ backgroundColor: '#F8FAFC' }}
+        >
+          <div className="min-w-0">
+            <p
+              className="text-[11px] font-bold uppercase tracking-[0.14em]"
+              style={{ color: theme.muted }}
+            >
+              Consulta en pantalla
+            </p>
+            <h2
+              id="eventos-manual-title"
+              className="mt-1 text-lg font-bold leading-snug"
+              style={{ color: theme.title }}
+            >
+              Manual de seguimiento
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-xl px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-200/70"
+          >
+            Cerrar
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <EventosManualSeguimiento />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function formatMtime(mtimeMs: number) {
@@ -100,6 +263,11 @@ export function EventosBiblioteca() {
   const [politicaOpen, setPoliticaOpen] = useState<{
     docId: PoliticaDocId;
   } | null>(null);
+  const [pdfOpen, setPdfOpen] = useState<{
+    title: string;
+    path: string;
+  } | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -192,8 +360,6 @@ export function EventosBiblioteca() {
     { id: 'publicidad', label: 'Publicidad', count: counts.publicidad },
   ];
 
-  const canOpen = source === 'scan';
-
   return (
     <div className="space-y-5">
       <SuiteCard>
@@ -201,14 +367,14 @@ export function EventosBiblioteca() {
           Biblioteca de menús y políticas
         </h3>
         <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-          Documentos vigentes para consulta rápida. Manual de seguimiento y
-          políticas se abren en pantalla; menús y PDFs usan Abrir.
+          Documentos vigentes para consulta rápida. Manual y políticas se abren
+          en pantalla; menús PDF con botón Abrir.
         </p>
         <p className="mt-1 text-xs text-slate-500">
           {rootExists
             ? `Fuente local: ${menusRoot || 'Eventos/Menús'}`
             : source === 'seed'
-              ? 'Catálogo en servidor (manual y políticas in-app)'
+              ? 'Catálogo en servidor · menús PDF disponibles · manual/políticas in-app'
               : 'Biblioteca Eventos'}
         </p>
         {note && source !== 'seed' ? (
@@ -333,9 +499,7 @@ export function EventosBiblioteca() {
                   const showFileOpen =
                     !featured &&
                     !politicaId &&
-                    canOpen &&
                     it.openable &&
-                    it.source === 'scan' &&
                     Boolean(it.path);
                   const updated = formatMtime(it.mtimeMs);
                   const hasOpenAction =
@@ -395,13 +559,14 @@ export function EventosBiblioteca() {
                       {hasOpenAction ? (
                         <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
                           {showManualOpen ? (
-                            <a
+                            <button
+                              type="button"
                               className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
                               style={{ backgroundColor: SUITE.orangeDeep }}
-                              href={MANUAL_SEGUIMIENTO_HREF}
+                              onClick={() => setManualOpen(true)}
                             >
-                              Abrir
-                            </a>
+                              Consultar
+                            </button>
                           ) : null}
                           {politicaId ? (
                             <button
@@ -412,19 +577,20 @@ export function EventosBiblioteca() {
                                 setPoliticaOpen({ docId: politicaId })
                               }
                             >
-                              Abrir
+                              Consultar
                             </button>
                           ) : null}
                           {showFileOpen ? (
-                            <a
+                            <button
+                              type="button"
                               className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
                               style={{ backgroundColor: SUITE.orangeDeep }}
-                              href={openUrl(it.path)}
-                              target="_blank"
-                              rel="noreferrer"
+                              onClick={() =>
+                                setPdfOpen({ title: it.name, path: it.path })
+                              }
                             >
-                              Abrir
-                            </a>
+                              Consultar
+                            </button>
                           ) : null}
                         </div>
                       ) : null}
@@ -442,6 +608,16 @@ export function EventosBiblioteca() {
           docId={politicaOpen.docId}
           onClose={() => setPoliticaOpen(null)}
         />
+      ) : null}
+      {pdfOpen ? (
+        <EventosPdfConsultModal
+          title={pdfOpen.title}
+          path={pdfOpen.path}
+          onClose={() => setPdfOpen(null)}
+        />
+      ) : null}
+      {manualOpen ? (
+        <EventosManualConsultModal onClose={() => setManualOpen(false)} />
       ) : null}
     </div>
   );

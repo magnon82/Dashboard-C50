@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 from supabase import create_client
+
+from retry_run import run_with_retries
 
 load_dotenv()
 load_dotenv(Path(__file__).resolve().parent.parent / ".env.local")
@@ -26,9 +27,7 @@ BASE = Path(__file__).resolve().parent
 
 
 def run(script: str, extra: list[str] | None = None) -> int:
-    cmd = [sys.executable, str(BASE / script), *(extra or [])]
-    print(f"\n>>> {' '.join(cmd)}")
-    return subprocess.call(cmd, cwd=str(BASE))
+    return run_with_retries(script, extra, attempts=3, delay_sec=20.0)
 
 
 def _client():

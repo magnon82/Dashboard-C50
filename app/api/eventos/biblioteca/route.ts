@@ -27,6 +27,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const openPath = url.searchParams.get('open') || '';
+  const asAttachment = url.searchParams.get('download') === '1';
 
   if (openPath) {
     const decoded = decodeURIComponent(openPath);
@@ -51,7 +52,8 @@ export async function GET(request: Request) {
       const { contentType, inline } = bibliotecaContentType(decoded);
       const stream = createReadStream(decoded);
       const webStream = Readable.toWeb(stream) as ReadableStream;
-      const disposition = inline ? 'inline' : 'attachment';
+      const disposition =
+        asAttachment || !inline ? 'attachment' : 'inline';
       return new NextResponse(webStream, {
         headers: {
           'Content-Type': contentType,

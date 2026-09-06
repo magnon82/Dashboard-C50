@@ -42,7 +42,7 @@ function money(v: number) {
 const theme = getTheme('suite');
 
 /** Años disponibles en comparativo semanal (Acumulado + Infocaja) */
-const COMPARE_YEAR_MIN = 2021;
+const COMPARE_YEAR_MIN = 2022;
 const COMPARE_YEAR_MAX = 2026;
 const COMPARE_YEARS = Array.from(
   { length: COMPARE_YEAR_MAX - COMPARE_YEAR_MIN + 1 },

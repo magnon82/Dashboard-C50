@@ -5,6 +5,9 @@ name: Sync RH Drive
 # Soft-check: inventario hr_* en Supabase + actualiza hr_drive_sync_state.
 # Full Drive→DB (File Stream / carpetas nuevas) sigue siendo opcional en PC admin
 # o vía POST /api/hr/sync con sesión RH. Ver ingestor/CLOUD_SYNC.md § RH.
+#
+# Requisito una vez: ejecutar supabase/hr_drive_sync.sql (tabla hr_drive_sync_state).
+# Sin esa tabla el job sigue verde (inventario OK) pero emite warning hasta crearla.
 
 on:
   schedule:

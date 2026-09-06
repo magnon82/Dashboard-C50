@@ -24,7 +24,7 @@ import { useStaffRptEventos } from '@/app/lib/use-staff-rpt-eventos';
 const theme = getTheme('suite');
 
 /** Años alineados con el comparativo de Ventas (Acumulado + Infocaja). */
-const COMPARE_YEAR_MIN = 2021;
+const COMPARE_YEAR_MIN = 2022;
 const COMPARE_YEAR_MAX = 2026;
 const COMPARE_YEARS = Array.from(
   { length: COMPARE_YEAR_MAX - COMPARE_YEAR_MIN + 1 },

@@ -500,7 +500,7 @@ def pull_anticipos(years: list[int] | None = None) -> list[dict]:
 
     drive = drive_service()
     sheets = sheets_service()
-    target = years or list(range(2021, datetime.now().year + 2))
+    target = years or list(range(2022, datetime.now().year + 2))
     events: list[dict] = []
     for year in target:
         sid = None

@@ -22,6 +22,7 @@ import {
   isMergedDuplicateShell,
   isPlantillaExterno,
   plantillaPositionKey,
+  todayIsoCdmx,
   type HrEmployee,
   type HrTipoEmpleo,
   type PlantillaTeamGroup,
@@ -369,7 +370,7 @@ export function RrhhPlantilla({
   const baseEmployees = data?.employees ?? [];
   const employees = showCatalog && catalog ? catalog : baseEmployees;
   const plantillaGroups = showCatalog ? [] : groupPlantillaByTeam(employees);
-  const asOf = data?.periodEnd || data?.paidAt || null;
+  const asOf = todayIsoCdmx();
   const emptyPlantilla = !loading && !showCatalog && baseEmployees.length === 0;
   const plantillaIdsKey = useMemo(
     () =>

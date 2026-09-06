@@ -474,8 +474,8 @@ export function buildRowsFromShifts(
   const shiftAreasByEmp = new Map<string, string[]>();
   const shiftRolesByEmp = new Map<string, string[]>();
   const dualSeen = new Set<string>();
-  // Histórico: solo quien tiene turnos esa semana. Plantilla vigente
-  // (force_exclude) solo se siembra en «nueva semana» / borradores futuros.
+  // Histórico (pasado): solo quien tiene turnos. Semanas editables (en curso +
+  // futuras): sembrar plantilla vigente para que altas/puestos nuevos aparezcan.
   const seedPlantilla = opts?.seedPlantilla === true;
 
   for (const s of shifts) {

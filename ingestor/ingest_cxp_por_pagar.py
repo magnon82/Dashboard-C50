@@ -134,21 +134,51 @@ def should_count_row(values: list[dict], saldo: float, yellow: bool) -> bool:
 
 
 def sum_tab_with_colors(service, spreadsheet_id: str, title: str) -> tuple[float, float]:
-    result = (
-        service.spreadsheets()
-        .get(
-            spreadsheetId=spreadsheet_id,
-            ranges=[f"'{title}'!A1:M8000"],
-            includeGridData=True,
-            fields=(
-                "sheets(data(rowData(values("
-                "formattedValue,effectiveValue,userEnteredValue,"
-                "effectiveFormat/backgroundColor"
-                "))))"
-            ),
-        )
-        .execute()
-    )
+    import time
+
+    last_err: Exception | None = None
+    result = None
+    for attempt in range(3):
+        try:
+            result = (
+                service.spreadsheets()
+                .get(
+                    spreadsheetId=spreadsheet_id,
+                    ranges=[f"'{title}'!A1:M8000"],
+                    includeGridData=True,
+                    fields=(
+                        "sheets(data(rowData(values("
+                        "formattedValue,effectiveValue,userEnteredValue,"
+                        "effectiveFormat/backgroundColor"
+                        "))))"
+                    ),
+                )
+                .execute()
+            )
+            break
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            msg = str(e).lower()
+            transient = any(
+                h in msg
+                for h in (
+                    "unavailable",
+                    "backenderror",
+                    "ratelimit",
+                    "timeout",
+                    "503",
+                    "500",
+                    "502",
+                    "429",
+                )
+            )
+            if not transient or attempt == 2:
+                raise
+            wait = 15 * (attempt + 1)
+            print(f"  Sheets reintento {attempt + 2}/3 en {wait}s ({e})")
+            time.sleep(wait)
+    if result is None and last_err:
+        raise last_err
     sheets = result.get("sheets") or []
     if not sheets:
         return 0.0, 0.0

@@ -224,8 +224,14 @@ export function isRequiredDocSatisfied(
 }
 
 export type HrMissingRequiredDoc = {
-  id: HrDocTypeId;
+  id: HrDocTypeId | 'contrato';
   title: string;
+};
+
+/** Alerta plantilla: falta contrato laboral (tabla o contrato__* en docs). */
+export const HR_CONTRACT_ALERT: HrMissingRequiredDoc = {
+  id: 'contrato',
+  title: 'Contrato',
 };
 
 /** Docs obligatorios sin archivo válido (pendiente / rechazado / sin fila). */
