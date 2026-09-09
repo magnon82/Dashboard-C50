@@ -372,6 +372,115 @@ function addAccum(a: Accum, b: Partial<Accum>): Accum {
   };
 }
 
+/** Suma Infocaja «Venta Total» del mes (sin propina). */
+export function sumInfocajaVentaMes(
+  records: FinancialRecord[],
+  year: number,
+  month: number
+): number {
+  let total = 0;
+  for (const r of records) {
+    if (r.source_file !== 'infocaja') continue;
+    if (r.category !== 'Venta Total') continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== year || p.m !== month) continue;
+    total += Number(r.amount) || 0;
+  }
+  return total;
+}
+
+/**
+ * Venta base del presupuesto: Infocaja del mes si hay datos;
+ * si no, Excel TOTAL!B49 (a veces vacío o plantilla vieja).
+ */
+export function resolvePresupuestoVenta(
+  excelVenta: number,
+  infocajaVenta: number
+): number {
+  const excel = Number(excelVenta) || 0;
+  const info = Number(infocajaVenta) || 0;
+  if (info > 0) return info;
+  return excel;
+}
+
+/** Cobro de cuota de inmueble compartido (no es venta). */
+export type RecuperacionPartner = 'surco' | 'tudor';
+
+export interface RecuperacionLine {
+  date: string;
+  partner: RecuperacionPartner;
+  amount: number;
+  concepto: string;
+}
+
+/**
+ * Recuperaciones Surco/Tudor cobradas en el mes (flujo efectivo).
+ * Carranza paga el gasto completo y luego recupera la parte de cada local;
+ * no se mezcla con venta. El concepto puede referirse a un mes anterior.
+ */
+export interface RecuperacionInmueble {
+  surco: number;
+  tudor: number;
+  total: number;
+  lines: RecuperacionLine[];
+}
+
+const RE_SURCO = /\bSURCO\b/i;
+const RE_TUDOR = /\bTUDOR\b/i;
+
+function partnerFromConcepto(text: string): RecuperacionPartner | null {
+  const hasSurco = RE_SURCO.test(text);
+  const hasTudor = RE_TUDOR.test(text);
+  if (hasSurco && !hasTudor) return 'surco';
+  if (hasTudor && !hasSurco) return 'tudor';
+  return null;
+}
+
+/** Cobros Surco/Tudor en flujo_efectivo_mov del mes calendario (fecha de caja). */
+export function buildRecuperacionInmueble(
+  records: FinancialRecord[],
+  year: number,
+  month: number
+): RecuperacionInmueble {
+  const lines: RecuperacionLine[] = [];
+  for (const r of records) {
+    if (r.source_file !== 'flujo_efectivo_mov') continue;
+    const p = parseIsoDate(r.date);
+    if (!p || p.y !== year || p.m !== month) continue;
+    const data = parseJson<{ concepto?: string; descripcion?: string }>(
+      r.description
+    );
+    const concepto = String(
+      data?.concepto || data?.descripcion || r.category || r.description || ''
+    ).trim();
+    const partner = partnerFromConcepto(
+      `${concepto} ${r.category || ''} ${String(r.description || '')}`
+    );
+    if (!partner) continue;
+    const amount = Math.abs(Number(r.amount) || 0);
+    if (!amount) continue;
+    lines.push({
+      date: p.key,
+      partner,
+      amount,
+      concepto: concepto || (partner === 'surco' ? 'Surco' : 'Tudor'),
+    });
+  }
+  lines.sort((a, b) => a.date.localeCompare(b.date));
+  let surco = 0;
+  let tudor = 0;
+  for (const line of lines) {
+    if (line.partner === 'surco') surco += line.amount;
+    else tudor += line.amount;
+  }
+  return {
+    surco,
+    tudor,
+    total: surco + tudor,
+    lines,
+  };
+}
+
 /** Semanas del Excel (todas las SEM n ingeridas), no solo las “elapsed”. */
 export function countPresupuestoWeeks(
   records: FinancialRecord[],
@@ -743,6 +852,13 @@ export function buildPresupuestoRubros(
 
   // Servicios: sumar presupuestos Excel de los hijos (antes de overrides de top-level)
   rollupParents(rows, [...COLLAPSIBLE_PARENTS], parentBasePresu);
+
+  // Excel TOTAL!B49 a veces viene vacío o parcial; Infocaja = venta real del mes.
+  const infocajaVenta = sumInfocajaVentaMes(records, year, month);
+  meta = {
+    ...meta,
+    venta: resolvePresupuestoVenta(meta.venta, infocajaVenta),
+  };
 
   const weekCount = countPresupuestoWeeks(records, year, month);
 

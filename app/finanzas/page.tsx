@@ -42,6 +42,8 @@ const FINANZAS_SOURCES = [
   'estado_bbva',
   'estado_pdf_index',
   'estado_cuenta_pdf_index',
+  // Venta real del mes si Excel TOTAL!B49 viene vacío/parcial (utilidad + nómina 25%)
+  'infocaja',
 ].join(',');
 
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;

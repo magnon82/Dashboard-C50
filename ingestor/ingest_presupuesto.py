@@ -1400,20 +1400,21 @@ def main() -> None:
             if args.file:
                 # Single-file: delete only that month's rows for each source
                 parsed = parse_month_year(args.file.name)
-                if parsed:
-                    y, m = parsed
-                    month_date = f"{y:04d}-{m:02d}-01"
-                    (
-                        supabase.table("financial_records")
-                        .delete()
-                        .eq("source_file", src)
-                        .eq("date", month_date)
-                        .execute()
+                if not parsed:
+                    raise SystemExit(
+                        f"No se pudo inferir mes/año de: {args.file.name}. "
+                        "Abortado sin borrar (renombra a PRESUPUESTO MENSUAL <MES> <AÑO>.xlsx)."
                     )
-                    print(f"Limpieza {src} {month_date}: OK")
-                else:
-                    supabase.table("financial_records").delete().eq("source_file", src).execute()
-                    print(f"Limpieza {src}: OK")
+                y, m = parsed
+                month_date = f"{y:04d}-{m:02d}-01"
+                (
+                    supabase.table("financial_records")
+                    .delete()
+                    .eq("source_file", src)
+                    .eq("date", month_date)
+                    .execute()
+                )
+                print(f"Limpieza {src} {month_date}: OK")
             else:
                 supabase.table("financial_records").delete().eq("source_file", src).execute()
                 print(f"Limpieza {src}: OK")

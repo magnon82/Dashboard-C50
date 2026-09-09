@@ -8,6 +8,7 @@ import type {
 } from '@/app/lib/presupuesto';
 import {
   COLLAPSIBLE_PARENTS,
+  buildRecuperacionInmueble,
   buildRubroDesglose,
 } from '@/app/lib/presupuesto';
 import { getTheme, SUITE } from '@/app/lib/themes';
@@ -102,14 +103,28 @@ export function PresupuestoRubros({
     return { amount, pct, gastos, venta: ventaBase };
   }, [totals.real, ventaBase]);
 
+  /** Surco/Tudor: recuperación de gasto compartido (no venta). */
+  const recuperacion = useMemo(() => {
+    if (year == null || month == null) {
+      return { surco: 0, tudor: 0, total: 0, lines: [] };
+    }
+    return buildRecuperacionInmueble(records, year, month);
+  }, [records, year, month]);
+
+  const gastoNeto = useMemo(
+    () => Math.max(0, utilidad.gastos - recuperacion.total),
+    [utilidad.gastos, recuperacion.total]
+  );
+
   /** Solo meses ya cerrados (antes del mes calendario actual). */
   const showUtilidad = useMemo(() => {
     if (year == null || month == null) return false;
+    if (totals.real <= 0) return false; // sin gastos reales → no inventar 100% utilidad
     const now = new Date();
     const cy = now.getFullYear();
     const cm = now.getMonth() + 1; // 1–12
     return year < cy || (year === cy && month < cm);
-  }, [year, month]);
+  }, [year, month, totals.real]);
 
   const canDrill =
     Boolean(records.length) && year != null && month != null;
@@ -341,7 +356,9 @@ export function PresupuestoRubros({
                       color: utilidad.amount >= 0 ? '#166534' : '#991B1B',
                     }}
                   >
-                    {utilidad.amount >= 0 ? 'Utilidad' : 'Pérdida'}
+                    {utilidad.amount >= 0
+                      ? 'Margen operativo'
+                      : 'Déficit operativo'}
                   </p>
                   <p
                     className="mt-1 text-2xl font-bold tabular-nums"
@@ -355,8 +372,9 @@ export function PresupuestoRubros({
                     </span>
                   </p>
                   <p className="mt-1 text-xs" style={{ color: theme.muted }}>
-                    Venta {money(utilidad.venta)} − gastos reales{' '}
-                    {money(utilidad.gastos)}
+                    Venta Infocaja {money(utilidad.venta)} − rubros (catálogo){' '}
+                    {money(utilidad.gastos)} · no es variación de saldos
+                    (bancos+efe)
                   </p>
                 </div>
                 <div className="min-w-[160px] flex-1 max-w-sm">
@@ -390,6 +408,48 @@ export function PresupuestoRubros({
                   </div>
                 </div>
               </div>
+
+              {recuperacion.total > 0 && (
+                <div className="mt-4 border-t border-slate-200/70 pt-3">
+                  <p
+                    className="text-[11px] font-bold uppercase tracking-[0.14em]"
+                    style={{ color: SUITE.navy }}
+                  >
+                    Recuperación Surco / Tudor
+                  </p>
+                  <p className="mt-1 text-sm tabular-nums text-slate-800">
+                    {money(recuperacion.total)}
+                    <span className="ml-2 text-xs text-slate-500">
+                      Surco {money(recuperacion.surco)} · Tudor{' '}
+                      {money(recuperacion.tudor)}
+                    </span>
+                  </p>
+                  <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+                    No es venta: cuota del inmueble compartido. Carranza paga el
+                    gasto completo y luego recupera la parte de cada local.
+                  </p>
+                  <p className="mt-2 text-xs tabular-nums text-slate-700">
+                    Gasto neto tras recuperación:{' '}
+                    <span className="font-semibold">{money(gastoNeto)}</span>
+                    <span className="text-slate-500">
+                      {' '}
+                      ({money(utilidad.gastos)} − {money(recuperacion.total)})
+                    </span>
+                  </p>
+                  {recuperacion.lines.length > 0 && (
+                    <ul className="mt-2 space-y-0.5 text-[11px] text-slate-500">
+                      {recuperacion.lines.map((line) => (
+                        <li key={`${line.date}-${line.partner}-${line.amount}`}>
+                          {line.date} ·{' '}
+                          {line.partner === 'surco' ? 'Surco' : 'Tudor'} ·{' '}
+                          {money(line.amount)}
+                          {line.concepto ? ` · ${line.concepto}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -216,6 +216,19 @@ function isoDate(y: number, month: number, day: number): string {
   return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+/** Semana 1 · 2026 = Lun 2026-01-05 … Dom 2026-01-11 (calendario C50). */
+export function c50WeekRange(year: number, weekNum: number): {
+  periodStart: string;
+  periodEnd: string;
+} | null {
+  if (year !== 2026 || weekNum < 1 || weekNum > 53) return null;
+  const start = new Date(Date.UTC(2026, 0, 5 + (weekNum - 1) * 7));
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  return { periodStart: fmt(start), periodEnd: fmt(end) };
+}
+
 function inferWeekMeta(rows: unknown[][], sheetName: string): {
   weekLabel: string | null;
   periodStart: string | null;
@@ -311,6 +324,23 @@ function inferWeekMeta(rows: unknown[][], sheetName: string): {
       wraps && endMonth < startMonth ? year + 1 : year;
     periodStart = isoDate(startY, startMonth, startDay);
     periodEnd = isoDate(endY, endMonth, endDay);
+  }
+
+  // Calendario C50 2026: el Sheet a veces deja el mes stale (p. ej. JULIO-AGO
+  // en semanas de ago/sep). Si hay nº de semana, anclar Lun–Dom real.
+  if (weekNum != null) {
+    const cal = c50WeekRange(year, weekNum);
+    if (cal) {
+      const headerMismatch =
+        !periodStart ||
+        !periodEnd ||
+        periodStart !== cal.periodStart ||
+        periodEnd !== cal.periodEnd;
+      if (headerMismatch) {
+        periodStart = cal.periodStart;
+        periodEnd = cal.periodEnd;
+      }
+    }
   }
 
   const weekLabel =
