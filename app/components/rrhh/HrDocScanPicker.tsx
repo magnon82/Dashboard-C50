@@ -47,11 +47,17 @@ export function HrDocScanPicker({
     setBusy(true);
     try {
       // Sin allowPhoto (alta/docs): Archivo también pasa por pipeline de documento.
+      // Con allowPhoto: Archivo/imagen también se comprime ≤2.5 MB (prepareHrCapture).
       const prepMode: HrCaptureMode =
         mode === 'file' && !allowPhoto ? 'scan' : mode;
       const prepared = await prepareHrCapture(raw, prepMode);
       setActiveMode(mode);
       onChange(prepared, mode);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'No se pudo preparar la foto';
+      window.alert(msg);
+      onChange(null, null);
     } finally {
       setBusy(false);
       if (scanRef.current) scanRef.current.value = '';

@@ -30,7 +30,6 @@ export function InstallAppPrompt({
   const [iosHint, setIosHint] = useState(false);
   const [likelyMobile, setLikelyMobile] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -49,15 +48,19 @@ export function InstallAppPrompt({
     const isIos =
       /iPad|iPhone|iPod/.test(ua) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    // Solo UA móvil/tablet. No usar max-width: en PC con ventana angosta
+    // Chrome igual dispara beforeinstallprompt y no debe mostrar el CTA.
     const isMobile =
       isIos ||
-      /Android|Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua) ||
-      window.matchMedia('(max-width: 768px)').matches;
+      /Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua) ||
+      (/Mobile/i.test(ua) && !/Windows NT/i.test(ua));
     setIosHint(isIos);
     setLikelyMobile(isMobile);
 
     const onBip = (e: Event) => {
       e.preventDefault();
+      // En escritorio Chrome ofrece instalar PWA; no guardamos el evento.
+      if (!isMobile) return;
       setDeferred(e as BeforeInstallPromptEvent);
     };
     const onInstalled = () => setInstalled(true);
@@ -72,6 +75,9 @@ export function InstallAppPrompt({
 
   if (installed) return null;
 
+  // Escritorio / laptop: sin tarjeta ni botón de instalar.
+  if (!likelyMobile) return null;
+
   async function install() {
     if (!deferred) return;
     setBusy(true);
@@ -81,16 +87,6 @@ export function InstallAppPrompt({
       setDeferred(null);
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(PROD_URL);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* ignore */
     }
   }
 
@@ -163,7 +159,7 @@ export function InstallAppPrompt({
             </li>
           </ol>
         </div>
-      ) : likelyMobile ? (
+      ) : (
         <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
           En <strong>Chrome/Edge (Android)</strong>: menú <strong>⋮</strong> →{' '}
           <strong>Instalar aplicación</strong> o{' '}
@@ -171,20 +167,6 @@ export function InstallAppPrompt({
           cuando Chrome marca el sitio como instalable (tras cargar el service
           worker).
         </p>
-      ) : (
-        <div className="mt-3 space-y-2">
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            Desde la PC: copia el enlace y ábrelo en el teléfono. En Android usa
-            Chrome; en iPhone usa Safari → Compartir → Añadir a pantalla de inicio.
-          </p>
-          <button
-            type="button"
-            onClick={() => void copyLink()}
-            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800"
-          >
-            {copied ? 'Enlace copiado' : 'Copiar enlace para el celular'}
-          </button>
-        </div>
       )}
     </div>
   );

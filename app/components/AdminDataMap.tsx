@@ -238,7 +238,7 @@ const NODES: MapNode[] = [
   {
     id: 'wf-gmail',
     label: 'sync-gmail.yml',
-    sub: 'L–V 2–6 · Dom 19–23',
+    sub: 'diario 1:17–6:17',
     x: 388,
     y: 96,
     w: 196,
@@ -251,7 +251,7 @@ const NODES: MapNode[] = [
       'ingest_facturas_gmail.py',
     ],
     detail:
-      'Función: ventas diarias (Infocaja + CORTE) + CFDI → financial_records. Lun–Vie 2–6 AM CDMX cada hora; Dom 7–11 PM CDMX cada hora. Si falta un día: hub alerta + Actions → Run workflow. CFDI = continue-on-error.',
+      'Función: ventas diarias (Infocaja + CORTE) + CFDI → financial_records. Diario 1:17–6:17 AM CDMX cada hora (cron 17 7-12 UTC; incluye domingo). Si falta un día: hub alerta + Actions → Run workflow. CFDI = continue-on-error. Reintentos ante cortes Google.',
   },
   {
     id: 'wf-saldos',
@@ -279,7 +279,7 @@ const NODES: MapNode[] = [
     icon: 'github',
     files: ['.github/workflows/sync-hr-drive.yml', 'sync_hr_drive_cloud.py'],
     detail:
-      'Soft-sync RR.HH.: inventario hr_* + hr_drive_sync_state. Diario 12:00 PM CDMX (0 18 UTC). Sin File Stream; import xlsx / carpetas nuevas = PC admin o POST /api/hr/sync.',
+      'Soft-sync RR.HH.: inventario hr_* + hr_drive_sync_state (SQL supabase/hr_drive_sync.sql). Diario 12:00 PM CDMX (0 18 UTC). Sin File Stream; import xlsx / carpetas nuevas = PC admin o POST /api/hr/sync.',
   },
   {
     id: 'ingestor-cloud',

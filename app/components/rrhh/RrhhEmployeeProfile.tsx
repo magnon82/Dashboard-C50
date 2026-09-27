@@ -368,6 +368,9 @@ export function RrhhEmployeeProfile({
         prepared = await prepareHrCapture(file, mode);
       } else if (target.kind === 'photo') {
         prepared = await preparePhoto(file);
+      } else if (target.kind === 'contract' || target.kind === 'exam') {
+        // Imagen desde carpeta/cámara: mismo tope 2.5 MB; PDF sin tocar.
+        prepared = await prepareHrCapture(file, mode === 'photo' ? 'photo' : 'file');
       }
       const fd = new FormData();
       fd.set('kind', target.kind);
@@ -427,8 +430,10 @@ export function RrhhEmployeeProfile({
       setToast(json.message || 'Guardado');
       await load();
       onChanged?.();
-    } catch {
-      setToast('Error al subir');
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Error al subir';
+      setToast(msg);
     } finally {
       setBusy(false);
       uploadTargetRef.current = null;

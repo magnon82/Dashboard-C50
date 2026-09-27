@@ -23,6 +23,10 @@ import {
   type HrMedicalReimbursement,
 } from '@/app/lib/hr-employee-profile';
 import {
+  HR_DOC_PDF_MAX_BYTES,
+  HR_DOC_PHOTO_MAX_BYTES,
+} from '@/app/lib/hr-doc-limits';
+import {
   HR_RESGUARDO_SELECT,
   HR_RESGUARDO_SELECT_LEGACY,
   asResguardoRequest,
@@ -833,6 +837,33 @@ export async function PATCH(request: Request, ctx: Ctx) {
   return NextResponse.json({ ready: true, employee: loaded.data });
 }
 
+function isHrUploadImage(file: File): boolean {
+  const mime = (file.type || '').toLowerCase();
+  if (mime.startsWith('image/')) return true;
+  if (mime.includes('pdf')) return false;
+  return /\.(jpe?g|png|webp|gif|heic|heif|bmp|tiff?)$/i.test(file.name);
+}
+
+/** Fotos ≤ 2.5 MB; PDF y otros ≤ 10 MB. */
+function rejectIfOversize(file: File): NextResponse | null {
+  if (isHrUploadImage(file) && file.size > HR_DOC_PHOTO_MAX_BYTES) {
+    return NextResponse.json(
+      {
+        error: 'Cada foto de documentación debe pesar máximo 2.5 MB',
+        hint: 'Comprímela o vuelve a tomarla; el cliente también reduce automáticamente.',
+      },
+      { status: 413 }
+    );
+  }
+  if (file.size > HR_DOC_PDF_MAX_BYTES) {
+    return NextResponse.json(
+      { error: 'Archivo máximo 10 MB' },
+      { status: 413 }
+    );
+  }
+  return null;
+}
+
 function parseExamFields(src: Record<string, unknown> | FormData): {
   ok: true;
   exam_type: string;
@@ -1012,12 +1043,8 @@ export async function POST(request: Request, ctx: Ctx) {
     let storage_path: string | null = null;
     let mime_type: string | null = null;
     if (file instanceof File && file.size > 0) {
-      if (file.size > 10 * 1024 * 1024) {
-        return NextResponse.json(
-          { error: 'Archivo máximo 10 MB' },
-          { status: 413 }
-        );
-      }
+      const over = rejectIfOversize(file);
+      if (over) return over;
       const mime = file.type || 'application/octet-stream';
       const buf = Buffer.from(await file.arrayBuffer());
       const ext = mime.includes('pdf')
@@ -1066,12 +1093,8 @@ export async function POST(request: Request, ctx: Ctx) {
   if (!(file instanceof File) || file.size < 1) {
     return NextResponse.json({ error: 'Archivo requerido' }, { status: 400 });
   }
-  if (file.size > 10 * 1024 * 1024) {
-    return NextResponse.json(
-      { error: 'Archivo máximo 10 MB' },
-      { status: 413 }
-    );
-  }
+  const over = rejectIfOversize(file);
+  if (over) return over;
 
   const mime = file.type || 'application/octet-stream';
   const buf = Buffer.from(await file.arrayBuffer());
