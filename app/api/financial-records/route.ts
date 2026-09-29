@@ -1,35 +1,42 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import {
+  SESSION_COOKIE,
+  canAccessCorteTpv,
+  canAccessModule,
+  verifySessionToken,
+} from '@/app/lib/auth';
+import { getServiceSupabase } from '@/app/lib/users';
 
 export const dynamic = 'force-dynamic';
 
-function clean(value: string | undefined): string {
-  return (value || '').trim().replace(/^["']|["']$/g, '');
-}
+/** Módulos que leen registros financieros (ventas, cortes, socios, finanzas). */
+const MODULES_WITH_ACCESS = ['finanzas', 'ventas', 'cortes', 'reportes-socios'];
 
 export async function GET(request: Request) {
-  const url = clean(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL);
-  const key = clean(
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      process.env.SUPABASE_ANON_KEY ||
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  const session = token ? await verifySessionToken(token) : null;
+  if (!session) {
+    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+  }
+  const allowed =
+    MODULES_WITH_ACCESS.some((m) => canAccessModule(session, m)) ||
+    canAccessCorteTpv(session);
+  if (!allowed) {
+    return NextResponse.json({ error: 'Sin acceso a registros financieros' }, { status: 403 });
+  }
 
-  if (!url || !key) {
+  // Solo servidor: service role (la anon key no debe leer esta tabla).
+  let supabase: ReturnType<typeof getServiceSupabase>;
+  try {
+    supabase = getServiceSupabase();
+  } catch (e) {
     return NextResponse.json(
-      {
-        error:
-          'Faltan variables de Supabase. Configura NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY (o SUPABASE_SERVICE_ROLE_KEY) en Vercel → Settings → Environment Variables → Production.',
-        debug: {
-          hasUrl: Boolean(url),
-          hasKey: Boolean(key),
-        },
-      },
+      { error: e instanceof Error ? e.message : 'Supabase no configurado' },
       { status: 500 }
     );
   }
-
-  const supabase = createClient(url, key);
   const all: unknown[] = [];
   let from = 0;
   const pageSize = 1000;
@@ -56,21 +63,7 @@ export async function GET(request: Request) {
 
     if (error) {
       return NextResponse.json(
-        {
-          error: error.message,
-          debug: {
-            urlHost: (() => {
-              try {
-                return new URL(url).host;
-              } catch {
-                return 'invalid-url';
-              }
-            })(),
-            keyLength: key.length,
-            keyStartsWithEyJ: key.startsWith('eyJ'),
-            keyPrefix: key.slice(0, 8),
-          },
-        },
+        { error: error.message },
         { status: 500 }
       );
     }

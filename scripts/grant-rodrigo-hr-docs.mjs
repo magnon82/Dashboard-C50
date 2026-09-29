@@ -179,12 +179,13 @@ async function main() {
   const now = new Date().toISOString();
 
   if (!user) {
-    const password = 'Rodrigo26';
+    // Nunca escribir contraseñas en el código: se genera una aleatoria (o se toma de RODRIGO_INITIAL_PASSWORD).
+    const password =
+      process.env.RODRIGO_INITIAL_PASSWORD || randomBytes(9).toString('base64url');
     const payload = {
       username: SUITE_USERNAME,
       display_name: DISPLAY_NAME,
       password_hash: hashPassword(password),
-      password,
       role: 'viewer',
       modules: MODULES,
       capabilities: CAPABILITIES,

@@ -25,13 +25,14 @@ export const runtime = 'nodejs';
 async function ensureBootstrapAdmin(): Promise<void> {
   try {
     const username = getDashboardUser();
+    const bootstrapPassword = getDashboardPassword();
+    if (!bootstrapPassword) return; // producción sin DASHBOARD_PASSWORD: no se crea
     const existing = await findUserByUsername(username);
     if (existing) return;
     await createUser({
       username,
       displayName: 'Sergio',
-      passwordHash: hashPassword(getDashboardPassword()),
-      password: getDashboardPassword(),
+      passwordHash: hashPassword(bootstrapPassword),
       role: 'admin',
       modules: ['*'],
       active: true,
@@ -81,7 +82,12 @@ export async function POST(request: Request) {
   }
 
   if (!session) {
-    if (username === getDashboardUser() && password === getDashboardPassword()) {
+    const bootstrapPassword = getDashboardPassword();
+    if (
+      bootstrapPassword &&
+      username === getDashboardUser() &&
+      password === bootstrapPassword
+    ) {
       session = {
         username,
         role: 'admin',

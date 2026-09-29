@@ -21,8 +21,11 @@ export interface DashboardUserRow {
   username: string;
   display_name: string | null;
   password_hash: string;
-  /** Contraseña en claro solo para recuperación en admin; login usa password_hash. */
-  password: string | null;
+  /**
+   * Ya no se guarda la contraseña en claro (solo password_hash). Siempre null;
+   * se conserva el campo para no romper la UI existente.
+   */
+  password: null;
   role: UserRole;
   modules: string[];
   /** Permisos granulares (p. ej. staff.corte). Admin implícito = todos. */
@@ -50,7 +53,7 @@ interface UserPayload {
   username: string;
   display_name: string | null;
   password_hash: string;
-  /** Recuperable solo vía API admin (requireAdmin). Opcional en filas antiguas. */
+  /** Obsoleto: filas antiguas pueden traerlo; se elimina con purgePlaintextPasswords(). */
   password?: string;
   role: UserRole;
   modules: string[];
@@ -114,7 +117,7 @@ function recordToUser(r: {
     username: p.username,
     display_name: p.display_name ?? null,
     password_hash: p.password_hash,
-    password: typeof p.password === 'string' && p.password ? p.password : null,
+    password: null,
     role: p.role === 'admin' ? 'admin' : 'viewer',
     modules: Array.isArray(p.modules) ? p.modules : [],
     capabilities: normalizeCapabilities(p.capabilities),
@@ -162,7 +165,7 @@ export async function createUser(input: {
   username: string;
   displayName?: string | null;
   passwordHash: string;
-  /** Texto claro para que el admin pueda ver/editar la contraseña asignada. */
+  /** Ignorado: la contraseña en claro ya no se guarda (solo el hash). */
   password?: string;
   role: UserRole;
   modules: string[];
@@ -175,7 +178,6 @@ export async function createUser(input: {
   if (existing) throw new Error('Ese usuario ya existe');
 
   const now = new Date().toISOString();
-  const plain = input.password?.trim() || undefined;
   const capabilities =
     input.role === 'admin'
       ? []
@@ -186,7 +188,6 @@ export async function createUser(input: {
     username,
     display_name: input.displayName?.trim() || null,
     password_hash: input.passwordHash,
-    ...(plain ? { password: plain } : {}),
     role: input.role,
     modules: input.role === 'admin' ? ['*'] : input.modules,
     capabilities,
@@ -283,11 +284,6 @@ export async function updateUser(
         ? normalizeAlertPrefs(patch.alertPrefs)
         : current.alert_prefs;
 
-  const plain =
-    patch.password !== undefined
-      ? patch.password.trim() || undefined
-      : current.password || undefined;
-
   const payload: UserPayload = {
     username,
     display_name:
@@ -295,7 +291,6 @@ export async function updateUser(
         ? patch.displayName?.trim() || null
         : current.display_name,
     password_hash: patch.passwordHash ?? current.password_hash,
-    ...(plain ? { password: plain } : {}),
     role,
     modules,
     capabilities,
@@ -314,6 +309,34 @@ export async function updateUser(
   const user = recordToUser(data);
   if (!user) throw new Error('No se pudo actualizar');
   return user;
+}
+
+/**
+ * Elimina el campo `password` (texto claro) de las filas antiguas de usuarios.
+ * Idempotente: solo reescribe las filas que todavía lo tienen. Devuelve cuántas limpió.
+ */
+export async function purgePlaintextPasswords(): Promise<number> {
+  const rows = await fetchAuthRecords();
+  const sb = getServiceSupabase();
+  let cleaned = 0;
+  for (const r of rows) {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(r.description || '');
+    } catch {
+      continue;
+    }
+    if (!payload || typeof payload !== 'object' || !('password' in payload)) continue;
+    delete payload.password;
+    const { error } = await sb
+      .from('financial_records')
+      .update({ description: JSON.stringify(payload) })
+      .eq('id', r.id)
+      .eq('source_file', AUTH_SOURCE_FILE);
+    if (error) throw new Error(error.message);
+    cleaned += 1;
+  }
+  return cleaned;
 }
 
 export async function findUserById(id: string): Promise<DashboardUserRow | null> {

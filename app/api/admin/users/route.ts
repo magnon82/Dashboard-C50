@@ -4,16 +4,15 @@ import {
   SESSION_COOKIE,
   verifySessionToken,
   canAccessAdmin,
-  getDashboardPassword,
-  getDashboardUser,
   type SessionUser,
 } from '@/app/lib/auth';
-import { hashPassword, verifyPassword } from '@/app/lib/password';
+import { hashPassword } from '@/app/lib/password';
 import {
   createUser,
   ensureStaffCorteCapabilitySeed,
   getServiceSupabase,
   listUsers,
+  purgePlaintextPasswords,
   toPublicUser,
   type UserRole,
 } from '@/app/lib/users';
@@ -62,9 +61,13 @@ export async function GET() {
     } catch {
       // seed best-effort
     }
+    try {
+      // Limpia contraseñas en claro que quedaron en filas antiguas.
+      await purgePlaintextPasswords();
+    } catch {
+      // best-effort
+    }
     const rows = await listUsers();
-    const bootstrapUser = getDashboardUser();
-    const bootstrapPass = getDashboardPassword();
 
     // Enlaces Suite → ficha RH (suite_username)
     const linkByUser = new Map<
@@ -96,16 +99,6 @@ export async function GET() {
     return NextResponse.json({
       users: rows.map((r) => {
         const pub = toPublicUser(r);
-        let password = r.password;
-        // Filas antiguas solo tenían hash: si es el admin bootstrap y el hash
-        // aún coincide con DASHBOARD_PASSWORD, devolver esa para el formulario.
-        if (
-          !password &&
-          r.username === bootstrapUser &&
-          verifyPassword(bootstrapPass, r.password_hash)
-        ) {
-          password = bootstrapPass;
-        }
         const linked = linkByUser.get(pub.username.trim().toLowerCase()) || null;
         return {
           id: pub.id,
@@ -118,8 +111,8 @@ export async function GET() {
           active: pub.active,
           canEdit: pub.canEdit,
           createdAt: r.created_at,
-          /** Solo en respuesta admin: contraseña recuperable si está guardada. */
-          password,
+          /** Ya no se devuelven contraseñas; para cambiarla, escribe una nueva. */
+          password: null,
           linkedEmployee: linked,
         };
       }),

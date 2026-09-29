@@ -23,12 +23,22 @@ export function getDashboardUser(): string {
   return (process.env.DASHBOARD_USER || 'sergio').trim().toLowerCase();
 }
 
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+/**
+ * Contraseña del admin bootstrap. En producción no hay valor por defecto:
+ * si falta DASHBOARD_PASSWORD devuelve '' y el login por variable queda desactivado.
+ */
 export function getDashboardPassword(): string {
-  return process.env.DASHBOARD_PASSWORD || 'sikame';
+  return process.env.DASHBOARD_PASSWORD || (IS_PROD ? '' : 'dev-local-cambiar');
 }
 
+/** En producción es obligatorio; sin él no se emiten ni aceptan sesiones. */
 function getAuthSecret(): string {
-  return process.env.AUTH_SECRET || 'c50-local-dev-secret-cambiar-en-produccion';
+  return (
+    process.env.AUTH_SECRET ||
+    (IS_PROD ? '' : 'c50-local-dev-secret-cambiar-en-produccion')
+  );
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -83,7 +93,9 @@ export async function createSessionToken(user: SessionUser): Promise<string> {
   );
   // v3: username:role:modules:capabilities:exp
   const payload = `v3:${user.username}:${user.role}:${mods}:${caps}:${exp}`;
-  const sig = await hmacSign(payload, getAuthSecret());
+  const secret = getAuthSecret();
+  if (!secret) throw new Error('Falta AUTH_SECRET en producción');
+  const sig = await hmacSign(payload, secret);
   return `${payload}:${sig}`;
 }
 
@@ -91,9 +103,11 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
   const lastColon = token.lastIndexOf(':');
   if (lastColon <= 0) return null;
 
+  const secret = getAuthSecret();
+  if (!secret) return null;
   const sig = token.slice(lastColon + 1);
   const payload = token.slice(0, lastColon);
-  const expected = await hmacSign(payload, getAuthSecret());
+  const expected = await hmacSign(payload, secret);
   if (!safeEqual(sig, expected)) return null;
 
   const parts = payload.split(':');

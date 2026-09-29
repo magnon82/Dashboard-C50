@@ -6,6 +6,7 @@ import path from 'path';
 import { Readable } from 'stream';
 import {
   SESSION_COOKIE,
+  canAccessModule,
   verifySessionToken,
   type SessionUser,
 } from '@/app/lib/auth';
@@ -192,6 +193,10 @@ async function requireSession(): Promise<SessionUser | NextResponse> {
   const session = await verifySessionToken(token);
   if (!session) {
     return NextResponse.json({ error: 'Sesión inválida' }, { status: 401 });
+  }
+  // Datos financieros: solo usuarios con el módulo Finanzas (o admin).
+  if (!canAccessModule(session, 'finanzas')) {
+    return NextResponse.json({ error: 'Sin acceso a Finanzas' }, { status: 403 });
   }
   return session;
 }
