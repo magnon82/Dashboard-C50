@@ -95,7 +95,34 @@ def pick_presupuesto_file(year: int, month: int) -> dict | None:
         return (exact, name)
 
     xlsx.sort(key=score)
-    return xlsx[0]
+    if len(xlsx) == 1:
+        return xlsx[0]
+
+    # Varios archivos con el mismo nombre: preferir el que tenga TOTAL!U:Z cacheado.
+    from ingest_presupuesto import (
+        extract_total_resumen_panel,
+        resumen_panel_amount_score,
+    )
+    import openpyxl
+
+    best = xlsx[0]
+    best_amt = -1.0
+    tmp_pick = Path(tempfile.mkdtemp(prefix="prep-pick-"))
+    for f in xlsx:
+        dest = tmp_pick / f"{str(f['id'])[:12]}.xlsx"
+        try:
+            download_drive_file_by_id(str(f["id"]), dest)
+            wb = openpyxl.load_workbook(dest, data_only=True, read_only=True)
+            amt = resumen_panel_amount_score(extract_total_resumen_panel(wb))
+            wb.close()
+        except Exception as exc:
+            print(f"AVISO: no se pudo leer {f.get('name')} ({f.get('id')}): {exc}")
+            amt = 0.0
+        print(f"  candidato {f.get('name')} id={f.get('id')} score_TOTAL={amt:.2f}")
+        if amt > best_amt:
+            best_amt = amt
+            best = f
+    return best
 
 
 def sync_presupuesto(dry_run: bool) -> int:

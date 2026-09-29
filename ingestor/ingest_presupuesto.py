@@ -913,6 +913,31 @@ def extract_total_resumen_panel(wb) -> dict[int, dict[str, float]]:
     }
 
 
+def resumen_panel_amount_score(panel: dict[int, dict[str, float]]) -> float:
+    """Suma |ingresos| + |suma_gasto| + |inicial|. 0 = fórmulas sin cache (Excel/Drive)."""
+    total = 0.0
+    for payload in panel.values():
+        for key in ("ingresos", "suma_gasto", "inicial", "pagos_mifel", "total"):
+            total += abs(float(payload.get(key) or 0))
+    return total
+
+
+def weeks_look_uncached(weeks: list[dict]) -> bool:
+    """True si el panel U:Z vino en ceros (xlsx sin valores calculados)."""
+    if not weeks:
+        return True
+    money = 0.0
+    for w in weeks:
+        money += abs(float(w.get("amount") or 0))
+        try:
+            data = json.loads(w.get("description") or "{}")
+        except Exception:
+            continue
+        for key in ("ingresos", "suma_gasto", "inicial", "pagos_mifel", "total"):
+            money += abs(float(data.get(key) or 0))
+    return money < 1.0
+
+
 def extract_week_bank_components(
     wb, year: int, month: int, anticipos_notes: dict[tuple[str, int], str] | None = None
 ) -> tuple[list[dict], list[dict]]:
@@ -1326,6 +1351,12 @@ def main() -> None:
             f"semanas={len(weeks)} saldos={len(saldos)} detalle={len(detalle)} "
             f"ingresos_banco={len(ingresos)}"
         )
+        if weeks_look_uncached(weeks):
+            print(
+                f"SKIP {path.name}: TOTAL!U:Z sin montos cacheados "
+                "(abre el Excel, guarda y vuelve a subir). No se borra el mes."
+            )
+            continue
         all_channel.extend(channels)
         all_saldos.extend(saldos)
         all_rubros.extend(rubros)
@@ -1342,6 +1373,12 @@ def main() -> None:
         + all_ingresos
     )
     print(f"TOTAL registros: {len(combined)}")
+    if not combined or weeks_look_uncached(all_weeks):
+        raise SystemExit(
+            "Abortado sin borrar: el presupuesto no trae el resumen TOTAL "
+            "(columnas inicial/ingresos/pagos). Usa el xlsx con valores "
+            "calculados (pestaña TOTAL)."
+        )
 
     if args.dry_run:
         print("Dry-run: no se escribió nada.")
