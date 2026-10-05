@@ -41,9 +41,14 @@ async function requireVentasViewer(): Promise<SessionUser | NextResponse> {
     return NextResponse.json({ error: 'Sesión inválida' }, { status: 401 });
   }
   const ok =
-    canAccessAdmin(session) || canAccessModule(session, 'ventas');
+    canAccessAdmin(session) ||
+    canAccessModule(session, 'ventas') ||
+    canAccessModule(session, 'cortes');
   if (!ok) {
-    return NextResponse.json({ error: 'Sin acceso a Ventas' }, { status: 403 });
+    return NextResponse.json(
+      { error: 'Sin acceso a Cortes o Ventas' },
+      { status: 403 }
+    );
   }
   return session;
 }

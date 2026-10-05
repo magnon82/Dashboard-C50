@@ -47,7 +47,10 @@ export function CortesOperacion() {
     async function fetchRecords() {
       setDataError(null);
       try {
-        const res = await fetch('/api/financial-records', { cache: 'no-store' });
+        const res = await fetch(
+          '/api/financial-records?sources=corte_caja',
+          { cache: 'no-store' }
+        );
         const json = await res.json();
         if (!res.ok) {
           setDataError(json.error || 'No se pudieron cargar los datos');
