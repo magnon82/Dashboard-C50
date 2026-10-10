@@ -36,6 +36,14 @@ function normalizeChoiceGroups(
     label: String(g.label || g.id),
     required: Boolean(g.required),
     affects_price: Boolean(g.affects_price),
+    min_select:
+      g.min_select == null || g.min_select === undefined
+        ? undefined
+        : Number(g.min_select),
+    max_select:
+      g.max_select == null || g.max_select === undefined
+        ? undefined
+        : Number(g.max_select),
     options: (g.options || []).map((o) => ({
       id: String(o.id),
       label: String(o.label),

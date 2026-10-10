@@ -35,6 +35,7 @@ export type OptionalMenuChoiceId =
 /** Categorías de alimentos cuya cantidad (unit=persona) reparte invitados del pax total. */
 export const EVENTOS_PAX_ALLOC_CATEGORIES = [
   'tres_tiempos',
+  'canapes',
   'carta',
   'desayunos',
   'parejas',
@@ -63,6 +64,15 @@ export const EVENTOS_DRINK_MENU_CODES = [
 
 /** Código del menú regular / carta C50 (alternativa al 3 tiempos). */
 export const EVENTOS_MENU_REGULAR_CODE = 'menu_regular_c50' as const;
+
+/** Código del menú de canapés (cocktail). No se mezcla con 3 tiempos. */
+export const EVENTOS_MENU_CANAPES_CODE = 'menu_canapes' as const;
+
+/** Código del menú de 3 tiempos. */
+export const EVENTOS_MENU_3_TIEMPOS_CODE = 'menu_3_tiempos_2025' as const;
+
+/** Separador interno de varias opciones en un mismo choice_group. */
+export const CHOICE_MULTI_SEP = '\n';
 
 export function isEventosDrinkMenu(menu: {
   category?: string | null;
@@ -274,6 +284,9 @@ export type MenuChoiceGroup = {
   required: boolean;
   /** Si true, al elegir una opción con unit_price se actualiza el precio de línea. */
   affects_price?: boolean;
+  /** Cuántas opciones hay que marcar. Si se omite, el grupo es de una sola. */
+  min_select?: number;
+  max_select?: number;
   options: MenuChoiceOption[];
 };
 
@@ -338,6 +351,32 @@ export function resolveItemUnitPrice(
   return Number(item.unit_price) || 0;
 }
 
+export function splitChoiceSelection(raw: string | null | undefined): string[] {
+  return String(raw || '')
+    .split(CHOICE_MULTI_SEP)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function choiceSelectionBounds(group: MenuChoiceGroup): {
+  min: number;
+  max: number;
+} {
+  const max =
+    group.max_select != null && group.max_select > 0 ? group.max_select : 1;
+  const min =
+    group.min_select != null
+      ? group.min_select
+      : group.required
+        ? max
+        : 0;
+  return { min, max };
+}
+
+function choiceTokenOk(group: MenuChoiceGroup, token: string): boolean {
+  return group.options.some((o) => o.id === token || o.label === token);
+}
+
 /** Valida selecciones requeridas de choice_groups. */
 export function validateChoiceSelections(
   item: EventMenuItem,
@@ -347,11 +386,25 @@ export function validateChoiceSelections(
   const groups = item.choice_groups || [];
   const force = new Set(opts?.requireOptionalIds || []);
   for (const g of groups) {
-    if (!g.required && !force.has(g.id)) continue;
-    const v = (selections[g.id] || '').trim();
-    if (!v) return `Elige ${g.label.toLowerCase()} para «${item.name}».`;
-    const ok = g.options.some((o) => o.id === v || o.label === v);
-    if (!ok) return `Opción inválida en ${g.label.toLowerCase()}.`;
+    const { min, max } = choiceSelectionBounds(g);
+    const parts =
+      max > 1
+        ? splitChoiceSelection(selections[g.id])
+        : (selections[g.id] || '').trim()
+          ? [(selections[g.id] || '').trim()]
+          : [];
+    const must = g.required || force.has(g.id);
+    if (must && parts.length < min) {
+      return max > 1
+        ? `Elige ${min} ${g.label.toLowerCase()} para «${item.name}» (llevas ${parts.length}).`
+        : `Elige ${g.label.toLowerCase()} para «${item.name}».`;
+    }
+    if (parts.length > max) {
+      return `Máximo ${max} en ${g.label.toLowerCase()}.`;
+    }
+    if (parts.some((p) => !choiceTokenOk(g, p))) {
+      return `Opción inválida en ${g.label.toLowerCase()}.`;
+    }
   }
   return null;
 }
@@ -836,11 +889,12 @@ export function formatQuoteLineDescription(
   for (const g of order) {
     const v = selections[g.id];
     if (!v) continue;
+    const display = splitChoiceSelection(v).join(' · ') || v;
     const label =
       'label' in g && typeof g.label === 'string'
         ? g.label
         : g.id.replace(/_/g, ' ');
-    parts.push(`${label}: ${v}`);
+    parts.push(`${label}: ${display}`);
   }
   return parts.join(' · ');
 }

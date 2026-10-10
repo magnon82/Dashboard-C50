@@ -130,7 +130,11 @@ export function optionEntries(
   return keys.map((key) => ({
     key,
     label: labels[key] || key.replace(/_/g, ' '),
-    value: options[key],
+    value: String(options[key] || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join(' · '),
   }));
 }
 

@@ -9,7 +9,7 @@
     "Menú 3 tiempos: un ítem con choice_groups (plato_fuerte requerido; entrada/postre opcionales).",
     "Barra libre solo con alimentos (requiere_food). Pack desayunos ≥50 = $30000.",
     "Servicio 15% salvo paquetes parejas (incluye servicio en PDF).",
-    "No incluir Menús eventos viejos / canapés / taquizas / botanas pre-bodas."
+    "No incluir Menús eventos viejos / taquizas / botanas pre-bodas. Canapés cocktail sí (menú vigente)."
   ],
   "menus": [
     {
@@ -149,6 +149,56 @@
                   "id": "POS-CHEESE-ELOTE",
                   "label": "Cheesecake pan de elote"
                 }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "local-menu-canapes",
+      "code": "menu_canapes",
+      "name": "Menú canapés (cocktail)",
+      "category": "canapes",
+      "description": "A elegir 4 canapés. $250 por persona. Con este formato se agregan platillos y bebidas del menú regular, no del menú de 3 tiempos.",
+      "min_pax": 10,
+      "requires_food": false,
+      "includes_servicio": false,
+      "active": true,
+      "sort_order": 12,
+      "notes": "Flyer Eventos Cocktail · 4 opciones · $250.",
+      "items": [
+        {
+          "id": "local-CAN-MENU",
+          "sku": "CAN-MENU",
+          "name": "Menú canapés",
+          "description": "Elige 4 de las opciones. Precio fijo por persona.",
+          "unit": "persona",
+          "unit_price": 250,
+          "min_pax": 10,
+          "is_vegetarian": false,
+          "active": true,
+          "sort_order": 10,
+          "price_source": "flyer_canapes_cocktail",
+          "price_verified": true,
+          "choice_groups": [
+            {
+              "id": "canapes",
+              "label": "Canapés",
+              "required": true,
+              "affects_price": false,
+              "min_select": 4,
+              "max_select": 4,
+              "options": [
+                { "id": "CAN-QUES", "label": "Quesadillas Coyoacán (1 pz)" },
+                { "id": "CAN-SOPE", "label": "Sope de Tinga (1 pz)" },
+                {
+                  "id": "CAN-TOSTA",
+                  "label": "Tosta de cremoso de aguacate, queso de oveja y cherry confitado (2 pz)"
+                },
+                { "id": "CAN-HUMUS", "label": "Petit de humus con ajonjolí (2 pz)" },
+                { "id": "CAN-BETABEL", "label": "Tapa de betabel y queso de cabra (2 pz)" },
+                { "id": "CAN-CERDO", "label": "Tapa de cerdo confitado (1 pz)" }
               ]
             }
           ]

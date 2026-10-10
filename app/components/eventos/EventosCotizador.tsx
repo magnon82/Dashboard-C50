@@ -18,7 +18,11 @@ import {
   EVENTOS_OPTIONAL_MENU_CHOICE_IDS,
   EVENTOS_QUOTE_LOCK_WITHIN_DAYS,
   EVENTOS_SERVICIO_PCT,
+  EVENTOS_MENU_3_TIEMPOS_CODE,
+  EVENTOS_MENU_CANAPES_CODE,
+  CHOICE_MULTI_SEP,
   canPlaceHold,
+  choiceSelectionBounds,
   checkOptionalMenuChoicesOnLines,
   computeOptionalMenuChoiceDeadline,
   computeQuoteTotals,
@@ -37,6 +41,7 @@ import {
   quoteLockMessage,
   resolveAnticipoDateFromActivity,
   resolveItemUnitPrice,
+  splitChoiceSelection,
   summarizePaxAllocation,
   syncBarraLibreLinesToPax,
   validateChoiceSelections,
@@ -262,17 +267,30 @@ export function EventosCotizador({
     return [...food, ...drinks];
   }, [menus, pax]);
 
-  const foodMenus = useMemo(
-    () => availableMenus.filter(isEventosCotizadorFoodMenu),
-    [availableMenus]
-  );
+  const foodMenus = useMemo(() => {
+    const hasCanapes = lines.some((l) => l.category === 'canapes');
+    const hasTres = lines.some((l) => l.category === 'tres_tiempos');
+    return availableMenus.filter((m) => {
+      if (!isEventosCotizadorFoodMenu(m)) return false;
+      if (hasCanapes && m.code === EVENTOS_MENU_3_TIEMPOS_CODE) return false;
+      if (hasTres && m.code === EVENTOS_MENU_CANAPES_CODE) return false;
+      return true;
+    });
+  }, [availableMenus, lines]);
   const drinkMenus = useMemo(
     () => availableMenus.filter(isEventosDrinkMenu),
     [availableMenus]
   );
 
-  /** Bebidas solo tras agregar al menos una línea de alimentos. */
   const hasFoodInQuote = useMemo(() => quoteHasFoodLines(lines), [lines]);
+  const quoteHasCanapes = useMemo(
+    () => lines.some((l) => l.category === 'canapes'),
+    [lines]
+  );
+  const quoteHasTresTiempos = useMemo(
+    () => lines.some((l) => l.category === 'tres_tiempos'),
+    [lines]
+  );
   const hasDrinkInQuote = useMemo(
     () =>
       lines.some((l) =>
@@ -312,7 +330,12 @@ export function EventosCotizador({
     const stillOk = availableMenus.some((m) => m.id === menuId);
     const drinkLocked =
       selectedMenu && isEventosDrinkMenu(selectedMenu) && !hasFoodInQuote;
-    if (!menuId || !stillOk || drinkLocked) {
+    const hiddenByFormat =
+      (quoteHasCanapes &&
+        selectedMenu?.code === EVENTOS_MENU_3_TIEMPOS_CODE) ||
+      (quoteHasTresTiempos &&
+        selectedMenu?.code === EVENTOS_MENU_CANAPES_CODE);
+    if (!menuId || !stillOk || drinkLocked || hiddenByFormat) {
       const next = foodMenus[0] || availableMenus[0];
       if (next && next.id !== menuId) {
         setMenuId(next.id);
@@ -325,6 +348,8 @@ export function EventosCotizador({
     foodMenus,
     hasFoodInQuote,
     menuId,
+    quoteHasCanapes,
+    quoteHasTresTiempos,
     selectedMenu,
   ]);
 
@@ -660,6 +685,24 @@ export function EventosCotizador({
     if (isEventosDrinkMenu(selectedMenu) && !hasFoodInQuote) {
       setErr(
         'Primero agrega un menú de alimentos; después puedes cotizar barra libre o bebidas.'
+      );
+      return;
+    }
+    if (
+      quoteHasCanapes &&
+      selectedMenu.code === EVENTOS_MENU_3_TIEMPOS_CODE
+    ) {
+      setErr(
+        'En formato canapés se agregan alimentos del menú regular y bebidas, no del menú de 3 tiempos.'
+      );
+      return;
+    }
+    if (
+      quoteHasTresTiempos &&
+      selectedMenu.code === EVENTOS_MENU_CANAPES_CODE
+    ) {
+      setErr(
+        'Esta cotización ya usa menú de 3 tiempos. Canapés es un formato aparte.'
       );
       return;
     }
@@ -2053,8 +2096,12 @@ export function EventosCotizador({
                     ? showItemPicker
                       ? 'Elige el ítem abajo y agrega la línea de bebidas a la cotización.'
                       : 'Agrega la línea de bebidas a la cotización.'
-                    : 'Alimentos listos. Usa los botones Barra libre / Bebidas C50 bajo la tabla, o cambia este menú a Bebidas.'
-                  : 'Elige Menú 3 tiempos (eventos) o Menú regular (C50); después se habilitan barra libre y Bebidas.'}
+                    : quoteHasCanapes
+                      ? 'Formato canapés. Agrega platillos del menú regular (no el de 3 tiempos) o bebidas abajo.'
+                      : 'Alimentos listos. Usa los botones Barra libre / Bebidas C50 bajo la tabla, o cambia este menú a Bebidas.'
+                  : quoteHasCanapes
+                    ? 'Formato canapés: agrega platillos del menú regular y bebidas. El menú de 3 tiempos no aplica.'
+                    : 'Elige Menú 3 tiempos, Menú canapés o Menú regular (C50); después se habilitan barra libre y Bebidas.'}
               </p>
             </label>
           </div>
@@ -2371,6 +2418,67 @@ export function EventosCotizador({
                         EVENTOS_OPTIONAL_MENU_CHOICE_IDS as readonly string[]
                       ).includes(g.id);
                     const showRequired = g.required || forceOptional;
+                    const bounds = choiceSelectionBounds(g);
+                    if (bounds.max > 1) {
+                      const picked = splitChoiceSelection(choices[g.id]);
+                      return (
+                        <div
+                          key={g.id}
+                          className="text-sm sm:col-span-2 lg:col-span-3"
+                        >
+                          <p
+                            className="font-semibold"
+                            style={{ color: SUITE.navy }}
+                          >
+                            {g.label}
+                            {showRequired
+                              ? ` · elige ${bounds.min}`
+                              : ''}
+                            {` (${picked.length}/${bounds.max})`}
+                          </p>
+                          <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                            {g.options.map((o) => {
+                              const on = picked.includes(o.label);
+                              const full = picked.length >= bounds.max && !on;
+                              return (
+                                <li key={o.id}>
+                                  <label
+                                    className={`flex items-start gap-2 rounded-lg border bg-white px-2.5 py-2 ${
+                                      full ? 'opacity-50' : ''
+                                    }`}
+                                    style={{
+                                      borderColor: on ? SUITE.navy : SUITE.border,
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="mt-0.5"
+                                      checked={on}
+                                      disabled={quoteLocked || full}
+                                      onChange={() => {
+                                        setChoices((prev) => {
+                                          const cur = splitChoiceSelection(
+                                            prev[g.id]
+                                          );
+                                          const next = on
+                                            ? cur.filter((x) => x !== o.label)
+                                            : [...cur, o.label];
+                                          return {
+                                            ...prev,
+                                            [g.id]: next.join(CHOICE_MULTI_SEP),
+                                          };
+                                        });
+                                      }}
+                                    />
+                                    <span>{o.label}</span>
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      );
+                    }
                     return (
                       <label key={g.id} className="text-sm">
                         <span
@@ -2493,6 +2601,14 @@ export function EventosCotizador({
                     <tr key={l.key} className="border-t border-slate-100">
                       <td className="px-3 py-2 font-medium text-slate-800">
                         <div>{l.description.split(' · ')[0]}</div>
+                        {l.options?.canapes ? (
+                          <div className="mt-0.5 text-xs font-normal text-slate-500">
+                            {String(l.options.canapes)
+                              .split('\n')
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </div>
+                        ) : null}
                         {l.options?.plato_fuerte && (
                           <div className="mt-0.5 text-xs font-normal text-slate-500">
                             Plato fuerte: {l.options.plato_fuerte}

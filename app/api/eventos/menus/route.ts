@@ -54,8 +54,8 @@ const DRINK_MENU_SEED_CODES = [
   'bebidas_a_la_carta',
 ] as const;
 
-/** Catálogos de alimentos aportados desde seed si faltan en DB (menú regular C50). */
-const FOOD_SEED_APPEND_CODES = ['menu_regular_c50'] as const;
+/** Catálogos de alimentos aportados desde seed si faltan en DB. */
+const FOOD_SEED_APPEND_CODES = ['menu_regular_c50', 'menu_canapes'] as const;
 
 const SEED_APPEND_CODES = [
   ...DRINK_MENU_SEED_CODES,
@@ -119,6 +119,9 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
   const needsTresTiemposOverlay = menus.some(
     (m) => String(m.code || '') === 'menu_3_tiempos_2025'
   );
+  const needsCanapesOverlay = menus.some(
+    (m) => String(m.code || '') === 'menu_canapes'
+  );
   const presentCodes = new Set(menus.map((m) => String(m.code || '')));
   const missingAppendCodes = SEED_APPEND_CODES.filter(
     (c) => !presentCodes.has(c)
@@ -170,6 +173,7 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
       !needsChoiceGroups &&
       !needsSeedItemsOverlay &&
       !needsTresTiemposOverlay &&
+      !needsCanapesOverlay &&
       !missingAppendCodes.length
     ) {
       return withSeedRules;
@@ -177,7 +181,8 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
     if (
       !needsChoiceGroups &&
       !needsSeedItemsOverlay &&
-      !needsTresTiemposOverlay
+      !needsTresTiemposOverlay &&
+      !needsCanapesOverlay
     ) {
       return appendMissingFromSeed(withSeedRules);
     }
@@ -185,18 +190,47 @@ async function enrichCatalogFromSeed(menus: MenuRow[]) {
       const seedMenu = m.code ? byCode.get(String(m.code)) : undefined;
       if (!seedMenu?.items?.length) return m;
 
-      // Barra libre / Bebidas C50 / Menú regular: seed completo si DB vacía, stub o parcial
+      // Barra libre / Bebidas C50 / Menú regular: seed completo si DB vacía, stub o parcial.
+      // Canapés no pasa por aquí: su ítem trae choice_groups y el overlay de bebidas los borra.
       const code = String(m.code || '');
+      const seedPackage = seedMenu.items.find(
+        (i) => Array.isArray(i.choice_groups) && i.choice_groups!.length > 0
+      );
+      if (code === 'menu_canapes' && seedPackage?.choice_groups?.length) {
+        const dbPackage =
+          (m.items || []).find((i) => String(i.sku || '') === 'CAN-MENU') ||
+          (m.items || [])[0];
+        return {
+          ...m,
+          description: seedMenu.description ?? m.description,
+          notes: seedMenu.notes ?? m.notes,
+          items: [
+            {
+              id: (dbPackage?.id as string | undefined) ?? seedPackage.id,
+              menu_id: m.id,
+              sku: seedPackage.sku,
+              name: seedPackage.name,
+              description: seedPackage.description,
+              unit: seedPackage.unit,
+              unit_price: seedPackage.unit_price,
+              min_pax: seedPackage.min_pax,
+              is_vegetarian: seedPackage.is_vegetarian,
+              active: true,
+              sort_order: seedPackage.sort_order,
+              price_source: seedPackage.price_source,
+              price_verified: seedPackage.price_verified,
+              choice_groups: seedPackage.choice_groups as MenuChoiceGroup[],
+            } satisfies Partial<EventMenuItem>,
+          ],
+        };
+      }
       if (
+        code !== 'menu_canapes' &&
         (SEED_APPEND_CODES as readonly string[]).includes(code) &&
         seedMenu.items.length > (m.items || []).length
       ) {
         return overlayDrinkItemsFromSeed(m, seedMenu);
       }
-
-      const seedPackage = seedMenu.items.find(
-        (i) => Array.isArray(i.choice_groups) && i.choice_groups!.length > 0
-      );
 
       // Menú 3 tiempos: seed PDF vigente siempre gana (no reintroducir fuertes
       // de stubs OS / carta C50 que puedan quedar en choice_groups de DB).
