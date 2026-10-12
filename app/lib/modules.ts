@@ -103,8 +103,8 @@ export const APP_MODULES: AppModule[] = [
     href: '/inventarios',
     label: 'Costos e Inventarios',
     short: 'Costos',
-    description: 'Costeo, existencias, mermas y puntos de reorden',
-    status: 'próximo',
+    description: 'Costo por venta de alimentos y bebidas · unidades, utilidad y margen',
+    status: 'activo',
   },
   {
     id: 'calidad',
