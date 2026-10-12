@@ -985,8 +985,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
             note: 'oculto hasta usuarios por empleado · redirect /staff',
           },
           { label: '/reportes-socios', kind: 'route' },
-          { label: '/cocina', kind: 'route', note: 'placeholder' },
-          { label: '/barra', kind: 'route', note: 'placeholder' },
+          { label: '/cocina', kind: 'route', note: 'Recetario vigente · copia local' },
+          { label: '/barra', kind: 'route', note: 'Recetario vigente · copia local' },
           { label: '/admin', kind: 'route', note: 'Mapa + Inventario de datos' },
         ],
         routes: [
