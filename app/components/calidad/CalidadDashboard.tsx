@@ -196,8 +196,17 @@ function ComentarioCard({ item }: { item: CalidadComentario }) {
   );
 }
 
+function yearInMexico(from = new Date()): number {
+  return Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+    }).format(from)
+  );
+}
+
 export function CalidadDashboard() {
-  const [year, setYear] = useState<number | null>(null);
+  const [year, setYear] = useState<number | null>(yearInMexico);
   const [month, setMonth] = useState<number | null>(null);
   const [mesero, setMesero] = useState<string | null>(null);
   const [pregunta, setPregunta] = useState<CalidadPreguntaId>('servicio');
@@ -275,14 +284,18 @@ export function CalidadDashboard() {
   }, [query, tono]);
 
   const years = useMemo(() => {
+    const current = yearInMexico();
     const fromApi = (resumen?.anios || []).filter((item) => Number.isFinite(item));
-    if (fromApi.length) return fromApi;
-    const min = resumen?.rango.min ? Number(resumen.rango.min.slice(0, 4)) : null;
-    const max = resumen?.rango.max ? Number(resumen.rango.max.slice(0, 4)) : null;
-    if (!min || !max || max - min > 12) return [];
-    const list: number[] = [];
-    for (let y = max; y >= min; y -= 1) list.push(y);
-    return list;
+    const list = fromApi.length ? [...fromApi] : [];
+    if (!list.length) {
+      const min = resumen?.rango.min ? Number(resumen.rango.min.slice(0, 4)) : null;
+      const max = resumen?.rango.max ? Number(resumen.rango.max.slice(0, 4)) : null;
+      if (min && max && max - min <= 12) {
+        for (let y = max; y >= min; y -= 1) list.push(y);
+      }
+    }
+    if (!list.includes(current)) list.push(current);
+    return list.sort((a, b) => b - a);
   }, [resumen?.anios, resumen?.rango.max, resumen?.rango.min]);
 
   const conteo = resumen?.preguntas[pregunta];
