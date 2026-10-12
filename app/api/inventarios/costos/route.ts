@@ -1,11 +1,10 @@
 /**
  * GET /api/inventarios/costos?mes=Septiembre
- * Costo por venta de alimentos y bebidas (Sheets, pestaña del mes).
+ * Costo por venta guardado en Supabase (no lee Drive en cada visita).
  */
 import { NextResponse } from 'next/server';
 import { requireInventariosSession } from '@/app/lib/inventarios-api';
 import { CostoMesError, loadCostosDashboard } from '@/app/lib/costos-venta';
-import { friendlyDriveError } from '@/app/lib/google-drive-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,14 +12,14 @@ export const dynamic = 'force-dynamic';
 function costosError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
   const lower = raw.toLowerCase();
-  if (lower.includes('faltan credenciales') || lower.includes('pestañas de mes')) {
+  if (
+    lower.includes('importado') ||
+    lower.includes('base de datos') ||
+    lower.includes('no tiene costo')
+  ) {
     return raw;
   }
-  const friendly = friendlyDriveError(err);
-  if (friendly.includes('carpeta RH')) {
-    return 'No se pudo leer las hojas de costo por venta. Revisa que la cuenta de Google tenga acceso a esos Sheets.';
-  }
-  return friendly;
+  return 'No se pudo cargar el costo por venta guardado.';
 }
 
 export async function GET(req: Request) {

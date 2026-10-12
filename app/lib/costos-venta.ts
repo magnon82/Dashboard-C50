@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { google } from 'googleapis';
 import { createSheetsClient } from '@/app/lib/google-drive-auth';
+import { getServiceSupabase } from '@/app/lib/users';
 
 export const COSTOS_FOOD_SHEET_ID = '1x_kzoXEFvAavWGyBnWYDdely6Epx9WPLgYdNjhOCeDE';
 export const COSTOS_DRINK_SHEET_ID = '1MCWAI7ozvUpawXxspT5wl4yd4HYhGFhOg0bpX0OcABM';
@@ -393,29 +394,7 @@ async function readMonth(
   return rows;
 }
 
-async function loadSide(
-  spreadsheetId: string,
-  actualTitle: string | undefined,
-  month: string
-): Promise<CostoLado> {
-  if (!actualTitle) {
-    return emptyLado(`La hoja no tiene pestaña de ${month}.`);
-  }
-  const values = await readMonth(spreadsheetId, actualTitle, month);
-  return rankCostoProductos(parseCostoRows(values));
-}
-
-async function monthHasSales(
-  foodTabs: Map<string, string>,
-  drinkTabs: Map<string, string>,
-  month: string
-): Promise<boolean> {
-  const [alimentos, bebidas] = await Promise.all([
-    loadSide(COSTOS_FOOD_SHEET_ID, foodTabs.get(month), month),
-    loadSide(COSTOS_DRINK_SHEET_ID, drinkTabs.get(month), month),
-  ]);
-  return alimentos.kpis.productos > 0 || bebidas.kpis.productos > 0;
-}
+export const COSTOS_ANIO = 2026;
 
 export class CostoMesError extends Error {
   status = 400;
@@ -427,28 +406,80 @@ export class CostoMesError extends Error {
   }
 }
 
+const COSTOS_SOURCE = 'costos_venta';
+
+function num(value: number | string | null | undefined): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+type SnapshotPayload = {
+  anio: number;
+  mes: string;
+  linea: 'alimentos' | 'bebidas';
+  productos: Array<{
+    producto: string;
+    grupo: string;
+    unidades: number;
+    venta: number;
+    costoTotal: number;
+    costoPct: number | null;
+    utilidad: number;
+  }>;
+};
+
+function monthDate(anio: number, mes: string): string {
+  const index = COSTOS_MESES.findIndex((name) => name === mes);
+  const month = String(Math.max(index, 0) + 1).padStart(2, '0');
+  return `${anio}-${month}-01`;
+}
+
+function ladoFromPayload(payload: SnapshotPayload | null): CostoLado {
+  const parsed: ParsedRow[] = (payload?.productos || []).map((row) => ({
+    producto: row.producto,
+    grupo: row.grupo || '',
+    unidades: num(row.unidades),
+    venta: num(row.venta),
+    costoTotal: num(row.costoTotal),
+    costoPct: row.costoPct == null ? null : num(row.costoPct),
+    utilidad: num(row.utilidad),
+  }));
+  if (!parsed.length) return emptyLado('Sin ventas en este mes.');
+  return rankCostoProductos(parsed);
+}
+
+function parseSnapshot(description: string | null): SnapshotPayload | null {
+  if (!description) return null;
+  try {
+    const payload = JSON.parse(description) as SnapshotPayload;
+    if (!payload?.mes || !payload.linea || !Array.isArray(payload.productos)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+/** Tablero desde la base. No consulta Drive. */
 export async function loadCostosDashboard(
   mesParam: string | null
 ): Promise<CostosDashboard> {
-  const [foodTabs, drinkTabs] = await Promise.all([
-    monthTabs(COSTOS_FOOD_SHEET_ID),
-    monthTabs(COSTOS_DRINK_SHEET_ID),
-  ]);
-  const mesesTab: string[] = COSTOS_MESES.filter(
-    (m) => foodTabs.has(m) || drinkTabs.has(m)
-  );
-  if (!mesesTab.length) {
-    throw new Error('Las hojas de costo por venta no tienen pestañas de mes.');
+  const sb = getServiceSupabase();
+  const { data, error } = await sb
+    .from('financial_records')
+    .select('description')
+    .eq('source_file', COSTOS_SOURCE);
+  if (error) {
+    throw new Error('No se pudo leer el costo por venta guardado.');
   }
 
-  const conVentas = (
-    await Promise.all(
-      mesesTab.map(async (month) =>
-        (await monthHasSales(foodTabs, drinkTabs, month)) ? month : null
-      )
-    )
-  ).filter((month): month is string => Boolean(month));
-  const meses = conVentas.length ? conVentas : mesesTab;
+  const snapshots = (data || [])
+    .map((row) => parseSnapshot((row as { description?: string }).description || null))
+    .filter((row): row is SnapshotPayload => Boolean(row));
+  const presentes = new Set(snapshots.map((row) => row.mes));
+  const meses = COSTOS_MESES.filter((mes) => presentes.has(mes));
+  if (!meses.length) {
+    throw new Error('El costo por venta todavía no está importado.');
+  }
 
   let mes: string;
   const requested = (mesParam || '').trim();
@@ -456,7 +487,7 @@ export async function loadCostosDashboard(
     const canon = canonicalMonthName(requested);
     if (!canon || !meses.includes(canon)) {
       throw new CostoMesError(
-        canon && mesesTab.includes(canon)
+        canon
           ? `${canon} todavía no tiene costo por venta.`
           : `Mes no disponible: ${requested}`,
         [...meses]
@@ -467,10 +498,116 @@ export async function loadCostosDashboard(
     mes = meses[meses.length - 1];
   }
 
-  const [alimentos, bebidas] = await Promise.all([
-    loadSide(COSTOS_FOOD_SHEET_ID, foodTabs.get(mes), mes),
-    loadSide(COSTOS_DRINK_SHEET_ID, drinkTabs.get(mes), mes),
-  ]);
+  const alimentos =
+    snapshots.find((row) => row.mes === mes && row.linea === 'alimentos') || null;
+  const bebidas =
+    snapshots.find((row) => row.mes === mes && row.linea === 'bebidas') || null;
 
-  return { mes, meses: [...meses], alimentos, bebidas };
+  return {
+    mes,
+    meses: [...meses],
+    alimentos: ladoFromPayload(alimentos),
+    bebidas: ladoFromPayload(bebidas),
+  };
+}
+
+function dedupeRows(rows: ParsedRow[]): ParsedRow[] {
+  const map = new Map<string, ParsedRow>();
+  for (const row of rows) {
+    const key = `${row.producto}\0${row.grupo}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...row });
+      continue;
+    }
+    prev.unidades += row.unidades;
+    prev.venta += row.venta;
+    prev.costoTotal += row.costoTotal;
+    prev.utilidad += row.utilidad;
+    prev.costoPct =
+      prev.venta > 0 ? (prev.costoTotal / prev.venta) * 100 : prev.costoPct;
+  }
+  return [...map.values()];
+}
+
+/**
+ * Lee las hojas de cocina y barra y reemplaza en la base los meses con ventas.
+ * Los meses vacíos (pestaña sin productos) no se tocan.
+ */
+export async function syncCostosVentaFromSheets(
+  anio = COSTOS_ANIO
+): Promise<{ meses: string[]; filas: number }> {
+  const [foodTabs, drinkTabs] = await Promise.all([
+    monthTabs(COSTOS_FOOD_SHEET_ID),
+    monthTabs(COSTOS_DRINK_SHEET_ID),
+  ]);
+  const mesesTab = COSTOS_MESES.filter(
+    (mes) => foodTabs.has(mes) || drinkTabs.has(mes)
+  );
+  const sb = getServiceSupabase();
+  const records: Array<{
+    date: string;
+    type: string;
+    category: string;
+    amount: number;
+    description: string;
+    source_file: string;
+  }> = [];
+
+  for (const mes of mesesTab) {
+    const lados: Array<['alimentos' | 'bebidas', string | undefined, string]> = [
+      ['alimentos', foodTabs.get(mes), COSTOS_FOOD_SHEET_ID],
+      ['bebidas', drinkTabs.get(mes), COSTOS_DRINK_SHEET_ID],
+    ];
+    for (const [linea, title, sheetId] of lados) {
+      const parsed = title
+        ? dedupeRows(parseCostoRows(await readMonth(sheetId, title, mes)))
+        : [];
+      if (!parsed.length) continue;
+      const payload: SnapshotPayload = {
+        anio,
+        mes,
+        linea,
+        productos: parsed.map((row) => ({
+          producto: row.producto,
+          grupo: row.grupo,
+          unidades: row.unidades,
+          venta: row.venta,
+          costoTotal: row.costoTotal,
+          costoPct: row.costoPct,
+          utilidad: row.utilidad,
+        })),
+      };
+      records.push({
+        date: monthDate(anio, mes),
+        type: 'expense',
+        category: linea,
+        amount: 0,
+        description: JSON.stringify(payload),
+        source_file: COSTOS_SOURCE,
+      });
+    }
+  }
+
+  const { error: delError } = await sb
+    .from('financial_records')
+    .delete()
+    .eq('source_file', COSTOS_SOURCE);
+  if (delError) throw new Error(delError.message);
+
+  if (records.length) {
+    const { error: insError } = await sb.from('financial_records').insert(records);
+    if (insError) throw new Error(insError.message);
+  }
+
+  return {
+    meses: [...new Set(records.map((row) => {
+      const payload = parseSnapshot(row.description);
+      return payload?.mes || '';
+    }).filter(Boolean))],
+    filas: records.reduce((sum, row) => {
+      const payload = parseSnapshot(row.description);
+      return sum + (payload?.productos.length || 0);
+    }, 0),
+  };
 }

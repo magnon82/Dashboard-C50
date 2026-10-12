@@ -52,6 +52,7 @@ export async function GET(request: Request) {
       .from('financial_records')
       .select('*')
       .neq('source_file', 'dashboard_auth')
+      .neq('source_file', 'costos_venta')
       .order('date', { ascending: false })
       .order('id', { ascending: false });
 
