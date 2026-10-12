@@ -111,8 +111,8 @@ export const APP_MODULES: AppModule[] = [
     href: '/calidad',
     label: 'Calidad',
     short: 'Calidad',
-    description: 'Incidencias, motivos de cancelación y KPIs de servicio',
-    status: 'próximo',
+    description: 'Encuestas de satisfacción, calificaciones y comentarios para corregir',
+    status: 'activo',
   },
 ];
 

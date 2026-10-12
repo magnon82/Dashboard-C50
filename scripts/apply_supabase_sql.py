@@ -31,6 +31,7 @@ SQL_FILES = {
     "tpv": ROOT / "supabase" / "tpv_cortes.sql",
     "hr_nacimiento": ROOT / "supabase" / "hr_employee_nacimiento.sql",
     "reservas": ROOT / "supabase" / "restaurant_reservations.sql",
+    "calidad": ROOT / "supabase" / "calidad_encuestas.sql",
 }
 
 DEFAULT_ORDER = ["eventos", "eventos_leads", "eventos_leads_source", "reportes", "tpv"]

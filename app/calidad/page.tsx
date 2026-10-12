@@ -1,12 +1,7 @@
 'use client';
 
-import { ModulePlaceholder } from '@/app/components/ModulePlaceholder';
+import { CalidadDashboard } from '@/app/components/calidad/CalidadDashboard';
 
 export default function CalidadPage() {
-  return (
-    <ModulePlaceholder
-      title="Calidad"
-      description="Incidencias, motivos de cancelación/descuento y KPIs de servicio al cliente."
-    />
-  );
+  return <CalidadDashboard />;
 }
