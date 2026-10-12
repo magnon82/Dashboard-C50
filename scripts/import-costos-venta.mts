@@ -24,7 +24,7 @@ if (
   );
 }
 
-const { syncCostosVentaFromSheets } = await import('../app/lib/costos-venta.ts');
+const { syncCostosVentaFromSheets } = await import('../app/lib/costos-venta');
 const result = await syncCostosVentaFromSheets();
 console.log('meses', result.meses.join(', '));
 console.log('filas', result.filas);

@@ -1,6 +1,6 @@
 /**
- * Costo por venta (cocina + barra) leído en vivo de Google Sheets.
- * Pestañas = meses. Rankings sobre filas con precio y venta > 0.
+ * Costo por venta (cocina + barra).
+ * El tablero lee lo guardado en Supabase. Google Sheets solo se usa al importar.
  */
 
 import fs from 'node:fs';
@@ -476,7 +476,7 @@ export async function loadCostosDashboard(
     .map((row) => parseSnapshot((row as { description?: string }).description || null))
     .filter((row): row is SnapshotPayload => Boolean(row));
   const presentes = new Set(snapshots.map((row) => row.mes));
-  const meses = COSTOS_MESES.filter((mes) => presentes.has(mes));
+  const meses: string[] = COSTOS_MESES.filter((mes) => presentes.has(mes));
   if (!meses.length) {
     throw new Error('El costo por venta todavía no está importado.');
   }
