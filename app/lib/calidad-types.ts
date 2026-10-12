@@ -38,6 +38,13 @@ export interface CalidadSync {
   lastMessage?: string | null;
 }
 
+export interface CalidadFiltro {
+  from: string | null;
+  to: string | null;
+  mesero: string | null;
+  grain: 'month' | 'day';
+}
+
 export interface CalidadResumen {
   encuestas: number;
   preguntas: Record<CalidadPreguntaId, CalidadConteo>;

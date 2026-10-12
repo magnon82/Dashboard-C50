@@ -1,12 +1,16 @@
 import { getServiceSupabase } from '@/app/lib/users';
-import type { CalidadComentarios, CalidadResumen, CalidadTono } from '@/app/lib/calidad-types';
+import {
+  buildCalidadComentarios,
+  buildCalidadResumen,
+  type StoredEncuestasFile,
+} from '@/app/lib/calidad-aggregate';
+import type { CalidadComentarios, CalidadFiltro, CalidadResumen, CalidadTono } from '@/app/lib/calidad-types';
 
-export interface CalidadFiltro {
-  from: string | null;
-  to: string | null;
-  mesero: string | null;
-  grain: 'month' | 'day';
-}
+const BUCKET = 'calidad-encuestas';
+const OBJECT = 'encuestas.json';
+const CACHE_MS = 60_000;
+
+let cache: { at: number; file: StoredEncuestasFile } | null = null;
 
 function clean(value: string | null): string | null {
   const trimmed = (value || '').trim();
@@ -33,32 +37,30 @@ export function calidadFiltroFromSearch(url: URL): CalidadFiltro {
   return { from: `${year}-${mm}-01`, to: `${year}-${mm}-${dd}`, mesero, grain: 'day' };
 }
 
-export async function loadCalidadResumen(filtro: CalidadFiltro): Promise<CalidadResumen> {
+async function loadStoredEncuestas(): Promise<StoredEncuestasFile> {
+  if (cache && Date.now() - cache.at < CACHE_MS) return cache.file;
   const sb = getServiceSupabase();
-  const { data, error } = await sb.rpc('calidad_resumen', {
-    p_from: filtro.from,
-    p_to: filtro.to,
-    p_mesero: filtro.mesero,
-    p_grain: filtro.grain,
-  });
-  if (error) throw new Error(error.message);
-  return data as CalidadResumen;
+  const { data, error } = await sb.storage.from(BUCKET).download(OBJECT);
+  if (error || !data) {
+    throw new Error(error?.message || 'Aún no hay encuestas importadas.');
+  }
+  const file = JSON.parse(await data.text()) as StoredEncuestasFile;
+  if (!Array.isArray(file.rows)) {
+    throw new Error('El archivo de encuestas no tiene filas.');
+  }
+  cache = { at: Date.now(), file };
+  return file;
+}
+
+export async function loadCalidadResumen(filtro: CalidadFiltro): Promise<CalidadResumen> {
+  return buildCalidadResumen(await loadStoredEncuestas(), filtro);
 }
 
 export async function loadCalidadComentarios(
   filtro: CalidadFiltro,
   tono: CalidadTono
 ): Promise<CalidadComentarios> {
-  const sb = getServiceSupabase();
-  const { data, error } = await sb.rpc('calidad_comentarios', {
-    p_from: filtro.from,
-    p_to: filtro.to,
-    p_mesero: filtro.mesero,
-    p_tono: tono,
-    p_limit: 120,
-  });
-  if (error) throw new Error(error.message);
-  return data as CalidadComentarios;
+  return buildCalidadComentarios(await loadStoredEncuestas(), filtro, tono);
 }
 
 export function parseCalidadTono(value: string | null): CalidadTono {

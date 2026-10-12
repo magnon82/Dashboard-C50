@@ -26,18 +26,10 @@ export async function requireCalidadSession(): Promise<SessionUser | NextRespons
 export function calidadQueryError(err: unknown): { status: number; error: string } {
   const raw = err instanceof Error ? err.message : String(err);
   const lower = raw.toLowerCase();
-  if (
-    lower.includes('calidad_resumen') ||
-    lower.includes('calidad_comentarios') ||
-    lower.includes('calidad_encuestas') ||
-    lower.includes('schema cache') ||
-    lower.includes('pgrst202') ||
-    lower.includes('does not exist')
-  ) {
+  if (lower.includes('aún no hay encuestas') || lower.includes('aun no hay encuestas') || lower.includes('not found') || lower.includes('object not found')) {
     return {
       status: 503,
-      error:
-        'Falta preparar la base de Calidad. Ejecuta supabase/calidad_encuestas.sql en Supabase y corre el sync de encuestas.',
+      error: 'Las encuestas todavía no se han importado. El sync diario corre a las 4:00.',
     };
   }
   return { status: 502, error: 'No se pudieron cargar las encuestas de Calidad.' };

@@ -1,16 +1,15 @@
 """
-Importa la hoja Encuestas → Supabase (calidad_encuestas).
+Importa la hoja Encuestas → Storage de Supabase (calidad-encuestas/encuestas.json).
 
-Solo inserta filas cuyo source_hash aún no existe. No actualiza historial.
+Solo agrega filas cuyo source_hash aún no está en el archivo. No reescribe historial.
 Pensado para GitHub Actions a las 4:00 AM CDMX (sync-calidad.yml).
-
-Requisito una vez: supabase/calidad_encuestas.sql
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 from collections import Counter
@@ -27,9 +26,9 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env.local")
 
 SPREADSHEET_ID = "1p8jWAw_eqeHgxtw03K7lgH-WThHVJ1FHENiEK6-m2gM"
 TAB = "Encuestas"
+BUCKET = "calidad-encuestas"
+OBJECT = "encuestas.json"
 HASH_SEP = "\x1f"
-BATCH = 400
-PAGE = 1000
 FECHA_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$")
 
 
@@ -123,51 +122,34 @@ def load_sheet_rows() -> list[dict]:
     return out
 
 
-def existing_hashes(sb) -> set[str]:
-    found: set[str] = set()
-    start = 0
-    while True:
-        res = (
-            sb.table("calidad_encuestas")
-            .select("source_hash")
-            .order("source_hash")
-            .range(start, start + PAGE - 1)
-            .execute()
-        )
-        rows = res.data or []
-        for row in rows:
-            found.add(row["source_hash"])
-        if len(rows) < PAGE:
-            break
-        start += PAGE
-    return found
+def load_existing(sb) -> tuple[list[dict], set[str]]:
+    try:
+        blob = sb.storage.from_(BUCKET).download(OBJECT)
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc).lower()
+        if "not found" in message or "404" in message:
+            return [], set()
+        raise
+    raw = blob.decode("utf-8") if isinstance(blob, (bytes, bytearray)) else bytes(blob).decode("utf-8")
+    payload = json.loads(raw or "{}")
+    rows = list(payload.get("rows") or [])
+    hashes = {str(row.get("source_hash")) for row in rows if row.get("source_hash")}
+    return rows, hashes
 
 
-def insert_new(sb, rows: list[dict]) -> int:
-    inserted = 0
-    for offset in range(0, len(rows), BATCH):
-        chunk = rows[offset : offset + BATCH]
-        sb.table("calidad_encuestas").insert(chunk).execute()
-        inserted += len(chunk)
-        print(f"  insertadas {inserted}/{len(rows)}")
-    return inserted
-
-
-def write_state(sb, *, status: str, rows_read: int, rows_inserted: int, message: str) -> None:
-    now = datetime.now(timezone.utc).isoformat()
-    sb.table("calidad_sync_state").upsert(
-        {
-            "content_type": "encuestas",
-            "label": "Encuestas de satisfacción",
-            "last_synced_at": now,
-            "rows_read": rows_read,
-            "rows_inserted": rows_inserted,
-            "last_status": status,
-            "last_message": message[:500],
-            "updated_at": now,
-        },
-        on_conflict="content_type",
-    ).execute()
+def save_file(sb, rows: list[dict], *, rows_read: int, rows_inserted: int) -> None:
+    payload = {
+        "syncedAt": datetime.now(timezone.utc).isoformat(),
+        "rowsRead": rows_read,
+        "rowsInserted": rows_inserted,
+        "rows": rows,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    sb.storage.from_(BUCKET).upload(
+        OBJECT,
+        data,
+        file_options={"content-type": "application/json", "upsert": "true"},
+    )
 
 
 def main() -> None:
@@ -189,19 +171,12 @@ def main() -> None:
         return
 
     sb = _client()
-    try:
-        known = existing_hashes(sb)
-    except Exception as exc:  # noqa: BLE001
-        print(f"No se pudo leer calidad_encuestas: {exc}")
-        print("Ejecuta supabase/calidad_encuestas.sql en el SQL Editor de Supabase.")
-        raise SystemExit(1) from exc
-
+    existing, known = load_existing(sb)
     fresh = [row for row in rows if row["source_hash"] not in known]
     print(f"Ya importadas: {len(known)}. Nuevas: {len(fresh)}")
-    inserted = insert_new(sb, fresh) if fresh else 0
-    message = f"{inserted} filas nuevas de {len(rows)} en la hoja"
-    write_state(sb, status="ok", rows_read=len(rows), rows_inserted=inserted, message=message)
-    print(message)
+    merged = existing + fresh
+    save_file(sb, merged, rows_read=len(rows), rows_inserted=len(fresh))
+    print(f"{len(fresh)} filas nuevas de {len(rows)} en la hoja. Guardadas: {len(merged)}")
 
 
 if __name__ == "__main__":

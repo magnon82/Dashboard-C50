@@ -2,9 +2,8 @@ name: Sync Calidad encuestas
 
 # CDMX sin DST desde 2022 (UTC-6 year-round).
 # Diario 4:00 AM CDMX = 10:00 UTC.
-# Solo inserta filas nuevas de la hoja Encuestas (source_hash). No reescribe historial.
-#
-# Requisito una vez: ejecutar supabase/calidad_encuestas.sql
+# Solo agrega filas nuevas de la hoja Encuestas (source_hash) al archivo
+# calidad-encuestas/encuestas.json. No reescribe historial.
 
 on:
   schedule:
