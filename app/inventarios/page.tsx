@@ -438,8 +438,7 @@ export default function InventariosPage() {
             {pagos.mes}
           </h2>
           <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-            El pago ejercido es la compra registrada. El % de costo es ese pago contra la venta. Meta de la hoja:{' '}
-            {pct(pagos.metaPct)}.
+            El pago ejercido es la compra registrada. El % de costo es ese pago contra la venta. Meta de la hoja: {pct(pagos.metaPct)}.
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
             <Kpi label="Venta" value={money(pagos.global.venta)} />
