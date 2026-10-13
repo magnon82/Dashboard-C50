@@ -87,7 +87,8 @@ function buildRecipe(
       }
       const subBuilt = buildRecipe(sub, recipes, insumos, cache, stack);
       const yieldQty = sub.yieldQty > 0 ? sub.yieldQty : 1;
-      const per = subBuilt.complete ? subBuilt.batch / yieldQty : null;
+      const per =
+        subBuilt.complete && subBuilt.batch != null ? subBuilt.batch / yieldQty : null;
       const lineCost = per != null ? per * line.qty : null;
       if (!subBuilt.complete || lineCost == null) {
         complete = false;
@@ -162,8 +163,10 @@ function buildRecipe(
 
 function perOrder(recipe: Recipe, built: Built): ItemCost {
   const factor = recipe.orderFactor > 0 ? recipe.orderFactor : 1;
-  const amount = built.batch / factor;
-  const hasPartial = !built.complete && built.batch > 0;
+  // batch es null cuando la receta tiene un ciclo de subrecetas: se trata como sin costo.
+  const batch = built.batch ?? 0;
+  const amount = batch / factor;
+  const hasPartial = !built.complete && batch > 0;
   return {
     cost: built.complete || hasPartial ? amount : null,
     complete: built.complete,
