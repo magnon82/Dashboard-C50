@@ -165,6 +165,20 @@ async function sheetsClient(): Promise<SheetsClient> {
   return sheetsClientPromise;
 }
 
+/** Lectura puntual para importar. El tablero no llama esto en cada visita. */
+export async function readSheetCells(
+  spreadsheetId: string,
+  range: string
+): Promise<unknown[][]> {
+  const sheets = await sheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  });
+  return (res.data.values || []) as unknown[][];
+}
+
 function strip(raw: string): string {
   return raw
     .normalize('NFD')

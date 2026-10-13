@@ -53,6 +53,7 @@ export async function GET(request: Request) {
       .select('*')
       .neq('source_file', 'dashboard_auth')
       .neq('source_file', 'costos_venta')
+      .neq('source_file', 'costos_pagos')
       .order('date', { ascending: false })
       .order('id', { ascending: false });
 
