@@ -2,10 +2,11 @@
  * Relee adjuntos CFDI (PDF/XML) desde Gmail cuando el path local
  * no existe en Vercel (File Stream / runner de Actions).
  *
- * Usa el mismo OAuth que el ingestor (GOOGLE_OAUTH_* · gmail.readonly).
+ * Bandeja: admin@carranza50.com.mx (GMAIL_OAUTH_TOKEN_JSON o GOOGLE_OAUTH_*).
  */
 
 import { google } from 'googleapis';
+import { assertGmailSourceMailbox } from '@/app/lib/gmail-source';
 
 type GmailPart = {
   filename?: string | null;
@@ -25,9 +26,13 @@ function parseJsonEnv(raw: string | undefined): Record<string, unknown> | null {
 }
 
 function createGmailAuth() {
-  const token = parseJsonEnv(process.env.GOOGLE_OAUTH_TOKEN_JSON);
+  const token =
+    parseJsonEnv(process.env.GMAIL_OAUTH_TOKEN_JSON) ||
+    parseJsonEnv(process.env.GOOGLE_OAUTH_TOKEN_JSON);
   if (!token || !(token.refresh_token || token.access_token)) {
-    throw new Error('Falta GOOGLE_OAUTH_TOKEN_JSON para leer adjuntos Gmail');
+    throw new Error(
+      'Falta GMAIL_OAUTH_TOKEN_JSON o GOOGLE_OAUTH_TOKEN_JSON para leer adjuntos Gmail'
+    );
   }
   const clientInfo = parseJsonEnv(process.env.GOOGLE_OAUTH_CLIENT_JSON);
   const installed =
@@ -87,6 +92,8 @@ export async function fetchFacturaAttachmentFromGmail(
   if (!id) return null;
 
   const gmail = google.gmail({ version: 'v1', auth: createGmailAuth() });
+  const profile = await gmail.users.getProfile({ userId: 'me' });
+  assertGmailSourceMailbox(profile.data.emailAddress);
   const msg = await gmail.users.messages.get({
     userId: 'me',
     id,

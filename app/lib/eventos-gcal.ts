@@ -11,6 +11,7 @@ import {
   EVENTOS_HOLD_BUSINESS_HOURS,
   EVENTOS_NO_HOLD_WITHIN_DAYS,
 } from '@/app/lib/eventos';
+import { resolveWorkspaceMailbox } from '@/app/lib/gmail-source';
 import { getServiceSupabase } from '@/app/lib/users';
 
 const GCAL_TZ = 'America/Mexico_City';
@@ -65,7 +66,9 @@ export function getGcalConfig() {
   const calendarId = process.env.GCAL_CALENDAR_ID?.trim() || '';
   const clientEmail = process.env.GCAL_CLIENT_EMAIL?.trim() || '';
   const privateKey = normalizeGcalPrivateKey(process.env.GCAL_PRIVATE_KEY);
-  const impersonateUser = process.env.GCAL_IMPERSONATE_USER?.trim() || '';
+  const impersonateUser = resolveWorkspaceMailbox(
+    process.env.GCAL_IMPERSONATE_USER
+  );
   return {
     calendarId,
     clientEmail,

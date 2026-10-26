@@ -12,6 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -20,12 +21,57 @@ from googleapiclient.discovery import build
 BASE_DIR = Path(__file__).resolve().parent
 CREDENTIALS_FILE = BASE_DIR / "credentials.json"
 TOKEN_FILE = BASE_DIR / "token.json"
+GMAIL_TOKEN_FILE = BASE_DIR / "token-gmail.json"
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
+
+# Bandeja operativa (reemplaza sergio@carranza50.com.mx).
+DEFAULT_GMAIL_SOURCE_MAILBOX = "admin@carranza50.com.mx"
+
+
+def gmail_source_mailbox() -> str:
+    raw = (
+        os.environ.get("GMAIL_SOURCE_MAILBOX") or DEFAULT_GMAIL_SOURCE_MAILBOX
+    ).strip().lower()
+    if raw == "sergio@carranza50.com.mx":
+        return DEFAULT_GMAIL_SOURCE_MAILBOX
+    return raw or DEFAULT_GMAIL_SOURCE_MAILBOX
+
+
+def _token_json_from_env(*names: str) -> str:
+    for name in names:
+        raw = (os.environ.get(name) or "").strip()
+        if raw:
+            return raw
+    return ""
+
+
+def _refresh_creds(creds: Credentials, persist_path: Path | None):
+    """Refresca el token. None si Google lo revocó (hay que reautorizar)."""
+    try:
+        creds.refresh(Request())
+    except RefreshError:
+        return None
+    if persist_path:
+        try:
+            persist_path.write_text(creds.to_json(), encoding="utf-8")
+        except OSError:
+            pass
+    return creds
+
+
+def _run_local_oauth(login_hint: str | None, persist_path: Path) -> Credentials:
+    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+    kwargs = {"port": 0}
+    if login_hint:
+        kwargs["login_hint"] = login_hint
+    creds = flow.run_local_server(**kwargs)
+    persist_path.write_text(creds.to_json(), encoding="utf-8")
+    return creds
 
 
 def _write_json_from_env(env_name: str, dest: Path) -> bool:
@@ -51,7 +97,7 @@ def get_credentials():
     _ensure_credential_files()
 
     # Prefer env token (siempre fresco en CI) sobre archivo viejo
-    token_env = (os.environ.get("GOOGLE_OAUTH_TOKEN_JSON") or "").strip()
+    token_env = _token_json_from_env("GOOGLE_OAUTH_TOKEN_JSON")
     if token_env:
         info = json.loads(token_env)
         creds = Credentials.from_authorized_user_info(info, SCOPES)
@@ -63,33 +109,86 @@ def get_credentials():
     need_reauth = not creds or not creds.valid or not creds.has_scopes(SCOPES)
 
     if need_reauth:
-        if creds and creds.expired and creds.refresh_token and creds.has_scopes(SCOPES):
-            creds.refresh(Request())
-            # Persistir refresh localmente si hay archivo
-            try:
-                TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
-            except OSError:
-                pass
-        else:
-            if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
-                raise SystemExit(
-                    "Token Google invalido/expirado en CI. "
-                    "Actualiza el secret GOOGLE_OAUTH_TOKEN_JSON (con refresh_token)."
-                )
-            print(
-                "Se abrira el navegador para autorizar Gmail + Sheets + Drive (solo lectura)."
+        refreshed = None
+        if creds and creds.refresh_token and creds.has_scopes(SCOPES):
+            refreshed = _refresh_creds(creds, TOKEN_FILE)
+        if refreshed:
+            return refreshed
+        if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+            raise SystemExit(
+                "Token Google invalido/revocado en CI. "
+                "Reautoriza admin@carranza50.com.mx y actualiza GOOGLE_OAUTH_TOKEN_JSON."
             )
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(CREDENTIALS_FILE), SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-            TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+        print(
+            "Se abrira el navegador para autorizar Gmail + Sheets + Drive (solo lectura)."
+        )
+        creds = _run_local_oauth(gmail_source_mailbox(), TOKEN_FILE)
 
     return creds
 
 
+def get_gmail_credentials():
+    """OAuth de la bandeja operativa. Prefiere token de Gmail; si no, el compartido."""
+    _ensure_credential_files()
+    token_env = _token_json_from_env(
+        "GMAIL_OAUTH_TOKEN_JSON", "GOOGLE_OAUTH_TOKEN_JSON"
+    )
+    token_file = GMAIL_TOKEN_FILE if GMAIL_TOKEN_FILE.exists() else TOKEN_FILE
+
+    if token_env:
+        info = json.loads(token_env)
+        creds = Credentials.from_authorized_user_info(info, SCOPES)
+    elif token_file.exists():
+        creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+    else:
+        creds = None
+
+    need_reauth = not creds or not creds.valid or not creds.has_scopes(SCOPES)
+    mailbox = gmail_source_mailbox()
+
+    if need_reauth:
+        refreshed = None
+        if creds and creds.refresh_token and creds.has_scopes(SCOPES):
+            refreshed = _refresh_creds(creds, token_file)
+        if refreshed:
+            return refreshed
+        if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+            raise SystemExit(
+                "Token Gmail invalido/revocado en CI. "
+                f"Autoriza {mailbox} y actualiza GMAIL_OAUTH_TOKEN_JSON "
+                "(o GOOGLE_OAUTH_TOKEN_JSON) con refresh_token."
+            )
+        print(
+            f"Se abrira el navegador para autorizar la bandeja {mailbox} "
+            f"(Gmail + Sheets + Drive, solo lectura). Entra con {mailbox}."
+        )
+        creds = _run_local_oauth(mailbox, GMAIL_TOKEN_FILE)
+        try:
+            TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+        except OSError:
+            pass
+
+    return creds
+
+
+def require_gmail_mailbox(service) -> str:
+    profile = service.users().getProfile(userId="me").execute()
+    email = str(profile.get("emailAddress") or "").strip().lower()
+    wanted = gmail_source_mailbox()
+    if email != wanted:
+        raise SystemExit(
+            f"Gmail OAuth esta en {email or '(desconocido)'}; "
+            f"el origen de correo debe ser {wanted} "
+            "(reemplaza sergio@carranza50.com.mx). "
+            "Reautoriza con esa cuenta y actualiza GMAIL_OAUTH_TOKEN_JSON."
+        )
+    return email
+
+
 def gmail_service():
-    return build("gmail", "v1", credentials=get_credentials())
+    service = build("gmail", "v1", credentials=get_gmail_credentials())
+    require_gmail_mailbox(service)
+    return service
 
 
 def sheets_service():

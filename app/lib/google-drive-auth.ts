@@ -17,6 +17,7 @@
 
 import { google } from 'googleapis';
 import { normalizeGcalPrivateKey } from '@/app/lib/eventos-gcal';
+import { resolveWorkspaceMailbox } from '@/app/lib/gmail-source';
 
 export const GOOGLE_DRIVE_READONLY_SCOPE =
   'https://www.googleapis.com/auth/drive.readonly';
@@ -61,10 +62,10 @@ export function getGoogleDriveAuthStatus(): GoogleDriveAuthStatus {
   const clientEmail = process.env.GCAL_CLIENT_EMAIL?.trim() || '';
   const privateKey = normalizeGcalPrivateKey(process.env.GCAL_PRIVATE_KEY);
   if (clientEmail && privateKey) {
-    const impersonate =
-      process.env.HR_DRIVE_IMPERSONATE_USER?.trim() ||
-      process.env.GCAL_IMPERSONATE_USER?.trim() ||
-      '';
+    const impersonate = resolveWorkspaceMailbox(
+      process.env.HR_DRIVE_IMPERSONATE_USER ||
+        process.env.GCAL_IMPERSONATE_USER
+    );
     return {
       configured: true,
       mode: 'service_account',
@@ -139,10 +140,9 @@ export function createGoogleDriveJwtAuth() {
   const clientEmail = process.env.GCAL_CLIENT_EMAIL?.trim() || '';
   const privateKey = normalizeGcalPrivateKey(process.env.GCAL_PRIVATE_KEY);
   if (!clientEmail || !privateKey) return null;
-  const subject =
-    process.env.HR_DRIVE_IMPERSONATE_USER?.trim() ||
-    process.env.GCAL_IMPERSONATE_USER?.trim() ||
-    '';
+  const subject = resolveWorkspaceMailbox(
+    process.env.HR_DRIVE_IMPERSONATE_USER || process.env.GCAL_IMPERSONATE_USER
+  );
 
   return new google.auth.JWT({
     email: clientEmail,

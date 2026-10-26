@@ -13,9 +13,12 @@ CDMX sin DST desde 2022 → UTC-6 year-round.
 | `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key |
 | `GOOGLE_OAUTH_CLIENT_JSON` | Contenido completo de `ingestor/credentials.json` |
-| `GOOGLE_OAUTH_TOKEN_JSON` | Contenido completo de `ingestor/token.json` (debe incluir `refresh_token`) |
+| `GOOGLE_OAUTH_TOKEN_JSON` | Token OAuth (Drive/Sheets; fallback de Gmail). Debe incluir `refresh_token` |
+| `GMAIL_OAUTH_TOKEN_JSON` | Opcional: token de la bandeja `admin@carranza50.com.mx`. Si falta, se usa `GOOGLE_OAUTH_TOKEN_JSON` |
 
 `GOOGLE_*` hace falta para Gmail, Saldos y Finanzas (Drive/Sheets). El soft-sync RH solo usa Supabase.
+
+**Bandeja de correo:** el sync Gmail exige `admin@carranza50.com.mx` (reemplaza `sergio@carranza50.com.mx`). Si el token sigue en Sergio, el workflow falla. Reautoriza esa cuenta y actualiza el secret.
 
 ## Workflows
 
@@ -98,7 +101,8 @@ Opcional: `--skip-ventas-semana` / `--skip-presupuesto` / `--skip-estados` / `--
 
 ## CLI local — Infocaja (Gmail → efectivo / tarjetas / comensales)
 
-Mismo OAuth (`credentials.json` + `token.json`). Cada correo «Fin de Día»
+Mismo OAuth (`credentials.json` + `token.json` / `token-gmail.json`).
+Bandeja: **admin@carranza50.com.mx**. Cada correo «Fin de Día»
 guarda `Venta Total` + `Infocaja Efectivo` + `Infocaja Bancarias` (+ propina)
 + `Infocaja Personas` (comensales) en `source_file=infocaja`.
 
@@ -134,7 +138,7 @@ Sin el backfill, años como 2023 muestran WI/Eventos (Acumulado) pero
 
 ## CLI local — facturas CFDI (Gmail → ERP / financial_records)
 
-Mismo OAuth que Infocaja (`credentials.json` + `token.json`). Indexa PDF/XML
+Mismo OAuth que Infocaja (`admin@carranza50.com.mx`). Indexa PDF/XML
 hacia `source_file=factura_cfdi` (hub ERP = Supabase `financial_records`) y guarda
 adjuntos en `FACTURAS_PATH` (default `I:\Mi unidad\FACTURAS CFDI`; en CI →
 `ingestor/data/facturas`).

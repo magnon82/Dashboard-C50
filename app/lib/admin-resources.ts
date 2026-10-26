@@ -594,8 +594,8 @@ export const ADMIN_STORAGE_PLATFORMS: ResourcePlatform[] = [
   {
     id: 'gmail',
     title: 'Gmail',
-    subtitle: 'Correos → ingestors Python → financial_records',
-    role: 'Bandeja de entrada automática para Infocaja, cortes y facturas.',
+    subtitle: 'admin@carranza50.com.mx → ingestors Python → financial_records',
+    role: 'Bandeja operativa admin@carranza50.com.mx (reemplaza sergio@) para Infocaja, cortes y facturas.',
     branches: [
       {
         id: 'gmail-infocaja',

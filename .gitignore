@@ -37,8 +37,10 @@ yarn-error.log*
 # Gmail OAuth (nunca subir a git)
 ingestor/credentials.json
 ingestor/token.json
+ingestor/token-gmail.json
 **/credentials.json
 **/token.json
+**/token-gmail.json
 
 # vercel
 .vercel

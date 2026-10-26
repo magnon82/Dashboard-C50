@@ -57,7 +57,7 @@ export const ADMIN_SYNC_SCHEDULES: AdminSyncSchedule[] = [
   {
     id: 'sync-gmail',
     label: 'Gmail · Ventas + CFDI',
-    feeds: 'infocaja, corte_caja, factura_cfdi → financial_records',
+    feeds: 'admin@carranza50.com.mx → infocaja, corte_caja, factura_cfdi',
     mode: 'cloud',
     schedule:
       'Diario 1:17–6:17 AM cada hora (CDMX) — Fin de Día del día anterior',
@@ -440,7 +440,7 @@ export const MODULE_SYNC_SOURCES: ModuleSyncSourceDef[] = [
     moduleId: 'finanzas',
     moduleLabel: 'Finanzas',
     label: 'Correo Finanzas (Gmail CFDI)',
-    channel: 'Gmail · sync-gmail (best-effort)',
+    channel: 'Gmail admin@ · sync-gmail (best-effort)',
     detail: 'factura_cfdi → financial_records',
     sourceFiles: ['factura_cfdi'],
     workflow: 'gmail',
@@ -467,7 +467,7 @@ export const MODULE_SYNC_SOURCES: ModuleSyncSourceDef[] = [
     moduleId: 'ventas',
     moduleLabel: 'Ventas',
     label: 'Infocaja + CORTE',
-    channel: 'Gmail · sync-gmail (diario + Dom noche)',
+    channel: 'Gmail admin@ · sync-gmail (diario + Dom noche)',
     detail: 'infocaja · corte_caja',
     sourceFiles: ['infocaja', 'corte_caja'],
     workflow: 'gmail',

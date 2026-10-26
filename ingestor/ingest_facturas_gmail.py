@@ -19,6 +19,7 @@ coincidir con la factura real; el dashboard no los suma a gastos.
 Alias opcional: deliveredto:facturacion@carranza50.com.mx
 
 Mismo OAuth que Infocaja (google_auth.py · gmail.readonly).
+Bandeja: admin@carranza50.com.mx (reemplaza sergio@).
 No modifica sync Infocaja/CORTE; se puede llamar aparte o vía sync_gmail_diario.py.
 
 source_file = factura_cfdi

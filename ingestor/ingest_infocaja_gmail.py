@@ -6,12 +6,12 @@ Requisitos previos (una sola vez):
 2. APIs & Services → Enable APIs → activar "Gmail API"
 3. APIs & Services → OAuth consent screen → External → app de prueba
    - Scopes: gmail.readonly
-   - Test users: tu correo de Gmail
+   - Test users: admin@carranza50.com.mx (reemplaza sergio@carranza50.com.mx)
 4. Credentials → Create Credentials → OAuth client ID → Desktop app
 5. Descargar JSON y guardarlo como:
    mi-dashboard-financiero/ingestor/credentials.json
 
-Primera ejecución abre el navegador para autorizar y crea token.json.
+Primera ejecución abre el navegador para autorizar admin@ y crea token.json.
 """
 
 from __future__ import annotations

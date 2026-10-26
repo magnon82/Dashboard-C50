@@ -153,7 +153,7 @@ const NODES: MapNode[] = [
   {
     id: 'gmail',
     label: 'Gmail',
-    sub: 'Infocaja · CORTE · CFDI',
+    sub: 'admin@ · Infocaja · CORTE · CFDI',
     x: 64,
     y: 96,
     w: 154,
@@ -168,7 +168,7 @@ const NODES: MapNode[] = [
       'ingest_facturas_gmail.py',
     ],
     detail:
-      'Función: ventas diarias (Infocaja + CORTE → /ventas) y CFDI → financial_records (ERP). Cloud: lun–sáb 4:00 AM · dom 8:00 PM CDMX (mismo workflow; CFDI best-effort).',
+      'Función: ventas diarias (Infocaja + CORTE → /ventas) y CFDI → financial_records (ERP). Bandeja: admin@carranza50.com.mx (reemplaza sergio@). Cloud: lun–sáb 4:00 AM · dom 8:00 PM CDMX (mismo workflow; CFDI best-effort).',
   },
   {
     id: 'drive',

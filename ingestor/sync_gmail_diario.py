@@ -14,7 +14,8 @@ Uso típico:
   python sync_gmail_diario.py --after 2026/05/01
   python sync_gmail_diario.py --skip-facturas
 
-Requiere ingestor/credentials.json + token.json (OAuth Gmail).
+Requiere OAuth Gmail de admin@carranza50.com.mx
+(credentials.json + token-gmail.json / token.json).
 """
 
 from __future__ import annotations
