@@ -877,8 +877,7 @@ def attach_menu(menu, recipes, insumos_by, fichas):
                     break
         item["ficha"] = ficha or blank_ficha(item["name"], item["category"])
         item["ficha"]["nombre"] = item["name"]
-        if rec and rec.get("method") and not item["ficha"].get("procesos"):
-            item["ficha"]["procesos"] = rec["method"]
+        # La ficha no hereda el procedimiento ni las porciones de la receta.
     for rec in recipes:
         if rec["kind"] == "subreceta" or any(
             line.get("subrecipeId") == rec["id"] for other in recipes for line in other["lines"]

@@ -4,6 +4,8 @@
  * Si en Supabase hay precios con price_source = factura, esos pisan al master.
  */
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import snapshotJson from '@/data/recetario/snapshot.json';
 import { costMenuItem, createCostCache } from '@/app/lib/recetario-cost';
 import type {
@@ -20,6 +22,22 @@ const snapshot = snapshotJson as RecetarioSnapshot;
 
 export type MenuStatus = 'enlazada' | 'parcial' | 'sin_costo' | 'sin_receta' | 'sin_insumo';
 
+export type RecipeLineView = {
+  name: string;
+  qty: number;
+  unit: string;
+  lineCost: number | null;
+  detail: string;
+  sub: RecipeBody | null;
+};
+
+export type RecipeBody = {
+  name: string;
+  code: string;
+  method: string;
+  lines: RecipeLineView[];
+};
+
 export type MenuRowView = {
   sku: string;
   name: string;
@@ -30,6 +48,10 @@ export type MenuRowView = {
   status: MenuStatus;
   missing: string[];
   portionLabel: string | null;
+  /** Nombres del plato, sin cantidad. */
+  ingredientes: string[];
+  foto: string | null;
+  recipe: RecipeBody | null;
   lines: {
     name: string;
     qty: number;
@@ -193,6 +215,53 @@ async function ventasDelMes(area: RecetaArea, mes: string | null) {
   }
 }
 
+function cleanMethod(method: string | undefined): string {
+  const text = (method || '').trim();
+  if (!text || /^presentaci[oó]n:?$/i.test(text)) return '';
+  return text;
+}
+
+function recipeBody(
+  recipe: Recipe,
+  recipes: Map<string, Recipe>,
+  costLines: { lineCost: number | null; detail?: string }[] | null,
+  seen: Set<string>
+): RecipeBody {
+  return {
+    name: recipe.name,
+    code: recipe.code,
+    method: cleanMethod(recipe.method),
+    lines: recipe.lines.map((line, index) => {
+      let sub: RecipeBody | null = null;
+      if (line.subrecipeId && !seen.has(line.subrecipeId)) {
+        const child = recipes.get(line.subrecipeId);
+        if (child) {
+          seen.add(line.subrecipeId);
+          sub = recipeBody(child, recipes, null, seen);
+          seen.delete(line.subrecipeId);
+        }
+      }
+      return {
+        name: line.name,
+        qty: line.qty,
+        unit: line.unit,
+        lineCost: costLines?.[index]?.lineCost ?? null,
+        detail: costLines?.[index]?.detail || '',
+        sub,
+      };
+    }),
+  };
+}
+
+function fotoFor(sku: string): string | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(sku)) return null;
+  const dir = path.join(process.cwd(), 'public', 'recetario', 'fotos');
+  for (const ext of ['jpg', 'jpeg', 'png', 'webp']) {
+    if (existsSync(path.join(dir, `${sku}.${ext}`))) return `/recetario/fotos/${sku}.${ext}`;
+  }
+  return null;
+}
+
 function matchItem(producto: string, items: MenuItem[]): MenuItem | null {
   const key = norm(producto);
   const exact = items.find((item) => item.nameKey === key);
@@ -214,6 +283,28 @@ export async function loadRecetario(area: RecetaArea, mes: string | null): Promi
     const cost = costed.cost;
     const costPct =
       costed.complete && cost != null && item.sellPrice > 0 ? (cost / item.sellPrice) * 100 : null;
+    const linked = item.recipeId ? recipes.get(item.recipeId) : undefined;
+    let recipe: RecipeBody | null = null;
+    if (linked) {
+      recipe = recipeBody(linked, recipes, costed.lines, new Set([linked.id]));
+    } else if (item.portion?.qty != null) {
+      const insumo = item.portion.insumoId ? insumoMap.get(item.portion.insumoId) : undefined;
+      recipe = {
+        name: item.name,
+        code: '',
+        method: '',
+        lines: [
+          {
+            name: insumo?.name || item.name,
+            qty: item.portion.qty,
+            unit: item.portion.unit || '',
+            lineCost: costed.lines[0]?.lineCost ?? null,
+            detail: costed.lines[0]?.detail || item.portion.label || '',
+            sub: null,
+          },
+        ],
+      };
+    }
     return {
       sku: item.sku,
       name: item.name,
@@ -224,6 +315,9 @@ export async function loadRecetario(area: RecetaArea, mes: string | null): Promi
       status: statusOf(item, costed.complete, cost),
       missing: costed.missing.slice(0, 8),
       portionLabel: item.portion?.label || null,
+      ingredientes: [...new Set((recipe?.lines || []).map((line) => line.name).filter(Boolean))],
+      foto: fotoFor(item.sku),
+      recipe,
       lines: costed.lines,
       ficha: fichas.get(item.sku) || item.ficha,
     };

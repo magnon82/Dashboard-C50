@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { SuiteShell, SuiteCard } from '@/app/components/SuiteShell';
 import { getTheme, SUITE } from '@/app/lib/themes';
 import type { Ficha, RecetaArea } from '@/app/lib/recetario-types';
-import type { MenuRowView, MenuStatus, RecetarioView } from '@/app/lib/recetario';
+import type { MenuRowView, MenuStatus, RecipeLineView, RecetarioView } from '@/app/lib/recetario';
 
 const theme = getTheme('suite');
 
@@ -117,7 +117,7 @@ export function RecetarioModule({ area }: { area: RecetaArea }) {
   return (
     <SuiteShell
       title={title}
-      subtitle="Menú vigente · receta estándar · ficha técnica"
+      subtitle="Menú vigente · receta estándar aparte de la ficha técnica"
     >
       <style>{`
         @media print {
@@ -129,8 +129,14 @@ export function RecetarioModule({ area }: { area: RecetaArea }) {
       `}</style>
       <p className="mb-4 text-sm" style={{ color: theme.muted }}>
         {data?.sourceNote ||
-          'Copia local del recetario. El costo del insumo se actualiza con el precio de factura.'}
+          'La receta guarda porciones y subrecetas. La ficha describe el plato, sin porciones.'}
       </p>
+      {data ? (
+        <p className="no-print mb-4 text-sm" style={{ color: theme.title }}>
+          {data.items.length} en la carta · {data.items.filter((item) => item.recipe).length} con receta ·{' '}
+          {data.items.filter((item) => item.foto).length} con foto
+        </p>
+      ) : null}
       <div className="no-print mb-4 flex flex-wrap gap-2">
         {(['menu', 'consumo'] as const).map((id) => (
           <button
@@ -314,6 +320,54 @@ export function RecetarioModule({ area }: { area: RecetaArea }) {
   );
 }
 
+function RecipeRows({ lines, depth }: { lines: RecipeLineView[]; depth: number }) {
+  return (
+    <>
+      {lines.map((line, index) => (
+        <Fragment key={`${depth}-${line.name}-${index}`}>
+          <tr className="border-t border-slate-100">
+            <td className="py-2" style={{ paddingLeft: depth ? 12 + depth * 14 : undefined }}>
+              <span className="font-semibold">{line.name}</span>
+              {line.sub ? (
+                <span className="mt-0.5 block text-xs" style={{ color: theme.muted }}>
+                  Subreceta{line.sub.code ? ` ${line.sub.code}` : ''}
+                </span>
+              ) : line.detail && line.detail !== line.name ? (
+                <span className="mt-0.5 block text-xs" style={{ color: theme.muted }}>
+                  {line.detail}
+                </span>
+              ) : null}
+            </td>
+            <td className="py-2 text-right tabular-nums">
+              {qty(line.qty)} {line.unit}
+            </td>
+            <td className="py-2 text-right tabular-nums">{depth === 0 ? money(line.lineCost) : ''}</td>
+          </tr>
+          {line.sub ? <RecipeRows lines={line.sub.lines} depth={depth + 1} /> : null}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/** Pasos de la ficha impresa cuando ficha.procesos está vacío a propósito. */
+function recipeProcessSteps(lines: RecipeLineView[], depth = 0): string[] {
+  const out: string[] = [];
+  let step = 1;
+  for (const line of lines) {
+    const amount = `${qty(line.qty)} ${line.unit}`.trim();
+    const pad = depth ? `${'  '.repeat(depth)}· ` : `${step}) `;
+    if (line.sub) {
+      out.push(`${pad}${line.name} (${amount}) — subreceta${line.sub.code ? ` ${line.sub.code}` : ''}`);
+      out.push(...recipeProcessSteps(line.sub.lines, depth + 1));
+    } else {
+      out.push(`${pad}${line.name}: ${amount}`);
+    }
+    if (!depth) step += 1;
+  }
+  return out;
+}
+
 function Detail({
   item,
   saving,
@@ -336,7 +390,7 @@ function Detail({
         </span>
         <textarea
           className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          rows={key === 'descripcion' || key === 'procesos' || key === 'historia' ? 3 : 2}
+          rows={key === 'descripcion' || key === 'presentacion' || key === 'historia' ? 3 : 2}
           value={ficha[key] || ''}
           onChange={(e) => setFicha({ ...ficha, [key]: e.target.value })}
         />
@@ -345,33 +399,21 @@ function Detail({
   }
 
   return (
-    <div className="ficha-print">
+    <div className="grid gap-4">
       <SuiteCard>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em]" style={{ color: theme.muted }}>
-              Ficha técnica
-            </p>
-            <h2 className="text-xl font-bold" style={{ color: theme.title }}>
-              {item.name}
-            </h2>
-            <p className="text-sm" style={{ color: theme.muted }}>
-              {item.category}
-              {item.portionLabel ? ` · ${item.portionLabel}` : ''} · Carta {money(item.sellPrice)} · Costo{' '}
-              {money(item.cost)} · {pct(item.costPct)}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="no-print rounded-xl px-3 py-2 text-sm font-semibold text-white"
-            style={{ backgroundColor: SUITE.navy }}
-            onClick={() => window.print()}
-          >
-            Imprimir
-          </button>
-        </div>
+        <p className="text-xs font-bold uppercase tracking-[0.14em]" style={{ color: theme.muted }}>
+          Receta estándar
+        </p>
+        <h2 className="text-xl font-bold" style={{ color: theme.title }}>
+          {item.recipe?.name || item.name}
+        </h2>
+        <p className="text-sm" style={{ color: theme.muted }}>
+          {item.recipe?.code ? `Código ${item.recipe.code} · ` : ''}
+          Costo {money(item.cost)} · {pct(item.costPct)}
+          {item.portionLabel ? ` · ${item.portionLabel}` : ''}
+        </p>
         {item.missing.length ? (
-          <p className="no-print mt-3 text-sm" style={{ color: theme.muted }}>
+          <p className="mt-3 text-sm" style={{ color: theme.muted }}>
             Sin precio: {item.missing.join(' · ')}
           </p>
         ) : null}
@@ -385,61 +427,113 @@ function Detail({
               </tr>
             </thead>
             <tbody>
-              {item.lines.length === 0 ? (
+              {item.recipe ? (
+                <RecipeRows lines={item.recipe.lines} depth={0} />
+              ) : (
                 <tr>
                   <td className="py-2" colSpan={3} style={{ color: theme.muted }}>
-                    {STATUS[item.status]}. No hay receta enlazada.
+                    Sin receta enlazada.
                   </td>
                 </tr>
-              ) : (
-                item.lines.map((line, i) => (
-                  <tr key={`${line.name}-${i}`} className="border-t border-slate-100">
-                    <td className="py-2">
-                      <span className="font-semibold">{line.name}</span>
-                      <span className="mt-0.5 block text-xs" style={{ color: theme.muted }}>
-                        {line.detail}
-                        {line.priceSource === 'factura' ? ' · precio de factura' : ''}
-                      </span>
-                    </td>
-                    <td className="py-2 text-right tabular-nums">
-                      {qty(line.qty)} {line.unit}
-                    </td>
-                    <td className="py-2 text-right tabular-nums">{money(line.lineCost)}</td>
-                  </tr>
-                ))
               )}
             </tbody>
           </table>
         </div>
-        <div className="mt-4 grid gap-3">
-          {field('version', 'Versión')}
-          {field('descripcion', 'Descripción')}
-          {field('alergenos', 'Alérgenos')}
-          {field('tiempoCiclo', 'Tiempo de ciclo')}
-          {field('tipoCocina', 'Tipo de cocina')}
-          {field('presentacion', 'Presentación')}
-          {field('equipo', 'Equipo')}
-          {field('acompanamientos', 'Acompañamientos')}
-          {field('procesos', 'Procesos')}
-          {field('historia', 'Historia')}
-        </div>
-        <div className="no-print mt-3 flex items-center gap-3">
-          <button
-            type="button"
-            disabled={saving}
-            className="rounded-xl px-3 py-2 text-sm font-semibold text-white"
-            style={{ backgroundColor: SUITE.orange }}
-            onClick={() => onSave(ficha)}
-          >
-            {saving ? 'Guardando…' : 'Guardar ficha'}
-          </button>
-          {saveMsg ? (
-            <span className="text-sm" style={{ color: theme.muted }}>
-              {saveMsg}
-            </span>
-          ) : null}
-        </div>
+        {item.recipe?.method ? (
+          <p className="mt-4 whitespace-pre-wrap text-sm" style={{ color: theme.title }}>
+            {item.recipe.method}
+          </p>
+        ) : null}
       </SuiteCard>
+      <div className="ficha-print">
+        <SuiteCard>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.14em]" style={{ color: theme.muted }}>
+                Ficha técnica
+              </p>
+              <h2 className="text-xl font-bold" style={{ color: theme.title }}>
+                {item.name}
+              </h2>
+              <p className="text-sm" style={{ color: theme.muted }}>
+                {item.category} · Carta {money(item.sellPrice)}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="no-print rounded-xl px-3 py-2 text-sm font-semibold text-white"
+              style={{ backgroundColor: SUITE.navy }}
+              onClick={() => window.print()}
+            >
+              Imprimir
+            </button>
+          </div>
+          {item.foto ? (
+            <img src={item.foto} alt={item.name} className="mt-4 max-h-72 w-full rounded-xl object-cover" />
+          ) : (
+            <div
+              className="mt-4 flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-300 text-sm"
+              style={{ color: theme.muted }}
+            >
+              Sin foto
+            </div>
+          )}
+          <div className="mt-4">
+            <p className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: theme.muted }}>
+              Ingredientes
+            </p>
+            <p className="mt-1 text-sm" style={{ color: theme.title }}>
+              {item.ingredientes.length ? item.ingredientes.join(' · ') : 'Sin ingredientes de receta.'}
+            </p>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {field('descripcion', 'El plato')}
+            {field('presentacion', 'Presentación')}
+            {ficha.procesos?.trim() ? (
+              field('procesos', 'Montaje')
+            ) : item.recipe?.lines.length ? (
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: theme.muted }}>
+                  Procesos (desde receta estándar)
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-sm" style={{ color: theme.title }}>
+                  {recipeProcessSteps(item.recipe.lines).join('\n')}
+                  {item.recipe.method ? `\n${item.recipe.method}` : ''}
+                </p>
+                <p className="no-print mt-1 text-xs" style={{ color: theme.muted }}>
+                  El campo Montaje de la ficha queda vacío a propósito: las porciones viven en la receta.
+                </p>
+              </div>
+            ) : (
+              field('procesos', 'Montaje')
+            )}
+            {field('acompanamientos', 'Acompañamientos')}
+            {field('alergenos', 'Alérgenos')}
+            {field('tiempoCiclo', 'Tiempo de ciclo')}
+            {field('tipoCocina', 'Tipo de cocina')}
+            {field('equipo', 'Equipo')}
+            {field('historia', 'Historia')}
+            {field('observaciones', 'Observaciones')}
+            {field('version', 'Versión')}
+          </div>
+          <div className="no-print mt-3 flex items-center gap-3">
+            <button
+              type="button"
+              disabled={saving}
+              className="rounded-xl px-3 py-2 text-sm font-semibold text-white"
+              style={{ backgroundColor: SUITE.orange }}
+              onClick={() => onSave(ficha)}
+            >
+              {saving ? 'Guardando…' : 'Guardar ficha'}
+            </button>
+            {saveMsg ? (
+              <span className="text-sm" style={{ color: theme.muted }}>
+                {saveMsg}
+              </span>
+            ) : null}
+          </div>
+        </SuiteCard>
+      </div>
     </div>
   );
 }
