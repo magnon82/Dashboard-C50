@@ -123,12 +123,13 @@ async function main() {
   if (!INCLUDE_COMPLETE && employees.length) {
     const ids = employees.map((e) => e.id);
     const byEmp = new Map();
+    const withContract = new Set();
     const CHUNK = 80;
     for (let i = 0; i < ids.length; i += CHUNK) {
       const chunk = ids.slice(i, i + CHUNK);
       const res = await sb
         .from('hr_employee_documents')
-        .select('employee_id, doc_type, status')
+        .select('employee_id, doc_type, status, storage_path')
         .in('employee_id', chunk)
         .in('doc_type', requiredIds);
       if (res.error) {
@@ -137,18 +138,51 @@ async function main() {
       }
       for (const r of res.data || []) {
         const list = byEmp.get(r.employee_id) || [];
-        list.push({ doc_type: r.doc_type, status: r.status });
+        list.push({
+          doc_type: r.doc_type,
+          status: r.status,
+          storage_path: r.storage_path,
+        });
         byEmp.set(r.employee_id, list);
+      }
+      const contracts = await sb
+        .from('hr_employee_contracts')
+        .select('employee_id, storage_path')
+        .in('employee_id', chunk);
+      if (!contracts.error) {
+        for (const r of contracts.data || []) {
+          if (r.employee_id && r.storage_path) withContract.add(r.employee_id);
+        }
+      }
+      const docContracts = await sb
+        .from('hr_employee_documents')
+        .select('employee_id, doc_type, status, storage_path')
+        .in('employee_id', chunk)
+        .or('doc_type.eq.contrato,doc_type.like.contrato__%');
+      if (!docContracts.error) {
+        for (const r of docContracts.data || []) {
+          const t = String(r.doc_type || '');
+          if (t !== 'contrato' && !t.startsWith('contrato__')) continue;
+          if (r.storage_path && r.status !== 'rejected') {
+            withContract.add(r.employee_id);
+          }
+        }
       }
     }
     const before = employees.length;
     employees = employees.filter((e) => {
       const rows = byEmp.get(e.id) || [];
-      const byType = new Map(rows.map((r) => [r.doc_type, r.status]));
-      return requiredIds.some((id) => !isRequiredDocSatisfied(byType.get(id)));
+      const byType = new Map(
+        rows.map((r) => [r.doc_type, r])
+      );
+      const missingDoc = requiredIds.some((id) => {
+        const row = byType.get(id);
+        return !isRequiredDocSatisfied(row?.status, row?.storage_path);
+      });
+      return missingDoc || !withContract.has(e.id);
     });
     console.log(
-      `Con docs obligatorios faltantes: ${employees.length}/${before}`
+      `Con docs o contrato faltantes: ${employees.length}/${before}`
     );
   }
 

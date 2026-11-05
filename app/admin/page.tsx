@@ -26,6 +26,8 @@ interface AdminUser {
   active: boolean;
   canEdit: boolean;
   createdAt?: string;
+  /** Último login exitoso (ISO); null = sin registro. */
+  lastLoginAt?: string | null;
   /** Contraseña recuperable (solo API admin). null en cuentas antiguas sin plaintext. */
   password?: string | null;
   linkedEmployee?: {
@@ -33,6 +35,31 @@ interface AdminUser {
     full_name: string;
     puesto: string | null;
   } | null;
+}
+
+function formatLastLogin(iso: string | null | undefined): {
+  label: string;
+  title: string;
+} {
+  if (!iso) return { label: '—', title: 'Sin accesos registrados' };
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { label: '—', title: 'Sin accesos registrados' };
+  const title = new Intl.DateTimeFormat('es-MX', {
+    timeZone: 'America/Mexico_City',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(d);
+  const now = Date.now();
+  const diffMs = now - d.getTime();
+  if (diffMs < 0) return { label: title, title };
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return { label: 'hace un momento', title };
+  if (mins < 60) return { label: `hace ${mins} min`, title };
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return { label: `hace ${hours} h`, title };
+  const days = Math.floor(hours / 24);
+  if (days < 14) return { label: `hace ${days} d`, title };
+  return { label: title, title };
 }
 
 type HrLinkOption = {
@@ -802,11 +829,14 @@ export default function AdminPage() {
                       <th className="py-2 pr-3 text-center">Rol</th>
                       <th className="py-2 pr-3 text-center">Módulos</th>
                       <th className="py-2 pr-3 text-center">Estado</th>
+                      <th className="py-2 pr-3 text-center">Último acceso</th>
                       <th className="py-2 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((u) => (
+                    {users.map((u) => {
+                      const last = formatLastLogin(u.lastLoginAt);
+                      return (
                       <tr key={u.id} className="border-t border-slate-100">
                         <td className="py-2.5 pr-3">
                           <p className="font-semibold text-slate-800">{u.username}</p>
@@ -853,6 +883,14 @@ export default function AdminPage() {
                             <span className="text-rose-600">Inactivo</span>
                           )}
                         </td>
+                        <td className="py-2.5 pr-3 text-center">
+                          <span
+                            className="text-xs text-slate-500 tabular-nums"
+                            title={last.title}
+                          >
+                            {last.label}
+                          </span>
+                        </td>
                         <td className="py-2.5">
                           <div className="flex flex-wrap gap-2">
                             <button
@@ -881,7 +919,8 @@ export default function AdminPage() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -111,6 +111,7 @@ export async function GET() {
           active: pub.active,
           canEdit: pub.canEdit,
           createdAt: r.created_at,
+          lastLoginAt: r.last_login_at,
           /** Ya no se devuelven contraseñas; para cambiarla, escribe una nueva. */
           password: null,
           linkedEmployee: linked,

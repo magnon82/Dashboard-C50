@@ -33,6 +33,8 @@ export interface DashboardUserRow {
   /** Alertas push/in-app suscritas. Admin implícito = todas. */
   alert_prefs: AlertPrefId[];
   active: boolean;
+  /** ISO del último login exitoso (null = nunca registrado). */
+  last_login_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -62,6 +64,8 @@ interface UserPayload {
   /** Opcional en filas antiguas → []. */
   alert_prefs?: string[];
   active: boolean;
+  /** Opcional en filas antiguas → null. */
+  last_login_at?: string | null;
   updated_at: string;
 }
 
@@ -123,6 +127,10 @@ function recordToUser(r: {
     capabilities: normalizeCapabilities(p.capabilities),
     alert_prefs: normalizeAlertPrefs(p.alert_prefs),
     active: p.active !== false,
+    last_login_at:
+      typeof p.last_login_at === 'string' && p.last_login_at.trim()
+        ? p.last_login_at.trim()
+        : null,
     created_at: r.date || p.updated_at,
     updated_at: p.updated_at || r.date || new Date().toISOString(),
   };
@@ -193,6 +201,7 @@ export async function createUser(input: {
     capabilities,
     alert_prefs,
     active: input.active !== false,
+    last_login_at: null,
     updated_at: now,
   };
 
@@ -296,6 +305,7 @@ export async function updateUser(
     capabilities,
     alert_prefs,
     active: patch.active !== undefined ? patch.active : current.active,
+    last_login_at: current.last_login_at,
     updated_at: new Date().toISOString(),
   };
 
@@ -309,6 +319,39 @@ export async function updateUser(
   const user = recordToUser(data);
   if (!user) throw new Error('No se pudo actualizar');
   return user;
+}
+
+/**
+ * Marca último login exitoso. Best-effort: no falla el login si falla el write.
+ * No toca updated_at (ese campo es de edición de cuenta).
+ */
+export async function touchLastLogin(username: string): Promise<void> {
+  const row = await findUserByUsername(username);
+  if (!row) return;
+  const sb = getServiceSupabase();
+  const { data: raw, error: findErr } = await sb
+    .from('financial_records')
+    .select('id,description')
+    .eq('id', row.id)
+    .eq('source_file', AUTH_SOURCE_FILE)
+    .maybeSingle();
+  if (findErr || !raw) return;
+
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(raw.description || '');
+  } catch {
+    return;
+  }
+  if (!payload || typeof payload !== 'object') return;
+  payload.last_login_at = new Date().toISOString();
+
+  const { error } = await sb
+    .from('financial_records')
+    .update({ description: JSON.stringify(payload) })
+    .eq('id', row.id)
+    .eq('source_file', AUTH_SOURCE_FILE);
+  if (error) throw new Error(error.message);
 }
 
 /**

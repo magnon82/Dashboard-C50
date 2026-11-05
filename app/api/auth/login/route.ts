@@ -17,6 +17,7 @@ import {
   ensureStaffCorteCapabilitySeed,
   findUserByUsername,
   toPublicUser,
+  touchLastLogin,
 } from '@/app/lib/users';
 
 
@@ -100,6 +101,12 @@ export async function POST(request: Request) {
 
   if (!session) {
     return NextResponse.json({ error: 'Usuario o contraseña incorrectos' }, { status: 401 });
+  }
+
+  try {
+    await touchLastLogin(session.username);
+  } catch {
+    // no bloquear login si falla el log
   }
 
   const token = await createSessionToken(session);
