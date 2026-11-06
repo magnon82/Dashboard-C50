@@ -321,13 +321,29 @@ export async function updateUser(
   return user;
 }
 
+/** Mínimo entre writes de último acceso (sesión viva; /api/auth/me). */
+const LAST_LOGIN_TOUCH_MIN_MS = 10 * 60 * 1000;
+
 /**
- * Marca último login exitoso. Best-effort: no falla el login si falla el write.
+ * Marca último acceso. Best-effort.
  * No toca updated_at (ese campo es de edición de cuenta).
+ * Con `throttle`, no reescribe si el último registro es reciente.
  */
-export async function touchLastLogin(username: string): Promise<void> {
+export async function touchLastLogin(
+  username: string,
+  opts?: { throttle?: boolean }
+): Promise<void> {
   const row = await findUserByUsername(username);
   if (!row) return;
+  if (opts?.throttle && row.last_login_at) {
+    const prev = Date.parse(row.last_login_at);
+    if (
+      Number.isFinite(prev) &&
+      Date.now() - prev < LAST_LOGIN_TOUCH_MIN_MS
+    ) {
+      return;
+    }
+  }
   const sb = getServiceSupabase();
   const { data: raw, error: findErr } = await sb
     .from('financial_records')
