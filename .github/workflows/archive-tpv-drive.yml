@@ -1,0 +1,75 @@
+name: Archive TPV fotos → Drive
+
+# Cada ~60 días libera Storage (plan Free). Metadata permanece en Supabase.
+# Master también puede disparar desde /admin/cortes-tpv.
+# Requiere: TPV_ARCHIVE_DRIVE_FOLDER_ID + GCAL_* con DWD drive.file → admin@
+
+on:
+  schedule:
+    # Día 1 y 15, 11:20 UTC ≈ 05:20 AM CDMX
+    - cron: "20 11 1,15 * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Solo simular (true/false)"
+        required: false
+        default: "false"
+      limit:
+        description: "Máx. fotos por corrida"
+        required: false
+        default: "120"
+
+concurrency:
+  group: archive-tpv-drive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Check secrets
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GCAL_CLIENT_EMAIL: ${{ secrets.GCAL_CLIENT_EMAIL }}
+          GCAL_PRIVATE_KEY: ${{ secrets.GCAL_PRIVATE_KEY }}
+          TPV_ARCHIVE_DRIVE_FOLDER_ID: ${{ secrets.TPV_ARCHIVE_DRIVE_FOLDER_ID }}
+        run: |
+          missing=0
+          check() {
+            if [ -z "$2" ]; then
+              echo "::error::Falta secret: $1"
+              missing=1
+            else
+              echo "OK $1 (len=${#2})"
+            fi
+          }
+          check NEXT_PUBLIC_SUPABASE_URL "$NEXT_PUBLIC_SUPABASE_URL"
+          check SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
+          check GCAL_CLIENT_EMAIL "$GCAL_CLIENT_EMAIL"
+          check GCAL_PRIVATE_KEY "$GCAL_PRIVATE_KEY"
+          check TPV_ARCHIVE_DRIVE_FOLDER_ID "$TPV_ARCHIVE_DRIVE_FOLDER_ID"
+          exit $missing
+
+      - name: Run archive
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GCAL_CLIENT_EMAIL: ${{ secrets.GCAL_CLIENT_EMAIL }}
+          GCAL_PRIVATE_KEY: ${{ secrets.GCAL_PRIVATE_KEY }}
+          GCAL_IMPERSONATE_USER: ${{ secrets.GCAL_IMPERSONATE_USER }}
+          TPV_ARCHIVE_DRIVE_FOLDER_ID: ${{ secrets.TPV_ARCHIVE_DRIVE_FOLDER_ID }}
+          TPV_ARCHIVE_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          TPV_ARCHIVE_LIMIT: ${{ github.event.inputs.limit || '120' }}
+        run: node scripts/archive-tpv-to-drive.mjs

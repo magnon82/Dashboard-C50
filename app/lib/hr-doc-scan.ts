@@ -2,7 +2,7 @@
  * Prepara capturas de cámara/galería:
  * · escaneo de documentación (alta res, JPEG document-friendly)
  * · fotografía (res típica de foto, sin tratamiento de documento)
- * Tope duro: 2.5 MB por foto (cualquier origen). Sin OCR.
+ * Tope duro: HR_DOC_PHOTO_MAX_BYTES por foto (cualquier origen). Sin OCR.
  */
 
 import { HR_DOC_PHOTO_MAX_BYTES } from '@/app/lib/hr-doc-limits';
@@ -60,7 +60,7 @@ async function resizeImageJpeg(
   } catch {
     if (file.size > HR_DOC_PHOTO_MAX_BYTES) {
       throw new Error(
-        'La foto supera 2.5 MB y no se pudo comprimir en este navegador. Usa JPEG/PNG o una foto más liviana.'
+        'La foto supera el límite y no se pudo comprimir en este navegador. Usa JPEG/PNG o una foto más liviana.'
       );
     }
     return file;
@@ -80,7 +80,7 @@ async function resizeImageJpeg(
     if (!ctx) {
       if (file.size > HR_DOC_PHOTO_MAX_BYTES) {
         throw new Error(
-          'No se pudo comprimir la foto (canvas). Prueba otra imagen ≤ 2.5 MB.'
+          'No se pudo comprimir la foto (canvas). Prueba otra imagen más liviana.'
         );
       }
       return file;
@@ -126,7 +126,7 @@ async function resizeImageJpeg(
 
     if (blob.size > HR_DOC_PHOTO_MAX_BYTES) {
       throw new Error(
-        'La foto sigue sobre 2.5 MB tras comprimir. Toma otra más cerca/lejos o elige un archivo más liviano.'
+        'La foto sigue demasiado pesada tras comprimir. Toma otra más cerca/lejos o elige un archivo más liviano.'
       );
     }
 
@@ -141,7 +141,7 @@ async function resizeImageJpeg(
 }
 
 /**
- * Si es imagen: reescala el lado largo a ≤2400px, JPEG, fondo blanco, ≤2.5 MB.
+ * Si es imagen: reescala el lado largo a ≤2400px, JPEG, fondo blanco, ≤ tope.
  * PDF y no-imágenes se dejan igual.
  */
 export async function prepareDocumentScan(file: File): Promise<File> {
@@ -154,7 +154,7 @@ export async function prepareDocumentScan(file: File): Promise<File> {
 }
 
 /**
- * Foto (cámara/galería): reescala ≤1600px, JPEG, ≤2.5 MB.
+ * Foto (cámara/galería): reescala ≤1600px, JPEG, ≤ tope.
  * PDF y no-imágenes se dejan igual.
  */
 export async function preparePhoto(file: File): Promise<File> {

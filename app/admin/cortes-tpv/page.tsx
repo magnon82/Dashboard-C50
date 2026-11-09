@@ -9,7 +9,7 @@ export default function AdminCortesTpvPage() {
   return (
     <SuiteShell
       title="Cortes TPV"
-      subtitle="Reporte admin · subir fotos de cualquier día · OCR igual que Staff"
+      subtitle="Historial de fotos · carga últimos 7 días · archivo a Drive a los 60 días (Free)"
       actions={
         <Link
           href="/admin"

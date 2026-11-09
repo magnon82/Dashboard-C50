@@ -29,6 +29,7 @@ import {
   type TpvPhotoKind,
   type TpvTerminalNumber,
 } from '@/app/lib/tpv-cortes';
+import { attachTpvImageUrls } from '@/app/lib/tpv-archive';
 import {
   STAFF_RPT_TABLE,
   asStaffRptRow,
@@ -200,8 +201,8 @@ export async function GET(request: Request) {
   const withUrls = url.searchParams.get('urls') === '1';
   const withDay = url.searchParams.get('day') === '1';
   const reportLimit = Math.min(
-    120,
-    Math.max(10, Number(url.searchParams.get('limit') || 60) || 60)
+    400,
+    Math.max(10, Number(url.searchParams.get('limit') || 180) || 180)
   );
 
   try {
@@ -215,7 +216,7 @@ export async function GET(request: Request) {
         .order('corte_date', { ascending: false })
         .order('terminal_number', { ascending: true })
         .order('photo_kind', { ascending: true })
-        .limit(800);
+        .limit(2400);
 
       if (upErr) {
         return NextResponse.json(
@@ -276,18 +277,7 @@ export async function GET(request: Request) {
       if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
         detailUploads = byDate.get(date) || [];
         if (withUrls) {
-          await Promise.all(
-            detailUploads.map(async (row) => {
-              if (!row.storage_path) {
-                row.image_url = null;
-                return;
-              }
-              const { data: signed } = await sb.storage
-                .from(TPV_STORAGE_BUCKET)
-                .createSignedUrl(row.storage_path, 60 * 30);
-              row.image_url = signed?.signedUrl || null;
-            })
-          );
+          await attachTpvImageUrls(detailUploads);
         }
         detailDay = buildDayCompleteness(detailUploads, date);
       }
@@ -341,18 +331,7 @@ export async function GET(request: Request) {
     const rows = (data || []).map((r) => asTpvRow(r as Record<string, unknown>));
 
     if (withUrls) {
-      await Promise.all(
-        rows.map(async (row) => {
-          if (!row.storage_path) {
-            row.image_url = null;
-            return;
-          }
-          const { data: signed } = await sb.storage
-            .from(TPV_STORAGE_BUCKET)
-            .createSignedUrl(row.storage_path, 60 * 30);
-          row.image_url = signed?.signedUrl || null;
-        })
-      );
+      await attachTpvImageUrls(rows);
     }
 
     const day =

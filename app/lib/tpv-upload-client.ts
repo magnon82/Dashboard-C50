@@ -12,7 +12,8 @@ import {
   validateTpvImageQuality,
 } from '@/app/lib/tpv-cortes';
 
-const MAX_EDGE = 2048;
+/** Lado largo máx. (antes 2048): menos px → menos MB en Storage Free. */
+const MAX_EDGE = 1600;
 
 export type PreparedTpvPhoto = {
   file: File;
@@ -83,11 +84,11 @@ export async function prepareTpvPhotoForUpload(
     return canvasToJpegBlob(canvas, quality);
   }
 
-  let quality = 0.84;
+  let quality = 0.72;
   let blob = await encodeAt(w, h, quality);
 
-  while (blob.size > TPV_UPLOAD_TARGET_BYTES && quality > 0.55) {
-    quality = Math.round((quality - 0.08) * 100) / 100;
+  while (blob.size > TPV_UPLOAD_TARGET_BYTES && quality > 0.5) {
+    quality = Math.round((quality - 0.07) * 100) / 100;
     blob = await encodeAt(w, h, quality);
   }
 

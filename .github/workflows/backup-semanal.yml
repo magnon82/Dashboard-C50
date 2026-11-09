@@ -1,0 +1,59 @@
+name: Backup semanal Supabase
+
+# Dump Postgres (-Fc) como artefacto. No modifica la base.
+# Secret requerido: SUPABASE_DB_URL (URI Direct connection, puerto 5432).
+# Guía: scripts/backup-supabase.md
+
+on:
+  schedule:
+    # Domingos 09:15 UTC ≈ 03:15 AM CDMX
+    - cron: "15 9 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: backup-semanal-supabase
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check secret
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::Falta secret Actions: SUPABASE_DB_URL (URI Direct connection Postgres). Ver scripts/backup-supabase.md"
+            exit 1
+          fi
+          echo "OK secret SUPABASE_DB_URL (len=${#SUPABASE_DB_URL})"
+
+      - name: Install pg_dump
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Dump database
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p backups
+          STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          OUT="backups/supabase-${STAMP}.dump"
+          pg_dump "$SUPABASE_DB_URL" \
+            -Fc \
+            --no-owner \
+            --no-privileges \
+            -f "$OUT"
+          ls -lh "$OUT"
+          echo "DUMP_PATH=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-dump
+          path: backups/*.dump
+          retention-days: 30
+          if-no-files-found: error

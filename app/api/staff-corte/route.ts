@@ -16,6 +16,7 @@ import {
   listAdminLookbackDates,
   staffCorteDateWindow,
 } from '@/app/lib/tpv-cortes';
+import { attachTpvImageUrls } from '@/app/lib/tpv-archive';
 import {
   STAFF_RPT_TABLE,
   asStaffRptRow,
@@ -172,21 +173,10 @@ async function loadTpvUploads(
 }
 
 async function attachSignedUrls(
-  sb: ReturnType<typeof getServiceSupabase>,
+  _sb: ReturnType<typeof getServiceSupabase>,
   uploads: ReturnType<typeof asTpvRow>[]
 ) {
-  await Promise.all(
-    uploads.map(async (row) => {
-      if (!row.storage_path) {
-        row.image_url = null;
-        return;
-      }
-      const { data: signed } = await sb.storage
-        .from('tpv-cortes')
-        .createSignedUrl(row.storage_path, 60 * 30);
-      row.image_url = signed?.signedUrl || null;
-    })
-  );
+  await attachTpvImageUrls(uploads);
 }
 
 async function loadInfocajaDay(

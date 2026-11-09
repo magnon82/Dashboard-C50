@@ -22,8 +22,11 @@ export const TPV_MAX_BYTES = 8 * 1024 * 1024;
  * con HTML "Request Entity Too Large" (antes de llegar a la ruta).
  */
 export const TPV_UPLOAD_MAX_BYTES = 3 * 1024 * 1024;
-/** Objetivo de compresión JPEG en el celular (~margen OCR). */
-export const TPV_UPLOAD_TARGET_BYTES = 2 * 1024 * 1024;
+/**
+ * Objetivo de compresión JPEG en el celular.
+ * Bajado para caber en Supabase Free (~500 KB/foto vs ~700 KB previo).
+ */
+export const TPV_UPLOAD_TARGET_BYTES = 500 * 1024;
 export const TPV_MIN_BYTES = 40 * 1024;
 export const TPV_MIN_LONG_SIDE = 1200;
 /** Varianza de luminancia mínima — por debajo se pide retomar la foto */
@@ -37,6 +40,11 @@ export type TpvCorteStatus =
   | 'rejected'
   | 'unused';
 export type TpvOcrStatus = 'skipped' | 'pending' | 'done' | 'failed';
+/** hot = en Storage; drive = archivado en Drive admin@ (Free plan). */
+export type TpvArchiveStatus = 'hot' | 'drive';
+
+/** Días en Storage antes de archivar a Drive (plan Free). */
+export const TPV_ARCHIVE_AFTER_DAYS = 60;
 
 export interface TpvCorteUpload {
   id: string;
@@ -62,6 +70,10 @@ export interface TpvCorteUpload {
   notes: string | null;
   verified_by: string | null;
   verified_at: string | null;
+  archive_status: TpvArchiveStatus;
+  drive_file_id: string | null;
+  drive_web_view_link: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
   image_url?: string | null;
@@ -797,7 +809,22 @@ export function asTpvRow(r: Record<string, unknown>): TpvCorteUpload {
     notes: r.notes != null ? String(r.notes) : null,
     verified_by: r.verified_by != null ? String(r.verified_by) : null,
     verified_at: r.verified_at != null ? String(r.verified_at) : null,
+    archive_status: r.archive_status === 'drive' ? 'drive' : 'hot',
+    drive_file_id:
+      r.drive_file_id != null ? String(r.drive_file_id) : null,
+    drive_web_view_link:
+      r.drive_web_view_link != null ? String(r.drive_web_view_link) : null,
+    archived_at: r.archived_at != null ? String(r.archived_at) : null,
     created_at: String(r.created_at || ''),
     updated_at: String(r.updated_at || ''),
   };
+}
+
+/** URL para ver la foto: Storage firmado o enlace Drive si ya archivó. */
+export function resolveTpvImageUrl(row: TpvCorteUpload): string | null {
+  if (row.image_url) return row.image_url;
+  if (row.archive_status === 'drive' && row.drive_web_view_link) {
+    return row.drive_web_view_link;
+  }
+  return null;
 }

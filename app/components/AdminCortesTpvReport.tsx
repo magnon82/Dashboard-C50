@@ -3,12 +3,17 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  TPV_ADMIN_LOOKBACK_DAYS,
+  TPV_ARCHIVE_AFTER_DAYS,
+  TPV_CORTE_EPOCH,
   TPV_TERMINALS,
   adminCorteDateWindow,
+  buildAdminReportDay,
   buildDayCompleteness,
   computeNetoBanco,
   moneyMx,
   photoKindLabel,
+  todayCdmxIso,
   type TpvAdminReportDay,
   type TpvCorteUpload,
   type TpvPhotoKind,
@@ -135,20 +140,27 @@ function PhotoCard({
         <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
           {kind === 'venta' ? 'Venta (Totalización)' : 'Propinas'}
         </p>
-        {upload?.image_url ? (
-          <a
-            href={upload.image_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] font-bold underline"
-            style={{ color: SUITE.orangeDeep }}
-          >
-            Ampliar
-          </a>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {upload?.archive_status === 'drive' ? (
+            <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-800">
+              Drive
+            </span>
+          ) : null}
+          {upload?.image_url ? (
+            <a
+              href={upload.image_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] font-bold underline"
+              style={{ color: SUITE.orangeDeep }}
+            >
+              {upload.archive_status === 'drive' ? 'Abrir en Drive' : 'Ampliar'}
+            </a>
+          ) : null}
+        </div>
       </div>
 
-      {upload?.image_url ? (
+      {upload?.image_url && upload.archive_status !== 'drive' ? (
         // eslint-disable-next-line @next/next/no-img-element
         <a
           href={upload.image_url}
@@ -162,6 +174,21 @@ function PhotoCard({
             className="max-h-36 w-full object-contain"
           />
         </a>
+      ) : upload?.archive_status === 'drive' && upload.image_url ? (
+        <div className="mt-2 rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-4 text-center">
+          <p className="text-xs text-sky-900">
+            Foto archivada en Drive (libera Storage Free).
+          </p>
+          <a
+            href={upload.image_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-block text-xs font-bold underline"
+            style={{ color: SUITE.navy }}
+          >
+            Ver archivo
+          </a>
+        </div>
       ) : (
         <div className="mt-2 flex h-24 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/80">
           <p className="text-xs text-slate-400">Sin foto</p>
@@ -412,7 +439,12 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
   const [savingRpt, setSavingRpt] = useState(false);
   /** Día pendiente seleccionado (ventana Master, solo incompletos). */
   const [jumpDate, setJumpDate] = useState('');
+  /** Consulta historial (cualquier día desde epoch; no solo 7 días editables). */
+  const [historyDate, setHistoryDate] = useState('');
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveInfo, setArchiveInfo] = useState<string>('');
   const dateWindow = useMemo(() => adminCorteDateWindow(), []);
+  const historyMax = useMemo(() => todayCdmxIso(), []);
 
   function selectPendingDate(next: string) {
     if (!next || !/^\d{4}-\d{2}-\d{2}$/.test(next)) {
@@ -428,7 +460,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/tpv-cortes?report=1&limit=60', {
+      const res = await fetch('/api/tpv-cortes?report=1&limit=180', {
         cache: 'no-store',
       });
       const json = (await res.json()) as {
@@ -496,6 +528,69 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
     setExpanded(date);
     setMsg('');
     await loadDetail(date);
+  }
+
+  async function openHistoryDate() {
+    if (!historyDate || !/^\d{4}-\d{2}-\d{2}$/.test(historyDate)) return;
+    if (historyDate < TPV_CORTE_EPOCH || historyDate > historyMax) {
+      setError(
+        `Historial disponible desde ${TPV_CORTE_EPOCH} hasta ${historyMax}`
+      );
+      return;
+    }
+    setError('');
+    setMsg('');
+    setExpanded(historyDate);
+    await loadDetail(historyDate);
+    // Si el día no está en la lista cargada, igual mostramos el detalle arriba.
+    if (!days.some((d) => d.date === historyDate)) {
+      setDays((prev) => {
+        if (prev.some((d) => d.date === historyDate)) return prev;
+        return [buildAdminReportDay(historyDate, [], null), ...prev];
+      });
+    }
+  }
+
+  async function runArchive(dryRun: boolean) {
+    setArchiveBusy(true);
+    setArchiveInfo('');
+    setError('');
+    try {
+      const res = await fetch('/api/admin/tpv-archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun, limit: 80 }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        ok?: boolean;
+        cutoffDate?: string;
+        candidates?: number;
+        archived?: number;
+        skipped?: number;
+        bytesFreed?: number;
+        errors?: string[];
+        driveStatus?: string;
+      };
+      if (!res.ok && !json.archived) {
+        setError(
+          [json.error, ...(json.errors || [])].filter(Boolean).join(' — ') ||
+            'No se pudo archivar'
+        );
+        return;
+      }
+      const mb = ((json.bytesFreed || 0) / (1024 * 1024)).toFixed(1);
+      setArchiveInfo(
+        dryRun
+          ? `Simulación: ${json.candidates ?? 0} fotos anteriores a ${json.cutoffDate} (~${mb} MB). ${json.driveStatus || ''}`
+          : `Archivadas ${json.archived ?? 0} · omitidas ${json.skipped ?? 0} · liberados ~${mb} MB (corte < ${json.cutoffDate}).`
+      );
+      if (!dryRun) await loadList();
+    } catch {
+      setError('Error de red al archivar TPV');
+    } finally {
+      setArchiveBusy(false);
+    }
   }
 
   async function refreshExpanded() {
@@ -841,8 +936,10 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
               Cortes TPV · reporte y carga
             </h3>
             <p className="mt-1 text-sm" style={{ color: theme.muted }}>
-              Día operativo del corte (madrugada 00:00–05:59 → día anterior) y
-              hasta 7 días atrás. Misma compresión/OCR que Staff.
+              Historial de fotos desde {TPV_CORTE_EPOCH}. Edición/carga: últimos{' '}
+              {TPV_ADMIN_LOOKBACK_DAYS} días. Tras {TPV_ARCHIVE_AFTER_DAYS} días
+              las fotos pasan a Drive (admin@) para caber en Supabase Free; el
+              historial se sigue consultando aquí.
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -899,7 +996,39 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
             className="text-[11px] font-bold uppercase tracking-[0.14em]"
             style={{ color: SUITE.navy }}
           >
-            Cargar / revisar por fecha
+            Historial de fotografías
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Elige cualquier día con cortes (también los archivados en Drive).
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="block text-xs font-semibold text-slate-600">
+              Fecha
+              <input
+                type="date"
+                value={historyDate}
+                min={TPV_CORTE_EPOCH}
+                max={historyMax}
+                onChange={(e) => setHistoryDate(e.target.value)}
+                className="mt-1 block min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void openHistoryDate()}
+              disabled={!historyDate || detailLoading}
+              className="inline-flex min-h-11 items-center rounded-xl px-4 text-sm font-bold text-white disabled:opacity-60"
+              style={{ backgroundColor: SUITE.navy }}
+            >
+              Ver fotos
+            </button>
+          </div>
+
+          <p
+            className="mt-5 text-[11px] font-bold uppercase tracking-[0.14em]"
+            style={{ color: SUITE.navy }}
+          >
+            Cargar / corregir (ventana 7 días)
           </p>
           <label className="mt-3 block text-xs font-semibold text-slate-600">
             Días pendientes
@@ -1323,6 +1452,47 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
           })}
         </div>
 
+        {!compact ? (
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
+            <p
+              className="text-[11px] font-bold uppercase tracking-[0.14em]"
+              style={{ color: SUITE.navy }}
+            >
+              Archivo Storage → Drive (Free)
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Mueve fotos con más de {TPV_ARCHIVE_AFTER_DAYS} días a la carpeta
+              Drive de admin@carranza50.com.mx y las saca de Supabase Storage.
+              Requiere SQL{' '}
+              <code className="text-[10px]">tpv_cortes_archive.sql</code>,{' '}
+              <code className="text-[10px]">TPV_ARCHIVE_DRIVE_FOLDER_ID</code> y
+              DWD con scope drive.file.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={archiveBusy}
+                onClick={() => void runArchive(true)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {archiveBusy ? '…' : 'Simular'}
+              </button>
+              <button
+                type="button"
+                disabled={archiveBusy}
+                onClick={() => void runArchive(false)}
+                className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+                style={{ backgroundColor: SUITE.orange }}
+              >
+                {archiveBusy ? 'Archivando…' : 'Archivar lote'}
+              </button>
+            </div>
+            {archiveInfo ? (
+              <p className="mt-2 text-xs text-slate-600">{archiveInfo}</p>
+            ) : null}
+          </div>
+        ) : null}
+
         {compact && days.length > 8 ? (
           <p className="mt-4 text-center text-sm text-slate-500">
             Mostrando los 8 más recientes.{' '}
@@ -1331,7 +1501,7 @@ export function AdminCortesTpvReport({ compact = false }: Props) {
               className="font-semibold underline"
               style={{ color: SUITE.navy }}
             >
-              Ver reporte completo
+              Ver reporte completo · historial
             </Link>
           </p>
         ) : null}
