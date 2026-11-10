@@ -1,5 +1,5 @@
 -- =============================================================================
--- Cortes TPV · archivo a Google Drive (plan Free: sacar fotos >60 días de Storage)
+-- Cortes TPV · archivo a Google Drive (plan Free: sacar fotos hot antiguas de Storage)
 -- =============================================================================
 -- Ejecutar una vez en Supabase → SQL Editor.
 -- Las filas de metadata permanecen: Master sigue consultando historial;
@@ -33,3 +33,20 @@ create index if not exists tpv_corte_uploads_archive_status_idx
 
 create index if not exists tpv_corte_uploads_corte_date_archive_idx
   on public.tpv_corte_uploads (corte_date, archive_status);
+
+-- Permitir foto archivada sin storage_path (binario ya en Drive).
+alter table public.tpv_corte_uploads
+  drop constraint if exists tpv_corte_photo_needs_path;
+
+alter table public.tpv_corte_uploads
+  add constraint tpv_corte_photo_needs_path check (
+    (entry_kind = 'unused' and storage_path is null and photo_kind is null)
+    or (
+      entry_kind = 'photo'
+      and photo_kind in ('venta', 'propina')
+      and (
+        storage_path is not null
+        or coalesce(archive_status, 'hot') = 'drive'
+      )
+    )
+  );

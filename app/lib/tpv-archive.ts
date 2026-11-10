@@ -100,7 +100,7 @@ async function ensureYearMonthFolder(
 }
 
 /**
- * Mueve a Drive fotos hot con corte_date < hoy−60d y borra de Storage.
+ * Mueve a Drive fotos hot con corte_date < hoy−Nd y borra de Storage.
  * dryRun: solo cuenta candidatos.
  */
 export async function archiveOldTpvPhotos(opts?: {

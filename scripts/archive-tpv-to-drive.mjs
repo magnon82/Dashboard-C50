@@ -1,10 +1,10 @@
 /**
- * Archiva fotos TPV >60 días: Supabase Storage → Drive (admin@) → borra Storage.
+ * Archiva fotos TPV antiguas: Supabase Storage → Drive (admin@) → borra Storage.
  * Uso: node scripts/archive-tpv-to-drive.mjs
  * Env: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
- *      GCAL_CLIENT_EMAIL, GCAL_PRIVATE_KEY, GCAL_IMPERSONATE_USER (o admin@),
  *      TPV_ARCHIVE_DRIVE_FOLDER_ID
- * Opcional: TPV_ARCHIVE_DRY_RUN=true, TPV_ARCHIVE_LIMIT=80
+ * Opcional: TPV_ARCHIVE_DRY_RUN=true, TPV_ARCHIVE_LIMIT=80,
+ *           TPV_ARCHIVE_BEFORE=YYYY-MM-DD, TPV_ARCHIVE_AFTER_DAYS=40
  */
 import { createClient } from '@supabase/supabase-js';
 import { google } from 'googleapis';
@@ -13,7 +13,6 @@ import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 const BUCKET = 'tpv-cortes';
-const AFTER_DAYS = 60;
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const DEFAULT_IMPERSONATE = 'admin@carranza50.com.mx';
 
@@ -58,6 +57,10 @@ function shiftIso(iso, delta) {
 
 loadEnv();
 
+const AFTER_DAYS = Math.max(
+  1,
+  Number(process.env.TPV_ARCHIVE_AFTER_DAYS || 40) || 40
+);
 const url = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
 const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const folderId = (process.env.TPV_ARCHIVE_DRIVE_FOLDER_ID || '').trim();
@@ -83,7 +86,10 @@ if (!folderId) {
   process.exit(1);
 }
 
-const cutoff = shiftIso(todayCdmx(), -AFTER_DAYS);
+const beforeEnv = (process.env.TPV_ARCHIVE_BEFORE || '').trim();
+const cutoff = /^\d{4}-\d{2}-\d{2}$/.test(beforeEnv)
+  ? beforeEnv
+  : shiftIso(todayCdmx(), -AFTER_DAYS);
 const sb = createClient(url, key, { auth: { persistSession: false } });
 
 const { data: rows, error } = await sb
@@ -127,20 +133,56 @@ if (dryRun || list.length === 0) {
   process.exit(0);
 }
 
-const clientEmail = (process.env.GCAL_CLIENT_EMAIL || '').trim();
-const privateKey = normalizeKey(process.env.GCAL_PRIVATE_KEY);
-if (!clientEmail || !privateKey) {
-  console.error('Faltan GCAL_CLIENT_EMAIL / GCAL_PRIVATE_KEY');
-  process.exit(1);
+async function buildDriveAuth() {
+  // Prefer OAuth token from setup_tpv_archive_drive.py (drive.file sin DWD).
+  const tokenPath = resolve('ingestor/token-tpv-archive.json');
+  const useOauth =
+    String(process.env.TPV_ARCHIVE_USE_OAUTH || '').trim() === '1' ||
+    existsSync(tokenPath);
+  if (useOauth && existsSync(tokenPath)) {
+    const token = JSON.parse(readFileSync(tokenPath, 'utf8'));
+    const clientInfoPath = resolve('ingestor/credentials.json');
+    const clientInfo = existsSync(clientInfoPath)
+      ? JSON.parse(readFileSync(clientInfoPath, 'utf8'))
+      : {};
+    const installed = clientInfo.installed || clientInfo.web || {};
+    const oauth2 = new google.auth.OAuth2(
+      installed.client_id || token.client_id,
+      installed.client_secret || token.client_secret
+    );
+    oauth2.setCredentials({
+      refresh_token: token.refresh_token,
+      access_token: token.access_token,
+      expiry_date: token.expiry_date,
+    });
+    console.log('Drive auth: OAuth token-tpv-archive.json');
+    return oauth2;
+  }
+
+  const clientEmail = (process.env.GCAL_CLIENT_EMAIL || '').trim();
+  const privateKey = normalizeKey(process.env.GCAL_PRIVATE_KEY);
+  if (!clientEmail || !privateKey) {
+    throw new Error(
+      'Falta OAuth (python ingestor/setup_tpv_archive_drive.py) o GCAL_CLIENT_EMAIL/PRIVATE_KEY con DWD drive.file'
+    );
+  }
+  console.log('Drive auth: JWT DWD as', impersonate);
+  return new google.auth.JWT({
+    email: clientEmail,
+    key: privateKey,
+    scopes: [DRIVE_SCOPE],
+    subject: impersonate,
+  });
 }
 
-const auth = new google.auth.JWT({
-  email: clientEmail,
-  key: privateKey,
-  scopes: [DRIVE_SCOPE],
-  subject: impersonate,
-});
-const drive = google.drive({ version: 'v3', auth });
+let drive;
+try {
+  const auth = await buildDriveAuth();
+  drive = google.drive({ version: 'v3', auth });
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e);
+  process.exit(1);
+}
 
 async function findOrCreateFolder(name, parent) {
   const q = [

@@ -6,6 +6,8 @@
  * Lectura del resto del suite sigue en google-drive-auth.ts (readonly).
  */
 
+import { existsSync, readFileSync } from 'fs';
+import path from 'path';
 import { google, type drive_v3 } from 'googleapis';
 import { normalizeGcalPrivateKey } from '@/app/lib/eventos-gcal';
 import {
@@ -49,7 +51,45 @@ export function getGoogleDriveWriteStatus(): GoogleDriveWriteStatus {
   };
 }
 
+function createOauthDriveWriteAuth() {
+  // Token de `python ingestor/setup_tpv_archive_drive.py` (drive.file).
+  // Solo en Node local/Actions con filesystem; en Vercel preferir DWD.
+  const tokenPath = path.resolve(
+    process.cwd(),
+    'ingestor/token-tpv-archive.json'
+  );
+  const credPath = path.resolve(process.cwd(), 'ingestor/credentials.json');
+  if (!existsSync(tokenPath)) return null;
+  const token = JSON.parse(readFileSync(tokenPath, 'utf8')) as Record<
+    string,
+    unknown
+  >;
+  const clientInfo = existsSync(credPath)
+    ? (JSON.parse(readFileSync(credPath, 'utf8')) as Record<string, unknown>)
+    : {};
+  const installed =
+    (clientInfo.installed as Record<string, unknown> | undefined) ||
+    (clientInfo.web as Record<string, unknown> | undefined) ||
+    {};
+  const oauth2 = new google.auth.OAuth2(
+    String(installed.client_id || token.client_id || ''),
+    String(installed.client_secret || token.client_secret || '')
+  );
+  oauth2.setCredentials({
+    refresh_token:
+      typeof token.refresh_token === 'string' ? token.refresh_token : undefined,
+    access_token:
+      typeof token.access_token === 'string' ? token.access_token : undefined,
+    expiry_date:
+      typeof token.expiry_date === 'number' ? token.expiry_date : undefined,
+  });
+  return oauth2;
+}
+
 export function createGoogleDriveWriteAuth() {
+  const oauth = createOauthDriveWriteAuth();
+  if (oauth) return oauth;
+
   const status = getGoogleDriveWriteStatus();
   if (!status.configured) throw new Error(status.message);
   const clientEmail = process.env.GCAL_CLIENT_EMAIL!.trim();

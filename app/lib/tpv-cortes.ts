@@ -43,8 +43,8 @@ export type TpvOcrStatus = 'skipped' | 'pending' | 'done' | 'failed';
 /** hot = en Storage; drive = archivado en Drive admin@ (Free plan). */
 export type TpvArchiveStatus = 'hot' | 'drive';
 
-/** Días en Storage antes de archivar a Drive (plan Free). */
-export const TPV_ARCHIVE_AFTER_DAYS = 60;
+/** Días en Storage antes de archivar a Drive (plan Free). Hot ≈ desde 1-oct en nov. */
+export const TPV_ARCHIVE_AFTER_DAYS = 40;
 
 export interface TpvCorteUpload {
   id: string;
@@ -809,12 +809,42 @@ export function asTpvRow(r: Record<string, unknown>): TpvCorteUpload {
     notes: r.notes != null ? String(r.notes) : null,
     verified_by: r.verified_by != null ? String(r.verified_by) : null,
     verified_at: r.verified_at != null ? String(r.verified_at) : null,
-    archive_status: r.archive_status === 'drive' ? 'drive' : 'hot',
-    drive_file_id:
-      r.drive_file_id != null ? String(r.drive_file_id) : null,
-    drive_web_view_link:
-      r.drive_web_view_link != null ? String(r.drive_web_view_link) : null,
-    archived_at: r.archived_at != null ? String(r.archived_at) : null,
+    ...(() => {
+      // Prefer columnas archive_*; fallback notes "DRIVE_ARCHIVE|fileId|url"
+      // si aún no se corrió supabase/tpv_cortes_archive.sql.
+      if (r.archive_status === 'drive') {
+        return {
+          archive_status: 'drive' as TpvArchiveStatus,
+          drive_file_id:
+            r.drive_file_id != null ? String(r.drive_file_id) : null,
+          drive_web_view_link:
+            r.drive_web_view_link != null
+              ? String(r.drive_web_view_link)
+              : null,
+          archived_at: r.archived_at != null ? String(r.archived_at) : null,
+        };
+      }
+      const notes = r.notes != null ? String(r.notes) : '';
+      const m = notes.match(/DRIVE_ARCHIVE\|([^|\s]+)\|(\S+)/);
+      if (m && !r.storage_path) {
+        return {
+          archive_status: 'drive' as TpvArchiveStatus,
+          drive_file_id: m[1] || null,
+          drive_web_view_link: m[2] || null,
+          archived_at: null,
+        };
+      }
+      return {
+        archive_status: 'hot' as TpvArchiveStatus,
+        drive_file_id:
+          r.drive_file_id != null ? String(r.drive_file_id) : null,
+        drive_web_view_link:
+          r.drive_web_view_link != null
+            ? String(r.drive_web_view_link)
+            : null,
+        archived_at: r.archived_at != null ? String(r.archived_at) : null,
+      };
+    })(),
     created_at: String(r.created_at || ''),
     updated_at: String(r.updated_at || ''),
   };
